@@ -3,6 +3,13 @@ pub mod home {
     use yew_router::prelude::*;
     use crate::Route;
     use web_sys::window;
+use gloo_net::http::Request;
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct UserProfile {
+    phone_number: Option<String>,
+}
 
     fn is_logged_in() -> bool {
         if let Some(window) = window() {
@@ -16,29 +23,101 @@ pub mod home {
     }
 
     #[function_component]
-    pub fn Home() -> Html {
-        let logged_in = is_logged_in();
+pub fn Home() -> Html {
+    let logged_in = is_logged_in();
+    let missing_phone = use_state(|| false);
+    let profile_checked = use_state(|| false);
 
-        let handle_logout = {
-            Callback::from(move |_| {
-                if let Some(window) = window() {
-                    if let Ok(Some(storage)) = window.local_storage() {
-                        let _ = storage.remove_item("token");
-                        // Reload the page to reflect the logged out state
-                        let _ = window.location().reload();
+    // Fetch profile data if logged in
+    {
+        let missing_phone = missing_phone.clone();
+        let profile_checked = profile_checked.clone();
+        use_effect_with_deps(move |_| {
+            if is_logged_in() {
+                wasm_bindgen_futures::spawn_local(async move {
+                    if let Some(token) = window()
+                        .and_then(|w| w.local_storage().ok())
+                        .flatten()
+                        .and_then(|storage| storage.get_item("token").ok())
+                        .flatten()
+                    {
+                        match Request::get("http://localhost:3000/api/profile")
+                            .header("Authorization", &format!("Bearer {}", token))
+                            .send()
+                            .await
+                        {
+                            Ok(response) => {
+                                if response.ok() {
+                                    match response.json::<UserProfile>().await {
+                                        Ok(profile) => {
+                                            let is_missing = profile.phone_number.is_none() || 
+                                                    profile.phone_number.as_ref()
+                                                    .map_or(true, |p| p.trim().is_empty());
+                                            missing_phone.set(is_missing);
+                                            profile_checked.set(true);
+                                        }
+                                        Err(e) => {
+                                            web_sys::console::log_1(&format!("Failed to parse profile: {:?}", e).into());
+                                            profile_checked.set(true);
+                                        }
+                                    }
+                                } else {
+                                    web_sys::console::log_1(&format!("Response not OK: {}", response.status()).into());
+                                    profile_checked.set(true);
+                                }
+                            }
+                            Err(e) => {
+                                web_sys::console::log_1(&format!("Request failed: {:?}", e).into());
+                                profile_checked.set(true);
+                            }
+                        }
                     }
-                }
-            })
-        };
+                });
+            } else {
+                profile_checked.set(true);
+            }
+            || ()
+        }, ());
+    }
 
-        html! {
+    let handle_logout = {
+        Callback::from(move |_| {
+            if let Some(window) = window() {
+                if let Ok(Some(storage)) = window.local_storage() {
+                    let _ = storage.remove_item("token");
+                    // Reload the page to reflect the logged out state
+                    let _ = window.location().reload();
+                }
+            }
+        })
+    };
+    html! {
             <div class="home-container">
-                <h1>{"Welcome to Our App"}</h1>
+                <h1>{"lightfriend"}</h1>
                 {
                     if logged_in {
                         html! {
                             <div class="user-panel">
-                                <p>{"You are logged in!"}</p>
+                                <Link<Route> to={Route::Profile}>
+                                    {"View Profile"}
+                                    {
+                                        if *profile_checked {
+                                            if *missing_phone {
+                                                html! {
+                                                    <span style="color: orange; margin-left: 5px;">
+                                                            {"(set phone number)"}
+                                                    </span>
+                                                }
+                                            } else {
+                                                html! {}
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                                </Link<Route>>
+                                    <br/>
+                                    <br/>
                                 <button onclick={handle_logout}>{"Logout"}</button>
                             </div>
                         }
@@ -65,10 +144,12 @@ pub mod home {
 pub mod profile {
     use yew::prelude::*;
     use web_sys::{HtmlInputElement, window};
+    use yew_router::prelude::*;
+    use crate::Route;
     use gloo_net::http::Request;
     use serde::{Deserialize, Serialize};
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, PartialEq)]
     struct UserProfile {
         username: String,
         email: String,
@@ -82,17 +163,49 @@ pub mod profile {
 
     #[function_component]
     pub fn Profile() -> Html {
-            let profile = use_state(|| None::<UserProfile>);
-            let phone_number = use_state(String::new);
-            let error = use_state(|| None::<String>);
-            let success = use_state(|| None::<String>);
-            let is_editing = use_state(|| false);
+        let profile = use_state(|| None::<UserProfile>);
+        let phone_number = use_state(String::new);
+        let error = use_state(|| None::<String>);
+        let success = use_state(|| None::<String>);
+        let is_editing = use_state(|| false);
+        let navigator = use_navigator().unwrap();
+    
+        // Check authentication immediately
+        {
+            let navigator = navigator.clone();
+            use_effect_with_deps(move |_| {
+                let is_authenticated = window()
+                    .and_then(|w| w.local_storage().ok())
+                    .flatten()
+                    .and_then(|storage| storage.get_item("token").ok())
+                    .flatten()
+                    .is_some();
+    
+                if !is_authenticated {
+                    navigator.push(&Route::Home);
+                }
+                || ()
+            }, ());
+        }
+
+        // Initialize phone_number state when profile is loaded
+        {
+            let phone_number = phone_number.clone();
+            let profile = profile.clone();
+            use_effect_with_deps(move |profile| {
+                if let Some(user_profile) = (**profile).as_ref() {
+                    if let Some(phone) = &user_profile.phone_number {
+                        phone_number.set(phone.clone());
+                    }
+                }
+                || ()
+            }, profile.clone());
+        }
 
         // Fetch user profile 
         {
             let profile = profile.clone();
             let error = error.clone();
-
             use_effect_with_deps(move |_| {
                 wasm_bindgen_futures::spawn_local(async move {
                     if let Some(token) = window()
@@ -107,7 +220,16 @@ pub mod profile {
                             .await
                         {
                             Ok(response) => {
-                                if response.ok() {
+                                if response.status() == 401 {
+                                    // Handle unauthorized access
+                                    if let Some(window) = window() {
+                                        if let Ok(Some(storage)) = window.local_storage() {
+                                            let _ = storage.remove_item("token");
+                                            let _ = window.location().set_href("/login");
+                                        }
+                                    }
+                                    return;
+                                } else if response.ok() {
                                     match response.json::<UserProfile>().await {
                                         Ok(data) => {
                                             profile.set(Some(data));
@@ -134,6 +256,7 @@ pub mod profile {
             let success = success.clone();
             let profile = profile.clone();
             let is_editing = is_editing.clone();
+let navigator = navigator.clone();
 
             Callback::from(move |_e: MouseEvent| {
                 let phone = (*phone_number).clone();
@@ -141,6 +264,20 @@ pub mod profile {
                 let success = success.clone();
                 let profile = profile.clone();
                 let is_editing = is_editing.clone();
+                let navigator = navigator.clone();
+
+                // Check authentication first
+                let is_authenticated = window()
+                    .and_then(|w| w.local_storage().ok())
+                    .flatten()
+                    .and_then(|storage| storage.get_item("token").ok())
+                    .flatten()
+                    .is_some();
+
+                if !is_authenticated {
+                    navigator.push(&Route::Home);
+                    return;
+                }
 
                 wasm_bindgen_futures::spawn_local(async move {
                     if let Some(token) = window()
@@ -152,12 +289,21 @@ pub mod profile {
                         match Request::post("http://localhost:3000/api/profile/update")
                             .header("Authorization", &format!("Bearer {}", token))
                             .json(&UpdateProfileRequest { phone_number: phone })
-                            .unwrap()
+                            .expect("Failed to build request")
                             .send()
-                            .await
+                            .await 
                         {
                             Ok(response) => {
-                                if response.ok() {
+                                if response.status() == 401 {
+                                    // Token is invalid or expired
+                                    if let Some(window) = window() {
+                                        if let Ok(Some(storage)) = window.local_storage() {
+                                            let _ = storage.remove_item("token");
+                                            navigator.push(&Route::Home);
+                                            return;
+                                        }
+                                    }
+                                } else if response.ok() {
                                     success.set(Some("Profile updated successfully".to_string()));
                                     error.set(None);
                                     is_editing.set(false);
@@ -191,9 +337,11 @@ pub mod profile {
                 });
             })
         };
+
         html! {
             <div class="profile-container">
-                <h1>{"Your Profile"}</h1>
+                <h1>{"profile"}</h1>
+                <Link<Route> to={Route::Home}>{"Back to Home"}</Link<Route>>
                 {
                     if let Some(error_msg) = (*error).as_ref() {
                         html! {
@@ -224,7 +372,7 @@ pub mod profile {
                                             html! {
                                                 <input
                                                     type="tel"
-                                                    value={user_profile.phone_number.clone().unwrap_or_default()}
+                                                    value={(*phone_number).clone()}
                                                     onchange={let phone_number = phone_number.clone(); move |e: Event| {
                                                         let input: HtmlInputElement = e.target_unchecked_into();
                                                         phone_number.set(input.value());
