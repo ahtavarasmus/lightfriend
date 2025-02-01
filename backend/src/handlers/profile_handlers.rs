@@ -16,6 +16,7 @@ use crate::{
 #[derive(Deserialize)]
 pub struct UpdateProfileRequest {
     phone_number: String,
+    nickname: String,
 }
 
 #[derive(Serialize)]
@@ -23,6 +24,7 @@ pub struct ProfileResponse {
     username: String,
     email: String,
     phone_number: Option<String>,
+    nickname: Option<String>
 }
 
 pub async fn get_profile(
@@ -68,6 +70,7 @@ pub async fn get_profile(
             username: user.username,
             email: user.email,
             phone_number: user.phone_number,
+            nickname: user.nickname,
         })),
         None => Err((
             StatusCode::NOT_FOUND,
@@ -110,11 +113,11 @@ pub async fn update_profile(
     };
 
     // Update user profile in database
-    state.user_repository.update_phone_number(claims.sub, &update_req.phone_number)
+    state.user_repository.update_profile(claims.sub, &update_req.phone_number, &update_req.nickname)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)}))
-        ))?;
+    ))?;
 
     Ok(Json(json!({
         "message": "Profile updated successfully"

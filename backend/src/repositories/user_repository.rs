@@ -79,12 +79,14 @@ impl UserRepository {
             .optional()?;
         Ok(user)
     }
-
-    // Update user's phone number
-    pub fn update_phone_number(&self, user_id: i32, phone_number: &str) -> Result<(), DieselError> {
+   // Update user's profile
+    pub fn update_profile(&self, user_id: i32, phone_number: &str, nickname: &str) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table.find(user_id))
-            .set(users::phone_number.eq(phone_number))
+            .set((
+                users::phone_number.eq(phone_number),
+                users::nickname.eq(nickname)
+            ))
             .execute(&mut conn)?;
         Ok(())
     }

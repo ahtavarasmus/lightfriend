@@ -10,6 +10,8 @@ pub struct User {
     pub password_hash: String,
     pub email: String,
     pub phone_number: Option<String>,
+    pub nickname: Option<String>,
+
 }
 
 
