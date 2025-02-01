@@ -1,0 +1,5 @@
+frontend/dist/
+*.db
+database.db
+backend/database.db
+.env

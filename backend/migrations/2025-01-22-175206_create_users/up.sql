@@ -1,0 +1,7 @@
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    username VARCHAR NOT NULL UNIQUE,
+    password_hash VARCHAR NOT NULL,
+    email VARCHAR NOT NULL,
+    phone_number VARCHAR NULL
+);
