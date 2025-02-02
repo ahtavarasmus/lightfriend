@@ -1,5 +1,5 @@
 use diesel::prelude::*;
-use crate::schema::users;  
+use crate::schema::users;
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = users)]
@@ -11,7 +11,5 @@ pub struct User {
     pub email: String,
     pub phone_number: Option<String>,
     pub nickname: Option<String>,
-
 }
-
 
