@@ -3,3 +3,4 @@ frontend/dist/
 database.db
 backend/database.db
 .env
+backend/src/api/payloads.md

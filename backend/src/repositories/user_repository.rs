@@ -90,4 +90,14 @@ impl UserRepository {
             .execute(&mut conn)?;
         Ok(())
     }
+
+    // Find a user by phone number
+    pub fn find_by_phone_number(&self, phone_number: &str) -> Result<Option<User>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let user = users::table
+            .filter(users::phone_number.eq(phone_number))
+            .first::<User>(&mut conn)
+            .optional()?;
+        Ok(user)
+    }
 }

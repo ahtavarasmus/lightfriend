@@ -1,0 +1,27 @@
+
+pub async fn handle_phone_call_event(Json(payload): Json<serde_json::Value>) -> Json<serde_json::Value> {
+    match serde_json::from_value::<MessageResponse>(payload) {
+        Ok(event) => {
+            let phone_number = event.get_phone_number();
+            let request_type = event.get_request_type();
+            
+            println!("Received call from: {}", phone_number);
+            println!("Request type: {}", request_type);
+            
+            Json(json!({
+                "status": "success",
+                "message": "Phone number and request type extracted successfully",
+                "phone_number": phone_number,
+                "request_type": request_type
+            }))
+        }
+        Err(e) => {
+            eprintln!("Error parsing payload: {}", e);
+            Json(json!({
+                "status": "error",
+                "message": "Invalid payload format",
+                "error": format!("{:#?}", e)
+            }))
+        }
+    }
+}

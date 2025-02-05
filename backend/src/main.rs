@@ -15,6 +15,10 @@ mod handlers {
     pub mod auth_dtos;
     pub mod profile_handlers;
 }
+mod api {
+    pub mod vapi_endpoints;
+    pub mod vapi_dtos;
+}
 mod models {
     pub mod user_models;
 }
@@ -23,10 +27,12 @@ mod repositories {
 }
 mod schema;
 
+
 use repositories::user_repository::UserRepository;
 
 use handlers::auth_handlers::{register, login, get_users};
 use handlers::profile_handlers::{get_profile, update_profile};
+use api::vapi_endpoints::{vapi_server, handle_phone_call_event};
 
 type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
 
@@ -40,6 +46,10 @@ pub fn validate_env() {
         .expect("JWT_SECRET_KEY must be set");
     let _ = std::env::var("JWT_REFRESH_KEY")
         .expect("JWT_REFRESH_KEY must be set");
+    let _ = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set");
+    let _ = std::env::var("VAPI_API_KEY")
+        .expect("VAPI_API_KEY must be set");
 }
 
 #[tokio::main]
@@ -72,6 +82,7 @@ async fn main() {
         .route("/api/admin/users", get(get_users))
         .route("/api/profile/update", post(update_profile))
         .route("/api/profile", get(get_profile))
+        .route("/server", post(handle_phone_call_event))
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
