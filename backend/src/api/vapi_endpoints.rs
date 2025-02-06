@@ -222,7 +222,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
         println!("No phone number found in event");
         let resp = json!({
             "messageResponse": {
-                "assistantId": "d60f5e83-3d90-4604-9d7d-06cb5decdc36",
+                "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
                 "assistantOverrides": {
                     "firstMessage": "Hello! {{name}}",
                     "variableValues": {
