@@ -157,7 +157,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                     println!("User has nickname: {}", nickname);
                     let response = json!({
                         "messageResponse": {
-                            "assistantId": "d60f5e83-3d90-4604-9d7d-06cb5decdc36",
+                            "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
                             "assistantOverrides": {
                                 "firstMessage": format!("Hello! {}", nickname),
                                 "variableValues": {
@@ -172,7 +172,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                     println!("User does NOT have nickname");
                     let resp = json!({
                         "messageResponse": {
-                            "assistantId": "d60f5e83-3d90-4604-9d7d-06cb5decdc36",
+                            "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
                             "assistantOverrides": {
                                 "firstMessage": "Hello! {{name}}",
                                 "variableValues": {
@@ -189,7 +189,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                 println!("No user found for phone number: {}", phone_number);
                 let resp = json!({
                     "messageResponse": {
-                        "assistantId": "d60f5e83-3d90-4604-9d7d-06cb5decdc36",
+                        "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
                         "assistantOverrides": {
                             "firstMessage": "Hello! {{name}}",
                             "variableValues": {
@@ -205,7 +205,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                 println!("Database error while finding user: {}", e);
                 let resp = json!({
                     "messageResponse": {
-                        "assistantId": "d60f5e83-3d90-4604-9d7d-06cb5decdc36",
+                        "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
                         "assistantOverrides": {
                             "firstMessage": "Hello! {{name}}",
                             "variableValues": {

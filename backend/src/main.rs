@@ -52,6 +52,8 @@ pub fn validate_env() {
         .expect("VAPI_API_KEY must be set");
     let _ = std::env::var("PERPLEXITY_API_KEY")
         .expect("PERPLEXITY_API_KEY must be set");
+    let _ = std::env::var("ASSISTANT_ID")
+        .expect("ASSISTANT_ID must be set");
 
 }
 
