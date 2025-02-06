@@ -40,7 +40,7 @@ pub mod login {
                 let success_setter = success_setter.clone();
 
                 wasm_bindgen_futures::spawn_local(async move {
-                    match Request::post("http://localhost:3000/api/login")
+                    match Request::post("/api/login")
                         .json(&LoginRequest { username, password })
                         .unwrap()
                         .send()
@@ -189,7 +189,7 @@ pub mod register {
                 let success_setter = success_setter.clone();
 
                 wasm_bindgen_futures::spawn_local(async move {
-                    match Request::post("http://localhost:3000/api/register")
+                    match Request::post("/api/register")
                         .json(&RegisterRequest { 
                             username, 
                             password,

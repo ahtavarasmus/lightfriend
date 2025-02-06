@@ -85,11 +85,11 @@ async fn main() {
     // Create router with CORS
     let app = Router::new()
         .route("/health", get(health_check))
-        .route("/api/login", post(login))
-        .route("/api/register", post(register))
-        .route("/api/admin/users", get(get_users))
-        .route("/api/profile/update", post(update_profile))
-        .route("/api/profile", get(get_profile))
+        .route("/login", post(login))
+        .route("/register", post(register))
+        .route("/admin/users", get(get_users))
+        .route("/profile/update", post(update_profile))
+        .route("/profile", get(get_profile))
         .route("/server", post(handle_phone_call_event))
         .layer(
             TraceLayer::new_for_http()

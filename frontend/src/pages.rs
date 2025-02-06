@@ -41,7 +41,7 @@ pub mod home {
                             .and_then(|storage| storage.get_item("token").ok())
                             .flatten()
                         {
-                            match Request::get("http://localhost:3000/api/profile")
+                            match Request::get("/api/profile")
                                 .header("Authorization", &format!("Bearer {}", token))
                                 .send()
                                 .await
@@ -240,7 +240,7 @@ pub mod profile {
                         .and_then(|storage| storage.get_item("token").ok())
                         .flatten()
                     {
-                        match Request::get("http://localhost:3000/api/profile")
+                        match Request::get("/api/profile")
                             .header("Authorization", &format!("Bearer {}", token))
                             .send()
                             .await
@@ -314,7 +314,7 @@ let navigator = navigator.clone();
                         .and_then(|storage| storage.get_item("token").ok())
                         .flatten()
                     {
-                        match Request::post("http://localhost:3000/api/profile/update")
+                        match Request::post("/api/profile/update")
                             .header("Authorization", &format!("Bearer {}", token))
                             .json(&UpdateProfileRequest { phone_number: phone,
                                 nickname: nick,
@@ -346,7 +346,7 @@ let navigator = navigator.clone();
                                     });
                                     
                                     // Fetch updated profile data after successful update
-                                    if let Ok(profile_response) = Request::get("http://localhost:3000/api/profile")
+                                    if let Ok(profile_response) = Request::get("/api/profile")
                                         .header("Authorization", &format!("Bearer {}", token))
                                         .send()
                                         .await
@@ -494,7 +494,7 @@ pub mod admin {
                     .flatten();
 
                 if let Some(token) = token {
-                    match Request::get("http://localhost:3000/api/admin/users")
+                    match Request::get("/api/admin/users")
                         .header("Authorization", &format!("Bearer {}", token))
                         .send()
                         .await
