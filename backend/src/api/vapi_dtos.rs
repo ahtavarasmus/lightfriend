@@ -35,6 +35,7 @@ pub struct Message {
     #[serde(rename = "type")]
     pub message_type: String,
     pub customer: Option<Customer>,
+    #[serde(rename = "toolCalls")]
     pub tool_calls: Option<Vec<ToolCall>>,
 }
 
@@ -52,6 +53,7 @@ pub struct ToolCall {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Function {
+    #[serde(rename = "name")]
     pub name: String,
     pub arguments: serde_json::Value,
 }

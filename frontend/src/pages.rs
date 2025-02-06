@@ -108,6 +108,7 @@ pub mod home {
                                                             {"(set phone number)"}
                                                     </span>
                                                 }
+                                            
                                             } else {
                                                 html! {}
                                             }
@@ -116,6 +117,24 @@ pub mod home {
                                         }
                                     }
                                 </Link<Route>>
+                                    <br/>
+                                    <br/>
+                                {
+                                    if *profile_checked && !*missing_phone {
+                                        html! {
+                                            <>
+                                                <h3>
+                                                    {"Call your lightfriend!:)"}
+                                                </h3>
+                                                <p>
+                                                    {"+358 45 4901522"}
+                                                </p>
+                                            </>
+                                        }
+                                    } else {
+                                        html! {}
+                                    }
+                                }
                                     <br/>
                                     <br/>
                                 <button onclick={handle_logout}>{"Logout"}</button>

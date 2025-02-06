@@ -32,7 +32,7 @@ use repositories::user_repository::UserRepository;
 
 use handlers::auth_handlers::{register, login, get_users};
 use handlers::profile_handlers::{get_profile, update_profile};
-use api::vapi_endpoints::{vapi_server, handle_phone_call_event};
+use api::vapi_endpoints::{vapi_server, handle_phone_call_event, handle_phone_call_event_print};
 
 type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
 
@@ -50,6 +50,9 @@ pub fn validate_env() {
         .expect("DATABASE_URL must be set");
     let _ = std::env::var("VAPI_API_KEY")
         .expect("VAPI_API_KEY must be set");
+    let _ = std::env::var("PERPLEXITY_API_KEY")
+        .expect("PERPLEXITY_API_KEY must be set");
+
 }
 
 #[tokio::main]

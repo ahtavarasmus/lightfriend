@@ -60,38 +60,85 @@ pub async fn handle_phone_call_event_print(Json(payload): Json<serde_json::Value
     }
 }
    
+pub async fn handle_tool_calls(event: &MessageResponse, state: &Arc<AppState>) -> Json<serde_json::Value> {
+    println!("\n=== Starting handle_tool_calls ===");
+    println!("📥 Incoming Event: {:#?}", event);
 
-pub async fn handle_tool_calls(event: &MessageResponse) -> ServerResponse {
+    
+    let mut results = Vec::new();
+    
     if let Some(tool_calls) = event.get_tool_calls() {
+        println!("\n🔧 Found {} tool calls to process", tool_calls.len());
+        println!("📋 Tool calls details: {:#?}", tool_calls);
+        
+        for (index, tool_call) in tool_calls.iter().enumerate() {
+            println!("\n🔄 Processing tool call #{}", index + 1);
+            println!("🆔 Tool Call ID: {}", tool_call.id);
+            println!("📝 Function Name: {}", tool_call.function.name);
+            println!("⚙️ Arguments: {:#?}", tool_call.function.arguments);
+        }
+         
         for tool_call in tool_calls {
+            println!("Processing tool call: {:#?}", tool_call);
+            let mut tool_result = json!({
+                "name": tool_call.function.name,
+                "toolCallId": tool_call.id,
+                "result": null,
+                "error": null
+            });
+
             match tool_call.function.name.as_str() {
-                "perplexity-ask" => {
+                "AskPerplexity" => {
+                    println!("\n🤖 Handling AskPerplexity function");
                     if let Some(arguments) = tool_call.function.arguments.as_object() {
+                        
                         let message = arguments.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                        println!("📤 Message to Perplexity: {}", message);
+                        println!("🔄 Making API request to Perplexity...");
                         match ask_perplexity(message).await {
                             Ok(result) => {
-                                println!("Perplexity response: {}", result);
+                                println!("✅ Perplexity API call successful!");
+                                println!("📥 Response received: {}", result);
+                                tool_result["result"] = json!(result);
                             },
                             Err(e) => {
-                                eprintln!("Error making Perplexity request: {}", e);
+                                let error_msg = format!("❌ Error making Perplexity request: {}", e);
+                                eprintln!("🚨 {}", error_msg);
+                                tool_result["error"] = json!(error_msg);
                             }
                         }
+                    } else {
+                        tool_result["error"] = json!("Invalid arguments format");
                     }
                 },
                 "system-command" => {
-                    // Handle system commands here
-                    println!("Received system command: {:?}", tool_call);
+                    println!("\n⚙️ Handling system-command function");
+                    println!("❌ System commands are not implemented");
+                    tool_result["error"] = json!("System command not implemented");
                 },
                 _ => {
-                    println!("Unknown function type: {}", tool_call.function.name);
+                    let error_msg = format!("❌ Unknown function type: {}", tool_call.function.name);
+                    println!("🚨 {}", error_msg);
+                    tool_result["error"] = json!(error_msg);
                 }
             }
+
+            println!("\n📊 Tool result: {:#?}", tool_result);
+            results.push(tool_result);
         }
-    }
-    ServerResponse {
-        status: "success".to_string(),
-        message: "Tool calls processed successfully".to_string(),
-        data: None,
+        
+        println!("\n✅ All tool calls processed successfully");
+        println!("📤 Returning results: {:#?}", results);
+        Json(json!({
+            "results": results,
+            "error": null
+        }))
+    } else {
+        println!("\n⚠️ No tool calls found in event");
+        Json(json!({
+            "results": [],
+            "error": "No tool calls found"
+        }))
     }
 }
 
@@ -206,6 +253,7 @@ pub async fn handle_phone_call_event(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
+    println!("Received payload: {:#?}", payload);
     match serde_json::from_value::<MessageResponse>(payload) {
         Ok(event) => {
             let request_type = event.get_request_type();
@@ -214,9 +262,10 @@ pub async fn handle_phone_call_event(
             println!("Request type: {:?}", request_type);
 
             match request_type.as_str() {
-                //"tool-calls" => {
-                 //   handle_tool_calls(&event).await
-                //},
+                "tool-calls" => {
+                    println!("Handling the tool-calls");
+                    handle_tool_calls(&event, &state).await
+                },
                 "assistant-request" => {
                     println!("Calling handle_assistant_request for assistant request");
                     handle_assistant_request(&event, &state).await
