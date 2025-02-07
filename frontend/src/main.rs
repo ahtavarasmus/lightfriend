@@ -1,10 +1,12 @@
 use yew::prelude::*;
 use yew_router::prelude::*;
 use tracing::info;
+use web_sys::window;
 
 mod pages;
 use pages::{
     home::Home,
+    home::is_logged_in,
     admin::Admin,
     profile::Profile,
 };
@@ -53,10 +55,83 @@ fn switch(routes: Route) -> Html {
         },
     }
 }
+
+// Create a new component called Nav.rs
+use yew::prelude::*;
+use yew_router::prelude::*;
+
+#[derive(Properties, PartialEq)]
+pub struct NavProps {
+    pub logged_in: bool,
+    pub on_logout: Callback<()>,
+}
+
+#[function_component(Nav)]
+pub fn nav(props: &NavProps) -> Html {
+    let NavProps { logged_in, on_logout } = props;
+    
+    let handle_logout = {
+        let on_logout = on_logout.clone();
+        Callback::from(move |_| {
+            on_logout.emit(());
+        })
+    };
+
+    html! {
+        <nav class="top-nav">
+            <div class="nav-content">
+                <Link<Route> to={Route::Home} classes="nav-logo">
+                    {"Lightfriend"}
+                </Link<Route>>
+                
+                <div class="nav-right">
+                    {
+                        if *logged_in {
+                            html! {
+                                <>
+                                    <Link<Route> to={Route::Profile} classes="nav-profile-link">
+                                        {"Profile"}
+                                    </Link<Route>>
+                                    <button onclick={handle_logout} class="nav-logout-button">
+                                        {"Logout"}
+                                    </button>
+                                </>
+                            }
+                        } else {
+                            html! {
+                                <Link<Route> to={Route::Login} classes="nav-login-button">
+                                    {"Login"}
+                                </Link<Route>>
+                            }
+                        }
+                    }
+                </div>
+            </div>
+        </nav>
+    }
+}
+
+
 #[function_component]
 fn App() -> Html {
+    let logged_in = use_state(|| is_logged_in());  // Import is_logged_in from home module
+    let handle_logout = {
+        Callback::from(move |_| {
+            if let Some(window) = window() {
+                if let Ok(Some(storage)) = window.local_storage() {
+                    let _ = storage.remove_item("token");
+                    // Reload the page to reflect the logged out state
+                    let _ = window.location().reload();
+                }
+            }
+        })
+    };
+
+
+
     html! {
         <BrowserRouter>
+            <Nav logged_in={*logged_in} on_logout={handle_logout} />
             <Switch<Route> render={switch} />
         </BrowserRouter>
         }

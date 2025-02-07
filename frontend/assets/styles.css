@@ -24,11 +24,120 @@ body {
 
 
 .landing-page {
+    position: relative;
+    min-height: 100vh;
     background-color: #1a1a1a;
     color: #ffffff;
     font-family: system-ui, -apple-system, sans-serif;
     margin: 0 auto;
 }
+
+.top-nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    background: rgba(26, 26, 26, 0.8);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(30, 144, 255, 0.1);
+    padding: 1rem 0;
+}
+
+.nav-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.nav-logo {
+    color: white;
+    text-decoration: none;
+    font-size: 1.25rem;
+    font-weight: 600;
+    background: linear-gradient(45deg, #fff, #7EB2FF);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    transition: opacity 0.3s ease;
+}
+
+.nav-logo:hover {
+    opacity: 0.8;
+}
+
+.nav-right {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.nav-login-button,
+.nav-logout-button {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+    text-decoration: none;
+    padding: 0.5rem 1.5rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+}
+
+.nav-logout-button {
+    background: linear-gradient(45deg, #ff4757, #ff6b81);
+}
+
+.nav-login-button:hover,
+.nav-logout-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3);
+}
+
+.nav-logout-button:hover {
+    box-shadow: 0 4px 12px rgba(255, 71, 87, 0.3);
+}
+
+.nav-profile-link {
+    color: #1E90FF;
+    text-decoration: none;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+    background: rgba(30, 144, 255, 0.1);
+    border: 1px solid rgba(30, 144, 255, 0.2);
+}
+
+.nav-profile-link:hover {
+    background: rgba(30, 144, 255, 0.2);
+    transform: translateY(-2px);
+}
+
+/* Add padding to all main content containers */
+.landing-page,
+.dashboard-container,
+.profile-container,
+.login-container,
+.register-container {
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .nav-content {
+        padding: 0 1rem;
+    }
+
+    .nav-login-button,
+    .nav-logout-button,
+    .nav-profile-link {
+        padding: 0.5rem 1rem;
+    }
+}
+
 
 .hero {
     min-height: 100vh;
@@ -39,6 +148,7 @@ body {
     text-align: center;
     padding: 4rem 2rem;
     position: relative;
+    padding-top: 120px; /* Add extra padding to prevent content from hiding under nav */
     background: linear-gradient(
         to bottom,
         rgba(30, 144, 255, 0.05),
@@ -587,11 +697,70 @@ button[type="submit"].loading::after {
 .dashboard-title {
     font-size: 2rem;
     margin-bottom: 2rem;
+    margin: 0; /* Remove margin to align with profile link */
     text-align: center;
     background: linear-gradient(45deg, #fff, #7EB2FF);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
 }
+
+.dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+.profile-link {
+    background: rgba(30, 144, 255, 0.1);
+    color: #1E90FF;
+    text-decoration: none;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.profile-link:hover {
+    background: rgba(30, 144, 255, 0.2);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(30, 144, 255, 0.1);
+}
+
+.profile-link::after {
+    content: '→';
+    transition: transform 0.3s ease;
+}
+
+.profile-link:hover::after {
+    transform: translateX(3px);
+}
+
+
+@media (max-width: 768px) {
+    .nav-content {
+        padding: 0 1rem;
+    }
+
+    .login-button {
+        padding: 0.5rem 1rem;
+    }
+    .dashboard-header {
+        flex-direction: column;
+        gap: 1rem;
+        align-items: stretch;
+        text-align: center;
+    }
+
+    .profile-link {
+        justify-content: center;
+    }
+}
+
 
 .warning-card {
     background: rgba(255, 193, 7, 0.1);
@@ -716,6 +885,24 @@ button[type="submit"].loading::after {
     -webkit-text-fill-color: transparent;
     margin: 0;
 }
+
+.forward-link {
+    color: #ffffff;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: color 0.3s ease;
+}
+
+.forward-link:hover {
+    color: #7EB2FF;
+}
+
+.forward-link::after {
+    content: '→';
+}
+
 
 .back-link {
     color: #1E90FF;
