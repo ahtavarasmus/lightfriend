@@ -174,18 +174,6 @@ pub mod home {
             }, ());
         }
 
-        let handle_logout = {
-            Callback::from(move |_| {
-                if let Some(window) = window() {
-                    if let Ok(Some(storage)) = window.local_storage() {
-                        let _ = storage.remove_item("token");
-                        // Reload the page to reflect the logged out state
-                        let _ = window.location().reload();
-                    }
-                }
-            })
-        };
-
         html! {
             {
                 if !logged_in {
@@ -196,9 +184,7 @@ pub mod home {
                             <div class="dashboard-panel">
                                 <div class="panel-header">
                                     <h1 class="panel-title">{"Your Lightfriend Dashboard"}</h1>
-                                    <Link<Route> to={Route::Profile} classes="back-link">{"Back to Home"}</Link<Route>>
                                 </div>
-
                                 {
                                     if *missing_phone {
                                         html! {
@@ -223,13 +209,6 @@ pub mod home {
                                         }
                                     }
                                 }
-                                
-                                <button 
-                                    onclick={handle_logout}
-                                    class="action-button"
-                                >
-                                    {"Logout"}
-                                </button>
                             </div>
                         </div>
                     }
