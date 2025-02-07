@@ -89,6 +89,7 @@ pub mod login {
         };
 
         html! {
+        <div class="min-h-screen gradient-bg">
             <div class="login-container">
                 <h1>{"Login"}</h1>
                 {
@@ -134,6 +135,7 @@ pub mod login {
                     </Link<Route>>
                 </div>
             </div>
+        </div>
         }
     }
 }
@@ -237,6 +239,8 @@ pub mod register {
         };
 
         html! {
+
+        <div class="min-h-screen gradient-bg">
             <div class="register-container">
                 <h1>{"Register"}</h1>
                 {
@@ -290,6 +294,7 @@ pub mod register {
                     </Link<Route>>
                 </div>
             </div>
+        </div>
         }
     }
 }
