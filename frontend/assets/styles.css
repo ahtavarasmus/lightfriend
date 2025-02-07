@@ -677,12 +677,7 @@ button[type="submit"].loading::after {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 2rem;
-}
-
-.dashboard-content {
-    width: 100%;
-    max-width: 600px;
+    padding: 4rem 2rem;
 }
 
 .dashboard-panel {
@@ -690,76 +685,132 @@ button[type="submit"].loading::after {
     border: 1px solid rgba(30, 144, 255, 0.1);
     border-radius: 16px;
     padding: 3rem;
+    width: 100%;
+    max-width: 600px;
     backdrop-filter: blur(10px);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
-.dashboard-title {
-    font-size: 2rem;
-    margin-bottom: 2rem;
-    margin: 0; /* Remove margin to align with profile link */
-    text-align: center;
-    background: linear-gradient(45deg, #fff, #7EB2FF);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-}
-
-.dashboard-header {
+.panel-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 2rem;
+    margin-bottom: 2.5rem;
 }
 
-.profile-link {
-    background: rgba(30, 144, 255, 0.1);
+.panel-title {
+    font-size: 2rem;
+    background: linear-gradient(45deg, #fff, #7EB2FF);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin: 0;
+}
+
+.back-link {
     color: #1E90FF;
     text-decoration: none;
-    padding: 0.5rem 1rem;
-    border-radius: 8px;
     font-size: 0.9rem;
+    transition: color 0.3s ease;
+}
+
+.back-link:hover {
+    color: #7EB2FF;
+}
+
+.info-section {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+    padding: 2rem;
+    margin: 1.5rem 0;
+    text-align: center;
+}
+
+.section-title {
+    color: #7EB2FF;
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.phone-display {
+    margin: 2rem 0;
+}
+
+.phone-number {
+    font-family: monospace;
+    font-size: 2rem;
+    color: white;
+    letter-spacing: 2px;
+}
+
+.instruction-text {
+    color: #999;
+    font-size: 0.9rem;
+    margin-top: 1rem;
+}
+
+.warning-card {
+    background: rgba(255, 193, 7, 0.1);
+    border: 1px solid rgba(255, 193, 7, 0.2);
+    border-radius: 12px;
+    padding: 1.5rem;
+    text-align: center;
+    margin: 1.5rem 0;
+}
+
+.warning-card a {
+    color: #1E90FF;
+    text-decoration: none;
+    transition: color 0.3s ease;
+}
+
+.warning-card a:hover {
+    color: #7EB2FF;
+}
+
+.warning-icon {
+    font-size: 1.5rem;
+    margin-right: 0.5rem;
+}
+
+.action-button {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+    border: none;
+    width: 100%;
+    padding: 1rem;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
     transition: all 0.3s ease;
-    border: 1px solid rgba(30, 144, 255, 0.2);
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+    margin-top: 1.5rem;
 }
 
-.profile-link:hover {
-    background: rgba(30, 144, 255, 0.2);
+.action-button:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(30, 144, 255, 0.1);
+    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
 }
 
-.profile-link::after {
-    content: '→';
-    transition: transform 0.3s ease;
-}
-
-.profile-link:hover::after {
-    transform: translateX(3px);
-}
-
-
+/* Responsive design */
 @media (max-width: 768px) {
-    .nav-content {
-        padding: 0 1rem;
+    .dashboard-panel {
+        padding: 2rem;
     }
 
-    .login-button {
-        padding: 0.5rem 1rem;
-    }
-    .dashboard-header {
+    .panel-header {
         flex-direction: column;
-        gap: 1rem;
-        align-items: stretch;
         text-align: center;
+        gap: 1rem;
     }
 
-    .profile-link {
-        justify-content: center;
+    .phone-number {
+        font-size: 1.5rem;
+    }
+
+    .panel-title {
+        font-size: 1.75rem;
     }
 }
+
 
 
 .warning-card {

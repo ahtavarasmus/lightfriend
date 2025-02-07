@@ -27,18 +27,6 @@ pub mod home {
     pub fn landing() -> Html {
         html! {
             <div class="landing-page">
-                /*
-                <nav class="top-nav">
-                    <div class="nav-content">
-                        <Link<Route> to={Route::Home} classes="nav-logo">
-                            {"Lightfriend"}
-                        </Link<Route>>
-                        <Link<Route> to={Route::Login} classes="login-button">
-                            {"Login"}
-                        </Link<Route>>
-                    </div>
-                </nav>
-                */
                 // Hero Section
                 <section class="hero">
                     <h1>{"Digital Freedom Through Simplicity"}</h1>
@@ -204,45 +192,49 @@ pub mod home {
                     html! { <Landing /> }
                 } else if *profile_checked {
                     html! {
-                        <div class="dashboard-panel">
-                            <div class="dashboard-header">
-                                <h2 class="dashboard-title">{"Your Lightfriend Dashboard"}</h2>
-                                <Link<Route> to={Route::Profile} classes="profile-link">
-                                    {"Profile Settings"}
-                                </Link<Route>>
-                            </div>
-                            
-                            {
-                                if *missing_phone {
-                                    html! {
-                                        <div class="warning-card">
-                                            <span class="warning-icon">{"⚠️"}</span>
-                                            <Link<Route> to={Route::Profile}>
-                                                {"Complete your setup by adding a phone number"}
-                                            </Link<Route>>
-                                        </div>
-                                    }
-                                } else {
-                                    html! {
-                                        <div class="phone-card">
-                                            <h3>{"Your Lightfriend is Ready!"}</h3>
-                                            <p class="phone-number">{"+358 45 4901522"}</p>
-                                            <p class="instruction-text">
-                                                {"Call or text this number to access your services"}
-                                            </p>
-                                        </div>
+                        <div class="dashboard-container">
+                            <div class="dashboard-panel">
+                                <div class="panel-header">
+                                    <h1 class="panel-title">{"Your Lightfriend Dashboard"}</h1>
+                                    <Link<Route> to={Route::Profile} classes="back-link">{"Back to Home"}</Link<Route>>
+                                </div>
+
+                                {
+                                    if *missing_phone {
+                                        html! {
+                                            <div class="warning-card">
+                                                <span class="warning-icon">{"⚠️"}</span>
+                                                <Link<Route> to={Route::Profile}>
+                                                    {"Complete your setup by adding a phone number"}
+                                                </Link<Route>>
+                                            </div>
+                                        }
+                                    } else {
+                                        html! {
+                                            <div class="info-section">
+                                                <h2 class="section-title">{"Your Lightfriend is Ready!"}</h2>
+                                                <div class="phone-display">
+                                                    <span class="phone-number">{"+358 45 4901522"}</span>
+                                                </div>
+                                                <p class="instruction-text">
+                                                    {"Call or text this number to access your services"}
+                                                </p>
+                                            </div>
+                                        }
                                     }
                                 }
-                            }
-                            
-                            <button 
-                                onclick={handle_logout}
-                                class="logout-button"
-                            >
-                                {"Logout"}
-                            </button>
+                                
+                                <button 
+                                    onclick={handle_logout}
+                                    class="action-button"
+                                >
+                                    {"Logout"}
+                                </button>
+                            </div>
                         </div>
                     }
+
+                    
                 } else {
                     html! {}
                 }
