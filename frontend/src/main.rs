@@ -62,6 +62,7 @@ fn App() -> Html {
         }
 }
 
+
 fn main() {
     // Initialize console error panic hook for better error messages
     console_error_panic_hook::set_once();

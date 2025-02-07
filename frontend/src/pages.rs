@@ -92,19 +92,76 @@ pub mod home {
             })
         };
         html! {
-            <div class="home-container">
-                <h1>{"lightfriend"}</h1>
+            <div class="min-h-screen gradient-bg">
+                <div class="container">
+                    <div class="hero-section">
+                        <h1 class="hero-title">{"lightfriend"}</h1>
+                        <p class="hero-subtitle">
+                            {"Your smart companion for a simpler phone life"}
+                        </p>
+                    </div>
+        
                 {
-                    if logged_in {
+                    if !logged_in {
                         html! {
-                            <div class="user-panel">
-                                <Link<Route> to={Route::Profile}>
+                            <>
+                                <div class="features-grid">
+                                    <div class="feature-card">
+                                        <div class="feature-icon">{"🌱"}</div>
+                                        <h3 class="feature-title">{"Digital Minimalism"}</h3>
+                                        <p class="feature-description">
+                                            {"Switch to a simpler phone without losing essential smart features"}
+                                        </p>
+                                    </div>
+                                    <div class="feature-card">
+                                        <div class="feature-icon">{"🤝"}</div>
+                                        <h3 class="feature-title">{"Always Connected"}</h3>
+                                        <p class="feature-description">
+                                            {"Access modern services through SMS and calls - no smartphone needed"}
+                                        </p>
+                                    </div>
+                                    <div class="feature-card">
+                                        <div class="feature-icon">{"🎯"}</div>
+                                        <h3 class="feature-title">{"Focus Better"}</h3>
+                                        <p class="feature-description">
+                                            {"Stay productive without constant digital distractions"}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div class="how-it-works">
+                                    <h2 class="section-title">{"How It Works"}</h2>
+                                    <p class="section-description">
+                                        {"Simply call or text our service to access the features you need. Weather updates, navigation, translations, and more - all through your basic phone."}
+                                    </p>
+                                </div>
+
+                                <div class="button-container">
+                                    <Link<Route> to={Route::Login} classes="primary-button">
+                                        {"Login"}
+                                    </Link<Route>>
+                                    <Link<Route> to={Route::Register} classes="secondary-button">
+                                        {"Register"}
+                                    </Link<Route>>
+                                </div>
+
+                                <div class="footer">
+                                    <div>
+                                        {"Join the digital minimalism movement without sacrificing connectivity"}
+                                    </div>
+                                </div>
+                            </>
+                        }
+                    } else {
+                        html! {
+                            <div class="profile-container">
+                                <Link<Route> to={Route::Profile} classes="profile-link">
                                     {"View Profile"}
                                     {
                                         if *profile_checked {
                                             if *missing_phone {
                                                 html! {
-                                                    <span style="color: orange; margin-left: 5px;">
+                                                    <span class="warning-text">
                                                             {"(set phone number)"}
                                                     </span>
                                                 }
@@ -137,23 +194,17 @@ pub mod home {
                                 }
                                     <br/>
                                     <br/>
-                                <button onclick={handle_logout}>{"Logout"}</button>
-                            </div>
-                        }
-                    } else {
-                        html! {
-                            <div class="auth-links">
-                                <Link<Route> to={Route::Login}>
-                                    {"Login"}
-                                </Link<Route>>
-                                {" or "}
-                                <Link<Route> to={Route::Register}>
-                                    {"Register"}
-                                </Link<Route>>
+                                <button 
+                                    onclick={handle_logout}
+                                    class="logout-button"
+                                >
+                                    {"Logout"}
+                                </button>
                             </div>
                         }
                     }
                 }
+                </div>
             </div>
         }
     }
