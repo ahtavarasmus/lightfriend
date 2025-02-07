@@ -29,7 +29,7 @@ pub mod home {
             <div class="landing-page">
                 // Hero Section
                 <section class="hero">
-                    <h1>{"Digital Freedom Through Simplicity"}</h1>
+                    <h1>{"Smart Tools for Dumbphones"}</h1>
                     <p class="hero-subtitle">
                         {"Stay connected to what matters, free from digital distractions. Use your dumbphone smarter with AI-powered voice and text assistance."}
                     </p>
