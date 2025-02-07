@@ -200,7 +200,7 @@ pub mod home {
                                             <div class="info-section">
                                                 <h2 class="section-title">{"Your Lightfriend is Ready!"}</h2>
                                                 <div class="phone-display">
-                                                    <span class="phone-number">{"+358 45 4901522"}</span>
+                                                    <span class="phone-number">{"+358454901522"}</span>
                                                 </div>
                                                 <p class="instruction-text">
                                                     {"Call or text this number to access your services"}
