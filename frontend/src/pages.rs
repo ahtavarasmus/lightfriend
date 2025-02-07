@@ -22,7 +22,97 @@ pub mod home {
         false
     }
 
-        #[function_component]
+
+    #[function_component(Landing)]
+    pub fn landing() -> Html {
+        html! {
+            <div class="landing-page">
+                // Hero Section
+                <section class="hero">
+                    <h1>{"Digital Freedom Through Simplicity"}</h1>
+                    <p class="hero-subtitle">
+                        {"Stay connected to what matters, free from digital distractions. Use your dumbphone smarter with AI-powered voice and text assistance."}
+                    </p>
+                    <button class="hero-cta">
+                        {"Get Started"}
+                    </button>
+                </section>
+
+                // Features Section
+                <section class="features">
+                    <h2>{"Essential Tools, Minimal Distractions"}</h2>
+                    <p>{"Access everything you need through your dumbphone, while staying focused and present."}</p>
+                    
+                    <div class="features-grid">
+                        <div class="feature-item">
+                            <i class="calendar-icon"></i>
+                            <h3>{"Calendar Access"}</h3>
+                            <p>{"Check and manage your schedule through simple voice calls or text messages."}</p>
+                        </div>
+                        
+                        <div class="feature-item">
+                            <i class="email-icon"></i>
+                            <h3>{"Email Integration"}</h3>
+                            <p>{"Stay on top of important emails without the constant notifications."}</p>
+                        </div>
+
+                        <div class="feature-item">
+                            <i class="message-icon"></i>
+                            <h3>{"Smart Messaging"}</h3>
+                            <p>{"Access your messages across platforms through your dumbphone."}</p>
+                        </div>
+
+                        <div class="feature-item">
+                            <i class="search-icon"></i>
+                            <h3>{"Perplexity Search"}</h3>
+                            <p>{"Get instant answers and information via SMS or voice call."}</p>
+                        </div>
+                    </div>
+                </section>
+
+                // How It Works section
+                <section class="how-it-works">
+                    <h2>{"How Lightfriend Works"}</h2>
+                    <p>{"Three simple steps to digital freedom"}</p>
+
+                    <div class="steps-grid">
+                        <div class="step">
+                            <h3>{"Connect Your Services"}</h3>
+                            <p>{"Link your calendar, email, and messaging accounts through our secure web interface."}</p>
+                        </div>
+
+                        <div class="step">
+                            <h3>{"Use Your Dumbphone"}</h3>
+                            <p>{"Call or text Lightfriend to access your connected services anytime, anywhere."}</p>
+                        </div>
+
+                        <div class="step">
+                            <h3>{"Stay Present"}</h3>
+                            <p>{"Enjoy life without digital distractions, knowing essential information is just a call away."}</p>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="footer-cta">
+                    <div class="footer-content">
+                        <h2>{"Ready to Reclaim Your Focus?"}</h2>
+                        <p class="subtitle">
+                            {"Join the digital minimalism movement without sacrificing essential connectivity."}
+                        </p>
+                        <button class="get-started-btn">
+                            {"Get Started Now"}
+                        </button>
+                        <p class="disclaimer">
+                            {"No smartphone required. Works with any basic phone."}
+                        </p>
+                    </div>
+                </section>
+            </div>
+        }
+    }
+
+
+    #[function_component]
     pub fn Home() -> Html {
         let logged_in = is_logged_in();
         let missing_phone = use_state(|| false);
@@ -91,124 +181,64 @@ pub mod home {
                 }
             })
         };
+
         html! {
-            <div class="min-h-screen gradient-bg">
-                <div class="container">
-                    <div class="hero-section">
-                        <h1 class="hero-title">{"lightfriend"}</h1>
-                        <p class="hero-subtitle">
-                            {"Your smart companion for a simpler phone life"}
-                        </p>
-                    </div>
-        
-                {
-                    if !logged_in {
-                        html! {
-                            <>
-                                <div class="features-grid">
-                                    <div class="feature-card">
-                                        <div class="feature-icon">{"🌱"}</div>
-                                        <h3 class="feature-title">{"Digital Minimalism"}</h3>
-                                        <p class="feature-description">
-                                            {"Switch to a simpler phone without losing essential smart features"}
-                                        </p>
-                                    </div>
-                                    <div class="feature-card">
-                                        <div class="feature-icon">{"🤝"}</div>
-                                        <h3 class="feature-title">{"Always Connected"}</h3>
-                                        <p class="feature-description">
-                                            {"Access modern services through SMS and calls - no smartphone needed"}
-                                        </p>
-                                    </div>
-                                    <div class="feature-card">
-                                        <div class="feature-icon">{"🎯"}</div>
-                                        <h3 class="feature-title">{"Focus Better"}</h3>
-                                        <p class="feature-description">
-                                            {"Stay productive without constant digital distractions"}
-                                        </p>
-                                    </div>
-                                </div>
+                                {
+                        if !logged_in {
+                            html! { <Landing /> }
+                        } else if *profile_checked {
+                            html! {
+                                <div class="dashboard-container">
+                                    <div class="dashboard-content">
 
-                                <div class="how-it-works">
-                                    <h2 class="section-title">{"How It Works"}</h2>
-                                    <p class="section-description">
-                                        {"Simply call or text our service to access the features you need. Weather updates, navigation, translations, and more - all through your basic phone."}
-                                    </p>
-                                </div>
-
-                                <div class="button-container">
-                                    <Link<Route> to={Route::Login} classes="primary-button">
-                                        {"Login"}
-                                    </Link<Route>>
-                                    <Link<Route> to={Route::Register} classes="secondary-button">
-                                        {"Register"}
-                                    </Link<Route>>
-                                </div>
-
-                                <div class="footer">
-                                    <div>
-                                        {"Join the digital minimalism movement without sacrificing connectivity"}
-                                    </div>
-                                </div>
-                            </>
-                        }
-                    } else {
-                        html! {
-                            <div class="profile-container">
-                                <Link<Route> to={Route::Profile} classes="profile-link">
-                                    {"View Profile"}
+                                <div class="dashboard-panel">
+                                    <h2 class="dashboard-title">{"Your Lightfriend Dashboard"}</h2>
+                                    
                                     {
-                                        if *profile_checked {
-                                            if *missing_phone {
-                                                html! {
-                                                    <span class="warning-text">
-                                                            {"(set phone number)"}
-                                                    </span>
-                                                }
-                                            
-                                            } else {
-                                                html! {}
+                                        if *missing_phone {
+                                            html! {
+                                                <div class="warning-card">
+                                                    <span class="warning-icon">{"⚠️"}</span>
+                                                    <Link<Route> to={Route::Profile}>
+                                                        {"Complete your setup by adding a phone number"}
+                                                    </Link<Route>>
+                                                </div>
                                             }
                                         } else {
-                                            html! {}
+                                            html! {
+                                                <div class="phone-card">
+                                                    <h3>{"Your Lightfriend is Ready!"}</h3>
+                                                    <p class="phone-number">{"+358 45 4901522"}</p>
+                                                    <p class="instruction-text">
+                                                        {"Call or text this number to access your services"}
+                                                    </p>
+                                                </div>
+                                            }
                                         }
                                     }
-                                </Link<Route>>
-                                    <br/>
-                                    <br/>
-                                {
-                                    if *profile_checked && !*missing_phone {
-                                        html! {
-                                            <>
-                                                <h3>
-                                                    {"Call your lightfriend!:)"}
-                                                </h3>
-                                                <p>
-                                                    {"+358 45 4901522"}
-                                                </p>
-                                            </>
-                                        }
-                                    } else {
-                                        html! {}
-                                    }
-                                }
-                                    <br/>
-                                    <br/>
-                                <button 
-                                    onclick={handle_logout}
-                                    class="logout-button"
-                                >
-                                    {"Logout"}
-                                </button>
+                                    
+                                    <button 
+                                        onclick={handle_logout}
+                                        class="logout-button"
+                                    >
+                                        {"Logout"}
+                                    </button>
+                                </div>
                             </div>
+                        </div>
+                            }
+                        } else {
+                            html! {}
                         }
+                        
                     }
-                }
-                </div>
-            </div>
+                
         }
+
+        
     }
 }
+
 
 
 pub mod profile {
@@ -421,91 +451,114 @@ let navigator = navigator.clone();
 
         html! {
             <div class="profile-container">
-                <h1>{"profile"}</h1>
-                <Link<Route> to={Route::Home}>{"Back to Home"}</Link<Route>>
-                {
-                    if let Some(error_msg) = (*error).as_ref() {
-                        html! {
-                            <div class="error-message" style="color: red;">
-                                {error_msg}
-                            </div>
+                <div class="profile-panel">
+                    <div class="profile-header">
+                        <h1 class="profile-title">{"Profile"}</h1>
+                        <Link<Route> to={Route::Home} classes="back-link">
+                            {"Back to Home"}
+                        </Link<Route>>
+                    </div>
+
+                    {
+                        if let Some(error_msg) = (*error).as_ref() {
+                            html! {
+                                <div class="message error-message">{error_msg}</div>
+                            }
+                        } else if let Some(success_msg) = (*success).as_ref() {
+                            html! {
+                                <div class="message success-message">{success_msg}</div>
+                            }
+                        } else {
+                            html! {}
                         }
-                    } else if let Some(success_msg) = (*success).as_ref() {
-                        html! {
-                            <div class="success-message" style="color: green;">
-                                {success_msg}
-                            </div>
-                        }
-                    } else {
-                        html! {}
                     }
-                }
-                {
-                    if let Some(user_profile) = (*profile).as_ref() {
-                        html! {
-                            <div class="profile-info">
-                                <p><strong>{"Username: "}</strong>{&user_profile.username}</p>
-                                <p><strong>{"Email: "}</strong>{&user_profile.email}</p>
-                                <p>
-                                    <strong>{"Phone: "}</strong>
-                                    {
-                                        if *is_editing {
-                                            html! {
-                                                <input
-                                                    type="tel"
-                                                    value={(*phone_number).clone()}
-                                                    onchange={let phone_number = phone_number.clone(); move |e: Event| {
-                                                        let input: HtmlInputElement = e.target_unchecked_into();
-                                                        phone_number.set(input.value());
-                                                    }}
-                                                />
-                                            }
-                                        } else {
-                                            html! {
-                                                <span>{user_profile.phone_number.clone().unwrap_or_default()}</span>
-                                            }
-                                        }
-                                    }
-                                <p>
-                                    <strong>{"Nickname: "}</strong>
-                                    {
-                                        if *is_editing {
-                                            html! {
-                                                <input
-                                                    type="tel"
-                                                    value={(*nickname).clone()}
-                                                    onchange={let nickname = nickname.clone(); move |e: Event| {
-                                                        let input: HtmlInputElement = e.target_unchecked_into();
-                                                        nickname.set(input.value());
-                                                    }}
-                                                />
-                                            }
-                                        } else {
-                                            html! {
-                                                <span>{user_profile.nickname.clone().unwrap_or_default()}</span>
+
+                    {
+                        if let Some(user_profile) = (*profile).as_ref() {
+                            html! {
+                                <div class="profile-info">
+                                    <div class="profile-field">
+                                        <span class="field-label">{"Username"}</span>
+                                        <span class="field-value">{&user_profile.username}</span>
+                                    </div>
+                                    
+                                    <div class="profile-field">
+                                        <span class="field-label">{"Email"}</span>
+                                        <span class="field-value">{&user_profile.email}</span>
+                                    </div>
+                                    
+                                    <div class="profile-field">
+                                        <span class="field-label">{"Phone"}</span>
+                                        {
+                                            if *is_editing {
+                                                html! {
+                                                    <input
+                                                        type="tel"
+                                                        class="profile-input"
+                                                        value={(*phone_number).clone()}
+                                                        onchange={let phone_number = phone_number.clone(); move |e: Event| {
+                                                            let input: HtmlInputElement = e.target_unchecked_into();
+                                                            phone_number.set(input.value());
+                                                        }}
+                                                    />
+                                                }
+                                            } else {
+                                                html! {
+                                                    <span class="field-value">
+                                                        {user_profile.phone_number.clone().unwrap_or_default()}
+                                                    </span>
+                                                }
                                             }
                                         }
-                                    }
-                                </p>
-                                    <button onclick={
-                                        let is_editing = is_editing.clone();
-                                        if *is_editing {
-                                            on_edit
-                                        } else {
-                                            Callback::from(move |_| is_editing.set(true))
+                                    </div>
+
+                                    <div class="profile-field">
+                                        <span class="field-label">{"Nickname"}</span>
+                                        {
+                                            if *is_editing {
+                                                html! {
+                                                    <input
+                                                        type="text"
+                                                        class="profile-input"
+                                                        value={(*nickname).clone()}
+                                                        onchange={let nickname = nickname.clone(); move |e: Event| {
+                                                            let input: HtmlInputElement = e.target_unchecked_into();
+                                                            nickname.set(input.value());
+                                                        }}
+                                                    />
+                                                }
+                                            } else {
+                                                html! {
+                                                    <span class="field-value">
+                                                        {user_profile.nickname.clone().unwrap_or_default()}
+                                                    </span>
+                                                }
+                                            }
                                         }
-                                    }>
-                                        {if *is_editing { "Confirm" } else { "Edit" }}
+                                    </div>
+
+                                    <button 
+                                        onclick={
+                                            let is_editing = is_editing.clone();
+                                            if *is_editing {
+                                                on_edit
+                                            } else {
+                                                Callback::from(move |_| is_editing.set(true))
+                                            }
+                                        }
+                                        class={classes!("edit-button", (*is_editing).then(|| "confirming"))}
+                                    >
+                                        {if *is_editing { "Save Changes" } else { "Edit Profile" }}
                                     </button>
-                                </p>
-                            </div>
-                        }
-                    } else {
-                        html! {
-                            <p>{"Loading profile..."}</p>
+                                </div>
+                            }
+                        } else {
+                            html! {
+                                <div class="loading-profile">{"Loading profile..."}</div>
+                            }
                         }
                     }
-                }
+                </div>
             </div>
         }
     }
