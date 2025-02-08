@@ -5,6 +5,7 @@ pub mod login {
     use serde::{Deserialize, Serialize};
     use yew_router::prelude::*;
     use crate::Route;
+    use gloo_console::log;
     #[derive(Serialize)]
     pub struct LoginRequest {
         username: String,
@@ -40,6 +41,7 @@ pub mod login {
                 let success_setter = success_setter.clone();
 
                 wasm_bindgen_futures::spawn_local(async move {
+                    println!("Attempting login for username: {}", &username);
                     match Request::post("/api/login")
                         .json(&LoginRequest { username, password })
                         .unwrap()
@@ -48,11 +50,13 @@ pub mod login {
                     {
                         Ok(response) => {
                             if response.ok() {
+                                log!("Login request successful, parsing response...");
                                 match response.json::<LoginResponse>().await {
                                     Ok(resp) => {
                                         let window = web_sys::window().unwrap();
                                         if let Ok(Some(storage)) = window.local_storage() {
                                             if storage.set_item("token", &resp.token).is_ok() {
+                                                log!("Token stored successfully in localStorage");
                                                 error_setter.set(None);
                                                 success_setter.set(Some("Login successful! Redirecting...".to_string()));
                                                 
@@ -65,13 +69,16 @@ pub mod login {
                                             }
                                         }
                                     }
-                                    Err(_) => {
+                                    Err(e) => {
+                                        log!("Error parsing login response:", e.to_string());
                                         error_setter.set(Some("Failed to parse server response".to_string()));
                                     }
                                 }
                             } else {
+                                log!("Login request failed with status:", response.status());
                                 match response.json::<ErrorResponse>().await {
                                     Ok(error_response) => {
+                                        log!("Server error response:", &error_response.error);
                                         error_setter.set(Some(error_response.error));
                                     }
                                     Err(_) => {
@@ -81,6 +88,7 @@ pub mod login {
                             }
                         }
                         Err(e) => {
+                            log!("Network request failed:", e.to_string());
                             error_setter.set(Some(format!("Request failed: {}", e)));
                         }
                     }

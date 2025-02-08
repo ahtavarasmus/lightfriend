@@ -107,6 +107,7 @@ name = "frontend"
 version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
+ "gloo-console",
  "gloo-net 0.2.6",
  "gloo-timers",
  "serde",

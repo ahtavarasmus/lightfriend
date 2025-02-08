@@ -31,7 +31,7 @@ pub mod home {
                 <section class="hero">
                     <h1>{"Smart Tools for Dumbphones"}</h1>
                     <p class="hero-subtitle">
-                        {"Stay connected to what matters, free from digital distractions. Use your dumbphone smarter with AI-powered voice and text assistance."}
+                        {"Use your dumbphone smarter with AI-powered voice and text assistance."}
                     </p>
                     <button class="hero-cta">
                         <Link<Route> to={Route::Register} classes="forward-link">

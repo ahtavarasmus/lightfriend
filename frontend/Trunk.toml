@@ -1,0 +1,6 @@
+[serve]
+port = 8080
+[[proxy]]
+backend = "http://localhost:3000/api/"
+frontend = "/api/"
+
