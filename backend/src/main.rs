@@ -1,6 +1,6 @@
 use dotenvy::dotenv;
 use axum::{
-    routing::{get, post},
+    routing::{get, post, delete},
     Router,
 };
 use diesel::prelude::*;
@@ -30,7 +30,7 @@ mod schema;
 
 use repositories::user_repository::UserRepository;
 
-use handlers::auth_handlers::{register, login, get_users};
+use handlers::auth_handlers::{register, login, get_users, delete_user};
 use handlers::profile_handlers::{get_profile, update_profile};
 use api::vapi_endpoints::{vapi_server, handle_phone_call_event, handle_phone_call_event_print};
 
@@ -92,6 +92,7 @@ async fn main() {
         .route("/api/admin/users", get(get_users))
         .route("/api/profile/update", post(update_profile))
         .route("/api/profile", get(get_profile))
+        .route("/api/profile/delete/:user_id", delete(delete_user))
         .route("/api/server", post(handle_phone_call_event))
         .layer(
             TraceLayer::new_for_http()
@@ -103,7 +104,8 @@ async fn main() {
                 .allow_methods([
                     axum::http::Method::GET,
                     axum::http::Method::POST,
-                    axum::http::Method::OPTIONS
+                    axum::http::Method::OPTIONS,
+                    axum::http::Method::DELETE,
                 ])
                 .allow_origin(Any)
                 .allow_headers(Any)

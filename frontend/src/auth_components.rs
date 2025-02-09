@@ -170,6 +170,7 @@ pub mod register {
     #[derive(Deserialize)]
     pub struct RegisterResponse {
         message: String,
+        token: String,
     }
 
     #[derive(Deserialize)]
@@ -214,16 +215,21 @@ pub mod register {
                         Ok(resp) => {
                             if resp.ok() {
                                 match resp.json::<RegisterResponse>().await {
-                                    Ok(success_response) => {
-                                        error_setter.set(None);
-                                        success_setter.set(Some(success_response.message));
-                                        
+                                    Ok(resp) => {
                                         let window = web_sys::window().unwrap();
-                                        let window_clone = window.clone();
-                                        wasm_bindgen_futures::spawn_local(async move {
-                                            gloo_timers::future::TimeoutFuture::new(2_000).await;
-                                            let _ = window_clone.location().set_href("/login");
-                                        });
+                                        if let Ok(Some(storage)) = window.local_storage() {
+                                            if storage.set_item("token", &resp.token).is_ok() {
+                                                error_setter.set(None);
+                                                success_setter.set(Some(resp.message));
+                                                
+                                                // Redirect to home page after a short delay
+                                                let window_clone = window.clone();
+                                                wasm_bindgen_futures::spawn_local(async move {
+                                                    gloo_timers::future::TimeoutFuture::new(1_000).await;
+                                                    let _ = window_clone.location().set_href("/");
+                                                });
+                                            }
+                                        }
                                     }
                                     Err(_) => {
                                         error_setter.set(Some("Failed to parse server response".to_string()));

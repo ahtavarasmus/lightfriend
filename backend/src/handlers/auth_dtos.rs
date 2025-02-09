@@ -9,6 +9,8 @@ pub struct NewUser {
     pub username: String,
     pub password_hash: String,
     pub phone_number: String,
+    pub time_to_live: i32,
+    pub verified: bool,
 }
 
 #[derive(Deserialize)]
@@ -22,7 +24,7 @@ pub struct LoginResponse {
     pub token: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct RegisterRequest {
     pub username: String,
     pub password: String,

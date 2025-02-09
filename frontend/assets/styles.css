@@ -672,6 +672,97 @@ button[type="submit"].loading::after {
     }
 }
 
+.verification-container {
+    min-height: 100vh;
+    background: #1a1a1a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4rem 2rem;
+}
+
+.verification-panel {
+    background: rgba(30, 30, 30, 0.7);
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    border-radius: 16px;
+    padding: 3rem;
+    width: 100%;
+    max-width: 600px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    text-align: center;
+}
+
+.verification-panel h1 {
+    font-size: 2rem;
+    background: linear-gradient(45deg, #fff, #7EB2FF);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 1.5rem;
+}
+
+.verification-panel p {
+    color: #999;
+    font-size: 1.1rem;
+    margin-bottom: 2rem;
+}
+
+.verification-status {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+    padding: 2rem;
+    margin: 2rem 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+}
+
+.verification-status span {
+    color: #7EB2FF;
+    font-size: 1.1rem;
+}
+
+.verification-icon {
+    width: 24px;
+    height: 24px;
+    border: 2px solid #7EB2FF;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+.verification-help {
+    color: #666;
+    font-size: 0.9rem;
+    margin-top: 2rem;
+    background: rgba(255, 193, 7, 0.1);
+    border: 1px solid rgba(255, 193, 7, 0.2);
+    border-radius: 12px;
+    padding: 1.5rem;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .verification-panel {
+        padding: 2rem;
+    }
+
+    .verification-panel h1 {
+        font-size: 1.75rem;
+    }
+
+    .verification-panel p {
+        font-size: 1rem;
+    }
+}
+
 .dashboard-container {
     min-height: 100vh;
     background: #1a1a1a;

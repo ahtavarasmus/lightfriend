@@ -21,10 +21,13 @@ pub struct UpdateProfileRequest {
 
 #[derive(Serialize)]
 pub struct ProfileResponse {
+    id: i32,
     username: String,
     phone_number: String,
-    email: Option<String>,
-    nickname: Option<String>
+    nickname: Option<String>,
+    verified: bool,
+    time_to_live: i32,
+    time_to_delete: bool,
 }
 
 pub async fn get_profile(
@@ -66,12 +69,26 @@ pub async fn get_profile(
     ))?;
 
     match user {
-        Some(user) => Ok(Json(ProfileResponse {
-            username: user.username,
-            email: user.email,
-            phone_number: user.phone_number,
-            nickname: user.nickname,
-        })),
+        Some(user) => {
+            let current_time = std::time::SystemTime::now()
+                                                    .duration_since(std::time::UNIX_EPOCH)
+                                                    .unwrap()
+                                                    .as_secs() as i32;
+
+            println!("User {:#?} verified: {:#?} time_to_live: {:#?} current_time: {:#?} current_time>ttl: {:#?}", user.username, user.verified, user.time_to_live.unwrap_or(0), current_time, current_time>user.time_to_live.unwrap_or(0));
+            let ttl = user.time_to_live.unwrap_or(0);
+            let time_to_delete = current_time > ttl;
+
+            Ok(Json(ProfileResponse {
+                id: user.id,
+                username: user.username,
+                phone_number: user.phone_number,
+                nickname: user.nickname,
+                verified: user.verified,
+                time_to_live: ttl,
+                time_to_delete: time_to_delete,
+            }))
+        }
         None => Err((
             StatusCode::NOT_FOUND,
             Json(json!({"error": "User not found"}))

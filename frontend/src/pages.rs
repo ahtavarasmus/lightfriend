@@ -7,9 +7,15 @@ pub mod home {
     use gloo_net::http::Request;
     use serde::Deserialize;
 
-    #[derive(Deserialize)]
+    #[derive(Deserialize, Clone)]
     struct UserProfile {
-        phone_number: Option<String>,
+        id: i32,
+        username: String,
+        phone_number: String,
+        nickname: Option<String>,
+        verified: bool,
+        time_to_live: i32,
+        time_to_delete: bool,
     }
 
     pub fn is_logged_in() -> bool {
@@ -116,19 +122,48 @@ pub mod home {
         }
     }
 
+    // Separate the deletion logic
+    fn delete_unverified_account(profile_id: i32, token: String) {
+        wasm_bindgen_futures::spawn_local(async move {
+            let _ = Request::delete(&format!("{}/api/profile/delete/{}", config::get_backend_url(), profile_id))
+                .header("Authorization", &format!("Bearer {}", token))
+                .send()
+                .await;
+            
+            if let Some(window) = window() {
+                if let Ok(Some(storage)) = window.local_storage() {
+                    let _ = storage.remove_item("token");
+                    let _ = window.location().set_href("/");
+                }
+            }
+        });
+    }
 
     #[function_component]
     pub fn Home() -> Html {
         let logged_in = is_logged_in();
-        let missing_phone = use_state(|| false);
-        let profile_checked = use_state(|| false);
+        let profile_data = use_state(|| None::<UserProfile>);
+        let user_verified = use_state(|| false);
+        let error = use_state(|| None::<String>);
 
-        // Fetch profile data if logged in
+        // Polling effect
         {
-            let missing_phone = missing_phone.clone();
-            let profile_checked = profile_checked.clone();
+            let profile_data = profile_data.clone();
+            let user_verified = user_verified.clone();
+            let error = error.clone();
+            
             use_effect_with_deps(move |_| {
-                if is_logged_in() {
+                let profile_data = profile_data.clone();
+                let user_verified = user_verified.clone();
+                let error = error.clone();
+
+                // Function to fetch profile
+                let fetch_profile = move || {
+                    let profile_data = profile_data.clone();
+                    let user_verified = user_verified.clone();
+                    let error = error.clone();
+
+                    gloo_console::log!("Fetching profile...");
                     wasm_bindgen_futures::spawn_local(async move {
                         if let Some(token) = window()
                             .and_then(|w| w.local_storage().ok())
@@ -142,86 +177,105 @@ pub mod home {
                                 .await
                             {
                                 Ok(response) => {
-                                    if response.ok() {
-                                        match response.json::<UserProfile>().await {
-                                            Ok(profile) => {
-                                                let is_missing = profile.phone_number.is_none() || 
-                                                        profile.phone_number.as_ref()
-                                                        .map_or(true, |p| p.trim().is_empty());
-                                                missing_phone.set(is_missing);
-                                                profile_checked.set(true);
-                                            }
-                                            Err(e) => {
-                                                web_sys::console::log_1(&format!("Failed to parse profile: {:?}", e).into());
-                                                profile_checked.set(true);
+                                    if response.status() == 401 {
+                                        if let Some(window) = window() {
+                                            if let Ok(Some(storage)) = window.local_storage() {
+                                                let _ = storage.remove_item("token");
+                                                let _ = window.location().set_href("/");
                                             }
                                         }
-                                    } else {
-                                        web_sys::console::log_1(&format!("Response not OK: {}", response.status()).into());
-                                        profile_checked.set(true);
+                                        return;
+                                    }
+                                    
+                                    match response.json::<UserProfile>().await {
+                                        Ok(profile) => {
+                                            gloo_console::log!("Profile fetched successfully:", format!("verified: {}", profile.verified));
+                                            // Check if unverified profile has expired
+                                            if !profile.verified && profile.time_to_delete {
+                                                // Profile has expired, delete account and logout
+                                                delete_unverified_account(profile.id, token.clone());
+                                                return;
+                                            }
+                                            user_verified.set(profile.verified);
+                                            error.set(None);
+                                        }
+                                        Err(_) => {
+                                            gloo_console::error!("Failed to parse profile data");
+                                            error.set(Some("Failed to parse profile data".to_string()));
+                                        }
                                     }
                                 }
-                                Err(e) => {
-                                    web_sys::console::log_1(&format!("Request failed: {:?}", e).into());
-                                    profile_checked.set(true);
+                                Err(_) => {
+                                    gloo_console::error!("Failed to fetch profile");
+                                    error.set(Some("Failed to fetch profile".to_string()));
                                 }
                             }
                         }
                     });
-                } else {
-                    profile_checked.set(true);
+                };
+
+                // Initial fetch
+                fetch_profile();
+
+                // TODO maybe we could not poll constantly if we know user is already verified
+                // Set up interval for polling
+                let interval = gloo_timers::callback::Interval::new(5000, move || {
+                    fetch_profile();
+                });
+
+                move || {
+                    interval.forget(); // Clean up interval on component unmount
                 }
-                || ()
             }, ());
         }
 
-        html! {
-            {
-                if !logged_in {
-                    html! { <Landing /> }
-                } else if *profile_checked {
-                    html! {
-                        <div class="dashboard-container">
-                            <div class="dashboard-panel">
-                                <div class="panel-header">
-                                    <h1 class="panel-title">{"Your Lightfriend Dashboard"}</h1>
+        if !logged_in {
+            html! { <Landing /> }
+        } else {
+            if !*user_verified {
+                html! {
+                    <div class="verification-container">
+                        <div class="verification-panel">
+                            <h1>{"Verify Your Account"}</h1>
+                            <p>{"Call the following number to verify your account"}</p>
+                            <div class="phone-display">
+                                <span class="phone-number">{"+358454901522"}</span>
+                            </div>
+                            <div class="verification-status">
+                                <i class="verification-icon"></i>
+                                <span>{"Waiting for verification..."}</span>
+                            </div>
+                            <p class="verification-help">
+                                <span>{"Having trouble? Make sure you typed your number correctly. You can change it in the profile."}</span>
+                                <Link<Route> to={Route::Profile}>
+                                    {"profile"}
+                                </Link<Route>>
+
+                            </p>
+                        </div>
+                    </div>
+                }
+            } else {
+                html! {
+                    <div class="dashboard-container">
+                        <div class="dashboard-panel">
+                            <div class="panel-header">
+                                <h1 class="panel-title">{"Your Lightfriend Dashboard"}</h1>
+                            </div>
+                            <div class="info-section">
+                                <h2 class="section-title">{"Your Lightfriend is Ready!"}</h2>
+                                <div class="phone-display">
+                                    <span class="phone-number">{"+358454901522"}</span>
                                 </div>
-                                {
-                                    if *missing_phone {
-                                        html! {
-                                            <div class="warning-card">
-                                                <span class="warning-icon">{"⚠️"}</span>
-                                                <Link<Route> to={Route::Profile}>
-                                                    {"Complete your setup by adding a phone number"}
-                                                </Link<Route>>
-                                            </div>
-                                        }
-                                    } else {
-                                        html! {
-                                            <div class="info-section">
-                                                <h2 class="section-title">{"Your Lightfriend is Ready!"}</h2>
-                                                <div class="phone-display">
-                                                    <span class="phone-number">{"+358454901522"}</span>
-                                                </div>
-                                                <p class="instruction-text">
-                                                    {"Call or text this number to access your services"}
-                                                </p>
-                                            </div>
-                                        }
-                                    }
-                                }
+                                <p class="instruction-text">
+                                    {"Call or text this number to access your services"}
+                                </p>
                             </div>
                         </div>
-                    }
-
-                    
-                } else {
-                    html! {}
+                    </div>
                 }
             }
         }
-
-        
     }
 }
 
@@ -239,7 +293,6 @@ pub mod profile {
     #[derive(Deserialize, PartialEq)]
     struct UserProfile {
         username: String,
-        email: String,
         phone_number: Option<String>,
         nickname: Option<String>,
     }
@@ -558,7 +611,6 @@ pub mod admin {
     struct UserInfo {
         id: i32,
         username: String,
-        email: String,
     }
 
     #[function_component]
@@ -628,8 +680,10 @@ pub mod admin {
                                     <thead>
                                         <tr>
                                             <th>{"ID"}</th>
-                                            <th>{"Username"}</th>
-                                            <th>{"Email"}</th>
+                                            <tr>
+                                                <th>{"ID"}</th>
+                                                <th>{"Username"}</th>
+                                            </tr>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -639,7 +693,6 @@ pub mod admin {
                                                     <tr key={user.id}>
                                                         <td>{user.id}</td>
                                                         <td>{&user.username}</td>
-                                                        <td>{&user.email}</td>
                                                     </tr>
                                                 }
                                             }).collect::<Html>()

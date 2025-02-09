@@ -3,6 +3,7 @@ use axum::{
     Json,
     extract::State,
     response::Response,
+    http::StatusCode
 };
 use std::future::Future;
 use std::sync::Arc;
@@ -153,13 +154,14 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
             Ok(Some(user)) => {
                 println!("User found for phone number: {}", phone_number);
                 
-                if let Some(nickname) = user.nickname {
-                    println!("User has nickname: {}", nickname);
+                if user.verified {
+                    let nickname = user.nickname.unwrap_or_else(|| user.username.clone());
+                    println!("User nickname: {}", nickname);
                     let response = json!({
                         "messageResponse": {
                             "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
                             "assistantOverrides": {
-                                "firstMessage": format!("Hello! {}", nickname),
+                                "firstMessage": format!("Hello {}!", nickname),
                                 "variableValues": {
                                     "name": nickname
                                 }
@@ -169,33 +171,49 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                     println!("Returning response: {:#?}", response);
                     Json(response)
                 } else {
-                    println!("User does NOT have nickname");
-                    let resp = json!({
-                        "messageResponse": {
-                            "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
-                            "assistantOverrides": {
-                                "firstMessage": "Hello! {{name}}",
-                                "variableValues": {
-                                    "name": "nickname"
+                    println!("Verifying user: {}", phone_number);
+                    
+                    match state.user_repository.verify_user(user.id) {
+                        Ok(_) => {
+                            println!("User verified successfully");
+                            let nickname = user.nickname.unwrap_or_else(|| user.username.clone());
+                            // TODO: make assistant explain the service
+                            // cap the call length to users credits and make the assistant say that
+                            let response = json!({
+                                "messageResponse": {
+                                    "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
+                                    "assistantOverrides": {
+                                        "firstMessage": format!("Welcome {}! Your account has been verified! Anyways, how can I help?", nickname),
+                                        "variableValues": {
+                                            "name": nickname
+                                        }
+                                    }
                                 }
-                            }
+                            });
+                            println!("Returning response: {:#?}", response);
+                            Json(response)
+                        },
+                        Err(e) => {
+                            println!("Error verifying user: {}", e);
+                            let resp = json!({
+                                "messageResponse": {
+                                    "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
+                                    "assistantOverrides": {
+                                        "firstMessage": "Sorry, there was an error verifying your account.",
+                                    }
+                                }
+                            });
+                            println!("Returning error response: {:#?}", resp);
+                            Json(resp)
                         }
-                    });
-                    println!("Returning response: {:#?}", resp);
-                    Json(resp)
+                    }
                 }
             },
             Ok(None) => {
                 println!("No user found for phone number: {}", phone_number);
                 let resp = json!({
                     "messageResponse": {
-                        "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
-                        "assistantOverrides": {
-                            "firstMessage": "Hello! {{name}}",
-                            "variableValues": {
-                                "name": "nickname"
-                            }
-                        }
+                        "error": "No user found with the phone number",
                     }
                 });
                 println!("Returning response: {:#?}", resp);
@@ -205,13 +223,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                 println!("Database error while finding user: {}", e);
                 let resp = json!({
                     "messageResponse": {
-                        "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
-                        "assistantOverrides": {
-                            "firstMessage": "Hello! {{name}}",
-                            "variableValues": {
-                                "name": "nickname"
-                            }
-                        }
+                        "error": "Database error when fetching user",
                     }
                 });
                 println!("Returning response: {:#?}", resp);
@@ -221,15 +233,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
     } else {
         println!("No phone number found in event");
         let resp = json!({
-            "messageResponse": {
-                "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
-                "assistantOverrides": {
-                    "firstMessage": "Hello! {{name}}",
-                    "variableValues": {
-                        "name": "nickname"
-                    }
-                }
-            }
+            "error": "Internal error, no phone number was included in the payload",
         });
         println!("Returning response: {:#?}", resp);
         Json(resp)

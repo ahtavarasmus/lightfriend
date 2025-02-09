@@ -70,6 +70,7 @@ pub async fn get_users(
 }
 
 
+
 pub async fn login(
     State(state): State<Arc<AppState>>,
     Json(login_req): Json<LoginRequest>,
@@ -81,7 +82,7 @@ pub async fn login(
         Ok(None) => {
             return Err((
                 StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "Invalid credentials"}))
+                Json(json!({"error": "User not found"}))
             ));
         }
         Err(_) => {
@@ -183,10 +184,67 @@ pub async fn login(
     }
 }
 
+pub async fn delete_user(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    axum::extract::Path(user_id): axum::extract::Path<i32>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Extract token from Authorization header
+    let auth_header = headers.get("Authorization")
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| header.strip_prefix("Bearer "));
+
+    let token = match auth_header {
+        Some(token) => token,
+        None => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "No authorization token provided"}))
+        )),
+    };
+
+    // Decode and validate JWT token
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+                    .expect("JWT_SECRET_KEY must be set in environment")
+                    .as_bytes()),
+        &Validation::new(Algorithm::HS256)
+    ) {
+        Ok(token_data) => token_data.claims,
+        Err(_) => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Invalid token"}))
+        )),
+    };
+
+    // Check if the user is deleting their own account or is an admin
+    if claims.sub != user_id && !state.user_repository.is_admin(claims.sub).map_err(|e| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": format!("Database error: {}", e)}))
+    ))? {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "You can only delete your own account unless you're an admin"}))
+        ));
+    }
+
+    println!("Deleting the user");
+    // Delete the user
+    match state.user_repository.delete_user(user_id) {
+        Ok(_) => Ok(Json(json!({"message": "User deleted successfully"}))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to delete user: {}", e)}))
+        )),
+    }
+}
+
+
+
 pub async fn register(
     State(state): State<Arc<AppState>>,
     Json(reg_req): Json<RegisterRequest>,
-) -> Result<Json<RegisterResponse>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     
     println!("Registration attempt for username: {}", reg_req.username);
 
@@ -221,10 +279,20 @@ pub async fn register(
 
     // Create and insert user
     println!("Creating new user...");
+    // Calculate timestamp 5 minutes from now
+    let five_minutes_from_now = Utc::now()
+        .checked_add_signed(Duration::minutes(5))
+        .expect("Failed to calculate timestamp")
+        .timestamp() as i32;
+    println!("Set the time to live due in 5 minutes");
+
+    let reg_r = reg_req.clone();
     let new_user = NewUser {
-        username: reg_req.username,
+        username: reg_r.username,
         password_hash,
-        phone_number: reg_req.phone_number,
+        phone_number: reg_r.phone_number,
+        time_to_live: five_minutes_from_now,
+        verified: false,
     };
 
     state.user_repository.create_user(new_user).map_err(|e| {
@@ -235,8 +303,81 @@ pub async fn register(
         )
     })?;
 
-    println!("User registered successfully");
-    Ok(Json(RegisterResponse {
-        message: "User registered successfully! Redirecting...".to_string(),
-    }))
+    println!("User registered successfully, generating tokens");
+    
+    // Get the newly created user
+    let user = state.user_repository.find_by_username(&reg_req.username)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to retrieve user: {}", e)}))
+        ))?
+        .ok_or_else(|| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "User not found after registration"}))
+        ))?;
+
+    // Generate access token (short-lived)
+    let access_token = encode(
+        &Header::default(),
+        &json!({
+            "sub": user.id,
+            "exp": (Utc::now() + Duration::minutes(15)).timestamp(),
+            "type": "access"
+        }),
+        &EncodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+            .expect("JWT_SECRET_KEY must be set in environment")
+            .as_bytes()),
+    ).map_err(|_| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": "Token generation failed"}))
+    ))?;
+
+    // Generate refresh token (long-lived)
+    let refresh_token = encode(
+        &Header::default(),
+        &json!({
+            "sub": user.id,
+            "exp": (Utc::now() + Duration::days(7)).timestamp(),
+            "type": "refresh"
+        }),
+        &EncodingKey::from_secret(std::env::var("JWT_REFRESH_KEY")
+            .expect("JWT_REFRESH_KEY must be set in environment")
+            .as_bytes()),
+    ).map_err(|_| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": "Token generation failed"}))
+    ))?;
+
+    // Create response with HttpOnly cookies
+    let mut response = Response::new(
+        axum::body::boxed(axum::body::Full::from(
+            Json(json!({
+                "message": "User registered and logged in successfully! Redirecting...",
+                "token": access_token
+            })).to_string()
+        ))
+    );
+
+    let cookie_options = "; HttpOnly; Secure; SameSite=Strict; Path=/";
+    response.headers_mut().insert(
+        "Set-Cookie",
+        format!("access_token={}{}; Max-Age=900", access_token, cookie_options)
+            .parse()
+            .unwrap(),
+    );
+
+    response.headers_mut().insert(
+        "Set-Cookie",
+        format!("refresh_token={}{}; Max-Age=604800", refresh_token, cookie_options)
+            .parse()
+            .unwrap(),
+    );
+
+    response.headers_mut().insert(
+        "Content-Type",
+        "application/json".parse().unwrap()
+    );
+
+    println!("Registration and login completed successfully");
+    Ok(response)
 }

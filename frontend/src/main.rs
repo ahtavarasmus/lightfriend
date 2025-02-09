@@ -1,7 +1,8 @@
 use yew::prelude::*;
 use yew_router::prelude::*;
-use tracing::info;
+use log::{info, Level};
 use web_sys::window;
+use wasm_bindgen::prelude::*;
 
 mod config;
 mod pages;
@@ -143,8 +144,8 @@ fn main() {
     // Initialize console error panic hook for better error messages
     console_error_panic_hook::set_once();
     
-    // Initialize tracing for logging
-    tracing_wasm::set_as_global_default();
+    // Initialize logging
+    console_log::init_with_level(Level::Info).expect("error initializing log");
     
     info!("Starting application");
     yew::Renderer::<App>::new().render();

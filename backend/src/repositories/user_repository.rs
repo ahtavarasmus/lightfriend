@@ -100,4 +100,22 @@ impl UserRepository {
             .optional()?;
         Ok(user)
     }
+
+    // Set user as verified
+    pub fn verify_user(&self, user_id: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::verified.eq(true))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    // Delete a user
+    pub fn delete_user(&self, user_id: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(users::table.find(user_id))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
 }
