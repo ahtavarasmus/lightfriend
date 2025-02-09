@@ -3,8 +3,10 @@ use axum::{
     Json,
     extract::State,
     response::Response,
-    http::StatusCode
+    http::{StatusCode, Request, HeaderMap},
+    body::Body
 };
+use axum::middleware;
 use std::future::Future;
 use std::sync::Arc;
 use crate::AppState;
@@ -13,6 +15,50 @@ use serde_json::{json, Value};
 use std::error::Error;
 use tracing::{error, info};
 
+pub async fn validate_vapi_secret(
+    headers: HeaderMap,
+    request: Request<Body>,
+    next: middleware::Next<Body>,
+) -> Result<Response, StatusCode> {
+    println!("\n=== Starting VAPI Secret Validation ===");
+    println!("📨 Received headers: {:?}", headers);
+    
+    let secret_key = match std::env::var("VAPI_SERVER_URL_SECRET") {
+        Ok(key) => {
+            println!("✅ Successfully retrieved VAPI_SERVER_URL_SECRET");
+            key
+        },
+        Err(e) => {
+            println!("❌ Failed to get VAPI_SERVER_URL_SECRET: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    match headers.get("x-vapi-secret") {
+        Some(header_value) => {
+            println!("🔍 Found x-vapi-secret header");
+            match header_value.to_str() {
+                Ok(value) => {
+                    if value == secret_key {
+                        println!("✅ Secret validation successful");
+                        Ok(next.run(request).await)
+                    } else {
+                        println!("❌ Invalid secret provided");
+                        Err(StatusCode::UNAUTHORIZED)
+                    }
+                },
+                Err(e) => {
+                    println!("❌ Error converting header to string: {}", e);
+                    Err(StatusCode::UNAUTHORIZED)
+                }
+            }
+        },
+        None => {
+            println!("❌ No x-vapi-secret header found");
+            Err(StatusCode::UNAUTHORIZED)
+        }
+    }
+}
 
 pub async fn vapi_server(
     Json(payload): Json<serde_json::Value>,

@@ -2,6 +2,7 @@ use dotenvy::dotenv;
 use axum::{
     routing::{get, post, delete},
     Router,
+    middleware
 };
 use diesel::prelude::*;
 use diesel::r2d2::{self, ConnectionManager};
@@ -58,6 +59,8 @@ pub fn validate_env() {
         .expect("PERPLEXITY_API_KEY must be set");
     let _ = std::env::var("ASSISTANT_ID")
         .expect("ASSISTANT_ID must be set");
+    let _ = std::env::var("VAPI_SERVER_URL_SECRET")
+    .expect("VAPI_SERVER_URL_SECRET must be set");
 
 }
 
@@ -84,6 +87,12 @@ async fn main() {
         user_repository,
     });
 
+    // Create a router for VAPI routes with secret validation
+    let vapi_routes = Router::new()
+        .route("/api/server", post(handle_phone_call_event))
+        .route_layer(middleware::from_fn(api::vapi_endpoints::validate_vapi_secret));
+
+
     // Create router with CORS
     let app = Router::new()
         .route("/api/health", get(health_check))
@@ -93,7 +102,7 @@ async fn main() {
         .route("/api/profile/update", post(update_profile))
         .route("/api/profile", get(get_profile))
         .route("/api/profile/delete/:user_id", delete(delete_user))
-        .route("/api/server", post(handle_phone_call_event))
+        .merge(vapi_routes)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
