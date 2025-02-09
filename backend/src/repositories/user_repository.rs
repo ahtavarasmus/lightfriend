@@ -55,7 +55,7 @@ impl UserRepository {
     pub fn get_all_users(&self) -> Result<Vec<(i32, String, String)>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let users_list = users::table
-            .select((users::id, users::username, users::email))
+            .select((users::id, users::username, users::phone_number))
             .load::<(i32, String, String)>(&mut conn)?;
         Ok(users_list)
     }

@@ -2,6 +2,7 @@ pub mod home {
     use yew::prelude::*;
     use yew_router::prelude::*;
     use crate::Route;
+    use crate::config;
     use web_sys::window;
     use gloo_net::http::Request;
     use serde::Deserialize;
@@ -135,7 +136,7 @@ pub mod home {
                             .and_then(|storage| storage.get_item("token").ok())
                             .flatten()
                         {
-                            match Request::get("/api/profile")
+                            match Request::get(&format!("{}/api/profile", config::get_backend_url()))
                                 .header("Authorization", &format!("Bearer {}", token))
                                 .send()
                                 .await
@@ -231,6 +232,7 @@ pub mod profile {
     use web_sys::{HtmlInputElement, window};
     use yew_router::prelude::*;
     use crate::Route;
+    use crate::config;
     use gloo_net::http::Request;
     use serde::{Deserialize, Serialize};
 
@@ -306,7 +308,7 @@ pub mod profile {
                         .and_then(|storage| storage.get_item("token").ok())
                         .flatten()
                     {
-                        match Request::get("/api/profile")
+                        match Request::get(&format!("{}/api/profile", config::get_backend_url()))
                             .header("Authorization", &format!("Bearer {}", token))
                             .send()
                             .await
@@ -380,7 +382,7 @@ let navigator = navigator.clone();
                         .and_then(|storage| storage.get_item("token").ok())
                         .flatten()
                     {
-                        match Request::post("/api/profile/update")
+                        match Request::post(&format!("{}/api/profile/update", config::get_backend_url()))
                             .header("Authorization", &format!("Bearer {}", token))
                             .json(&UpdateProfileRequest { phone_number: phone,
                                 nickname: nick,
@@ -412,7 +414,8 @@ let navigator = navigator.clone();
                                     });
                                     
                                     // Fetch updated profile data after successful update
-                                    if let Ok(profile_response) = Request::get("/api/profile")
+                                    if let Ok(profile_response) = Request::get(&format!("{}/api/profile", config::get_backend_url()))
+
                                         .header("Authorization", &format!("Bearer {}", token))
                                         .send()
                                         .await
@@ -465,11 +468,6 @@ let navigator = navigator.clone();
                                     <div class="profile-field">
                                         <span class="field-label">{"Username"}</span>
                                         <span class="field-value">{&user_profile.username}</span>
-                                    </div>
-                                    
-                                    <div class="profile-field">
-                                        <span class="field-label">{"Email"}</span>
-                                        <span class="field-value">{&user_profile.email}</span>
                                     </div>
                                     
                                     <div class="profile-field">
@@ -552,6 +550,7 @@ let navigator = navigator.clone();
 pub mod admin {
     use yew::prelude::*;
     use web_sys::window;
+    use crate::config;
     use gloo_net::http::Request;
     use serde::Deserialize;
 
@@ -583,7 +582,7 @@ pub mod admin {
                     .flatten();
 
                 if let Some(token) = token {
-                    match Request::get("/api/admin/users")
+                    match Request::get(&format!("{}/api/admin/users", config::get_backend_url()))
                         .header("Authorization", &format!("Bearer {}", token))
                         .send()
                         .await

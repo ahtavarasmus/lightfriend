@@ -8,7 +8,7 @@ use std::fmt::Debug;
 pub struct NewUser {
     pub username: String,
     pub password_hash: String,
-    pub email: String,
+    pub phone_number: String,
 }
 
 #[derive(Deserialize)]
@@ -26,7 +26,7 @@ pub struct LoginResponse {
 pub struct RegisterRequest {
     pub username: String,
     pub password: String,
-    pub email: String,
+    pub phone_number: String,
 }
 
 #[derive(Serialize)]
@@ -38,7 +38,7 @@ pub struct RegisterResponse {
 pub struct UserResponse {
     pub id: i32,
     pub username: String,
-    pub email: String,
+    pub phone_number: String,
 }
 
 #[derive(Debug, Deserialize)]

@@ -63,7 +63,7 @@ pub async fn get_users(
             ))?;
     let users_response: Vec<UserResponse> = users_list
         .into_iter()
-        .map(|(id, username, email)| UserResponse { id, username, email })
+        .map(|(id, username, phone_number)| UserResponse { id, username, phone_number })
         .collect();
 
     Ok(Json(users_response))
@@ -223,8 +223,8 @@ pub async fn register(
     println!("Creating new user...");
     let new_user = NewUser {
         username: reg_req.username,
-        password_hash: password_hash,
-        email: reg_req.email,
+        password_hash,
+        phone_number: reg_req.phone_number,
     };
 
     state.user_repository.create_user(new_user).map_err(|e| {

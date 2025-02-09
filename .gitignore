@@ -1,6 +1,8 @@
 frontend/dist/
+frontend/target/
 *.db
 database.db
 backend/database.db
+backend/target/
 .env
 backend/src/api/payloads.md

@@ -3,6 +3,7 @@ use yew_router::prelude::*;
 use tracing::info;
 use web_sys::window;
 
+mod config;
 mod pages;
 use pages::{
     home::Home,

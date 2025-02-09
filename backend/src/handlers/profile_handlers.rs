@@ -22,8 +22,8 @@ pub struct UpdateProfileRequest {
 #[derive(Serialize)]
 pub struct ProfileResponse {
     username: String,
-    email: String,
-    phone_number: Option<String>,
+    phone_number: String,
+    email: Option<String>,
     nickname: Option<String>
 }
 

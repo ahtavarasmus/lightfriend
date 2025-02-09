@@ -5,6 +5,7 @@ pub mod login {
     use serde::{Deserialize, Serialize};
     use yew_router::prelude::*;
     use crate::Route;
+    use crate::config;
     use gloo_console::log;
     #[derive(Serialize)]
     pub struct LoginRequest {
@@ -42,7 +43,7 @@ pub mod login {
 
                 wasm_bindgen_futures::spawn_local(async move {
                     println!("Attempting login for username: {}", &username);
-                    match Request::post("/api/login")
+                    match Request::post(&format!("{}/api/login", config::get_backend_url()))
                         .json(&LoginRequest { username, password })
                         .unwrap()
                         .send()
@@ -157,12 +158,13 @@ pub mod register {
     use serde::{Deserialize, Serialize};
     use yew_router::prelude::*;
     use crate::Route;
+    use crate::config;
 
     #[derive(Serialize)]
     pub struct RegisterRequest {
         username: String,
         password: String,
-        email: String,
+        phone_number: String,
     }
 
     #[derive(Deserialize)]
@@ -179,14 +181,14 @@ pub mod register {
     pub fn Register() -> Html {
         let username = use_state(String::new);
         let password = use_state(String::new);
-        let email = use_state(String::new);
+        let phone_number = use_state(String::new);
         let error = use_state(|| None::<String>);
         let success = use_state(|| None::<String>);
 
         let onsubmit = {
             let username = username.clone();
             let password = password.clone();
-            let email = email.clone();
+            let phone_number = phone_number.clone();
             let error_setter = error.clone();
             let success_setter = success.clone();
             
@@ -194,16 +196,16 @@ pub mod register {
                 e.prevent_default();
                 let username = (*username).clone();
                 let password = (*password).clone();
-                let email = (*email).clone();
+                let phone_number = (*phone_number).clone();
                 let error_setter = error_setter.clone();
                 let success_setter = success_setter.clone();
 
                 wasm_bindgen_futures::spawn_local(async move {
-                    match Request::post("/api/register")
+                    match Request::post(&format!("{}/api/register", config::get_backend_url()))
                         .json(&RegisterRequest { 
                             username, 
                             password,
-                            email,
+                            phone_number,
                         })
                         .unwrap()
                         .send()
@@ -278,11 +280,11 @@ pub mod register {
                         }}
                     />
                     <input
-                        type="email"
-                        placeholder="Email"
-                        onchange={let email = email.clone(); move |e: Event| {
+                        type="tel"
+                        placeholder="Phone Number"
+                        onchange={let phone_number = phone_number.clone(); move |e: Event| {
                             let input: HtmlInputElement = e.target_unchecked_into();
-                            email.set(input.value());
+                            phone_number.set(input.value());
                         }}
                     />
                     <input
