@@ -117,6 +117,22 @@ pub mod home {
                         <p class="disclaimer">
                             {"No smartphone required. Works with any basic phone."}
                         </p>
+                    <div class="development-links">
+                        <p>{"Source code available on "}
+                            <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">
+                                {"GitHub"}
+                            </a>
+                        </p>
+                        <p>{"Follow development progress at "}
+                            <a href="https://pacepeek.com/ahtavarasmus" target="_blank" rel="noopener noreferrer">
+                                {"pacepeek.com/ahtavarasmus"}
+                            </a>
+                        {" and "}
+                        <a href="https://x.com/rasmuscodes" target="_blank" rel="noopener noreferrer">
+                            {"x.com/rasmuscodes"}
+                        </a>
+                        </p>
+                    </div>
                     </div>
                 </section>
             </div>
