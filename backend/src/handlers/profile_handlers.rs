@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use diesel::result::Error as DieselError;
 use axum::{
     Json,
     extract::State,
@@ -245,11 +246,21 @@ pub async fn update_profile(
     };
 
     // Update user profile in database
-    state.user_repository.update_profile(claims.sub, &update_req.phone_number, &update_req.nickname)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
-    ))?;
+    match state.user_repository.update_profile(claims.sub, &update_req.phone_number, &update_req.nickname) {
+        Ok(_) => (),
+        Err(DieselError::RollbackTransaction) => {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(json!({"error": "Phone number already exists"}))
+            ));
+        }
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)}))
+            ));
+        }
+    }
 
     Ok(Json(json!({
         "message": "Profile updated successfully"

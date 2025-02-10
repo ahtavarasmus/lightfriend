@@ -503,7 +503,7 @@ let navigator = navigator.clone();
                                         }
                                     }
                                 } else {
-                                    error.set(Some("Failed to update profile".to_string()));
+                                    error.set(Some("Failed to update profile. Phone number already exists?".to_string()));
                                 }
                             }
                             Err(_) => {
