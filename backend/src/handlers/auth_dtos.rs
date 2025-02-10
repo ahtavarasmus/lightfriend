@@ -11,6 +11,7 @@ pub struct NewUser {
     pub phone_number: String,
     pub time_to_live: i32,
     pub verified: bool,
+    pub iq: i32,
 }
 
 #[derive(Deserialize)]

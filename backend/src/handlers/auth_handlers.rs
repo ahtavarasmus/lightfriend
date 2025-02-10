@@ -293,6 +293,7 @@ pub async fn register(
         phone_number: reg_r.phone_number,
         time_to_live: five_minutes_from_now,
         verified: false,
+        iq: 500,
     };
 
     state.user_repository.create_user(new_user).map_err(|e| {

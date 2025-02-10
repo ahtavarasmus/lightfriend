@@ -118,4 +118,13 @@ impl UserRepository {
         Ok(())
     }
 
+    // Update user's IQ (credits)
+    pub fn update_user_iq(&self, user_id: i32, new_iq: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::iq.eq(new_iq))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
 }

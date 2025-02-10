@@ -28,6 +28,7 @@ pub struct ProfileResponse {
     verified: bool,
     time_to_live: i32,
     time_to_delete: bool,
+    iq: i32,
 }
 
 pub async fn get_profile(
@@ -87,6 +88,7 @@ pub async fn get_profile(
                 verified: user.verified,
                 time_to_live: ttl,
                 time_to_delete: time_to_delete,
+                iq: user.iq,
             }))
         }
         None => Err((

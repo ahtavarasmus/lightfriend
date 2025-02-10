@@ -9,5 +9,6 @@ diesel::table! {
         nickname -> Nullable<Text>,
         time_to_live -> Nullable<Integer>,
         verified -> Bool,
+        iq -> Integer,
     }
 }

@@ -12,5 +12,6 @@ pub struct User {
     pub nickname: Option<String>,
     pub time_to_live: Option<i32>,
     pub verified: bool,
+    pub iq: i32,
 }
 

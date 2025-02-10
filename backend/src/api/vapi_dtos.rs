@@ -37,6 +37,16 @@ pub struct Message {
     pub customer: Option<Customer>,
     #[serde(rename = "toolCalls")]
     pub tool_calls: Option<Vec<ToolCall>>,
+    pub analysis: Option<CallAnalysis>,
+    #[serde(rename = "durationSeconds")]
+    pub duration_seconds: Option<f64>
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CallAnalysis {
+    #[serde(rename = "successEvaluation")]
+    pub success_evaluation: String,
+    pub summary: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

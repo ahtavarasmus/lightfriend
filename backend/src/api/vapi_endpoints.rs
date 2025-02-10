@@ -203,19 +203,38 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                 if user.verified {
                     let nickname = user.nickname.unwrap_or_else(|| user.username.clone());
                     println!("User nickname: {}", nickname);
-                    let response = json!({
-                        "messageResponse": {
-                            "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
-                            "assistantOverrides": {
-                                "firstMessage": format!("Hello {}!", nickname),
-                                "variableValues": {
-                                    "name": nickname
+                    
+                    if user.iq <= 0 {
+                        let response = json!({
+                            "messageResponse": {
+                                "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
+                                "assistantOverrides": {
+                                    "firstMessage": "Hey, I don't have enough IQ to talk, you can give me more by visiting lightfriend website.",
+                                    "variableValues": {
+                                        "name": nickname
+                                    },
+                                    "maxDurationSeconds": 5,
                                 }
                             }
-                        }
-                    });
+                        });
+                        println!("Returning response: {:#?}", response);
+                        Json(response)
+                    } else {
+                        let response = json!({
+                            "messageResponse": {
+                                "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
+                                "assistantOverrides": {
+                                    "firstMessage": format!("Hello {}!", nickname),
+                                    "variableValues": {
+                                        "name": nickname
+                                    },
+                                    "maxDurationSeconds": user.iq,
+                                }
+                            }
+                        });
                     println!("Returning response: {:#?}", response);
                     Json(response)
+                                        }
                 } else {
                     println!("Verifying user: {}", phone_number);
                     
@@ -232,7 +251,8 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                                         "firstMessage": format!("Welcome {}! Your account has been verified! Anyways, how can I help?", nickname),
                                         "variableValues": {
                                             "name": nickname
-                                        }
+                                        },
+                                        "maxDurationSeconds": user.iq,
                                     }
                                 }
                             });
@@ -243,10 +263,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                             println!("Error verifying user: {}", e);
                             let resp = json!({
                                 "messageResponse": {
-                                    "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
-                                    "assistantOverrides": {
-                                        "firstMessage": "Sorry, there was an error verifying your account.",
-                                    }
+                                    "error": "Sorry there was an error verifying your account"
                                 }
                             });
                             println!("Returning error response: {:#?}", resp);
@@ -286,6 +303,53 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
     }
 }
 
+
+pub async fn handle_end_of_call_report(
+    event: &MessageResponse,
+    state: &Arc<AppState>
+) -> Json<serde_json::Value> {
+    println!("\n=== Processing End of Call Report ===");
+    
+    let phone_number = event.get_phone_number().unwrap_or_default();
+    println!("📱 Phone Number: {}", phone_number);
+    
+    if let Some(analysis) = &event.message.analysis {
+        println!("📊 Call Analysis:");
+        println!("Success Evaluation: {}", analysis.success_evaluation);
+        println!("Summary: {}", analysis.summary);
+    }
+
+    if let Some(duration) = event.message.duration_seconds {
+        println!("⏱️ Call Duration: {:.2} seconds", duration);
+        
+        // Update user's remaining credits based on call duration
+        if let Ok(Some(mut user)) = state.user_repository.find_by_phone_number(&phone_number) {
+            let new_iq = user.iq.saturating_sub(duration as i32);
+            
+            match state.user_repository.update_user_iq(user.id, new_iq) {
+                Ok(_) => {
+                    println!("✅ Updated user IQ to: {}", new_iq);
+                },
+                Err(e) => {
+                    error!("Failed to update user IQ: {}", e);
+                    return Json(json!({
+                        "status": "error",
+                        "message": "Failed to update user credits",
+                        "error": e.to_string()
+                    }));
+                }
+            }
+        }
+    }
+
+    Json(json!({
+        "status": "success",
+        "message": "End of call report processed successfully"
+    }))
+}
+
+
+
 pub async fn handle_status_update(event: &MessageResponse) -> ServerResponse {
 
     println!("Processing status update");
@@ -320,6 +384,10 @@ pub async fn handle_phone_call_event(
                     println!("Calling handle_assistant_request for assistant request");
                     handle_assistant_request(&event, &state).await
                 },
+                "end-of-call-report" => {
+                    println!("Handling end of call report");
+                    handle_end_of_call_report(&event, &state).await
+                },
                 //"status-update" => {
                  //   handle_status_update(&event).await
                 //},
@@ -341,6 +409,8 @@ pub async fn handle_phone_call_event(
         }
     }
 }
+
+
 
 
 pub async fn ask_perplexity(message: &str) -> Result<String, reqwest::Error> {

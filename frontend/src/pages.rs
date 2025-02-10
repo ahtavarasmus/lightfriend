@@ -16,6 +16,7 @@ pub mod home {
         verified: bool,
         time_to_live: i32,
         time_to_delete: bool,
+        iq: i32,
     }
 
     pub fn is_logged_in() -> bool {
@@ -295,6 +296,8 @@ pub mod profile {
         username: String,
         phone_number: Option<String>,
         nickname: Option<String>,
+        iq: i32,
+        verified: bool,
     }
 
     #[derive(Serialize)]
