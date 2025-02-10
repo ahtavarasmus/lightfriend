@@ -213,7 +213,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                                     "variableValues": {
                                         "name": nickname
                                     },
-                                    "maxDurationSeconds": 5,
+                                    "maxDurationSeconds": 10,
                                 }
                             }
                         });
@@ -252,7 +252,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                                         "variableValues": {
                                             "name": nickname
                                         },
-                                        "maxDurationSeconds": user.iq,
+                                        "maxDurationSeconds": std::cmp::max(user.iq, 10),
                                     }
                                 }
                             });

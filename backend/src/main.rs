@@ -32,7 +32,7 @@ mod schema;
 use repositories::user_repository::UserRepository;
 
 use handlers::auth_handlers::{register, login, get_users, delete_user};
-use handlers::profile_handlers::{get_profile, update_profile};
+use handlers::profile_handlers::{get_profile, update_profile, increase_iq, reset_iq};
 use api::vapi_endpoints::{vapi_server, handle_phone_call_event, handle_phone_call_event_print};
 
 type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
@@ -102,6 +102,9 @@ async fn main() {
         .route("/api/profile/update", post(update_profile))
         .route("/api/profile", get(get_profile))
         .route("/api/profile/delete/:user_id", delete(delete_user))
+        .route("/api/profile/increase-iq/:user_id", post(increase_iq))
+
+        .route("/api/profile/reset-iq/:user_id", post(reset_iq))
         .merge(vapi_routes)
         .layer(
             TraceLayer::new_for_http()

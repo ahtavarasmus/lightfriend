@@ -42,11 +42,24 @@ pub struct UserResponse {
     pub id: i32,
     pub username: String,
     pub phone_number: String,
+    pub nickname: Option<String>,
+    pub time_to_live: Option<i32>,
+    pub verified: bool,
+    pub iq: i32,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Claims {
     pub sub: i32,
     pub exp: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateUserRequest {
+    pub username: String,
+    pub phone_number: String,
+    pub nickname: Option<String>,
+    pub time_to_live: Option<i32>,
+    pub verified: bool,
 }
 

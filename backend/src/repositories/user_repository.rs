@@ -32,6 +32,16 @@ impl UserRepository {
         Ok(existing_user.is_some())
     }
 
+    // Check if a phone number exists
+    pub fn phone_number_exists(&self, search_phone: &str) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let existing_user: Option<User> = users::table
+            .filter(users::phone_number.eq(search_phone))
+            .first::<User>(&mut conn)
+            .optional()?;
+        Ok(existing_user.is_some())
+    }
+
     // Create and insert a new user
     pub fn create_user(&self, new_user: NewUser) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -52,11 +62,10 @@ impl UserRepository {
     }
 
     // Get all users
-    pub fn get_all_users(&self) -> Result<Vec<(i32, String, String)>, DieselError> {
+    pub fn get_all_users(&self) -> Result<Vec<User>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let users_list = users::table
-            .select((users::id, users::username, users::phone_number))
-            .load::<(i32, String, String)>(&mut conn)?;
+            .load::<User>(&mut conn)?;
         Ok(users_list)
     }
 
@@ -126,5 +135,20 @@ impl UserRepository {
             .execute(&mut conn)?;
         Ok(())
     }
+    // Increase user's IQ by a specified amount
+    pub fn increase_iq(&self, user_id: i32, amount: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let user = users::table
+            .find(user_id)
+            .first::<User>(&mut conn)?;
+        
+        let new_iq = user.iq + amount;
+        
+        diesel::update(users::table.find(user_id))
+            .set(users::iq.eq(new_iq))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
 
 }

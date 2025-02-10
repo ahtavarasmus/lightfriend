@@ -63,7 +63,15 @@ pub async fn get_users(
             ))?;
     let users_response: Vec<UserResponse> = users_list
         .into_iter()
-        .map(|(id, username, phone_number)| UserResponse { id, username, phone_number })
+        .map(|user| UserResponse {
+            id: user.id,
+            username: user.username,
+            phone_number: user.phone_number,
+            nickname: user.nickname,
+            time_to_live: user.time_to_live,
+            verified: user.verified,
+            iq: user.iq,
+        })
         .collect();
 
     Ok(Json(users_response))
@@ -264,6 +272,23 @@ pub async fn register(
         ));
     }
     println!("Username is available");
+
+    // Check if phone number exists
+    println!("Checking if phone number exists...");
+    if state.user_repository.phone_number_exists(&reg_req.phone_number).map_err(|e| {
+        println!("Database error while checking phone number: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR, 
+            Json(json!({ "error": format!("Database error: {}", e) }))
+        )
+    })? {
+        println!("Phone number {} already exists", reg_req.phone_number);
+        return Err((
+            StatusCode::CONFLICT,
+            Json(json!({ "error": "Phone number already registered" })),
+        ));
+    }
+    println!("Phone number is available");
 
     // Hash password
     println!("Hashing password...");

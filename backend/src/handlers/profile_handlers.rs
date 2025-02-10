@@ -98,6 +98,119 @@ pub async fn get_profile(
     }
 }
 
+pub async fn reset_iq(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    axum::extract::Path(user_id): axum::extract::Path<i32>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Extract and validate token
+    let auth_header = headers.get("Authorization")
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| header.strip_prefix("Bearer "));
+
+    let token = match auth_header {
+        Some(token) => token,
+        None => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "No authorization token provided"}))
+        )),
+    };
+
+    // Decode JWT token
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+            .expect("JWT_SECRET_KEY must be set in environment")
+            .as_bytes()),
+        &Validation::new(Algorithm::HS256)
+    ) {
+        Ok(token_data) => token_data.claims,
+        Err(_) => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Invalid token"}))
+        )),
+    };
+
+    // Check if user is an admin
+    if !state.user_repository.is_admin(claims.sub).map_err(|e| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": format!("Database error: {}", e)}))
+    ))? {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Only admins can reset IQ"}))
+        ));
+    }
+
+    // Reset user's IQ to zero in database
+    state.user_repository.update_user_iq(user_id, 0)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+    ))?;
+
+    Ok(Json(json!({
+        "message": "IQ reset successfully"
+    })))
+}
+
+
+pub async fn increase_iq(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    axum::extract::Path(user_id): axum::extract::Path<i32>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Extract and validate token
+    let auth_header = headers.get("Authorization")
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| header.strip_prefix("Bearer "));
+
+    let token = match auth_header {
+        Some(token) => token,
+        None => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "No authorization token provided"}))
+        )),
+    };
+
+    // Decode JWT token
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+            .expect("JWT_SECRET_KEY must be set in environment")
+            .as_bytes()),
+        &Validation::new(Algorithm::HS256)
+    ) {
+        Ok(token_data) => token_data.claims,
+        Err(_) => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Invalid token"}))
+        )),
+    };
+
+    // Check if user is modifying their own IQ or is an admin
+    if claims.sub != user_id && !state.user_repository.is_admin(claims.sub).map_err(|e| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": format!("Database error: {}", e)}))
+    ))? {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "You can only modify your own IQ unless you're an admin"}))
+        ));
+    }
+
+    // Update user's IQ in database
+    state.user_repository.increase_iq(user_id, 500)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+    ))?;
+
+    Ok(Json(json!({
+        "message": "IQ increased successfully"
+    })))
+}
+
 pub async fn update_profile(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
