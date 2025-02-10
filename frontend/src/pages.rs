@@ -601,7 +601,7 @@ let navigator = navigator.clone();
                                     </div>
                                     <div class="profile-field">
                                         <span class="field-label">{"IQ"}</span>
-                                        <span class="field-value">{user_profile.iq}</span>
+                                        <span class="field-value">{user_profile.iq}{" "}<span class="time-note">{"("}{if user_profile.iq >= 60 { format!("{} minutes", user_profile.iq / 60) } else { format!("{} seconds", user_profile.iq) }}{")"}</span></span>
                                         {
                                             if user_profile.iq == 0 {
                                                 let onclick = {
