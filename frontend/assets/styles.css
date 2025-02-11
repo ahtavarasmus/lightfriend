@@ -1243,13 +1243,6 @@ button[type="submit"].loading::after {
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
-.profile-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2rem;
-}
-
 .profile-title {
     font-size: 2rem;
     background: linear-gradient(45deg, #fff, #7EB2FF);
@@ -1275,6 +1268,102 @@ button[type="submit"].loading::after {
     content: '→';
 }
 
+.profile-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.profile-tabs {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    border-bottom: 1px solid rgba(30, 144, 255, 0.1);
+    padding-bottom: 1rem;
+}
+
+.tab-button {
+    background: transparent;
+    border: none;
+    color: #999;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+    border-radius: 6px;
+}
+
+.tab-button:hover {
+    color: #fff;
+    background: rgba(30, 144, 255, 0.1);
+}
+
+.tab-button.active {
+    color: #1E90FF;
+    background: rgba(30, 144, 255, 0.1);
+}
+
+.billing-section {
+    padding: 2rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+    border: 1px solid rgba(30, 144, 255, 0.1);
+}
+
+.billing-section h3 {
+    color: #7EB2FF;
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.iq-balance {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-bottom: 2rem;
+}
+
+.iq-amount {
+    font-size: 3rem;
+    color: #fff;
+    font-weight: 600;
+}
+
+.iq-time {
+    color: #999;
+    font-size: 1rem;
+}
+
+.billing-info {
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid rgba(30, 144, 255, 0.1);
+}
+
+.billing-info p {
+    color: #999;
+    margin-bottom: 1rem;
+}
+
+.billing-info ul {
+    list-style: none;
+    padding: 0;
+}
+
+.billing-info li {
+    color: #666;
+    padding: 0.5rem 0;
+    padding-left: 1.5rem;
+    position: relative;
+}
+
+.billing-info li::before {
+    content: '•';
+    position: absolute;
+    left: 0.5rem;
+    color: #1E90FF;
+}
 
 .back-link {
     color: #1E90FF;

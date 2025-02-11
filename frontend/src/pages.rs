@@ -415,6 +415,12 @@ pub mod profile {
         nickname: String,
     }
 
+    #[derive(Clone, PartialEq)]
+    enum ProfileTab {
+        Settings,
+        Billing,
+    }
+    
     #[function_component]
     pub fn Profile() -> Html {
         let profile = use_state(|| None::<UserProfile>);
@@ -423,6 +429,7 @@ pub mod profile {
         let error = use_state(|| None::<String>);
         let success = use_state(|| None::<String>);
         let is_editing = use_state(|| false);
+        let active_tab = use_state(|| ProfileTab::Settings);
         let navigator = use_navigator().unwrap();
     
         // Check authentication immediately
@@ -611,7 +618,26 @@ pub mod profile {
                             {"Back to Home"}
                         </Link<Route>>
                     </div>
-
+                    <div class="profile-tabs">
+                        <button 
+                            class={classes!("tab-button", (*active_tab == ProfileTab::Settings).then(|| "active"))}
+                            onclick={{
+                                let active_tab = active_tab.clone();
+                                Callback::from(move |_| active_tab.set(ProfileTab::Settings))
+                            }}
+                        >
+                            {"Settings"}
+                        </button>
+                        <button 
+                            class={classes!("tab-button", (*active_tab == ProfileTab::Billing).then(|| "active"))}
+                            onclick={{
+                                let active_tab = active_tab.clone();
+                                Callback::from(move |_| active_tab.set(ProfileTab::Billing))
+                            }}
+                        >
+                            {"Billing"}
+                        </button>
+                    </div>
                     {
                         if let Some(error_msg) = (*error).as_ref() {
                             html! {
@@ -628,7 +654,8 @@ pub mod profile {
 
                     {
                         if let Some(user_profile) = profile_data {
-                            html! {
+                            match *active_tab {
+                                ProfileTab::Settings => html! {
                                 <div class="profile-info">
                                     <div class="profile-field">
                                         <span class="field-label">{"Username"}</span>
@@ -684,9 +711,36 @@ pub mod profile {
                                             }
                                         }
                                     </div>
-                                    <div class="profile-field">
-                                        <span class="field-label">{"IQ"}</span>
-                                        <span class="field-value">{user_profile.iq}{" "}<span class="time-note">{"("}{if user_profile.iq >= 60 { format!("{} minutes", user_profile.iq / 60) } else { format!("{} seconds", user_profile.iq) }}{")"}</span></span>
+                                    
+                                    <button 
+                                        onclick={
+                                            let is_editing = is_editing.clone();
+                                            if *is_editing {
+                                                on_edit
+                                            } else {
+                                                Callback::from(move |_| is_editing.set(true))
+                                            }
+                                        }
+                                        class={classes!("edit-button", (*is_editing).then(|| "confirming"))}
+                                    >
+                                        {if *is_editing { "Save Changes" } else { "Edit Profile" }}
+                                    </button>
+                                </div>
+                            },
+                            ProfileTab::Billing => html! {
+                                <div class="profile-info">
+                                    <div class="billing-section">
+                                        <h3>{"IQ Balance"}</h3>
+                                        <div class="iq-balance">
+                                            <span class="iq-amount">{user_profile.iq}</span>
+                                            <span class="iq-time">
+                                                {if user_profile.iq >= 60 { 
+                                                    format!("({} minutes)", user_profile.iq / 60)
+                                                } else { 
+                                                    format!("({} seconds)", user_profile.iq)
+                                                }}
+                                            </span>
+                                        </div>
                                         {
                                             if user_profile.iq == 0 {
                                                 let onclick = {
@@ -746,31 +800,21 @@ pub mod profile {
                                                 html! {}
                                             }
                                         }
+                                    <div class="billing-info">
+                                        <p>{"Purchase additional IQ soon... for now you can just add more IQ for free if they run out"}</p>
                                     </div>
-
-                                    <button 
-                                        onclick={
-                                            let is_editing = is_editing.clone();
-                                            if *is_editing {
-                                                on_edit
-                                            } else {
-                                                Callback::from(move |_| is_editing.set(true))
-                                            }
-                                        }
-                                        class={classes!("edit-button", (*is_editing).then(|| "confirming"))}
-                                    >
-                                        {if *is_editing { "Save Changes" } else { "Edit Profile" }}
-                                    </button>
+                                    </div>
                                 </div>
                             }
-                        } else {
-                            html! {
-                                <div class="loading-profile">{"Loading profile..."}</div>
-                            }
+                        }
+                    } else {
+                        html! {
+                            <div class="loading-profile">{"Loading profile..."}</div>
                         }
                     }
-                </div>
+                }
             </div>
+        </div>
         }
     }
 }
