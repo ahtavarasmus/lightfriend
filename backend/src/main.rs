@@ -10,6 +10,7 @@ use tower_http::cors::{CorsLayer, Any};
 use tower_http::trace::{TraceLayer, DefaultMakeSpan, DefaultOnResponse};
 use tracing::Level;
 use std::sync::Arc;
+use sentry;
 
 mod handlers {
     pub mod auth_handlers;
@@ -68,6 +69,15 @@ pub fn validate_env() {
 async fn main() {
     dotenv().ok();
     validate_env();
+
+    let _guard = sentry::init(("https://07fbdaf63c1270c8509844b775045dd3@o4507415184539648.ingest.de.sentry.io/4508802101411920", sentry::ClientOptions {
+        release: sentry::release_name!(),
+        ..Default::default()
+    }));
+
+    // Sentry will capture this
+    // panic!("Everything is on fire!");
+
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_max_level(Level::INFO)
