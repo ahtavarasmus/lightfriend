@@ -83,7 +83,7 @@ pub fn nav(props: &NavProps) -> Html {
         <nav class="top-nav">
             <div class="nav-content">
                 <Link<Route> to={Route::Home} classes="nav-logo">
-                    {"Lightfriend"}
+                    {"lightfriend"}
                 </Link<Route>>
                 
                 <div class="nav-right">

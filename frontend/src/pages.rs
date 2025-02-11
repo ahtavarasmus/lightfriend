@@ -82,7 +82,7 @@ pub mod home {
 
                 // How It Works section
                 <section class="how-it-works">
-                    <h2>{"How Lightfriend Works"}</h2>
+                    <h2>{"How lightfriend Works"}</h2>
                     <p>{"Three simple steps to digital freedom"}</p>
 
                     <div class="steps-grid">
@@ -93,7 +93,7 @@ pub mod home {
 
                         <div class="step">
                             <h3>{"Use Your Dumbphone"}</h3>
-                            <p>{"Call or text Lightfriend to access your connected services anytime, anywhere."}</p>
+                            <p>{"Call or text your lightfriend to access your connected services anytime, anywhere."}</p>
                         </div>
 
                         <div class="step">
@@ -298,10 +298,10 @@ let interval_handle = interval_handle.clone();
                     <div class="dashboard-container">
                         <div class="dashboard-panel">
                             <div class="panel-header">
-                                <h1 class="panel-title">{"Your Lightfriend Dashboard"}</h1>
+                                <h1 class="panel-title">{"Your lightfriend Dashboard"}</h1>
                             </div>
                             <div class="info-section">
-                                <h2 class="section-title">{"Your Lightfriend is Ready!"}</h2>
+                                <h2 class="section-title">{"Your lightfriend is Ready!"}</h2>
                                 <div class="phone-display">
                                     <span class="phone-number">{"+358454901522"}</span>
                                 </div>
@@ -445,7 +445,7 @@ pub mod profile {
             let success = success.clone();
             let profile = profile.clone();
             let is_editing = is_editing.clone();
-let navigator = navigator.clone();
+            let navigator = navigator.clone();
 
             Callback::from(move |_e: MouseEvent| {
                 let phone = (*phone_number).clone();
