@@ -13,5 +13,6 @@ pub struct User {
     pub time_to_live: Option<i32>,
     pub verified: bool,
     pub iq: i32,
+    pub notify_credits: bool,
 }
 

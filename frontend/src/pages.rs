@@ -17,6 +17,7 @@ pub mod home {
         time_to_live: i32,
         time_to_delete: bool,
         iq: i32,
+        notify_credits: bool,
     }
 
     pub fn is_logged_in() -> bool {
@@ -229,6 +230,7 @@ let interval_handle = interval_handle.clone();
                                             }
                                             
                                             user_verified.set(profile.verified);
+                                            profile_data.set(Some(profile));
                                             error.set(None);
                                         }
                                         Err(_) => {
@@ -306,8 +308,75 @@ let interval_handle = interval_handle.clone();
                                     <span class="phone-number">{"+358454901522"}</span>
                                 </div>
                                 <p class="instruction-text">
-                                    {"Call or text this number to access your services"}
+                                    {"Call this number to access your services"}
                                 </p>
+                                <div class="feature-status">
+                                    <h3>{"Currently Available"}</h3>
+                                    <ul>
+                                        <li>{"Perplexity AI search through voice calls"}</li>
+                                        <li>{"Adding more IQ(credits) for free in the profile(when you ran out)"}</li>
+                                    </ul>
+                                    
+                                    <h3>{"Coming Soon"}</h3>
+                                    <ul>
+                                        <li>{"Purchase additional IQ(credits)"}</li>
+                                        <li>{"Text messaging support"}</li>
+                                        <li>{"WhatsApp and Telegram integration"}</li>
+                                        <li>{"Email and calendar integration"}</li>
+                                        <li>{"Camera functionality for photo translation and more"}</li>
+                                    </ul>
+                                    
+                                    <p class="feature-suggestion">
+                                        {"Have a feature in mind? Email your suggestions to "}
+                                        <a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>
+                                    </p>
+                                </div>
+                                <div class="credits-section">
+                                    {
+                                        if let Some(profile) = &*profile_data {
+                                            let notify_credits = profile.notify_credits;
+                                            let profile_id = profile.id;
+                                            let onclick = {
+                                                let profile = profile.clone();
+                                                Callback::from(move |e: Event| {
+                                                    let checkbox: web_sys::HtmlInputElement = e.target_unchecked_into();
+                                                    let checked = checkbox.checked();
+                                                    
+                                                    // Update the notification preference
+                                                    if let Some(token) = window()
+                                                        .and_then(|w| w.local_storage().ok())
+                                                        .flatten()
+                                                        .and_then(|storage| storage.get_item("token").ok())
+                                                        .flatten()
+                                                    {
+                                                        wasm_bindgen_futures::spawn_local(async move {
+                                                            let _ = Request::post(&format!("{}/api/profile/notify-credits/{}", config::get_backend_url(), profile_id))
+                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                .header("Content-Type", "application/json")
+                                                                .json(&serde_json::json!({ "notify": checked }))
+                                                                .expect("Failed to build request")
+                                                                .send()
+                                                                .await;
+                                                        });
+                                                    }
+                                                })
+                                            };
+                                            
+                                            html! {
+                                                <label class="checkbox-label">
+                                                    <input 
+                                                        type="checkbox"
+                                                        checked={notify_credits}
+                                                        onchange={onclick}
+                                                    />
+                                                    {"Notify me when I can purchase more credits or major new features come online"}
+                                                </label>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                                </div>
                             </div>
                         </div>
                     </div>

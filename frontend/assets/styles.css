@@ -525,6 +525,51 @@ body {
 }
 
 
+.credits-section {
+    background: rgba(30, 144, 255, 0.05);
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    border-radius: 12px;
+    padding: 2rem;
+    margin-top: 2rem;
+}
+
+
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    color: #fff;
+    cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(30, 144, 255, 0.3);
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    padding: 0;
+}
+
+.checkbox-label input[type="checkbox"]:checked {
+    background: #1E90FF;
+    border-color: #1E90FF;
+}
+
+
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .credits-section {
+        padding: 1.5rem;
+    }
+
+    .credits-section h3 {
+        font-size: 1.2rem;
+    }
+}
 
 /* auth pages: */
 .gradient-bg {
@@ -963,6 +1008,65 @@ button[type="submit"].loading::after {
     color: #999;
     font-size: 0.9rem;
     margin-top: 1rem;
+}
+
+.feature-status {
+    margin-top: 2rem;
+    text-align: left;
+    background: rgba(30, 144, 255, 0.05);
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    border-radius: 12px;
+    padding: 1.5rem;
+}
+
+.feature-status h3 {
+    color: #7EB2FF;
+    font-size: 1.1rem;
+    margin: 1rem 0 0.5rem 0;
+}
+
+.feature-status h3:first-child {
+    margin-top: 0;
+}
+
+.feature-status ul {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 1.5rem 0;
+}
+
+.feature-status li {
+    color: #999;
+    font-size: 0.9rem;
+    padding: 0.3rem 0;
+    padding-left: 1.5rem;
+    position: relative;
+}
+
+.feature-status li::before {
+    content: '•';
+    position: absolute;
+    left: 0.5rem;
+    color: #1E90FF;
+}
+
+.feature-suggestion {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid rgba(30, 144, 255, 0.1);
+    color: #999;
+    font-size: 0.9rem;
+}
+
+.feature-suggestion a {
+    color: #1E90FF;
+    text-decoration: none;
+    transition: color 0.3s ease;
+}
+
+.feature-suggestion a:hover {
+    color: #7EB2FF;
+    text-decoration: underline;
 }
 
 .warning-card {

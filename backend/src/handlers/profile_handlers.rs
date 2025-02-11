@@ -6,6 +6,7 @@ use axum::{
     http::{StatusCode, HeaderMap}
 };
 use serde::{Deserialize, Serialize};
+use axum::extract::Path;
 use serde_json::json;
 use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 
@@ -30,6 +31,7 @@ pub struct ProfileResponse {
     time_to_live: i32,
     time_to_delete: bool,
     iq: i32,
+    notify_credits: bool,
 }
 
 pub async fn get_profile(
@@ -90,6 +92,7 @@ pub async fn get_profile(
                 time_to_live: ttl,
                 time_to_delete: time_to_delete,
                 iq: user.iq,
+                notify_credits: user.notify_credits,
             }))
         }
         None => Err((
@@ -209,6 +212,68 @@ pub async fn increase_iq(
 
     Ok(Json(json!({
         "message": "IQ increased successfully"
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct NotifyCreditsRequest {
+    notify: bool,
+}
+
+pub async fn update_notify_credits(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(user_id): Path<i32>,
+    Json(request): Json<NotifyCreditsRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Extract and validate token
+    let auth_header = headers.get("Authorization")
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| header.strip_prefix("Bearer "));
+
+    let token = match auth_header {
+        Some(token) => token,
+        None => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "No authorization token provided"}))
+        )),
+    };
+
+    // Decode JWT token
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+            .expect("JWT_SECRET_KEY must be set in environment")
+            .as_bytes()),
+        &Validation::new(Algorithm::HS256)
+    ) {
+        Ok(token_data) => token_data.claims,
+        Err(_) => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Invalid token"}))
+        )),
+    };
+
+    // Check if user is modifying their own settings or is an admin
+    if claims.sub != user_id && !state.user_repository.is_admin(claims.sub).map_err(|e| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": format!("Database error: {}", e)}))
+    ))? {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "You can only modify your own settings unless you're an admin"}))
+        ));
+    }
+
+    // Update notify_credits preference
+    state.user_repository.update_notify_credits(user_id, request.notify)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+    ))?;
+
+    Ok(Json(json!({
+        "message": "Notification preference updated successfully"
     })))
 }
 

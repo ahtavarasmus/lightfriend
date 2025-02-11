@@ -162,5 +162,13 @@ impl UserRepository {
         Ok(())
     }
 
+    // Update user's notify_credits preference
+    pub fn update_notify_credits(&self, user_id: i32, notify: bool) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::notify_credits.eq(notify))
+            .execute(&mut conn)?;
+        Ok(())
+    }
 
 }

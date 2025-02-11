@@ -10,5 +10,6 @@ diesel::table! {
         time_to_live -> Nullable<Integer>,
         verified -> Bool,
         iq -> Integer,
+        notify_credits -> Bool,
     }
 }
