@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use serde_json::json;
+use serde_json::{json, Value};
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use crate::AppState;
@@ -190,4 +190,106 @@ pub async fn create_checkout(
     Ok(Json(serde_json::json!({
         "checkout_url": checkout_response.data.attributes.url
     })))
+}
+
+
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
+
+type HmacSha256 = Hmac<Sha256>;
+
+pub async fn lemon_squeezy_webhook(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: String,
+) -> Result<(), (StatusCode, String)> {
+    println!("In order webhook");
+    
+    // Print headers
+    println!("Headers:");
+    for (key, value) in headers.iter() {
+        println!("  {}: {}", key, value.to_str().unwrap_or("[invalid header value]"));
+    }
+
+    // Parse and print the payload
+    let payload: Value = serde_json::from_str(&body)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid JSON: {}", e)))?;
+    println!("Payload: {}", serde_json::to_string_pretty(&payload).unwrap());
+
+    // Get the signature from headers
+    let signature = headers
+        .get("x-signature")
+        .and_then(|h| h.to_str().ok())
+        .ok_or((StatusCode::BAD_REQUEST, "Missing signature header".to_string()))?;
+
+    // Get webhook secret from environment
+    let webhook_secret = std::env::var("LEMON_SQUEEZY_WEBHOOK_SECRET")
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Missing webhook secret".to_string()))?;
+
+    // Verify signature
+    let mut mac = HmacSha256::new_from_slice(webhook_secret.as_bytes())
+        .map_err(|_| (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create HMAC".to_string()))?;
+    mac.update(body.as_bytes());
+    
+    let result = mac.finalize().into_bytes();
+    let calculated_signature = hex::encode(result);
+
+    if !constant_time_eq::constant_time_eq(calculated_signature.as_bytes(), signature.as_bytes()) {
+        return Err((StatusCode::UNAUTHORIZED, "Invalid signature".to_string()));
+    }
+
+    // Get event name and verify it's an order_created event
+    let event_name = payload
+        .get("meta")
+        .and_then(|meta| meta.get("event_name"))
+        .and_then(|name| name.as_str())
+        .ok_or((StatusCode::BAD_REQUEST, "Missing event name".to_string()))?;
+
+    if event_name != "order_created" {
+        println!("Ignoring non-order event: {}", event_name);
+        return Ok(());
+    }
+
+    // Get order status
+    let status = payload
+        .get("data")
+        .and_then(|data| data.get("attributes"))
+        .and_then(|attrs| attrs.get("status"))
+        .and_then(|status| status.as_str())
+        .ok_or((StatusCode::BAD_REQUEST, "Missing order status".to_string()))?;
+
+    if status != "paid" {
+        println!("Ignoring order with status: {}", status);
+        return Ok(());
+    }
+
+    // Extract custom data
+    let custom_data = payload
+        .get("meta")
+        .and_then(|meta| meta.get("custom_data"))
+        .ok_or((StatusCode::BAD_REQUEST, "Missing custom data".to_string()))?;
+
+    let user_id: i32 = custom_data
+        .get("user_id")
+        .and_then(|id| id.as_str())
+        .ok_or((StatusCode::BAD_REQUEST, "Missing user_id".to_string()))?
+        .parse()
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid user_id format".to_string()))?;
+
+    let iq_amount: i32 = custom_data
+        .get("iq_amount")
+        .and_then(|amount| amount.as_str())
+        .ok_or((StatusCode::BAD_REQUEST, "Missing iq_amount".to_string()))?
+        .parse()
+        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid iq_amount format".to_string()))?;
+
+    // Update user's IQ
+    state.user_repository.increase_iq(user_id, iq_amount)
+        .map_err(|e| {
+            println!("Failed to update user IQ: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, "Failed to update user IQ".to_string())
+        })?;
+
+    println!("Successfully updated IQ for user {} with amount {}", user_id, iq_amount);
+    Ok(())
 }

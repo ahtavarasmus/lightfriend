@@ -37,7 +37,7 @@ use handlers::auth_handlers::{register, login, get_users, delete_user};
 use handlers::profile_handlers::{get_profile, update_profile, increase_iq, reset_iq, update_notify_credits};
 use api::{
     vapi_endpoints::{vapi_server, handle_phone_call_event, handle_phone_call_event_print},
-    lemonsqueezy::create_checkout,    
+    lemonsqueezy::{create_checkout, lemon_squeezy_webhook},    
 };
 
 type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
@@ -72,6 +72,8 @@ pub fn validate_env() {
     .expect("LEMON_SQUEEZY_STORE_ID must be set");
     let _ = std::env::var("LEMON_SQUEEZY_VARIANT_ID")
     .expect("LEMON_SQUEEZY_VARIANT_ID must be set");
+    let _ = std::env::var("LEMON_SQUEEZY_WEBHOOK_SECRET")
+    .expect("LEMON_SQUEEZY_WEBHOOK_SECRET must be set");
 
 }
 
@@ -111,6 +113,8 @@ async fn main() {
     let vapi_routes = Router::new()
         .route("/api/server", post(handle_phone_call_event))
         .route_layer(middleware::from_fn(api::vapi_endpoints::validate_vapi_secret));
+    let lemonsqueezy_routes = Router::new()
+        .route("/api/webhook/lemonsqueezy", post(lemon_squeezy_webhook));
 
 
     // Create router with CORS
@@ -126,6 +130,7 @@ async fn main() {
         .route("/api/profile/reset-iq/:user_id", post(reset_iq))
         .route("/api/profile/notify-credits/:user_id", post(update_notify_credits))
         .route("/api/profile/buy-iq", post(create_checkout))
+        .merge(lemonsqueezy_routes)
         .merge(vapi_routes)
         .layer(
             TraceLayer::new_for_http()
