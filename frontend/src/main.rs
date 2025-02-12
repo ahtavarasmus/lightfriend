@@ -6,12 +6,15 @@ use wasm_bindgen::prelude::*;
 
 mod config;
 mod pages;
+mod admin;
+mod profile;
 use pages::{
     home::Home,
     home::is_logged_in,
-    admin::Admin,
-    profile::Profile,
 };
+use admin::Admin;
+use profile::Profile;
+
 mod auth_components;
 use auth_components::{
     login::Login,
