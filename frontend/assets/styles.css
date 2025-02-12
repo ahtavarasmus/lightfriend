@@ -1304,6 +1304,28 @@ button[type="submit"].loading::after {
     background: rgba(30, 144, 255, 0.1);
 }
 
+.iq-conversion-info {
+    margin-top: 8px;
+    font-size: 0.9em;
+    color: #666;
+}
+
+.time-conversion {
+    margin: 4px 0;
+}
+
+.cost-info {
+    color: #2c5282;
+    font-weight: 600;
+    margin: 4px 0;
+}
+
+.iq-purchase-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
 .billing-section {
     padding: 2rem;
     background: rgba(0, 0, 0, 0.2);

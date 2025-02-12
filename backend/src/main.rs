@@ -20,6 +20,7 @@ mod handlers {
 mod api {
     pub mod vapi_endpoints;
     pub mod vapi_dtos;
+    pub mod lemonsqueezy;
 }
 mod models {
     pub mod user_models;
@@ -34,7 +35,10 @@ use repositories::user_repository::UserRepository;
 
 use handlers::auth_handlers::{register, login, get_users, delete_user};
 use handlers::profile_handlers::{get_profile, update_profile, increase_iq, reset_iq, update_notify_credits};
-use api::vapi_endpoints::{vapi_server, handle_phone_call_event, handle_phone_call_event_print};
+use api::{
+    vapi_endpoints::{vapi_server, handle_phone_call_event, handle_phone_call_event_print},
+    lemonsqueezy::create_checkout,    
+};
 
 type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
 
@@ -62,6 +66,12 @@ pub fn validate_env() {
         .expect("ASSISTANT_ID must be set");
     let _ = std::env::var("VAPI_SERVER_URL_SECRET")
     .expect("VAPI_SERVER_URL_SECRET must be set");
+    let _ = std::env::var("LEMON_SQUEEZY_API_KEY")
+    .expect("LEMON_SQUEEZY_API_KEY must be set");
+    let _ = std::env::var("LEMON_SQUEEZY_STORE_ID")
+    .expect("LEMON_SQUEEZY_STORE_ID must be set");
+    let _ = std::env::var("LEMON_SQUEEZY_VARIANT_ID")
+    .expect("LEMON_SQUEEZY_VARIANT_ID must be set");
 
 }
 
@@ -115,6 +125,7 @@ async fn main() {
         .route("/api/profile/increase-iq/:user_id", post(increase_iq))
         .route("/api/profile/reset-iq/:user_id", post(reset_iq))
         .route("/api/profile/notify-credits/:user_id", post(update_notify_credits))
+        .route("/api/profile/buy-iq", post(create_checkout))
         .merge(vapi_routes)
         .layer(
             TraceLayer::new_for_http()

@@ -1,5 +1,5 @@
     use yew::prelude::*;
-    use web_sys::{HtmlInputElement, window};
+    use web_sys::{HtmlInputElement, window, InputEvent};
     use yew_router::prelude::*;
     use crate::Route;
     use crate::config;
@@ -30,6 +30,12 @@
         Billing,
     }
     
+    #[derive(Serialize)]
+    struct BuyIqRequest {
+        amount: i32,
+        user_id: i32,
+    }
+    
     #[function_component]
     pub fn Profile() -> Html {
         let profile = use_state(|| None::<UserProfile>);
@@ -39,6 +45,7 @@
         let success = use_state(|| None::<String>);
         let is_editing = use_state(|| false);
         let active_tab = use_state(|| ProfileTab::Settings);
+        let iq_amount = use_state(|| String::new());
         let navigator = use_navigator().unwrap();
     
         // Check authentication immediately
@@ -350,68 +357,166 @@
                                                 }}
                                             </span>
                                         </div>
-                                        {
-                                            if user_profile.iq == 0 {
-                                                let onclick = {
-                                                    let profile = profile.clone();
-                                                    let error = error.clone();
-                                                    let success = success.clone();
-                                                    Callback::from(move |_| {
+                                        <div class="billing-info">
+                                            <div class="iq-purchase-form">
+                                                <input
+                                                    type="number"
+                                                    min="1500"
+                                                    step="1"
+                                                    class="iq-amount-input"
+                                                    placeholder="Enter IQ amount (min 1500)"
+                                                    value={(*iq_amount).clone()}
+                                                    oninput={
+                                                        let iq_amount = iq_amount.clone();
+                                                        move |e: InputEvent| {
+                                                            let input: HtmlInputElement = e.target_unchecked_into();
+                                                            // Only allow numeric values
+                                                            if let Ok(num) = input.value().parse::<i32>() {
+                                                                iq_amount.set(input.value());
+                                                            }
+                                                        }
+                                                    }
+                                                />
+                                                {
+                                                    if let Ok(amount) = (*iq_amount).parse::<i32>() {
+                                                        if amount > 0 {
+                                                            let hours = amount / 3600;
+                                                            let minutes = (amount % 3600) / 60;
+                                                            let seconds = amount % 60;
+                                                            let cost = (amount as f64 / 60.0) * 0.2;
+                                                            html! {
+                                                                <div class="iq-conversion-info">
+                                                                    <p class="time-conversion">
+                                                                        {
+                                                                            if hours > 0 {
+                                                                                if minutes > 0 && seconds > 0 {
+                                                                                    format!("= {} hours {} minutes {} seconds", hours, minutes, seconds)
+                                                                                } else if minutes > 0 {
+                                                                                    format!("= {} hours {} minutes", hours, minutes)
+                                                                                } else if seconds > 0 {
+                                                                                    format!("= {} hours {} seconds", hours, seconds)
+                                                                                } else {
+                                                                                    format!("= {} hours", hours)
+                                                                                }
+                                                                            } else if minutes > 0 {
+                                                                                if seconds > 0 {
+                                                                                    format!("= {} minutes {} seconds", minutes, seconds)
+                                                                                } else {
+                                                                                    format!("= {} minutes", minutes)
+                                                                                }
+                                                                            } else {
+                                                                                format!("= {} seconds", seconds)
+                                                                            }
+                                                                        }
+                                                                    </p>
+                                                                    <p class="cost-info">
+                                                                        {format!("Cost: {:.2}€", cost)}
+                                                                    </p>
+                                                                </div>
+                                                            }
+                                                        } else {
+                                                            html! {}
+                                                        }
+                                                    } else {
+                                                        html! {}
+                                                    }
+                                                }
+                                                <button 
+                                                    class="iq-button"
+                                                    onclick={{
                                                         let profile = profile.clone();
                                                         let error = error.clone();
                                                         let success = success.clone();
-                                                        wasm_bindgen_futures::spawn_local(async move {
-                                                            if let Some(token) = window()
-                                                                .and_then(|w| w.local_storage().ok())
-                                                                .flatten()
-                                                                .and_then(|storage| storage.get_item("token").ok())
-                                                                .flatten()
-                                                            {
-                                                                match Request::post(&format!("{}/api/profile/increase-iq/{}", config::get_backend_url(), user_profile.id))
-                                                                    .header("Authorization", &format!("Bearer {}", token))
-                                                                    .send()
-                                                                    .await
+                                                        let iq_amount = iq_amount.clone();
+                                                        
+                                                        Callback::from(move |_| {
+                                                            let profile = profile.clone();
+                                                            let error = error.clone();
+                                                            let success = success.clone();
+                                                            let amount_str = (*iq_amount).clone();
+                                                            
+                                                            // Parse the amount, show error if invalid
+                                                            let amount = match amount_str.parse::<i32>() {
+                                                                Ok(n) if n >= 1500 => n,
+                                                                _ => {
+                                                                    error.set(Some("Please enter a valid amount (minimum 1500 IQ / 5€)".to_string()));
+                                                                    return;
+                                                                }
+                                                            };
+
+                                                            wasm_bindgen_futures::spawn_local(async move {
+                                                                if let Some(token) = window()
+                                                                    .and_then(|w| w.local_storage().ok())
+                                                                    .flatten()
+                                                                    .and_then(|storage| storage.get_item("token").ok())
+                                                                    .flatten()
                                                                 {
-                                                                    Ok(response) => {
-                                                                        if response.ok() {
-                                                                            success.set(Some("IQ increased successfully".to_string()));
-                                                                            error.set(None);
-                                                                            
-                                                                            // Fetch updated profile
-                                                                            if let Ok(profile_response) = Request::get(&format!("{}/api/profile", config::get_backend_url()))
-                                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                                .send()
-                                                                                .await
-                                                                            {
-                                                                                if let Ok(updated_profile) = profile_response.json::<UserProfile>().await {
-                                                                                    profile.set(Some(updated_profile));
+                                                                    match Request::post(&format!("{}/api/profile/buy-iq", config::get_backend_url()))
+                                                                        .header("Authorization", &format!("Bearer {}", token))
+                                                                        .json(&BuyIqRequest { 
+                                                                            amount,
+                                                                            user_id: profile.as_ref().map(|p| p.id).unwrap_or_default()
+                                                                        })
+                                                                        .expect("Failed to build request")
+                                                                        .send()
+                                                                        .await
+                                                                    {
+                                                                        Ok(response) => {
+                                                                            if response.status() == 401 {
+                                                                                // Token is invalid or expired
+                                                                                if let Some(window) = window() {
+                                                                                    if let Ok(Some(storage)) = window.local_storage() {
+                                                                                        let _ = storage.remove_item("token");
+                                                                                        // Redirect to home page
+                                                                                        let _ = window.location().set_href("/");
+                                                                                        return;
+                                                                                    }
+                                                                                }
+                                                                            } else if response.ok() {
+                                                                                match response.json::<serde_json::Value>().await {
+                                                                                    Ok(data) => {
+                                                                                        if let Some(checkout_url) = data.get("checkout_url").and_then(|u| u.as_str()) {
+                                                                                            // Redirect to the Lemon Squeezy checkout
+                                                                                            if let Some(window) = window() {
+                                                                                                let _ = window.location().set_href(checkout_url);
+                                                                                            }
+                                                                                        } else {
+                                                                                            error.set(Some("Invalid response from server".to_string()));
+                                                                                        }
+                                                                                    }
+                                                                                    Err(_) => {
+                                                                                        error.set(Some("Failed to parse server response".to_string()));
+                                                                                    }
+                                                                                }
+                                                                            } else {
+                                                                                // Try to get detailed error message from response
+                                                                                match response.json::<serde_json::Value>().await {
+                                                                                    Ok(error_data) => {
+                                                                                        let error_msg = error_data.get("error")
+                                                                                            .and_then(|e| e.as_str())
+                                                                                            .unwrap_or("Failed to process payment request");
+                                                                                        error.set(Some(error_msg.to_string()));
+                                                                                    }
+                                                                                    Err(_) => {
+                                                                                        error.set(Some("Failed to process payment request".to_string()));
+                                                                                    }
                                                                                 }
                                                                             }
-                                                                        } else {
-                                                                            error.set(Some("Failed to increase IQ".to_string()));
+                                                                        }
+                                                                        Err(_) => {
+                                                                            error.set(Some("Failed to connect to server".to_string()));
                                                                         }
                                                                     }
-                                                                    Err(_) => {
-                                                                        error.set(Some("Failed to send request".to_string()));
-                                                                    }
+                                 
                                                                 }
-                                                            }
-                                                        });
-                                                    })
-                                                };
-                                                html! {
-                                                    <button onclick={onclick} class="iq-button">
-                                                        {"Get 500 IQ"}
-                                                    </button>
-
-                                                }
-                                            } else {
-                                                html! {}
-                                            }
-                                        }
-                                    <div class="billing-info">
-                                        <p>{"Purchase additional IQ soon... for now you can just add more IQ for free if they run out"}</p>
-                                    </div>
+                                                            });
+                                                        })
+                                                    }}
+                                                >
+                                                    {"Buy IQ"}
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             }
