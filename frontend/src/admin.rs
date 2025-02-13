@@ -15,6 +15,7 @@ struct UserInfo {
     time_to_live: Option<i32>,
     verified: bool,
     iq: i32,
+    notify_credits: bool,
 }
 
 #[derive(Serialize)]
@@ -141,8 +142,9 @@ pub fn Admin() -> Html {
                                                                     <td colspan="4">
                                                                         <div class="user-details">
                                                                             <p><strong>{"Phone Number: "}</strong>{&user.phone_number}</p>
-                                                                            <p><strong>{"Nickname: "}</strong>{user.nickname.as_ref().map_or("None", |n| n)}</p>
                                                                             <p><strong>{"Time to Live: "}</strong>{user.time_to_live.map_or("N/A".to_string(), |ttl| ttl.to_string())}</p>
+                                                                            <p><strong>{"Verified: "}</strong>{if user.verified { "Yes" } else { "No" }}</p>
+                                                                            <p><strong>{"Notify Credits: "}</strong>{if user.notify_credits { "Yes" } else { "No" }}</p>
                                                                             <p><strong>{"Verified: "}</strong>{if user.verified { "Yes" } else { "No" }}</p>
                                                                         <button 
                                                                             onclick={{
