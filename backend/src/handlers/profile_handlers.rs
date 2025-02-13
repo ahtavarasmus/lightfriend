@@ -316,6 +316,14 @@ pub async fn update_profile(
         )),
     };
 
+    // Validate phone number format
+    if !update_req.phone_number.starts_with('+') {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Phone number must start with '+'" }))
+        ));
+    }
+
     // Update user profile in database
     match state.user_repository.update_profile(claims.sub, &update_req.phone_number, &update_req.nickname) {
         Ok(_) => (),
