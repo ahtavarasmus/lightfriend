@@ -218,7 +218,7 @@ let interval_handle = interval_handle.clone();
                                             // Check if unverified profile has expired
                                             if !profile.verified && profile.time_to_delete {
                                                 // Profile has expired, delete account and logout
-                                                delete_unverified_account(profile.id, token.clone());
+                                                //delete_unverified_account(profile.id, token.clone());
                                                 return;
                                             }
                                             
@@ -332,6 +332,7 @@ let interval_handle = interval_handle.clone();
                                 </div>
                                 <p class="instruction-text">
                                     {"Call this number to access your services"}
+                                    {"Want a local phone number to call? Please send me an email or message telegram(@ahtavarasmus)"}
                                 </p>
                                 <div class="feature-status">
                                     <h3>{"Currently Available"}</h3>
