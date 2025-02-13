@@ -240,6 +240,55 @@ pub fn Admin() -> Html {
                                                                         >
                                                                             {"Reset IQ"}
                                                                         </button>
+                                                                        <button 
+                                                                            onclick={{
+                                                                                let users = users.clone();
+                                                                                let error = error.clone();
+                                                                                let user_id = user.id;
+                                                                                Callback::from(move |_| {
+                                                                                    let users = users.clone();
+                                                                                    let error = error.clone();
+                                                                                    wasm_bindgen_futures::spawn_local(async move {
+                                                                                        if let Some(token) = window()
+                                                                                            .and_then(|w| w.local_storage().ok())
+                                                                                            .flatten()
+                                                                                            .and_then(|storage| storage.get_item("token").ok())
+                                                                                            .flatten()
+                                                                                        {
+                                                                                            match Request::post(&format!("{}/api/admin/verify/{}", config::get_backend_url(), user_id))
+                                                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                                                .send()
+                                                                                                .await
+                                                                                            {
+                                                                                                Ok(response) => {
+                                                                                                    if response.ok() {
+                                                                                                        // Refresh the users list after verifying
+                                                                                                        if let Ok(response) = Request::get(&format!("{}/api/admin/users", config::get_backend_url()))
+                                                                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                                                                            .send()
+                                                                                                            .await
+                                                                                                        {
+                                                                                                            if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
+                                                                                                                users.set(updated_users);
+                                                                                                            }
+                                                                                                        }
+                                                                                                    } else {
+                                                                                                        error.set(Some("Failed to verify user".to_string()));
+                                                                                                    }
+                                                                                                }
+                                                                                                Err(_) => {
+                                                                                                    error.set(Some("Failed to send verification request".to_string()));
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    });
+                                                                                })
+                                                                            }}
+                                                                            class="iq-button"
+                                                                            disabled={user.verified}
+                                                                        >
+                                                                            {if user.verified { "Verified" } else { "Verify User" }}
+                                                                        </button>
                                                                         </div>
                                                                     </td>
                                                                 </tr>
