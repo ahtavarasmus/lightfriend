@@ -71,6 +71,7 @@ pub async fn get_users(
             time_to_live: user.time_to_live,
             verified: user.verified,
             iq: user.iq,
+            notify_credits: user.notify_credits,
         })
         .collect();
 
