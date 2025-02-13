@@ -288,7 +288,7 @@ let interval_handle = interval_handle.clone();
                                     }
                                 } else {
                                     html! {
-                                        <span class="phone-number">{"+358454901522"}</span>
+                                        <span class="phone-number">{"+18153684737"}</span>
                                     }
                                 }
                             }
@@ -325,7 +325,7 @@ let interval_handle = interval_handle.clone();
                                         }
                                     } else {
                                         html! {
-                                            <span class="phone-number">{"+358454901522"}</span>
+                                            <span class="phone-number">{"+18153684737"}</span>
                                         }
                                     }
                                 }
