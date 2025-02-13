@@ -331,7 +331,9 @@ let interval_handle = interval_handle.clone();
                                 }
                                 </div>
                                 <p class="instruction-text">
-                                    {"Call this number to access your services"}
+                                    {"Call this number to access your services."}
+                                    <br/>
+                                    <br/>
                                     {"Want a local phone number to call? Please send me an email or message telegram(@ahtavarasmus)"}
                                 </p>
                                 <div class="feature-status">
