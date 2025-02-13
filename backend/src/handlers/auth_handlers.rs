@@ -273,6 +273,15 @@ pub async fn register(
     }
     println!("Username is available");
 
+    // Validate phone number format
+    if !reg_req.phone_number.starts_with('+') {
+        println!("Invalid phone number format: {}", reg_req.phone_number);
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Phone number must start with '+'" })),
+        ));
+    }
+
     // Check if phone number exists
     println!("Checking if phone number exists...");
     if state.user_repository.phone_number_exists(&reg_req.phone_number).map_err(|e| {

@@ -141,6 +141,12 @@
                 let is_editing = is_editing.clone();
                 let navigator = navigator.clone();
 
+                // Validate phone number format
+                if !phone.starts_with('+') {
+                    error.set(Some("Phone number must start with '+'".to_string()));
+                    return;
+                }
+
                 // Check authentication first
                 let is_authenticated = window()
                     .and_then(|w| w.local_storage().ok())
@@ -280,6 +286,7 @@
                                                         type="tel"
                                                         class="profile-input"
                                                         value={(*phone_number).clone()}
+                                                        placeholder="+1234567890"
                                                         onchange={let phone_number = phone_number.clone(); move |e: Event| {
                                                             let input: HtmlInputElement = e.target_unchecked_into();
                                                             phone_number.set(input.value());
