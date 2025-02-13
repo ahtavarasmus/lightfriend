@@ -274,13 +274,17 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
             },
             Ok(None) => {
                 println!("No user found for phone number: {}", phone_number);
-                let resp = json!({
+                let response = json!({
                     "messageResponse": {
-                        "error": "No user found with the phone number",
+                        "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
+                        "assistantOverrides": {
+                            "firstMessage": "Hey, I didn't find your phone number. Make sure you have added plus infront of it in the lightfriend settings.",
+                            "maxDurationSeconds": 10,
+                        }
                     }
                 });
-                println!("Returning response: {:#?}", resp);
-                Json(resp)
+                println!("Returning response: {:#?}", response);
+                Json(response)
             },
             Err(e) => {
                 println!("Database error while finding user: {}", e);
