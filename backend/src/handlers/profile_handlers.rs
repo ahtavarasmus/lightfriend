@@ -32,6 +32,7 @@ pub struct ProfileResponse {
     time_to_delete: bool,
     iq: i32,
     notify_credits: bool,
+    local_phone_number: String,
 }
 
 pub async fn get_profile(
@@ -79,9 +80,13 @@ pub async fn get_profile(
                                                     .unwrap()
                                                     .as_secs() as i32;
 
-            println!("User {:#?} verified: {:#?} time_to_live: {:#?} current_time: {:#?} current_time>ttl: {:#?}", user.username, user.verified, user.time_to_live.unwrap_or(0), current_time, current_time>user.time_to_live.unwrap_or(0));
             let ttl = user.time_to_live.unwrap_or(0);
             let time_to_delete = current_time > ttl;
+            let local_phone_number = match user.locality.as_str() {
+                "fin" => std::env::var("FIN_PHONE").unwrap_or_default(),
+                "usa" => std::env::var("USA_PHONE").unwrap_or_default(), 
+                _ => std::env::var("FIN_PHONE").unwrap_or_default(), // Default to Finnish number
+            };
 
             Ok(Json(ProfileResponse {
                 id: user.id,
@@ -93,6 +98,7 @@ pub async fn get_profile(
                 time_to_delete: time_to_delete,
                 iq: user.iq,
                 notify_credits: user.notify_credits,
+                local_phone_number: local_phone_number,
             }))
         }
         None => Err((

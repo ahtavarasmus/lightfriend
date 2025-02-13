@@ -12,6 +12,7 @@ pub struct NewUser {
     pub time_to_live: i32,
     pub verified: bool,
     pub iq: i32,
+    pub locality: String,
 }
 
 #[derive(Deserialize)]

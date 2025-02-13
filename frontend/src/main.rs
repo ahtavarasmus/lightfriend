@@ -21,6 +21,7 @@ use auth_components::{
     register::Register,
 };
 
+
 #[derive(Clone, Routable, PartialEq)]
 pub enum Route {
     #[at("/")]

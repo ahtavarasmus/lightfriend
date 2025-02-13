@@ -11,5 +11,6 @@ diesel::table! {
         verified -> Bool,
         iq -> Integer,
         notify_credits -> Bool,
+        locality -> Text,
     }
 }

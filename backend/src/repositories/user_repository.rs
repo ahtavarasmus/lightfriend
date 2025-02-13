@@ -88,7 +88,7 @@ impl UserRepository {
             .optional()?;
         Ok(user)
     }
-   // Update user's profile
+    // Update user's profile
     pub fn update_profile(&self, user_id: i32, phone_number: &str, nickname: &str) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
@@ -102,21 +102,35 @@ impl UserRepository {
         if existing_user.is_some() {
             return Err(DieselError::RollbackTransaction);
         }
+
+        // Determine locality based on phone number
+        let locality = if phone_number.starts_with("+358") {
+            "fin"
+        } else if phone_number.starts_with("+1") {
+            "usa"
+        } else {
+            "usa"
+        };
+
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table.find(user_id))
             .set((
                 users::phone_number.eq(phone_number),
-                users::nickname.eq(nickname)
+                users::nickname.eq(nickname),
+                users::locality.eq(locality)
             ))
             .execute(&mut conn)?;
         Ok(())
     }
 
-    // Find a user by phone number
     pub fn find_by_phone_number(&self, phone_number: &str) -> Result<Option<User>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let cleaned_phone = phone_number
+            .chars()
+            .filter(|c| c.is_digit(10) || *c == '+')
+            .collect::<String>();
         let user = users::table
-            .filter(users::phone_number.eq(phone_number))
+            .filter(users::phone_number.eq(cleaned_phone))
             .first::<User>(&mut conn)
             .optional()?;
         Ok(user)

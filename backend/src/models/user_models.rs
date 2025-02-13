@@ -14,5 +14,6 @@ pub struct User {
     pub verified: bool,
     pub iq: i32,
     pub notify_credits: bool,
+    pub locality: String,
 }
 

@@ -18,6 +18,7 @@ pub mod home {
         time_to_delete: bool,
         iq: i32,
         notify_credits: bool,
+        local_phone_number: String,
     }
 
     pub fn is_logged_in() -> bool {
@@ -278,9 +279,19 @@ let interval_handle = interval_handle.clone();
                         <div class="verification-panel">
                             <h1>{"Verify Your Account"}</h1>
                             <p>{"Call the following number to verify your account"}</p>
-                            <div class="phone-display">
-                                <span class="phone-number">{"+358454901522"}</span>
-                            </div>
+                            {
+                                if let Some(profile) = &*profile_data {
+                                    html! { 
+                                        <span class="phone-number">
+                                            {&profile.local_phone_number}
+                                        </span>
+                                    }
+                                } else {
+                                    html! {
+                                        <span class="phone-number">{"+358454901522"}</span>
+                                    }
+                                }
+                            }
                             <div class="verification-status">
                                 <i class="verification-icon"></i>
                                 <span>{"Waiting for verification..."}</span>
@@ -305,7 +316,19 @@ let interval_handle = interval_handle.clone();
                             <div class="info-section">
                                 <h2 class="section-title">{"Your lightfriend is Ready!"}</h2>
                                 <div class="phone-display">
-                                    <span class="phone-number">{"+358454901522"}</span>
+                                {
+                                    if let Some(profile) = &*profile_data {
+                                        html! { 
+                                            <span class="phone-number">
+                                                {&profile.local_phone_number}
+                                            </span>
+                                        }
+                                    } else {
+                                        html! {
+                                            <span class="phone-number">{"+358454901522"}</span>
+                                        }
+                                    }
+                                }
                                 </div>
                                 <p class="instruction-text">
                                     {"Call this number to access your services"}

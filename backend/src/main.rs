@@ -62,6 +62,10 @@ pub fn validate_env() {
         .expect("ASSISTANT_ID must be set");
     let _ = std::env::var("VAPI_SERVER_URL_SECRET")
     .expect("VAPI_SERVER_URL_SECRET must be set");
+    let _ = std::env::var("FIN_PHONE")
+    .expect("FIN_PHONE must be set");
+    let _ = std::env::var("USA_PHONE")
+    .expect("USA_PHONE must be set");
 
 }
 

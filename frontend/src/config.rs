@@ -7,3 +7,4 @@ pub fn get_backend_url() -> &'static str {
 pub fn get_backend_url() -> &'static str {
     ""  // Production URL
 }
+

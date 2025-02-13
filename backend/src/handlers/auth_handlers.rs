@@ -312,6 +312,16 @@ pub async fn register(
     println!("Set the time to live due in 5 minutes");
 
     let reg_r = reg_req.clone();
+
+    // Determine locality based on phone number
+    let locality = if reg_r.phone_number.starts_with("+358") {
+        "fin".to_string()
+    } else if reg_r.phone_number.starts_with("+1") {
+        "usa".to_string()
+    } else {
+        "usa".to_string()
+    };
+
     let new_user = NewUser {
         username: reg_r.username,
         password_hash,
@@ -319,6 +329,7 @@ pub async fn register(
         time_to_live: five_minutes_from_now,
         verified: false,
         iq: 500,
+        locality: locality,
     };
 
     state.user_repository.create_user(new_user).map_err(|e| {
