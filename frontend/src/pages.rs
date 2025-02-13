@@ -303,7 +303,7 @@ let interval_handle = interval_handle.clone();
                                 {"Want a local phone number to call? Please send me an email or message telegram(@ahtavarasmus)"}
                             </p>
                             <p class="verification-help">
-                                <span>{"Having trouble? Make sure you typed your number correctly. You can change it in the profile."}</span>
+                                <span>{"Having trouble? Make sure you typed your number correctly. You can change it in the profile. Or you can email me at rasmus@ahtava.com or message telegram @ahtavarasmus"}</span>
                                 <Link<Route> to={Route::Profile}>
                                     {"profile"}
                                 </Link<Route>>
