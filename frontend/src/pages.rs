@@ -279,8 +279,9 @@ let interval_handle = interval_handle.clone();
                         <div class="verification-panel">
                             <h1>{"Verify Your Account"}</h1>
                             <p>{"Call the one of the following numbers to verify your account"}</p>
-                                <span class="phone-number">{"+18153684737"}</span>
-                                <span class="phone-number">{"+358454901522"}</span>
+                                <span class="phone-number">{"us +18153684737"}</span>
+                                <span class="phone-number">{"fin +358454901522"}</span>
+                                <span class="phone-number">{"nl +3197006520696"}</span>
                             <div class="verification-status">
                                 <i class="verification-icon"></i>
                                 <span>{"Waiting for verification..."}</span>
@@ -308,8 +309,9 @@ let interval_handle = interval_handle.clone();
                             <div class="info-section">
                                 <h2 class="section-title">{"Your lightfriend is Ready!"}</h2>
                                 <div class="phone-display">
-                                            <span class="phone-number">{"+18153684737"}</span>
-                                            <span class="phone-number">{"+358454901522"}</span>
+                                            <span class="phone-number">{"us +18153684737"}</span>
+                                            <span class="phone-number">{"fin +358454901522"}</span>
+                                            <span class="phone-number">{"nl +3197006520696"}</span>
                                 </div>
                                 <p class="instruction-text">
                                     {"Call these numbers to access your services. +1 is US number and +358 is Finnish."}
