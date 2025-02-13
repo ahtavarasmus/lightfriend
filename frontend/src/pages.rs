@@ -279,9 +279,9 @@ let interval_handle = interval_handle.clone();
                         <div class="verification-panel">
                             <h1>{"Verify Your Account"}</h1>
                             <p>{"Call the one of the following numbers to verify your account"}</p>
-                                <span class="phone-number">{"us +18153684737"}</span>
-                                <span class="phone-number">{"fin +358454901522"}</span>
-                                <span class="phone-number">{"nl +3197006520696"}</span>
+                                <div class="phone-number">{"us +18153684737"}</div >
+                                <div class="phone-number">{"fin +358454901522"}</div>
+                                <div class="phone-number">{"nl +3197006520696"}</div>
                             <div class="verification-status">
                                 <i class="verification-icon"></i>
                                 <span>{"Waiting for verification..."}</span>
@@ -309,12 +309,12 @@ let interval_handle = interval_handle.clone();
                             <div class="info-section">
                                 <h2 class="section-title">{"Your lightfriend is Ready!"}</h2>
                                 <div class="phone-display">
-                                            <span class="phone-number">{"us +18153684737"}</span>
-                                            <span class="phone-number">{"fin +358454901522"}</span>
-                                            <span class="phone-number">{"nl +3197006520696"}</span>
+                                    <div class="phone-number">{"us +18153684737"}</div >
+                                    <div class="phone-number">{"fin +358454901522"}</div>
+                                    <div class="phone-number">{"nl +3197006520696"}</div>
                                 </div>
                                 <p class="instruction-text">
-                                    {"Call these numbers to access your services. +1 is US number and +358 is Finnish."}
+                                    {"Call these numbers to access your services."}
                                     <br/>
                                     <br/>
                                     {"If too expensive and want a another phone number to call please send me an email or message telegram(@ahtavarasmus) and we'll see what I can do."}
