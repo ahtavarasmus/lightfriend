@@ -278,20 +278,9 @@ let interval_handle = interval_handle.clone();
                     <div class="verification-container">
                         <div class="verification-panel">
                             <h1>{"Verify Your Account"}</h1>
-                            <p>{"Call the following number to verify your account"}</p>
-                            {
-                                if let Some(profile) = &*profile_data {
-                                    html! { 
-                                        <span class="phone-number">
-                                            {&profile.local_phone_number}
-                                        </span>
-                                    }
-                                } else {
-                                    html! {
-                                        <span class="phone-number">{"+18153684737"}</span>
-                                    }
-                                }
-                            }
+                            <p>{"Call the one of the following numbers to verify your account"}</p>
+                                <span class="phone-number">{"+18153684737"}</span>
+                                <span class="phone-number">{"+358454901522"}</span>
                             <div class="verification-status">
                                 <i class="verification-icon"></i>
                                 <span>{"Waiting for verification..."}</span>
@@ -319,25 +308,14 @@ let interval_handle = interval_handle.clone();
                             <div class="info-section">
                                 <h2 class="section-title">{"Your lightfriend is Ready!"}</h2>
                                 <div class="phone-display">
-                                {
-                                    if let Some(profile) = &*profile_data {
-                                        html! { 
-                                            <span class="phone-number">
-                                                {&profile.local_phone_number}
-                                            </span>
-                                        }
-                                    } else {
-                                        html! {
                                             <span class="phone-number">{"+18153684737"}</span>
-                                        }
-                                    }
-                                }
+                                            <span class="phone-number">{"+358454901522"}</span>
                                 </div>
                                 <p class="instruction-text">
-                                    {"Call this number to access your services."}
+                                    {"Call these numbers to access your services. +1 is US number and +358 is Finnish."}
                                     <br/>
                                     <br/>
-                                    {"Want a local phone number to call? Please send me an email or message telegram(@ahtavarasmus)"}
+                                    {"If too expensive and want a another phone number to call please send me an email or message telegram(@ahtavarasmus) and we'll see what I can do."}
                                 </p>
                                 <div class="feature-status">
                                     <h3>{"Currently Available"}</h3>
