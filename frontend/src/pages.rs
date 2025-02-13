@@ -401,6 +401,19 @@ let interval_handle = interval_handle.clone();
                                     }
                                 </div>
                             </div>
+                            <footer class="dashboard-footer">
+                                <div class="development-links">
+                                    <p>{"Follow development progress at "}
+                                        <a href="https://pacepeek.com/ahtavarasmus" target="_blank" rel="noopener noreferrer">
+                                            {"pacepeek.com/ahtavarasmus"}
+                                        </a>
+                                        {" or "}
+                                        <a href="https://x.com/rasmuscodes" target="_blank" rel="noopener noreferrer">
+                                            {"x.com/rasmuscodes"}
+                                        </a>
+                                    </p>
+                                </div>
+                            </footer>
                         </div>
                     </div>
                 }
