@@ -282,6 +282,7 @@ let interval_handle = interval_handle.clone();
                                 <div class="phone-number">{"us +18153684737"}</div >
                                 <div class="phone-number">{"fin +358454901522"}</div>
                                 <div class="phone-number">{"nl +3197006520696"}</div>
+                                <div class="phone-number">{"cz +420910921902"}</div >
                             <div class="verification-status">
                                 <i class="verification-icon"></i>
                                 <span>{"Waiting for verification..."}</span>
@@ -312,6 +313,7 @@ let interval_handle = interval_handle.clone();
                                     <div class="phone-number">{"us +18153684737"}</div >
                                     <div class="phone-number">{"fin +358454901522"}</div>
                                     <div class="phone-number">{"nl +3197006520696"}</div>
+                                    <div class="phone-number">{"cz +420910921902"}</div >
                                 </div>
                                 <p class="instruction-text">
                                     {"Call these numbers to access your services."}
