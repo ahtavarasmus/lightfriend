@@ -15,5 +15,6 @@ pub struct User {
     pub iq: i32,
     pub notify_credits: bool,
     pub locality: String,
+    pub info: Option<String>,
 }
 

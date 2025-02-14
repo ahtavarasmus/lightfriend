@@ -19,6 +19,7 @@ use crate::{
 pub struct UpdateProfileRequest {
     phone_number: String,
     nickname: String,
+    info: String,
 }
 
 #[derive(Serialize)]
@@ -33,6 +34,7 @@ pub struct ProfileResponse {
     iq: i32,
     notify_credits: bool,
     local_phone_number: String,
+    info: Option<String>,
 }
 
 pub async fn get_profile(
@@ -99,6 +101,7 @@ pub async fn get_profile(
                 iq: user.iq,
                 notify_credits: user.notify_credits,
                 local_phone_number: local_phone_number,
+                info: user.info,
             }))
         }
         None => Err((
@@ -325,7 +328,7 @@ pub async fn update_profile(
     }
 
     // Update user profile in database
-    match state.user_repository.update_profile(claims.sub, &update_req.phone_number, &update_req.nickname) {
+    match state.user_repository.update_profile(claims.sub, &update_req.phone_number, &update_req.nickname, &update_req.info) {
         Ok(_) => (),
         Err(DieselError::RollbackTransaction) => {
             return Err((
