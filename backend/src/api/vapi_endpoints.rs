@@ -21,7 +21,6 @@ pub async fn validate_vapi_secret(
     next: middleware::Next<Body>,
 ) -> Result<Response, StatusCode> {
     println!("\n=== Starting VAPI Secret Validation ===");
-    println!("📨 Received headers: {:?}", headers);
     
     let secret_key = match std::env::var("VAPI_SERVER_URL_SECRET") {
         Ok(key) => {
@@ -422,16 +421,16 @@ pub async fn ask_perplexity(message: &str) -> Result<String, reqwest::Error> {
     let client = reqwest::Client::new();
     
     let payload = json!({
-        "model": "llama-3.1-sonar-small-128k-online",
+        "model": "sonar",
         "messages": [
-            {
-                "role": "system",
-                "content": "Be precise and concise."
-            },
-            {
-                "role": "user",
-                "content": message
-            }
+                {
+                    "role": "system",
+                    "content": "You are assisting an AI voice calling service. The questions you receive are from voice conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read aloud 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. Use natural language sentence structure 5. When listing multiple points, use simple numbering (1, 2, 3) or natural language transitions (First... Second... Finally...) 6. Focus on the most relevant information that addresses the user's immediate needs 7. If specific numbers, dates, or proper names are important, spell them out clearly 8. Format numerical data in a way that's easy to read aloud (e.g., twenty-five percent instead of 25%) Your responses will be incorporated into a voice conversation, so clarity and natural flow are essential."
+                },
+                {
+                    "role": "user",
+                    "content": message
+                },
         ]
     });
 
