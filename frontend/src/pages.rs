@@ -356,6 +356,7 @@ let interval_handle = interval_handle.clone();
                             </footer>
                         </div>
                     </div>
+                </div>
                 }
             }
         }

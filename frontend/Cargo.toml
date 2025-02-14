@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+chrono = { version = "0.4", features = ["serde"] }
 yew = { version = "0.20", features = ["csr"] }
 tracing = "0.1"
 tracing-wasm = "0.2"
