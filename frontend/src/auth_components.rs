@@ -9,7 +9,7 @@ pub mod login {
     use gloo_console::log;
     #[derive(Serialize)]
     pub struct LoginRequest {
-        username: String,
+        email: String,
         password: String,
     }
     #[derive(Deserialize)]
@@ -23,28 +23,28 @@ pub mod login {
 
     #[function_component]
     pub fn Login() -> Html {
-        let username = use_state(String::new);
+        let email= use_state(String::new);
         let password = use_state(String::new);
         let error = use_state(|| None::<String>);
         let success = use_state(|| None::<String>);
 
         let onsubmit = {
-            let username = username.clone();
+            let email = email.clone();
             let password = password.clone();
             let error_setter = error.clone();
             let success_setter = success.clone();
             
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
-                let username = (*username).clone();
+                let email = (*email).clone();
                 let password = (*password).clone();
                 let error_setter = error_setter.clone();
                 let success_setter = success_setter.clone();
 
                 wasm_bindgen_futures::spawn_local(async move {
-                    println!("Attempting login for username: {}", &username);
+                    println!("Attempting login for email: {}", &email);
                     match Request::post(&format!("{}/api/login", config::get_backend_url()))
-                        .json(&LoginRequest { username, password })
+                        .json(&LoginRequest { email, password })
                         .unwrap()
                         .send()
                         .await 
@@ -121,10 +121,10 @@ pub mod login {
                 <form onsubmit={onsubmit}>
                     <input
                         type="text"
-                        placeholder="Username"
-                        onchange={let username = username.clone(); move |e: Event| {
+                        placeholder="Email or username"
+                        onchange={let email = email.clone(); move |e: Event| {
                             let input: HtmlInputElement = e.target_unchecked_into();
-                            username.set(input.value());
+                            email.set(input.value());
                         }}
                     />
                     <input
@@ -162,7 +162,7 @@ pub mod register {
 
     #[derive(Serialize)]
     pub struct RegisterRequest {
-        username: String,
+        email: String,
         password: String,
         phone_number: String,
     }
@@ -178,16 +178,27 @@ pub mod register {
         error: String,
     }
 
+    fn is_valid_email(email: &str) -> bool {
+        // Basic email validation
+        email.contains('@') && email.contains('.')
+    }
+
+    fn is_valid_phone(phone: &str) -> bool {
+        // Check if phone number starts with +
+        phone.starts_with('+')
+    }
+
     #[function_component]
     pub fn Register() -> Html {
-        let username = use_state(String::new);
+        let email = use_state(String::new);
         let password = use_state(String::new);
         let phone_number = use_state(String::new);
         let error = use_state(|| None::<String>);
         let success = use_state(|| None::<String>);
+        let email_valid = use_state(|| true); // Track email validity
 
         let onsubmit = {
-            let username = username.clone();
+            let email = email.clone();
             let password = password.clone();
             let phone_number = phone_number.clone();
             let error_setter = error.clone();
@@ -195,16 +206,26 @@ pub mod register {
             
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
-                let username = (*username).clone();
+                let email = (*email).clone();
                 let password = (*password).clone();
                 let phone_number = (*phone_number).clone();
                 let error_setter = error_setter.clone();
                 let success_setter = success_setter.clone();
 
+                if !is_valid_email(&email) {
+                    error_setter.set(Some("Please enter a valid email address".to_string()));
+                    return;
+                }
+
+                if !is_valid_phone(&phone_number) {
+                    error_setter.set(Some("Phone number must start with '+'".to_string()));
+                    return;
+                }
+
                 wasm_bindgen_futures::spawn_local(async move {
                     match Request::post(&format!("{}/api/register", config::get_backend_url()))
                         .json(&RegisterRequest { 
-                            username, 
+                            email, 
                             password,
                             phone_number,
                         })
@@ -278,20 +299,44 @@ pub mod register {
                 }
                 <form onsubmit={onsubmit}>
                     <input
-                        type="text"
-                        placeholder="Username"
-                        onchange={let username = username.clone(); move |e: Event| {
-                            let input: HtmlInputElement = e.target_unchecked_into();
-                            username.set(input.value());
-                        }}
+                        type="email"
+                        placeholder="Email"
+                        onchange={
+                            let email = email.clone();
+                            let email_valid = email_valid.clone();
+                            let error_setter = error.clone();
+                            move |e: Event| {
+                                let input: HtmlInputElement = e.target_unchecked_into();
+                                let value = input.value();
+                                let is_valid = is_valid_email(&value);
+                                email_valid.set(is_valid);
+                                if !is_valid {
+                                    error_setter.set(Some("Please enter a valid email address".to_string()));
+                                } else {
+                                    error_setter.set(None);
+                                }
+                                email.set(value);
+                            }
+                        }
+                        class={if !*email_valid {"invalid-input"} else {""}}
                     />
                     <input
                         type="tel"
                         placeholder="Phone Number"
-                        onchange={let phone_number = phone_number.clone(); move |e: Event| {
-                            let input: HtmlInputElement = e.target_unchecked_into();
-                            phone_number.set(input.value());
-                        }}
+                        onchange={
+                            let phone_number = phone_number.clone();
+                            let error_setter = error.clone();
+                            move |e: Event| {
+                                let input: HtmlInputElement = e.target_unchecked_into();
+                                let value = input.value();
+                                if !is_valid_phone(&value) {
+                                    error_setter.set(Some("Phone number must start with '+'".to_string()));
+                                } else {
+                                    error_setter.set(None);
+                                }
+                                phone_number.set(value);
+                            }
+                        }
                     />
                     <input
                         type="password"

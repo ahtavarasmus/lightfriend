@@ -65,7 +65,7 @@ pub async fn get_users(
         .into_iter()
         .map(|user| UserResponse {
             id: user.id,
-            username: user.username,
+            email: user.email,
             phone_number: user.phone_number,
             nickname: user.nickname,
             time_to_live: user.time_to_live,
@@ -139,9 +139,9 @@ pub async fn login(
     State(state): State<Arc<AppState>>,
     Json(login_req): Json<LoginRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    println!("Login attempt for username: {}", login_req.username); // Debug log
+    println!("Login attempt for email: {}", login_req.email); // Debug log
 
-    let user = match state.user_repository.find_by_username(&login_req.username) {
+    let user = match state.user_repository.find_by_email(&login_req.email) {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((
@@ -310,24 +310,24 @@ pub async fn register(
     Json(reg_req): Json<RegisterRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     
-    println!("Registration attempt for username: {}", reg_req.username);
+    println!("Registration attempt for email: {}", reg_req.email);
 
-    // Check if username exists
-    println!("Checking if username exists...");
-    if state.user_repository.username_exists(&reg_req.username).map_err(|e| {
-        println!("Database error while checking username: {}", e);
+    // Check if email exists
+    println!("Checking if email exists...");
+    if state.user_repository.email_exists(&reg_req.email).map_err(|e| {
+        println!("Database error while checking email: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR, 
             Json(json!({ "error": format!("Database error: {}", e) }))
         )
     })? {
-        println!("Username {} already exists", reg_req.username);
+        println!("Email {} already exists", reg_req.email);
         return Err((
             StatusCode::CONFLICT,
-            Json(json!({ "error": "Username already exists" })),
+            Json(json!({ "error": "Email already exists" })),
         ));
     }
-    println!("Username is available");
+    println!("Email is available");
 
     // Validate phone number format
     if !reg_req.phone_number.starts_with('+') {
@@ -388,7 +388,7 @@ pub async fn register(
     };
 
     let new_user = NewUser {
-        username: reg_r.username,
+        email: reg_r.email,
         password_hash,
         phone_number: reg_r.phone_number,
         time_to_live: five_minutes_from_now,
@@ -408,7 +408,7 @@ pub async fn register(
     println!("User registered successfully, generating tokens");
     
     // Get the newly created user
-    let user = state.user_repository.find_by_username(&reg_req.username)
+    let user = state.user_repository.find_by_email(&reg_req.email)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to retrieve user: {}", e)}))

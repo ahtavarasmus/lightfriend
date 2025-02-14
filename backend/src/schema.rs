@@ -3,7 +3,8 @@
 diesel::table! {
     users (id) {
         id -> Integer,
-        username -> Text,
+        username -> Nullable<Text>,
+        email -> Text,
         password_hash -> Text,
         phone_number -> Text,
         nickname -> Nullable<Text>,

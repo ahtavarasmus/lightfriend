@@ -10,7 +10,7 @@ pub mod home {
     #[derive(Deserialize, Clone)]
     struct UserProfile {
         id: i32,
-        username: String,
+        email: String,
         phone_number: String,
         nickname: Option<String>,
         verified: bool,

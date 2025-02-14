@@ -6,7 +6,7 @@ use std::fmt::Debug;
 #[derive(Insertable)]
 #[diesel(table_name = users)]
 pub struct NewUser {
-    pub username: String,
+    pub email: String,
     pub password_hash: String,
     pub phone_number: String,
     pub time_to_live: i32,
@@ -17,7 +17,7 @@ pub struct NewUser {
 
 #[derive(Deserialize)]
 pub struct LoginRequest {
-    pub username: String,
+    pub email: String,
     pub password: String,
 }
 
@@ -28,7 +28,7 @@ pub struct LoginResponse {
 
 #[derive(Deserialize, Clone)]
 pub struct RegisterRequest {
-    pub username: String,
+    pub email: String,
     pub password: String,
     pub phone_number: String,
 }
@@ -41,7 +41,7 @@ pub struct RegisterResponse {
 #[derive(Debug, Serialize)]
 pub struct UserResponse {
     pub id: i32,
-    pub username: String,
+    pub email: String,
     pub phone_number: String,
     pub nickname: Option<String>,
     pub time_to_live: Option<i32>,
@@ -58,7 +58,7 @@ pub struct Claims {
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateUserRequest {
-    pub username: String,
+    pub email: String,
     pub phone_number: String,
     pub nickname: Option<String>,
     pub time_to_live: Option<i32>,

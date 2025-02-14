@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc, TimeZone};
 #[derive(Deserialize, Clone, Debug)]
 struct UserInfo {
     id: i32,
-    username: String,
+    email: String,
     phone_number: String,
     nickname: Option<String>,
     time_to_live: Option<i32>,
@@ -21,7 +21,7 @@ struct UserInfo {
 
 #[derive(Serialize)]
 struct UpdateUserRequest {
-    username: String,
+    email: String,
     phone_number: String,
     nickname: Option<String>,
     time_to_live: Option<i32>,
@@ -114,7 +114,7 @@ pub fn Admin() -> Html {
                                         <thead>
                                             <tr>
                                                 <th>{"ID"}</th>
-                                                <th>{"Username"}</th>
+                                                <th>{"Email"}</th>
                                             <th>{"IQ"}</th>
                                             <th>{"Actions"}</th>
                                             </tr>
@@ -130,7 +130,7 @@ pub fn Admin() -> Html {
                                                         <>
                                                             <tr key={user.id} class={classes!("user-row", is_selected.then(|| "selected"))}>
                                                                 <td>{user.id}</td>
-                                                                <td>{&user.username}</td>
+                                                                <td>{&user.email}</td>
                                                                 <td>{user.iq}</td>
                                                                 <td>
                                                                     <button onclick={onclick} class="details-button">

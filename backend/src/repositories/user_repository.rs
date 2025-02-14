@@ -22,11 +22,11 @@ impl UserRepository {
         Self { pool }
     }
 
-    // Check if a username exists
-    pub fn username_exists(&self, search_username: &str) -> Result<bool, DieselError> {
+    // Check if a email exists
+    pub fn email_exists(&self, search_email: &str) -> Result<bool, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let existing_user: Option<User> = users::table
-            .filter(users::username.eq(search_username))
+            .filter(users::email.eq(search_email))
             .first::<User>(&mut conn)
             .optional()?;
         Ok(existing_user.is_some())
@@ -51,11 +51,11 @@ impl UserRepository {
         Ok(())
     }
 
-    // Find a user by username
-    pub fn find_by_username(&self, search_username: &str) -> Result<Option<User>, DieselError> {
+    // Find a user by email
+    pub fn find_by_email(&self, search_email: &str) -> Result<Option<User>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let user = users::table
-            .filter(users::username.eq(search_username))
+            .filter(users::email.eq(search_email))
             .first::<User>(&mut conn)
             .optional()?;
         Ok(user)
@@ -69,14 +69,14 @@ impl UserRepository {
         Ok(users_list)
     }
 
-    // Check if a user is an admin (username is 'rasmus')
+    // Check if a user is an admin (email is 'rasmus')
     pub fn is_admin(&self, user_id: i32) -> Result<bool, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let user = users::table
             .find(user_id)
             .first::<User>(&mut conn)?;
 
-        Ok(user.username == "rasmus")
+        Ok(user.email == "rasmus")
     }
     
     // Find a user by ID

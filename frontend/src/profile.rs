@@ -9,7 +9,7 @@
     #[derive(Deserialize, Clone, PartialEq)]
     struct UserProfile {
         id: i32,
-        username: String,
+        email: String,
         phone_number: String,
         nickname: Option<String>,
         verified: bool,
@@ -273,8 +273,8 @@
                                 ProfileTab::Settings => html! {
                                 <div class="profile-info">
                                     <div class="profile-field">
-                                        <span class="field-label">{"Username"}</span>
-                                        <span class="field-value">{&user_profile.username}</span>
+                                        <span class="field-label">{"Email"}</span>
+                                        <span class="field-value">{&user_profile.email}</span>
                                     </div>
                                     
                                     <div class="profile-field">
