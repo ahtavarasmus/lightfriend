@@ -16,12 +16,17 @@
         time_to_live: i32,
         time_to_delete: bool,
         iq: i32,
+        info: Option<String>,
     }
+
+    const MAX_NICKNAME_LENGTH: usize = 30;
+    const MAX_INFO_LENGTH: usize = 500;
 
     #[derive(Serialize)]
     struct UpdateProfileRequest {
         phone_number: String,
         nickname: String,
+        info: String,
     }
 
     #[derive(Clone, PartialEq)]
@@ -35,6 +40,7 @@
         let profile = use_state(|| None::<UserProfile>);
         let phone_number = use_state(String::new);
         let nickname = use_state(String::new);
+        let info = use_state(String::new);
         let error = use_state(|| None::<String>);
         let success = use_state(|| None::<String>);
         let is_editing = use_state(|| false);
@@ -63,12 +69,16 @@
         {
             let phone_number = phone_number.clone();
             let nickname = nickname.clone();
+            let info = info.clone();
             let profile = profile.clone();
             use_effect_with_deps(move |profile| {
                 if let Some(user_profile) = (**profile).as_ref() {
                     phone_number.set(user_profile.phone_number.clone());
                     if let Some(nick) = &user_profile.nickname {
                         nickname.set(nick.clone());
+                    }
+                    if let Some(user_info) = &user_profile.info {
+                        info.set(user_info.clone());
                     }
                 }
                 || ()
@@ -126,6 +136,7 @@
         let on_edit = {
             let phone_number = phone_number.clone();
             let nickname = nickname.clone();
+            let info = info.clone();
             let error = error.clone();
             let success = success.clone();
             let profile = profile.clone();
@@ -135,6 +146,7 @@
             Callback::from(move |_e: MouseEvent| {
                 let phone = (*phone_number).clone();
                 let nick = (*nickname).clone();
+                let user_info = (*info).clone();
                 let error = error.clone();
                 let success = success.clone();
                 let profile = profile.clone();
@@ -169,8 +181,10 @@
                     {
                         match Request::post(&format!("{}/api/profile/update", config::get_backend_url()))
                             .header("Authorization", &format!("Bearer {}", token))
-                            .json(&UpdateProfileRequest { phone_number: phone,
+                            .json(&UpdateProfileRequest { 
+                                phone_number: phone,
                                 nickname: nick,
+                                info: user_info,
                             })
                             .expect("Failed to build request")
                             .send()
@@ -304,24 +318,83 @@
                                     </div>
 
                                     <div class="profile-field">
-                                        <span class="field-label">{"Nickname"}</span>
+                                        <div class="field-label-group">
+                                            <span class="field-label">{"Nickname"}</span>
+                                            <div class="tooltip">
+                                                <span class="tooltip-icon">{"?"}</span>
+                                                <span class="tooltip-text">
+                                                    {"This is how the AI assistant will address you in conversations. It will use this name to greet you and make interactions more personal."}
+                                                </span>
+                                            </div>
+                                        </div>
                                         {
                                             if *is_editing {
                                                 html! {
-                                                    <input
-                                                        type="text"
-                                                        class="profile-input"
-                                                        value={(*nickname).clone()}
-                                                        onchange={let nickname = nickname.clone(); move |e: Event| {
-                                                            let input: HtmlInputElement = e.target_unchecked_into();
-                                                            nickname.set(input.value());
-                                                        }}
-                                                    />
+                                                    <div class="input-with-limit">
+                                                        <input
+                                                            type="text"
+                                                            class="profile-input"
+                                                            value={(*nickname).clone()}
+                                                            maxlength={MAX_NICKNAME_LENGTH.to_string()}
+                                                            onchange={let nickname = nickname.clone(); move |e: Event| {
+                                                                let input: HtmlInputElement = e.target_unchecked_into();
+                                                                let value = input.value();
+                                                                if value.chars().count() <= MAX_NICKNAME_LENGTH {
+                                                                    nickname.set(value);
+                                                                }
+                                                            }}
+                                                        />
+                                                        <span class="char-count">
+                                                            {format!("{}/{}", (*nickname).chars().count(), MAX_NICKNAME_LENGTH)}
+                                                        </span>
+                                                    </div>
                                                 }
                                             } else {
                                                 html! {
                                                     <span class="field-value">
                                                         {user_profile.nickname.clone().unwrap_or_default()}
+                                                    </span>
+                                                }
+                                            }
+                                        }
+                                    </div>
+
+                                    <div class="profile-field">
+                                        <div class="field-label-group">
+                                            <span class="field-label">{"Info"}</span>
+                                            <div class="tooltip">
+                                                <span class="tooltip-icon">{"?"}</span>
+                                                <span class="tooltip-text">
+                                                    {"What would you like the AI assistant to know about you? For example, your location, preferred units (metric/imperial), language preferences, or any specific way you'd like the assistant to respond to you."}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        {
+                                            if *is_editing {
+                                                html! {
+                                                    <div class="input-with-limit">
+                                                        <textarea
+                                                            class="profile-input"
+                                                            value={(*info).clone()}
+                                                            maxlength={MAX_INFO_LENGTH.to_string()}
+                                                            placeholder="Tell something about yourself or how the assistant should respond to you"
+                                                            onchange={let info = info.clone(); move |e: Event| {
+                                                                let input: HtmlInputElement = e.target_unchecked_into();
+                                                                let value = input.value();
+                                                                if value.chars().count() <= MAX_INFO_LENGTH {
+                                                                    info.set(value);
+                                                                }
+                                                            }}
+                                                        />
+                                                        <span class="char-count">
+                                                            {format!("{}/{}", (*info).chars().count(), MAX_INFO_LENGTH)}
+                                                        </span>
+                                                    </div>
+                                                }
+                                            } else {
+                                                html! {
+                                                    <span class="field-value">
+                                                        {user_profile.info.clone().unwrap_or("I'm from finland, always use Celsious and metric system, etc...".to_string())}
                                                     </span>
                                                 }
                                             }

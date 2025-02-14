@@ -223,9 +223,9 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                             "messageResponse": {
                                 "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
                                 "assistantOverrides": {
-                                    "firstMessage": format!("Hello {}!", nickname),
                                     "variableValues": {
-                                        "name": nickname
+                                        "name": nickname,
+                                        "user_info": user.info,
                                     },
                                     "maxDurationSeconds": user.iq,
                                 }
@@ -249,7 +249,8 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                                     "assistantOverrides": {
                                         "firstMessage": format!("Welcome {}! Your account has been verified! Anyways, how can I help?", nickname),
                                         "variableValues": {
-                                            "name": nickname
+                                            "name": nickname,
+                                            "user_info": user.info,
                                         },
                                         "maxDurationSeconds": std::cmp::max(user.iq, 10),
                                     }

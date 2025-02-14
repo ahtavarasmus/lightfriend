@@ -89,7 +89,7 @@ impl UserRepository {
         Ok(user)
     }
     // Update user's profile
-    pub fn update_profile(&self, user_id: i32, phone_number: &str, nickname: &str) -> Result<(), DieselError> {
+    pub fn update_profile(&self, user_id: i32, phone_number: &str, nickname: &str, info: &str) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // Check if phone number exists for a different user
@@ -103,21 +103,12 @@ impl UserRepository {
             return Err(DieselError::RollbackTransaction);
         }
 
-        // Determine locality based on phone number
-        let locality = if phone_number.starts_with("+358") {
-            "fin"
-        } else if phone_number.starts_with("+1") {
-            "usa"
-        } else {
-            "usa"
-        };
-
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table.find(user_id))
             .set((
                 users::phone_number.eq(phone_number),
                 users::nickname.eq(nickname),
-                users::locality.eq(locality)
+                users::info.eq(info),
             ))
             .execute(&mut conn)?;
         Ok(())

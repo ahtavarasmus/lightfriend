@@ -12,5 +12,6 @@ diesel::table! {
         iq -> Integer,
         notify_credits -> Bool,
         locality -> Text,
+        info -> Nullable<Text>,
     }
 }
