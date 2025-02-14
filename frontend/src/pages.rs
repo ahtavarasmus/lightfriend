@@ -331,6 +331,7 @@ let interval_handle = interval_handle.clone();
                                         <li>{"Purchase additional IQ(credits)"}</li>
                                         <li>{"Text messaging support"}</li>
                                         <li>{"WhatsApp and Telegram integration"}</li>
+                                        <li>{"Reminder setting"}</li>
                                         <li>{"Email and calendar integration"}</li>
                                         <li>{"Camera functionality for photo translation and more"}</li>
                                     </ul>
@@ -339,53 +340,6 @@ let interval_handle = interval_handle.clone();
                                         {"Have a feature in mind? Email your suggestions to "}
                                         <a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>
                                     </p>
-                                </div>
-                                <div class="credits-section">
-                                    {
-                                        if let Some(profile) = &*profile_data {
-                                            let notify_credits = profile.notify_credits;
-                                            let profile_id = profile.id;
-                                            let onclick = {
-                                                let profile = profile.clone();
-                                                Callback::from(move |e: Event| {
-                                                    let checkbox: web_sys::HtmlInputElement = e.target_unchecked_into();
-                                                    let checked = checkbox.checked();
-                                                    
-                                                    // Update the notification preference
-                                                    if let Some(token) = window()
-                                                        .and_then(|w| w.local_storage().ok())
-                                                        .flatten()
-                                                        .and_then(|storage| storage.get_item("token").ok())
-                                                        .flatten()
-                                                    {
-                                                        wasm_bindgen_futures::spawn_local(async move {
-                                                            let _ = Request::post(&format!("{}/api/profile/notify-credits/{}", config::get_backend_url(), profile_id))
-                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                .header("Content-Type", "application/json")
-                                                                .json(&serde_json::json!({ "notify": checked }))
-                                                                .expect("Failed to build request")
-                                                                .send()
-                                                                .await;
-                                                        });
-                                                    }
-                                                })
-                                            };
-                                            
-                                            html! {
-                                                <label class="checkbox-label">
-                                                    <input 
-                                                        type="checkbox"
-                                                        checked={notify_credits}
-                                                        onchange={onclick}
-                                                    />
-                                                    {"Notify me when I can purchase more credits or major new features come online"}
-                                                </label>
-                                            }
-                                        } else {
-                                            html! {}
-                                        }
-                                    }
-                                </div>
                             </div>
                             <footer class="dashboard-footer">
                                 <div class="development-links">
