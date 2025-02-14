@@ -24,7 +24,7 @@ pub struct UpdateProfileRequest {
 #[derive(Serialize)]
 pub struct ProfileResponse {
     id: i32,
-    username: String,
+    email: String,
     phone_number: String,
     nickname: Option<String>,
     verified: bool,
@@ -90,7 +90,7 @@ pub async fn get_profile(
 
             Ok(Json(ProfileResponse {
                 id: user.id,
-                username: user.username,
+                email: user.email,
                 phone_number: user.phone_number,
                 nickname: user.nickname,
                 verified: user.verified,

@@ -200,7 +200,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                 println!("User found for phone number: {}", phone_number);
                 
                 if user.verified {
-                    let nickname = user.nickname.unwrap_or_else(|| user.username.clone());
+                    let nickname = user.nickname.unwrap_or_else(|| "".to_string());
                     println!("User nickname: {}", nickname);
                     
                     if user.iq <= 0 {
@@ -240,7 +240,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                     match state.user_repository.verify_user(user.id) {
                         Ok(_) => {
                             println!("User verified successfully");
-                            let nickname = user.nickname.unwrap_or_else(|| user.username.clone());
+                            let nickname = user.nickname.unwrap_or_else(|| "".to_string());
                             // TODO: make assistant explain the service
                             // cap the call length to users credits and make the assistant say that
                             let response = json!({
