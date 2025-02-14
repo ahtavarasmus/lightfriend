@@ -129,6 +129,7 @@ impl UserRepository {
             .chars()
             .filter(|c| c.is_digit(10) || *c == '+')
             .collect::<String>();
+        println!("cleaned_phone: {}", cleaned_phone);
         let user = users::table
             .filter(users::phone_number.eq(cleaned_phone))
             .first::<User>(&mut conn)
