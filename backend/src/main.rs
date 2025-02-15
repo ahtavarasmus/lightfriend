@@ -20,7 +20,13 @@ mod handlers {
 mod api {
     pub mod vapi_endpoints;
     pub mod vapi_dtos;
+    pub mod twilio;
 }
+
+mod config {
+    pub mod phone_numbers;
+}
+
 mod models {
     pub mod user_models;
 }
@@ -32,7 +38,7 @@ mod schema;
 
 use repositories::user_repository::UserRepository;
 
-use handlers::auth_handlers::{register, login, get_users, delete_user, verify_user};
+use handlers::auth_handlers::{register, login, get_users, delete_user, verify_user, broadcast_message};
 use handlers::profile_handlers::{get_profile, update_profile, increase_iq, reset_iq, update_notify_credits};
 use api::vapi_endpoints::{vapi_server, handle_phone_call_event, handle_phone_call_event_print};
 
@@ -61,11 +67,19 @@ pub fn validate_env() {
     let _ = std::env::var("ASSISTANT_ID")
         .expect("ASSISTANT_ID must be set");
     let _ = std::env::var("VAPI_SERVER_URL_SECRET")
-    .expect("VAPI_SERVER_URL_SECRET must be set");
+        .expect("VAPI_SERVER_URL_SECRET must be set");
     let _ = std::env::var("FIN_PHONE")
-    .expect("FIN_PHONE must be set");
+        .expect("FIN_PHONE must be set");
     let _ = std::env::var("USA_PHONE")
-    .expect("USA_PHONE must be set");
+        .expect("USA_PHONE must be set");
+    let _ = std::env::var("NLD_PHONE")
+        .expect("NLD_PHONE must be set");
+    let _ = std::env::var("CHZ_PHONE")
+        .expect("CHZ_PHONE must be set");
+    let _ = std::env::var("TWILIO_ACCOUNT_SID")
+        .expect("TWILIO_ACCOUNT_SID must be set");
+    let _ = std::env::var("TWILIO_AUTH_TOKEN")
+        .expect("TWILIO_AUTH_TOKEN must be set");
 
 }
 
@@ -114,6 +128,7 @@ async fn main() {
         .route("/api/register", post(register))
         .route("/api/admin/users", get(get_users))
         .route("/api/admin/verify/:user_id", post(verify_user))
+        .route("/api/admin/broadcast", post(broadcast_message))
         .route("/api/profile/update", post(update_profile))
         .route("/api/profile", get(get_profile))
         .route("/api/profile/delete/:user_id", delete(delete_user))
