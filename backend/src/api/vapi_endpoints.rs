@@ -417,7 +417,7 @@ pub async fn handle_phone_call_event(
 
 
 
-pub async fn ask_perplexity(message: &str) -> Result<String, reqwest::Error> {
+pub async fn ask_perplexity(message: &str) -> Result<String, Box<dyn Error>> {
     let api_key = std::env::var("PERPLEXITY_API_KEY").expect("PERPLEXITY_API_KEY must be set");
     let client = reqwest::Client::new();
     
@@ -426,7 +426,18 @@ pub async fn ask_perplexity(message: &str) -> Result<String, reqwest::Error> {
         "messages": [
                 {
                     "role": "system",
-                    "content": "You are assisting an AI voice calling service. The questions you receive are from voice conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read aloud 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. Use natural language sentence structure 5. When listing multiple points, use simple numbering (1, 2, 3) or natural language transitions (First... Second... Finally...) 6. Focus on the most relevant information that addresses the user's immediate needs 7. If specific numbers, dates, or proper names are important, spell them out clearly 8. Format numerical data in a way that's easy to read aloud (e.g., twenty-five percent instead of 25%) Your responses will be incorporated into a voice conversation, so clarity and natural flow are essential."
+                    "content": "Olet avustamassa tekoälyyn perustuvaa puhelinpalvelua. Saamasi kysymykset tulevat äänipuheluista, joissa käyttäjät etsivät tietoa tai apua. Huomioi seuraavat asiat:
+
+1. Anna selkeitä, keskustelunomaisia vastauksia, jotka on helppo lukea ääneen
+2. Vältä markdown-, HTML- tai muiden merkintäkielien käyttöä
+3. Pidä vastaukset ytimekkäinä mutta informatiivisina
+4. Käytä luonnollista kieltä ja lauserakennetta
+5. Kun luettelet useita kohtia, käytä yksinkertaista numerointia (1, 2, 3) tai luonnollisia siirtymäsanoja (Ensiksi... Toiseksi... Lopuksi...)
+6. Keskity olennaisimpaan tietoon, joka vastaa käyttäjän välittömiin tarpeisiin
+7. Jos tietyt numerot, päivämäärät tai erisnimet ovat tärkeitä, kirjoita ne selkeästi auki
+8. Muotoile numeeriset tiedot helposti ääneen luettavaan muotoon (esimerkiksi kaksikymmentäviisi prosenttia eikä 25%)
+
+Vastauksesi sisällytetään äänipuheluun, joten selkeys ja luonnollinen eteneminen ovat olennaisia."
                 },
                 {
                     "role": "user",
@@ -434,6 +445,7 @@ pub async fn ask_perplexity(message: &str) -> Result<String, reqwest::Error> {
                 },
         ]
     });
+    let prompt = "You are assisting an AI voice calling service. The questions you receive are from voice conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read aloud 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. Use natural language sentence structure 5. When listing multiple points, use simple numbering (1, 2, 3) or natural language transitions (First... Second... Finally...) 6. Focus on the most relevant information that addresses the user's immediate needs 7. If specific numbers, dates, or proper names are important, spell them out clearly 8. Format numerical data in a way that's easy to read aloud (e.g., twenty-five percent instead of 25%) Your responses will be incorporated into a voice conversation, so clarity and natural flow are essential.";
 
     let response = client
         .post("https://api.perplexity.ai/chat/completions")
@@ -444,7 +456,21 @@ pub async fn ask_perplexity(message: &str) -> Result<String, reqwest::Error> {
         .send()
         .await?;
 
-    let result = response.text().await?;
-    println!("{}", result);
-    Ok(result)
+    let response_text = response.text().await?;
+    println!("Raw response: {}", response_text);
+    
+    // Parse the JSON response
+    let response_json: Value = serde_json::from_str(&response_text)?;
+    
+    // Extract the assistant's message content
+    let content = response_json
+        .get("choices")
+        .and_then(|choices| choices.get(0))
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(|content| content.as_str())
+        .ok_or("Failed to extract message content")?;
+
+    println!("Extracted content: {}", content);
+    Ok(content.to_string())
 }
