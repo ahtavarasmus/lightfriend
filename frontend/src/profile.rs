@@ -457,7 +457,7 @@
                                             </span>
                                         </div>
                                         {
-                                            if user_profile.iq == 0 {
+                                            if user_profile.iq <= 0 {
                                                 let onclick = {
                                                     let profile = profile.clone();
                                                     let error = error.clone();
