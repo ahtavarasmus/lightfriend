@@ -39,7 +39,7 @@ mod schema;
 use repositories::user_repository::UserRepository;
 
 use handlers::auth_handlers::{register, login, get_users, delete_user, verify_user, broadcast_message};
-use handlers::profile_handlers::{get_profile, update_profile, increase_iq, reset_iq, update_notify_credits};
+use handlers::profile_handlers::{get_profile, update_profile, increase_iq, reset_iq, update_notify_credits, update_preferred_number};
 use api::vapi_endpoints::{vapi_server, handle_phone_call_event, handle_phone_call_event_print};
 
 type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
@@ -130,6 +130,7 @@ async fn main() {
         .route("/api/admin/verify/:user_id", post(verify_user))
         .route("/api/admin/broadcast", post(broadcast_message))
         .route("/api/profile/update", post(update_profile))
+        .route("/api/profile/preferred-number", post(update_preferred_number))
         .route("/api/profile", get(get_profile))
         .route("/api/profile/delete/:user_id", delete(delete_user))
         .route("/api/profile/increase-iq/:user_id", post(increase_iq))

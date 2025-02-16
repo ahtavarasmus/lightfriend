@@ -7,6 +7,11 @@ use yew_router::prelude::*;
 use crate::Route;
 use chrono::{DateTime, Utc, TimeZone};
 
+#[derive(Serialize)]
+struct BroadcastMessage {
+    message: String,
+}
+
 #[derive(Deserialize, Clone, Debug)]
 struct UserInfo {
     id: i32,
@@ -33,6 +38,7 @@ pub fn Admin() -> Html {
     let users = use_state(|| Vec::new());
     let error = use_state(|| None::<String>);
     let selected_user_id = use_state(|| None::<i32>);
+    let message = use_state(|| String::new());
 
     // Clone state handles for the effect
     let users_effect = users.clone();
@@ -96,6 +102,73 @@ pub fn Admin() -> Html {
                     <Link<Route> to={Route::Home} classes="back-link">
                         {"Back to Home"}
                     </Link<Route>>
+                </div>
+                
+                <div class="broadcast-section">
+                    <h2>{"Broadcast Message"}</h2>
+                    <textarea
+                        value={(*message).clone()}
+                        onchange={{
+                            let message = message.clone();
+                            Callback::from(move |e: Event| {
+                                let input: web_sys::HtmlTextAreaElement = e.target_unchecked_into();
+                                message.set(input.value());
+                            })
+                        }}
+                        placeholder="Enter message to broadcast..."
+                        class="broadcast-textarea"
+                    />
+                    <button
+                        onclick={{
+                            let message = message.clone();
+                            let error = error.clone();
+                            Callback::from(move |_| {
+                                let message = message.clone();
+                                let error = error.clone();
+                                
+                                if message.is_empty() {
+                                    error.set(Some("Message cannot be empty".to_string()));
+                                    return;
+                                }
+                                
+                                wasm_bindgen_futures::spawn_local(async move {
+                                    if let Some(token) = window()
+                                        .and_then(|w| w.local_storage().ok())
+                                        .flatten()
+                                        .and_then(|storage| storage.get_item("token").ok())
+                                        .flatten()
+                                    {
+                                        let broadcast_message = BroadcastMessage {
+                                            message: (*message).clone(),
+                                        };
+                                        
+                                        match Request::post(&format!("{}/api/admin/broadcast", config::get_backend_url()))
+                                            .header("Authorization", &format!("Bearer {}", token))
+                                            .json(&broadcast_message)
+                                            .unwrap()
+                                            .send()
+                                            .await
+                                        {
+                                            Ok(response) => {
+                                                if response.ok() {
+                                                    message.set(String::new());
+                                                    error.set(Some("Message sent successfully".to_string()));
+                                                } else {
+                                                    error.set(Some("Failed to send message".to_string()));
+                                                }
+                                            }
+                                            Err(_) => {
+                                                error.set(Some("Failed to send request".to_string()));
+                                            }
+                                        }
+                                    }
+                                });
+                            })
+                        }}
+                        class="broadcast-button"
+                    >
+                        {"Send Broadcast"}
+                    </button>
                 </div>
 
                 {

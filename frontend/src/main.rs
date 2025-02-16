@@ -8,10 +8,14 @@ mod config;
 mod pages;
 mod admin;
 mod profile;
+mod verify;
 use pages::{
     home::Home,
     home::is_logged_in,
+    home::TermsAndConditions,
+    home::PrivacyPolicy,
 };
+use verify::Verify;
 use admin::Admin;
 use profile::Profile;
 
@@ -34,6 +38,12 @@ pub enum Route {
     Admin,
     #[at("/profile")]
     Profile,
+    #[at("/verify")]
+    Verify,
+    #[at("/terms")]
+    Terms,
+    #[at("/privacy")]
+    Privacy,
 }
 
 
@@ -58,6 +68,18 @@ fn switch(routes: Route) -> Html {
         Route::Profile => {
             info!("Rendering Profile page");
             html! { <Profile /> }
+        },
+        Route::Verify => {
+            info!("Rendering Verify page");
+            html! { <Verify /> }
+        },
+        Route::Terms => {
+            info!("Rendering Terms page");
+            html! { <TermsAndConditions /> }
+        },
+        Route::Privacy => {
+            info!("Rendering Privacy page");
+            html! { <PrivacyPolicy /> }
         },
     }
 }

@@ -34,12 +34,19 @@ pub struct VariableValues {
 pub struct Message {
     #[serde(rename = "type")]
     pub message_type: String,
+    #[serde(rename = "phoneNumber")]
+    pub assistant_number: Option<Number>,
     pub customer: Option<Customer>,
     #[serde(rename = "toolCalls")]
     pub tool_calls: Option<Vec<ToolCall>>,
     pub analysis: Option<CallAnalysis>,
     #[serde(rename = "durationSeconds")]
     pub duration_seconds: Option<f64>
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Number {
+    pub number: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -71,6 +78,10 @@ pub struct Function {
 impl MessageResponse {
     pub fn get_phone_number(&self) -> Option<String> {
         self.message.customer.as_ref().map(|c| c.number.clone())
+    }
+
+    pub fn get_assistant_number(&self) -> Option<String> {
+        self.message.assistant_number.as_ref().map(|n| n.number.clone())
     }
 
     pub fn get_request_type(&self) -> String {

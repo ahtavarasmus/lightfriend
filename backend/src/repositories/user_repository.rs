@@ -42,6 +42,14 @@ impl UserRepository {
         Ok(existing_user.is_some())
     }
 
+    pub fn update_preferred_number(&self, user_id: i32, preferred_number: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::preferred_number.eq(preferred_number))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
     // Create and insert a new user
     pub fn create_user(&self, new_user: NewUser) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");

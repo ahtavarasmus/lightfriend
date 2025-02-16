@@ -16,6 +16,6 @@ pub struct User {
     pub notify_credits: bool,
     pub locality: String,
     pub info: Option<String>,
-    pub latest_called_number: Option<String>,
+    pub preferred_number: Option<String>,
 }
 
