@@ -1068,7 +1068,7 @@ button[type="submit"].loading::after {
 
 .users-table th,
 .users-table td {
-    padding: 1rem;
+    padding: 0.8rem;
     text-align: left;
     border-bottom: 1px solid rgba(30, 144, 255, 0.1);
 }
@@ -1085,6 +1085,43 @@ button[type="submit"].loading::after {
 
 .users-table tbody tr:hover {
     background: rgba(30, 144, 255, 0.05);
+}
+
+.users-table tbody tr:hover {
+    background: rgba(30, 144, 255, 0.05);
+}
+
+.preferred-number-selector {
+    margin-top: 1rem;
+    margin-bottom: 1rem;
+}
+
+.preferred-number-selector select {
+    width: 100%;
+    padding: 0.75rem;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    border-radius: 8px;
+    color: #ffffff;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.preferred-number-selector select:hover {
+    border-color: rgba(30, 144, 255, 0.4);
+}
+
+.preferred-number-selector select:focus {
+    outline: none;
+    border-color: rgba(30, 144, 255, 0.6);
+    box-shadow: 0 0 0 2px rgba(30, 144, 255, 0.1);
+}
+
+.preferred-number-selector select option {
+    background: #1a1a1a;
+    color: #ffffff;
+    padding: 0.5rem;
 }
 
 .error-message {
@@ -1115,7 +1152,7 @@ button[type="submit"].loading::after {
     border-radius: 16px;
     padding: 3rem;
     width: 100%;
-    max-width: 600px;
+    max-width: 700px;
     backdrop-filter: blur(10px);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }

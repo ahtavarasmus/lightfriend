@@ -80,6 +80,7 @@ pub async fn get_users(
             verified: user.verified,
             iq: user.iq,
             notify_credits: user.notify_credits,
+            preferred_number: user.preferred_number,
         })
         .collect();
 
@@ -160,6 +161,78 @@ pub async fn broadcast_message(
         "message": "Broadcast completed",
         "success_count": success_count,
         "failed_count": failed_count
+    })))
+}
+
+pub async fn update_preferred_number_admin(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    axum::extract::Path(user_id): axum::extract::Path<i32>,
+    Json(preferred_number): Json<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Extract and validate token
+    let auth_header = headers.get("Authorization")
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| header.strip_prefix("Bearer "));
+
+    let token = match auth_header {
+        Some(token) => token,
+        None => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "No authorization token provided"}))
+        )),
+    };
+
+    // Decode JWT token
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+            .expect("JWT_SECRET_KEY must be set in environment")
+            .as_bytes()),
+        &Validation::new(Algorithm::HS256)
+    ) {
+        Ok(token_data) => token_data.claims,
+        Err(_) => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Invalid token"}))
+        )),
+    };
+
+    // Check if user is an admin
+    if !state.user_repository.is_admin(claims.sub).map_err(|e| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": format!("Database error: {}", e)}))
+    ))? {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Only admins can update preferred numbers"}))
+        ));
+    }
+
+    // Get allowed numbers from environment
+    let allowed_numbers = vec![
+        std::env::var("USA_PHONE").expect("USA_PHONE must be set in environment"),
+        std::env::var("FIN_PHONE").expect("FIN_PHONE must be set in environment"),
+        std::env::var("NLD_PHONE").expect("NLD_PHONE must be set in environment"),
+        std::env::var("CHZ_PHONE").expect("CHZ_PHONE must be set in environment"),
+    ];
+
+    // Validate that the preferred number is in the allowed list
+    if !allowed_numbers.contains(&preferred_number) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid preferred number"}))
+        ));
+    }
+
+    // Update the user's preferred number
+    state.user_repository.update_preferred_number(user_id, &preferred_number).map_err(|e| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": format!("Database error: {}", e)}))
+    ))?;
+
+    Ok(Json(json!({
+        "message": "Preferred number updated successfully"
     })))
 }
 

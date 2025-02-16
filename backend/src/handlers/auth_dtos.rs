@@ -48,6 +48,7 @@ pub struct UserResponse {
     pub verified: bool,
     pub iq: i32,
     pub notify_credits: bool,
+    pub preferred_number: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

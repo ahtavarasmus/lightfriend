@@ -13,6 +13,14 @@ struct BroadcastMessage {
 }
 
 #[derive(Deserialize, Clone, Debug)]
+struct PhoneNumbers {
+    usa: String,
+    fin: String,
+    nld: String,
+    chz: String,
+}
+
+#[derive(Deserialize, Clone, Debug)]
 struct UserInfo {
     id: i32,
     email: String,
@@ -22,6 +30,7 @@ struct UserInfo {
     verified: bool,
     iq: i32,
     notify_credits: bool,
+    preferred_number: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -39,6 +48,38 @@ pub fn Admin() -> Html {
     let error = use_state(|| None::<String>);
     let selected_user_id = use_state(|| None::<i32>);
     let message = use_state(|| String::new());
+    let phone_numbers = use_state(|| None::<PhoneNumbers>);
+
+    // Clone state handles for the phone numbers effect
+    let phone_numbers_effect = phone_numbers.clone();
+    
+    // Fetch phone numbers from environment
+    use_effect_with_deps(move |_| {
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Some(token) = window()
+                .and_then(|w| w.local_storage().ok())
+                .flatten()
+                .and_then(|storage| storage.get_item("token").ok())
+                .flatten()
+            {
+                match Request::get(&format!("{}/api/admin/phone-numbers", config::get_backend_url()))
+                    .header("Authorization", &format!("Bearer {}", token))
+                    .send()
+                    .await
+                {
+                    Ok(response) => {
+                        if response.ok() {
+                            if let Ok(numbers) = response.json::<PhoneNumbers>().await {
+                                phone_numbers_effect.set(Some(numbers));
+                            }
+                        }
+                    }
+                    Err(_) => {}
+                }
+            }
+        });
+        || ()
+    }, ());
 
     // Clone state handles for the effect
     let users_effect = users.clone();
@@ -167,7 +208,7 @@ pub fn Admin() -> Html {
                         }}
                         class="broadcast-button"
                     >
-                        {"Send Broadcast"}
+                        {"Send Broadcast(only works with admin)"}
                     </button>
                 </div>
 
@@ -189,7 +230,6 @@ pub fn Admin() -> Html {
                                                 <th>{"ID"}</th>
                                                 <th>{"Email"}</th>
                                             <th>{"IQ"}</th>
-                                            <th>{"Actions"}</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -201,22 +241,17 @@ pub fn Admin() -> Html {
                                                     
                                                     html! {
                                                         <>
-                                                            <tr key={user.id} class={classes!("user-row", is_selected.then(|| "selected"))}>
+                                                            <tr onclick={onclick} key={user.id} class={classes!("user-row", is_selected.then(|| "selected"))}>
                                                                 <td>{user.id}</td>
                                                                 <td>{&user.email}</td>
                                                                 <td>{user.iq}</td>
-                                                                <td>
-                                                                    <button onclick={onclick} class="details-button">
-                                                                        {if is_selected { "Hide Details" } else { "Show Details" }}
-                                                                    </button>
-                                                                </td>
                                                             </tr>
                                                             if is_selected {
                                                                 <tr class="details-row">
                                                                     <td colspan="4">
                                                                         <div class="user-details">
                                                                             <p><strong>{"Phone Number: "}</strong>{&user.phone_number}</p>
-                                                                            <p><strong>{"Time to Live: "}</strong>{
+                                                                            <p><strong>{"Joined at: "}</strong>{
                                                                                 user.time_to_live.map_or("N/A".to_string(), |ttl| {
                                                                                     Utc.timestamp_opt(ttl as i64, 0)
                                                                                         .single()
@@ -224,9 +259,9 @@ pub fn Admin() -> Html {
                                                                                         .unwrap_or_else(|| "Invalid timestamp".to_string())
                                                                                 })
                                                                             }</p>
-                                                                            <p><strong>{"Verified: "}</strong>{if user.verified { "Yes" } else { "No" }}</p>
-                                                                            <p><strong>{"Notify Credits: "}</strong>{if user.notify_credits { "Yes" } else { "No" }}</p>
-                                                                            <p><strong>{"Verified: "}</strong>{if user.verified { "Yes" } else { "No" }}</p>
+                                                                            <p><strong>{"Notify: "}</strong>{if user.notify_credits { "Yes" } else { "No" }}</p>
+                                                                            <p><strong>{"Preferred Number: "}</strong>{user.preferred_number.clone().unwrap_or_else(|| "Not set".to_string())}</p>
+                                                                            
                                                                         <button 
                                                                             onclick={{
                                                                                 let users = users.clone();
