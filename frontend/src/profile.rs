@@ -24,6 +24,7 @@
 
     #[derive(Serialize)]
     struct UpdateProfileRequest {
+        email: String,
         phone_number: String,
         nickname: String,
         info: String,
@@ -37,10 +38,11 @@
     
     #[function_component]
     pub fn Profile() -> Html {
-        let profile = use_state(|| None::<UserProfile>);
-        let phone_number = use_state(String::new);
-        let nickname = use_state(String::new);
-        let info = use_state(String::new);
+    let profile = use_state(|| None::<UserProfile>);
+    let email = use_state(String::new);
+    let phone_number = use_state(String::new);
+    let nickname = use_state(String::new);
+    let info = use_state(String::new);
         let error = use_state(|| None::<String>);
         let success = use_state(|| None::<String>);
         let is_editing = use_state(|| false);
@@ -67,12 +69,14 @@
 
         // Initialize phone_number state when profile is loaded
         {
+            let email = email.clone();
             let phone_number = phone_number.clone();
             let nickname = nickname.clone();
             let info = info.clone();
             let profile = profile.clone();
             use_effect_with_deps(move |profile| {
                 if let Some(user_profile) = (**profile).as_ref() {
+                    email.set(user_profile.email.clone());
                     phone_number.set(user_profile.phone_number.clone());
                     if let Some(nick) = &user_profile.nickname {
                         nickname.set(nick.clone());
@@ -134,6 +138,7 @@
         }
 
         let on_edit = {
+            let email = email.clone();
             let phone_number = phone_number.clone();
             let nickname = nickname.clone();
             let info = info.clone();
@@ -144,6 +149,7 @@
             let navigator = navigator.clone();
 
             Callback::from(move |_e: MouseEvent| {
+                let email_str = (*email).clone();
                 let phone = (*phone_number).clone();
                 let nick = (*nickname).clone();
                 let user_info = (*info).clone();
@@ -182,6 +188,7 @@
                         match Request::post(&format!("{}/api/profile/update", config::get_backend_url()))
                             .header("Authorization", &format!("Bearer {}", token))
                             .json(&UpdateProfileRequest { 
+                                email: email_str,
                                 phone_number: phone,
                                 nickname: nick,
                                 info: user_info,
@@ -224,7 +231,7 @@
                                         }
                                     }
                                 } else {
-                                    error.set(Some("Failed to update profile. Phone number already exists?".to_string()));
+                                    error.set(Some("Failed to update profile. Phone number/email already exists?".to_string()));
                                 }
                             }
                             Err(_) => {
@@ -288,7 +295,26 @@
                                 <div class="profile-info">
                                     <div class="profile-field">
                                         <span class="field-label">{"Email"}</span>
-                                        <span class="field-value">{&user_profile.email}</span>
+                                        {
+                                            if *is_editing {
+                                                html! {
+                                                    <input
+                                                        type="email"
+                                                        class="profile-input"
+                                                        value={(*email).clone()}
+                                                        placeholder="your@email.com"
+                                                        onchange={let email = email.clone(); move |e: Event| {
+                                                            let input: HtmlInputElement = e.target_unchecked_into();
+                                                            email.set(input.value());
+                                                        }}
+                                                    />
+                                                }
+                                            } else {
+                                                html! {
+                                                    <span class="field-value">{&user_profile.email}</span>
+                                                }
+                                            }
+                                        }
                                     </div>
                                     
                                     <div class="profile-field">
