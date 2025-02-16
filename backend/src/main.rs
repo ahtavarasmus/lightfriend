@@ -38,7 +38,7 @@ mod schema;
 
 use repositories::user_repository::UserRepository;
 
-use handlers::auth_handlers::{register, login, get_users, delete_user, verify_user, broadcast_message};
+use handlers::auth_handlers::{register, login, get_users, delete_user, verify_user, broadcast_message, update_preferred_number_admin};
 use handlers::profile_handlers::{get_profile, update_profile, increase_iq, reset_iq, update_notify_credits, update_preferred_number};
 use api::vapi_endpoints::{vapi_server, handle_phone_call_event, handle_phone_call_event_print};
 
@@ -128,6 +128,7 @@ async fn main() {
         .route("/api/register", post(register))
         .route("/api/admin/users", get(get_users))
         .route("/api/admin/verify/:user_id", post(verify_user))
+        .route("/api/admin/preferred-number/:user_id", post(update_preferred_number_admin))
         .route("/api/admin/broadcast", post(broadcast_message))
         .route("/api/profile/update", post(update_profile))
         .route("/api/profile/preferred-number", post(update_preferred_number))
