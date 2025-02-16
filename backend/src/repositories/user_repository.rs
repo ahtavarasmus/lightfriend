@@ -84,7 +84,7 @@ impl UserRepository {
             .find(user_id)
             .first::<User>(&mut conn)?;
 
-        Ok(user.email == "rasmus")
+        Ok(user.email == "rasmus@ahtava.com")
     }
     
     // Find a user by ID
