@@ -17,6 +17,7 @@ use crate::{
 
 #[derive(Deserialize)]
 pub struct UpdateProfileRequest {
+    email: String,
     phone_number: String,
     nickname: String,
     info: String,
@@ -395,12 +396,18 @@ pub async fn update_profile(
     }
 
     // Update user profile in database
-    match state.user_repository.update_profile(claims.sub, &update_req.phone_number, &update_req.nickname, &update_req.info) {
+    match state.user_repository.update_profile(claims.sub, &update_req.email, &update_req.phone_number, &update_req.nickname, &update_req.info) {
         Ok(_) => (),
         Err(DieselError::RollbackTransaction) => {
             return Err((
                 StatusCode::CONFLICT,
                 Json(json!({"error": "Phone number already exists"}))
+            ));
+        }
+        Err(DieselError::NotFound) => {
+            return Err((
+                StatusCode::CONFLICT,
+                Json(json!({"error": "Email already exists"}))
             ));
         }
         Err(e) => {
