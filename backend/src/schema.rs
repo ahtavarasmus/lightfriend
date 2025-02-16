@@ -13,6 +13,6 @@ diesel::table! {
         notify_credits -> Bool,
         locality -> Text,
         info -> Nullable<Text>,
-        latest_called_number -> Nullable<Text>,
+        preferred_number -> Nullable<Text>,
     }
 }

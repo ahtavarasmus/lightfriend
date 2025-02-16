@@ -198,6 +198,14 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
         match state.user_repository.find_by_phone_number(&phone_number) {
             Ok(Some(user)) => {
                 println!("User found for phone number: {}", phone_number);
+
+                if let Some(assistant_number) = event.get_assistant_number() {
+                    if let Err(e) = state.user_repository.update_preferred_number(user.id, &assistant_number) {
+                        println!("Error updating preferred number: {}", e);
+                    } else {
+                        println!("Successfully updated preferred number to: {}", assistant_number);
+                    }
+                }
                 
                 if user.verified {
                     let nickname = user.nickname.unwrap_or_else(|| "".to_string());

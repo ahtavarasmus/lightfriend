@@ -35,6 +35,7 @@ pub struct ProfileResponse {
     notify_credits: bool,
     local_phone_number: String,
     info: Option<String>,
+    preferred_number: Option<String>,
 }
 
 pub async fn get_profile(
@@ -102,6 +103,7 @@ pub async fn get_profile(
                 notify_credits: user.notify_credits,
                 local_phone_number: local_phone_number,
                 info: user.info,
+                preferred_number: user.preferred_number,
             }))
         }
         None => Err((
@@ -228,6 +230,71 @@ pub async fn increase_iq(
 pub struct NotifyCreditsRequest {
     notify: bool,
 }
+
+#[derive(Deserialize)]
+pub struct PreferredNumberRequest {
+    preferred_number: String,
+}
+
+pub async fn update_preferred_number(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<PreferredNumberRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Extract and validate token
+    let auth_header = headers.get("Authorization")
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| header.strip_prefix("Bearer "));
+
+    let token = match auth_header {
+        Some(token) => token,
+        None => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "No authorization token provided"}))
+        )),
+    };
+
+    // Decode JWT token
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+            .expect("JWT_SECRET_KEY must be set in environment")
+            .as_bytes()),
+        &Validation::new(Algorithm::HS256)
+    ) {
+        Ok(token_data) => token_data.claims,
+        Err(_) => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Invalid token"}))
+        )),
+    };
+    let allowed_numbers = vec![
+        std::env::var("USA_PHONE").expect("USA_PHONE must be set in environment"),
+        std::env::var("FIN_PHONE").expect("FIN_PHONE must be set in environment"),
+        std::env::var("NLD_PHONE").expect("NLD_PHONE must be set in environment"),
+        std::env::var("CHZ_PHONE").expect("CHZ_PHONE must be set in environment"),
+    ];
+
+    if !allowed_numbers.contains(&request.preferred_number) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid preferred number"}))
+        ));
+    }
+
+    // Update preferred number
+    state.user_repository.update_preferred_number(claims.sub, &request.preferred_number)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+    ))?;
+
+    println!("Updated preferred number to: {}", request.preferred_number);
+    Ok(Json(json!({
+        "message": "Preferred number updated successfully"
+    })))
+}
+
 
 pub async fn update_notify_credits(
     State(state): State<Arc<AppState>>,

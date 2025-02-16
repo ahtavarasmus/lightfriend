@@ -1,2 +1,2 @@
 -- This file should undo anything in `up.sql`
-ALTER TABLE users DROP COLUMN latest_called_number;
+ALTER TABLE users DROP COLUMN preferred_number;

@@ -7,6 +7,13 @@ pub mod home {
     use gloo_net::http::Request;
     use serde::Deserialize;
 
+    const PHONE_NUMBERS: &[(&str, &str)] = &[
+        ("us", "+18153684737"),
+        ("fin", "+358454901522"),
+        ("nl", "+3197006520696"),
+        ("cz", "+420910921902"),
+    ];
+
     #[derive(Deserialize, Clone)]
     struct UserProfile {
         id: i32,
@@ -19,6 +26,7 @@ pub mod home {
         iq: i32,
         notify_credits: bool,
         local_phone_number: String,
+        preferred_number: Option<String>,
     }
 
     pub fn is_logged_in() -> bool {
@@ -32,6 +40,149 @@ pub mod home {
         false
     }
 
+    #[function_component(PrivacyPolicy)]
+    pub fn privacy_policy() -> Html {
+        html! {
+            <div class="legal-content privacy-policy">
+                <h1>{"lightfriend Privacy Policy"}</h1>
+
+                <section>
+                    <h2>{"1. Introduction"}</h2>
+                    <p>{"This Privacy Policy outlines how lightfriend (\"we,\" \"our,\" or \"us\") collects, uses, and protects your personal information. By accessing or using our services, you agree to the terms described herein."}</p>
+                </section>
+
+                <section>
+                    <h2>{"2. Information We Collect"}</h2>
+                    <p>{"We may collect the following types of information:"}</p>
+                    <ul>
+                        <li>{"Personal Information: Such as your name, email address, and other contact details provided during account registration."}</li>
+                        <li>{"Usage Data: Information about your interactions with our services, including access times, pages viewed, and other related metrics."}</li>
+                        <li>{"Device Information: Details about the device you use to access our services, including hardware model, operating system, and unique device identifiers."}</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h2>{"3. How We Use Your Information"}</h2>
+                    <p>{"The information we collect is used to:"}</p>
+                    <ul>
+                        <li>{"Provide and Improve Services: Enhance user experience and develop new features."}</li>
+                        <li>{"Communication: Send updates, security alerts, and support messages."}</li>
+                        <li>{"Analytics: Monitor and analyze usage to ensure platform stability and performance."}</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h2>{"4. Sharing Your Information"}</h2>
+                    <p>{"We do not sell or rent your personal information. We may share data with:"}</p>
+                    <ul>
+                        <li>{"Service Providers: Trusted third parties that assist in operating our services, under strict confidentiality agreements."}</li>
+                        <li>{"Legal Obligations: When required by law or to protect our rights and users."}</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h2>{"5. Data Security"}</h2>
+                    <p>{"We implement industry-standard security measures to protect your data. However, no method of transmission over the internet is entirely secure, and we cannot guarantee absolute security."}</p>
+                </section>
+
+                <section>
+                    <h2>{"6. Data Retention"}</h2>
+                    <p>{"Personal data is retained only as long as necessary to fulfill the purposes outlined in this policy or as required by law."}</p>
+                </section>
+
+                <section>
+                    <h2>{"7. Your Rights"}</h2>
+                    <p>{"You have the right to:"}</p>
+                    <ul>
+                        <li>{"Access and Correction: Request access to your data and correct inaccuracies."}</li>
+                        <li>{"Deletion: Request the deletion of your data, subject to certain conditions."}</li>
+                        <li>{"Opt-Out: Unsubscribe from non-essential communications."}</li>
+                    </ul>
+                </section>
+
+                <section>
+                    <h2>{"8. Children's Privacy"}</h2>
+                    <p>{"Our services are not intended for individuals under the age of 13. We do not knowingly collect personal information from children under 13. If we become aware of such data, we will take steps to delete it."}</p>
+                </section>
+
+                <section>
+                    <h2>{"9. Changes to This Policy"}</h2>
+                    <p>{"We may update this policy periodically. Significant changes will be communicated via email or through our platform."}</p>
+                </section>
+
+                <section>
+                    <h2>{"10. Contact Us"}</h2>
+                    <p>
+                        {"For questions or concerns regarding this policy, please contact us at "}
+                        <a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>
+                    </p>
+                </section>
+            </div>
+        }
+    }
+
+    #[function_component(TermsAndConditions)]
+    pub fn terms_and_conditions() -> Html {
+        html! {
+            <div class="legal-content terms-and-conditions">
+                <h1>{"lightfriend Terms and Conditions"}</h1>
+    
+                <section>
+                    <h2>{"1. Introduction"}</h2>
+                    <p>{"These Terms and Conditions (\"Terms\") govern your use of the lightfriend platform (\"Service\"). By accessing or using our Service, you agree to comply with and be bound by these Terms."}</p>
+                </section>
+    
+                <section>
+                    <h2>{"2. User Accounts"}</h2>
+                    <p>{"To access certain features, you must create an account. You are responsible for maintaining the confidentiality of your account information and for all activities that occur under your account. lightfriend never has access to your passwords. Please do not provide your password to anyone claiming to be a representative of lightfriend, or any third party."}</p>
+                </section>
+    
+                <section>
+                    <h2>{"3. Acceptable Use"}</h2>
+                    <p>{"You agree not to use the Service for any unlawful purpose or in any way that could harm the Service or impair anyone else's use of it."}</p>
+                </section>
+    
+                <section>
+                    <h2>{"4. Intellectual Property"}</h2>
+                    <p>{"All content provided on the Service, including text, graphics, logos, and software, is the property of lightfriend or its content suppliers and is protected by intellectual property laws."}</p>
+                </section>
+    
+                <section>
+                    <h2>{"5. Termination"}</h2>
+                    <p>{"We reserve the right to suspend or terminate your access to the Service at our discretion, without notice, for conduct that we believe violates these Terms or is harmful to other users."}</p>
+                </section>
+    
+                <section>
+                    <h2>{"6. Limitation of Liability"}</h2>
+                    <p>{"The Service is provided \"as is\" without warranties of any kind. lightfriend will not be liable for any damages arising from the use or inability to use the Service."}</p>
+                </section>
+    
+                <section>
+                    <h2>{"7. Changes to Terms"}</h2>
+                    <p>{"We may update these Terms from time to time. Continued use of the Service after any such changes constitutes your acceptance of the new Terms."}</p>
+                </section>
+    
+                <section>
+                    <h2>{"8. Governing Law"}</h2>
+                    <p>{"These Terms are governed by and construed in accordance with the laws of the jurisdiction in which lightfriend operates, in Tampere, Finland."}</p>
+                </section>
+    
+                <section>
+                    <h2>{"9. Service Usage Policy"}</h2>
+                    <p>{"By using our platform, you agree to use the AI-powered voice and text assistance services responsibly. lightfriend is designed to provide smart tools for dumbphone users, including calendar access, email integration, messaging services, and Perplexity search capabilities. Users are responsible for using these features in accordance with applicable laws and regulations. The service should not be used for any malicious or harmful purposes that could compromise the platform's integrity or other users' experience."}</p>
+                </section>
+    
+                <section>
+                    <h2>{"10. Contact Us"}</h2>
+                    <p>
+                        {"For questions or concerns regarding these Terms, please contact us at "}
+                        <a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>
+                        {". GDPR and other international compliances are coming soon."}
+                    </p>
+                </section>
+            </div>
+        }
+    }
 
     #[function_component(Landing)]
     pub fn landing() -> Html {
@@ -134,6 +285,11 @@ pub mod home {
                             {"x.com/rasmuscodes"}
                         </a>
                         </p>
+                        <div class="legal-links">
+                            <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
+                            {" | "}
+                            <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
+                        </div>
                     </div>
                     </div>
                 </section>
@@ -164,8 +320,10 @@ pub mod home {
         let profile_data = use_state(|| None::<UserProfile>);
         let user_verified = use_state(|| true);
         let error = use_state(|| None::<String>);
+        let is_expanded = use_state(|| false);
+        let navigator = use_navigator().unwrap();
 
-        // Polling effect
+        // Single profile fetch effect
         {
             let profile_data = profile_data.clone();
             let user_verified = user_verified.clone();
@@ -176,150 +334,161 @@ pub mod home {
                 let user_verified = user_verified.clone();
                 let error = error.clone();
 
-                // Create a handle to store the interval
-                let interval_handle: std::rc::Rc<std::cell::RefCell<Option<gloo_timers::callback::Interval>>> = 
-                std::rc::Rc::new(std::cell::RefCell::new(None));
-                let interval_handle_clone = interval_handle.clone();
 
-                // Function to fetch profile
-                let fetch_profile = move || {
-                    let profile_data = profile_data.clone();
-                    let user_verified = user_verified.clone();
-                    let error = error.clone();
-let interval_handle = interval_handle.clone();
-
-                    gloo_console::log!("Fetching profile...");
-                    wasm_bindgen_futures::spawn_local(async move {
-                        if let Some(token) = window()
-                            .and_then(|w| w.local_storage().ok())
-                            .flatten()
-                            .and_then(|storage| storage.get_item("token").ok())
-                            .flatten()
+                wasm_bindgen_futures::spawn_local(async move {
+                    if let Some(token) = window()
+                        .and_then(|w| w.local_storage().ok())
+                        .flatten()
+                        .and_then(|storage| storage.get_item("token").ok())
+                        .flatten()
+                    {
+                        match Request::get(&format!("{}/api/profile", config::get_backend_url()))
+                            .header("Authorization", &format!("Bearer {}", token))
+                            .send()
+                            .await
                         {
-                            match Request::get(&format!("{}/api/profile", config::get_backend_url()))
-                                .header("Authorization", &format!("Bearer {}", token))
-                                .send()
-                                .await
-                            {
-                                Ok(response) => {
-                                    if response.status() == 401 {
-                                        if let Some(window) = window() {
-                                            if let Ok(Some(storage)) = window.local_storage() {
-                                                let _ = storage.remove_item("token");
-                                                let _ = window.location().set_href("/");
-                                            }
-                                        }
-                                        return;
-                                    }
-                                    
-                                    match response.json::<UserProfile>().await {
-                                        Ok(profile) => {
-                                            gloo_console::log!("Profile fetched successfully:", format!("verified: {}", profile.verified));
-                                            // Check if unverified profile has expired
-                                            if !profile.verified && profile.time_to_delete {
-                                                // Profile has expired, delete account and logout
-                                                //delete_unverified_account(profile.id, token.clone());
-                                                return;
-                                            }
-                                            
-                                            // If user becomes verified, clear the interval
-                                            if profile.verified {
-                                                if let Some(interval) = interval_handle.borrow_mut().take() {
-                                                    gloo_console::log!("User verified, stopping polling");
-                                                    drop(interval); // This will stop the interval
-                                                }
-                                            }
-                                            
-                                            user_verified.set(profile.verified);
-                                            profile_data.set(Some(profile));
-                                            error.set(None);
-                                        }
-                                        Err(_) => {
-                                            gloo_console::error!("Failed to parse profile data");
-                                            error.set(Some("Failed to parse profile data".to_string()));
+                            Ok(response) => {
+                                if response.status() == 401 {
+                                    if let Some(window) = window() {
+                                        if let Ok(Some(storage)) = window.local_storage() {
+                                            let _ = storage.remove_item("token");
+                                            let _ = window.location().set_href("/");
                                         }
                                     }
+                                    return;
                                 }
-                                Err(_) => {
-                                    gloo_console::error!("Failed to fetch profile");
-                                    error.set(Some("Failed to fetch profile".to_string()));
+                                
+                                match response.json::<UserProfile>().await {
+                                    Ok(profile) => {
+                                        if !profile.verified && profile.time_to_delete {
+                                            delete_unverified_account(profile.id, token);
+                                            return;
+                                        }
+                                        
+                                        user_verified.set(profile.verified);
+                                        profile_data.set(Some(profile));
+                                        error.set(None);
+                                    }
+                                    Err(_) => {
+                                        error.set(Some("Failed to parse profile data".to_string()));
+                                    }
                                 }
                             }
+                            Err(_) => {
+                                error.set(Some("Failed to fetch profile".to_string()));
+                            }
                         }
-                    });
-                };
-
-                // Initial fetch
-                fetch_profile();
-
-                
-                // Set up interval for polling
-                let interval = gloo_timers::callback::Interval::new(5000, move || {
-                    fetch_profile();
-                });
-
-                // Store the interval in our handle
-                *interval_handle_clone.borrow_mut() = Some(interval);
-
-                move || {
-                    // Clean up interval on component unmount
-                    if let Some(interval) = interval_handle_clone.borrow_mut().take() {
-                        drop(interval);
                     }
-                }
+                });
+                
+                || ()
             }, ());
         }
 
+        // If not logged in, show landing page
         if !logged_in {
             html! { <Landing /> }
+        } else if !*user_verified {
+            // If logged in but not verified, redirect to verify page
+            navigator.push(&Route::Verify);
+            html! {}
         } else {
-            if !*user_verified {
-                html! {
-                    <div class="verification-container">
-                        <div class="verification-panel">
-                            <h1>{"Verify Your Account"}</h1>
-                            <p>{"Call the one of the following numbers to verify your account"}</p>
-                                <div class="phone-number">{"us +18153684737"}</div >
-                                <div class="phone-number">{"fin +358454901522"}</div>
-                                <div class="phone-number">{"nl +3197006520696"}</div>
-                                <div class="phone-number">{"cz +420910921902"}</div >
-                            <div class="verification-status">
-                                <i class="verification-icon"></i>
-                                <span>{"Waiting for verification..."}</span>
-                            </div>
-                            <p class="instruction-text">
-                                {"Want a local phone number to call? Please send me an email(rasmus@ahtava.com) or telegram(@ahtavarasmus)"}
-                            </p>
-                            <p class="verification-help">
-                                <span>{"Having trouble? Make sure you typed your number correctly. You can change it in the profile."}</span>
-                                <Link<Route> to={Route::Profile}>
-                                    {"profile"}
-                                </Link<Route>>
-
-                            </p>
-                        </div>
-                    </div>
-                }
-            } else {
                 html! {
                     <div class="dashboard-container">
                         <div class="dashboard-panel">
                             <div class="panel-header">
-                                <h1 class="panel-title">{"Your lightfriend Dashboard"}</h1>
+                                <h1 class="panel-title">{"Dashboard"}</h1>
                             </div>
                             <div class="info-section">
                                 <h2 class="section-title">{"Your lightfriend is Ready!"}</h2>
-                                <div class="phone-display">
-                                    <div class="phone-number">{"us +18153684737"}</div >
-                                    <div class="phone-number">{"fin +358454901522"}</div>
-                                    <div class="phone-number">{"nl +3197006520696"}</div>
-                                    <div class="phone-number">{"cz +420910921902"}</div >
+                                 <div class="phone-selector">
+                                    <button 
+                                        class="selector-btn"
+                                        onclick={let is_expanded = is_expanded.clone(); 
+                                            move |_| is_expanded.set(!*is_expanded)}>
+                                        {
+                                            if let Some(profile) = (*profile_data).as_ref() {
+                                                if let Some(preferred) = &profile.preferred_number {
+                                                    format!("Your lightfriend's Number: {}", preferred)
+                                                } else {
+                                                    "Select Your lightfriend's Number".to_string()
+                                                }
+                                            } else {
+                                                "Select Your lightfriend's Number".to_string()
+                                            }
+                                        }
+                                    </button>
+                                    
+                                    if *is_expanded {
+                                        <div class="phone-display">
+                                            { PHONE_NUMBERS.iter().map(|(country, number)| {
+                                                let number = number.to_string();
+                                                let is_selected = if let Some(profile) = (*profile_data).as_ref() {
+                                                    profile.preferred_number.as_ref().map_or(false, |pref| pref == &number)
+                                                } else {
+                                                    false
+                                                };
+                                                
+                                                let onclick = {
+                                                    let number = number.clone();
+                                                    let profile_data = profile_data.clone();
+                                                    let is_expanded = is_expanded.clone();
+                                                    
+                                                    Callback::from(move |_| {
+                                                        let number = number.clone();
+                                                        let profile_data = profile_data.clone();
+                                                        
+                                                        if let Some(token) = window()
+                                                            .and_then(|w| w.local_storage().ok())
+                                                            .flatten()
+                                                            .and_then(|storage| storage.get_item("token").ok())
+                                                            .flatten()
+                                                        {
+                                                            wasm_bindgen_futures::spawn_local(async move {
+                                                                let response = Request::post(&format!("{}/api/profile/preferred-number", config::get_backend_url()))
+                                                                    .header("Authorization", &format!("Bearer {}", token))
+                                                                    .header("Content-Type", "application/json")
+                                                                    .body(format!("{{\"preferred_number\": \"{}\"}}", number))
+                                                                    .send()
+                                                                    .await;
+                                                                
+                                                                if let Ok(response) = response {
+                                                                    if response.status() == 200 {
+                                                                        if let Some(mut current_profile) = (*profile_data).clone() {
+                                                                            current_profile.preferred_number = Some(number);
+                                                                            profile_data.set(Some(current_profile));
+                                                                        }
+                                                                    }
+                                                                }
+                                                            });
+                                                        }
+                                                        is_expanded.set(false);
+                                                    })
+                                                };
+
+                                                html! {
+                                                    <div 
+                                                        class={classes!("phone-number-item", if is_selected { "selected" } else { "" })}
+                                                        onclick={onclick}
+                                                    >
+                                                        <div class="number-info">
+                                                            <span class="country">{country}</span>
+                                                            <span class="number">{number}</span>
+                                                            if is_selected {
+                                                                <span class="selected-indicator">{"✓"}</span>
+                                                            }
+                                                        </div>
+                                                    </div>
+                                                }
+                                            }).collect::<Html>() }
+                                        </div>
+                                    }
                                 </div>
+                                
                                 <p class="instruction-text">
-                                    {"Call these numbers to access your services."}
+                                    {"Select the best number for you above."}
                                     <br/>
                                     <br/>
-                                    {"If too expensive and want a another phone number to call please send me an email or message telegram(@ahtavarasmus) and we'll see what I can do."}
                                 </p>
                                 <div class="feature-status">
                                     <h3>{"Currently Available"}</h3>
@@ -354,12 +523,16 @@ let interval_handle = interval_handle.clone();
                                             {"x.com/rasmuscodes"}
                                         </a>
                                     </p>
+                                    <div class="legal-links">
+                                        <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
+                                        {" | "}
+                                        <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
+                                    </div>
                                 </div>
                             </footer>
                         </div>
                     </div>
                 </div>
-                }
             }
         }
     }
