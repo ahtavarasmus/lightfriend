@@ -236,6 +236,74 @@ pub async fn update_preferred_number_admin(
     })))
 }
 
+pub async fn set_preferred_number_default(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    axum::extract::Path(user_id): axum::extract::Path<i32>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Extract token from Authorization header
+    let auth_header = headers.get("Authorization")
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| header.strip_prefix("Bearer "));
+
+    let token = match auth_header {
+        Some(token) => token,
+        None => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "No authorization token provided"}))
+        )),
+    };
+
+    // Decode and validate JWT token
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+                    .expect("JWT_SECRET_KEY must be set in environment")
+                    .as_bytes()),
+        &Validation::new(Algorithm::HS256)
+    ) {
+        Ok(token_data) => token_data.claims,
+        Err(_) => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Invalid token"}))
+        )),
+    };
+
+    // Check if the user is admin
+    if !state.user_repository.is_admin(claims.sub).map_err(|e| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": format!("Database error: {}", e)}))
+    ))? {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Only admins can set preferred numbers"}))
+        ));
+    }
+
+    // Get the user's phone number
+    let user = state.user_repository.find_by_id(user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        ))?
+        .ok_or_else(|| (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "User not found"}))
+        ))?;
+
+    // Set the preferred number
+    match state.user_repository.set_preferred_number_to_default(user_id, &user.phone_number) {
+        Ok(preferred_number) => Ok(Json(json!({
+            "message": "Preferred number set successfully",
+            "preferred_number": preferred_number
+        }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to set preferred number: {}", e)}))
+        )),
+    }
+}
+
 pub async fn verify_user(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -563,9 +631,30 @@ pub async fn register(
         )
     })?;
 
-    println!("User registered successfully, generating tokens");
+    println!("User registered successfully, setting preferred number");
     
-    // Get the newly created user
+    // Get the newly created user to get their ID
+    let user = state.user_repository.find_by_email(&reg_req.email)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to retrieve user: {}", e)}))
+        ))?
+        .ok_or_else(|| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "User not found after registration"}))
+        ))?;
+
+    // Set preferred number
+    state.user_repository.set_preferred_number_to_default(user.id, &reg_req.phone_number)
+        .map_err(|e| {
+            println!("Failed to set preferred number: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Failed to set preferred number: {}", e) })),
+            )
+        })?;
+
+    println!("Preferred number set successfully, generating tokens");
     let user = state.user_repository.find_by_email(&reg_req.email)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,

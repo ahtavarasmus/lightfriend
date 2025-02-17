@@ -21,6 +21,7 @@ mod api {
     pub mod vapi_endpoints;
     pub mod vapi_dtos;
     pub mod twilio;
+    pub mod twilio_conversations;
 }
 
 mod config {
@@ -38,7 +39,7 @@ mod schema;
 
 use repositories::user_repository::UserRepository;
 
-use handlers::auth_handlers::{register, login, get_users, delete_user, verify_user, broadcast_message, update_preferred_number_admin};
+use handlers::auth_handlers::{register, login, get_users, delete_user, verify_user, broadcast_message, update_preferred_number_admin, set_preferred_number_default};
 use handlers::profile_handlers::{get_profile, update_profile, increase_iq, reset_iq, update_notify_credits, update_preferred_number};
 use api::vapi_endpoints::{vapi_server, handle_phone_call_event, handle_phone_call_event_print};
 
@@ -130,6 +131,7 @@ async fn main() {
         .route("/api/admin/verify/:user_id", post(verify_user))
         .route("/api/admin/preferred-number/:user_id", post(update_preferred_number_admin))
         .route("/api/admin/broadcast", post(broadcast_message))
+        .route("/api/admin/set-preferred-number-default/:user_id", post(set_preferred_number_default))
         .route("/api/profile/update", post(update_profile))
         .route("/api/profile/preferred-number", post(update_preferred_number))
         .route("/api/profile", get(get_profile))
