@@ -6,11 +6,14 @@
 
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
+use std::error::Error;
+use chrono::Local;
 use crate::{
-    models::user_models::User,
+    models::user_models::{User, Conversation, NewConversation},
     handlers::auth_dtos::NewUser,
-    schema::users,
+    schema::{users, conversations},
     DbPool,
+    api::twilio_conversations::setup_conversation,
 };
 
 pub struct UserRepository {
@@ -20,6 +23,46 @@ pub struct UserRepository {
 impl UserRepository {
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
+    }
+
+    pub fn set_preferred_number_to_default(&self, user_id: i32, phone_number: &str) -> Result<String, Box<dyn Error>> {
+        // Get all Twilio phone numbers from environment
+        let phone_numbers = [
+            ("FIN_PHONE", "+358"),
+            ("USA_PHONE", "+1"),
+            ("NLD_PHONE", "+31"),
+            ("CHZ_PHONE", "+420"),
+        ];
+
+        // Collect phone numbers into a HashMap for easier matching
+        let mut number_map = std::collections::HashMap::new();
+        for (env_key, prefix) in phone_numbers {
+            if let Ok(number) = std::env::var(env_key) {
+                number_map.insert(prefix, number);
+            }
+        }
+
+        // Validate phone number format
+        if !phone_number.starts_with('+') {
+            return Err("Invalid phone number format".into());
+        }
+
+        // Find the matching Twilio number based on the country code prefix
+        let preferred_number = phone_numbers.iter()
+            .find(|(_, prefix)| phone_number.starts_with(prefix))
+            .and_then(|(env_key, _)| std::env::var(env_key).ok())
+            .unwrap_or_else(|| {
+                // If no match is found, use the country code from the phone number to find a match
+                number_map
+                    .get("+358") // Default to Finnish number if no match
+                    .expect("FIN_PHONE not set")
+                    .clone()
+            });
+
+        // Update the user's preferred number in the database
+        self.update_preferred_number(user_id, &preferred_number)?;
+
+        Ok(preferred_number)
     }
 
     // Check if a email exists
@@ -197,4 +240,47 @@ impl UserRepository {
         Ok(())
     }
 
+    pub async fn create_conversation_for_user(&self, user: &User) -> Result<Conversation, Box<dyn Error>> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // If user doesn't have a preferred number, set one
+        if user.preferred_number.is_none() {
+            self.set_preferred_number_to_default(user.id, &user.phone_number)?;
+        }
+        
+        // Fetch the updated user
+        let updated_user = self.find_by_id(user.id)?.ok_or("User not found")?;
+        let (conv_sid, service_sid) = setup_conversation(&updated_user).await?;
+        
+        let new_conversation = NewConversation {
+            user_id: user.id,
+            conversation_sid: conv_sid,
+            service_sid: service_sid,
+            created_at: Local::now().timestamp() as i32,
+            active: true,
+        };
+
+        diesel::insert_into(conversations::table)
+            .values(&new_conversation)
+            .execute(&mut conn)?;
+
+        // Fetch and return the created conversation
+        let created_conversation = conversations::table
+            .filter(conversations::user_id.eq(user.id))
+            .order(conversations::id.desc())
+            .first(&mut conn)?;
+
+        Ok(created_conversation)
+    }
+
+    pub fn find_active_conversation(&self, user_id: i32) -> Result<Option<Conversation>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        use crate::schema::conversations::dsl::*;
+
+        conversations
+            .filter(user_id.eq(user_id))
+            .filter(active.eq(true))
+            .first(&mut conn)
+            .optional()
+    }
 }

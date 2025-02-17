@@ -1,5 +1,6 @@
 use diesel::prelude::*;
 use crate::schema::users;
+use crate::schema::conversations;
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = users)]
@@ -19,3 +20,24 @@ pub struct User {
     pub preferred_number: Option<String>,
 }
 
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = conversations)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct Conversation {
+    pub id: i32,
+    pub user_id: i32,
+    pub conversation_sid: String,
+    pub service_sid: String,
+    pub created_at: i32,
+    pub active: bool,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = conversations)]
+pub struct NewConversation {
+    pub user_id: i32,
+    pub conversation_sid: String,
+    pub service_sid: String,
+    pub created_at: i32,
+    pub active: bool,
+}
