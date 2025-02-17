@@ -9,12 +9,12 @@ mod pages;
 mod admin;
 mod profile;
 mod verify;
+mod termsprivacy;
 use pages::{
     home::Home,
     home::is_logged_in,
-    home::TermsAndConditions,
-    home::PrivacyPolicy,
 };
+use termsprivacy::{TermsAndConditions, PrivacyPolicy};
 use verify::Verify;
 use admin::Admin;
 use profile::Profile;
