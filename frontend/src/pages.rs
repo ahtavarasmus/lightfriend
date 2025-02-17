@@ -256,118 +256,117 @@ pub mod home {
                             <div class="panel-header">
                                 <h1 class="panel-title">{"Dashboard"}</h1>
                             </div>
-                            <div class="info-section">
-                                <h2 class="section-title">{"Your lightfriend is Ready!"}</h2>
-                                 <div class="phone-selector">
-                                    <button 
-                                        class="selector-btn"
-                                        onclick={let is_expanded = is_expanded.clone(); 
-                                            move |_| is_expanded.set(!*is_expanded)}>
-                                        {
-                                            if let Some(profile) = (*profile_data).as_ref() {
-                                                if let Some(preferred) = &profile.preferred_number {
-                                                    format!("Your lightfriend's Number: {}", preferred)
-                                                } else {
-                                                    "Select Your lightfriend's Number".to_string()
-                                                }
+                            <h2 class="section-title">{"Your lightfriend is Ready!"}</h2>
+                             <div class="phone-selector">
+                                <button 
+                                    class="selector-btn"
+                                    onclick={let is_expanded = is_expanded.clone(); 
+                                        move |_| is_expanded.set(!*is_expanded)}>
+                                    {
+                                        if let Some(profile) = (*profile_data).as_ref() {
+                                            if let Some(preferred) = &profile.preferred_number {
+                                                format!("Your lightfriend's Number: {}", preferred)
                                             } else {
                                                 "Select Your lightfriend's Number".to_string()
                                             }
+                                        } else {
+                                            "Select Your lightfriend's Number".to_string()
                                         }
-                                    </button>
-                                    
-                                    if *is_expanded {
-                                        <div class="phone-display">
-                                            { PHONE_NUMBERS.iter().map(|(country, number)| {
-                                                let number = number.to_string();
-                                                let is_selected = if let Some(profile) = (*profile_data).as_ref() {
-                                                    profile.preferred_number.as_ref().map_or(false, |pref| pref == &number)
-                                                } else {
-                                                    false
-                                                };
+                                    }
+                                </button>
+                                
+                                if *is_expanded {
+                                    <div class="phone-display">
+                                        { PHONE_NUMBERS.iter().map(|(country, number)| {
+                                            let number = number.to_string();
+                                            let is_selected = if let Some(profile) = (*profile_data).as_ref() {
+                                                profile.preferred_number.as_ref().map_or(false, |pref| pref == &number)
+                                            } else {
+                                                false
+                                            };
+                                            
+                                            let onclick = {
+                                                let number = number.clone();
+                                                let profile_data = profile_data.clone();
+                                                let is_expanded = is_expanded.clone();
                                                 
-                                                let onclick = {
+                                                Callback::from(move |_| {
                                                     let number = number.clone();
                                                     let profile_data = profile_data.clone();
-                                                    let is_expanded = is_expanded.clone();
                                                     
-                                                    Callback::from(move |_| {
-                                                        let number = number.clone();
-                                                        let profile_data = profile_data.clone();
-                                                        
-                                                        if let Some(token) = window()
-                                                            .and_then(|w| w.local_storage().ok())
-                                                            .flatten()
-                                                            .and_then(|storage| storage.get_item("token").ok())
-                                                            .flatten()
-                                                        {
-                                                            wasm_bindgen_futures::spawn_local(async move {
-                                                                let response = Request::post(&format!("{}/api/profile/preferred-number", config::get_backend_url()))
-                                                                    .header("Authorization", &format!("Bearer {}", token))
-                                                                    .header("Content-Type", "application/json")
-                                                                    .body(format!("{{\"preferred_number\": \"{}\"}}", number))
-                                                                    .send()
-                                                                    .await;
-                                                                
-                                                                if let Ok(response) = response {
-                                                                    if response.status() == 200 {
-                                                                        if let Some(mut current_profile) = (*profile_data).clone() {
-                                                                            current_profile.preferred_number = Some(number);
-                                                                            profile_data.set(Some(current_profile));
-                                                                        }
+                                                    if let Some(token) = window()
+                                                        .and_then(|w| w.local_storage().ok())
+                                                        .flatten()
+                                                        .and_then(|storage| storage.get_item("token").ok())
+                                                        .flatten()
+                                                    {
+                                                        wasm_bindgen_futures::spawn_local(async move {
+                                                            let response = Request::post(&format!("{}/api/profile/preferred-number", config::get_backend_url()))
+                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                .header("Content-Type", "application/json")
+                                                                .body(format!("{{\"preferred_number\": \"{}\"}}", number))
+                                                                .send()
+                                                                .await;
+                                                            
+                                                            if let Ok(response) = response {
+                                                                if response.status() == 200 {
+                                                                    if let Some(mut current_profile) = (*profile_data).clone() {
+                                                                        current_profile.preferred_number = Some(number);
+                                                                        profile_data.set(Some(current_profile));
                                                                     }
                                                                 }
-                                                            });
-                                                        }
-                                                        is_expanded.set(false);
-                                                    })
-                                                };
-
-                                                html! {
-                                                    <div 
-                                                        class={classes!("phone-number-item", if is_selected { "selected" } else { "" })}
-                                                        onclick={onclick}
-                                                    >
-                                                        <div class="number-info">
-                                                            <span class="country">{country}</span>
-                                                            <span class="number">{number}</span>
-                                                            if is_selected {
-                                                                <span class="selected-indicator">{"✓"}</span>
                                                             }
-                                                        </div>
+                                                        });
+                                                    }
+                                                    is_expanded.set(false);
+                                                })
+                                            };
+
+                                            html! {
+                                                <div 
+                                                    class={classes!("phone-number-item", if is_selected { "selected" } else { "" })}
+                                                    onclick={onclick}
+                                                >
+                                                    <div class="number-info">
+                                                        <span class="country">{country}</span>
+                                                        <span class="number">{number}</span>
+                                                        if is_selected {
+                                                            <span class="selected-indicator">{"✓"}</span>
+                                                        }
                                                     </div>
-                                                }
-                                            }).collect::<Html>() }
-                                        </div>
-                                    }
-                                </div>
+                                                </div>
+                                            }
+                                        }).collect::<Html>() }
+                                    </div>
+                                }
+                            </div>
+                            
+                            <p class="instruction-text">
+                                {"Select the best number for you above."}
+                                <br/>
+                                <br/>
+                            </p>
+                            <div class="feature-status">
+                                <h3>{"Currently Available"}</h3>
+                                <ul>
+                                    <li>{"Perplexity AI search through voice calls"}</li>
+                                    <li>{"Adding more IQ(credits) for free in the profile(when you ran out)"}</li>
+                                </ul>
                                 
-                                <p class="instruction-text">
-                                    {"Select the best number for you above."}
-                                    <br/>
-                                    <br/>
+                                <h3>{"Coming Soon"}</h3>
+                                <ul>
+                                    <li>{"Purchase additional IQ(credits)"}</li>
+                                    <li>{"Text messaging support"}</li>
+                                    <li>{"WhatsApp and Telegram integration"}</li>
+                                    <li>{"Reminder setting"}</li>
+                                    <li>{"Email and calendar integration"}</li>
+                                    <li>{"Camera functionality for photo translation and more"}</li>
+                                </ul>
+                                
+                                <p class="feature-suggestion">
+                                    {"Have a feature in mind? Email your suggestions to "}
+                                    <a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>
                                 </p>
-                                <div class="feature-status">
-                                    <h3>{"Currently Available"}</h3>
-                                    <ul>
-                                        <li>{"Perplexity AI search through voice calls"}</li>
-                                        <li>{"Adding more IQ(credits) for free in the profile(when you ran out)"}</li>
-                                    </ul>
-                                    
-                                    <h3>{"Coming Soon"}</h3>
-                                    <ul>
-                                        <li>{"Purchase additional IQ(credits)"}</li>
-                                        <li>{"Text messaging support"}</li>
-                                        <li>{"WhatsApp and Telegram integration"}</li>
-                                        <li>{"Reminder setting"}</li>
-                                        <li>{"Email and calendar integration"}</li>
-                                        <li>{"Camera functionality for photo translation and more"}</li>
-                                    </ul>
-                                    
-                                    <p class="feature-suggestion">
-                                        {"Have a feature in mind? Email your suggestions to "}
-                                        <a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>
-                                    </p>
                             </div>
                             <footer class="dashboard-footer">
                                 <div class="development-links">
@@ -387,7 +386,6 @@ pub mod home {
                                     </div>
                                 </div>
                             </footer>
-                        </div>
                     </div>
                 </div>
             }
