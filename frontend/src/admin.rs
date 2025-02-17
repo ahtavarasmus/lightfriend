@@ -4,8 +4,10 @@ use crate::config;
 use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
 use yew_router::prelude::*;
+use serde_json::json;
 use crate::Route;
 use chrono::{DateTime, Utc, TimeZone};
+use wasm_bindgen::JsCast;
 
 #[derive(Serialize)]
 struct BroadcastMessage {
@@ -260,7 +262,9 @@ pub fn Admin() -> Html {
                                                                                 })
                                                                             }</p>
                                                                             <p><strong>{"Notify: "}</strong>{if user.notify_credits { "Yes" } else { "No" }}</p>
-                                                                            <p><strong>{"Preferred Number: "}</strong>{user.preferred_number.clone().unwrap_or_else(|| "Not set".to_string())}</p>
+                                                                            <div class="preferred-number-section">
+                                                                                <p><strong>{"Current Preferred Number: "}</strong>{user.preferred_number.clone().unwrap_or_else(|| "Not set".to_string())}</p>
+                                                                            </div>
                                                                             
                                                                         <button 
                                                                             onclick={{
