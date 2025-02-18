@@ -9,7 +9,7 @@ use serde_json::json;
 use jsonwebtoken::{encode, decode, Header, EncodingKey, DecodingKey, Validation, Algorithm};
 use chrono::{Duration, Utc};
 use serde::Deserialize;
-use crate::api::twilio;
+use crate::api::twilio_sms;
 use crate::config::phone_numbers;
 
 #[derive(Deserialize)]
@@ -151,10 +151,10 @@ pub async fn broadcast_message(
             }
         };
 
-        match twilio::send_message(&user.phone_number, &request.message, &sender_number).await {
-            Ok(_) => success_count += 1,
-            Err(_) => failed_count += 1,
-        }
+        //match twilio_sms::send_sms(&user.phone_number, &request.message, &sender_number).await {
+        //    Ok(_) => success_count += 1,
+        //    Err(_) => failed_count += 1,
+        //}
     }
 
     Ok(Json(json!({
