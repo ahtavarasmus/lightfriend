@@ -58,5 +58,19 @@ impl UserConversations {
             .first(&mut conn)
             .optional()
     }
+
+    pub async fn ensure_conversation_exists(
+        &self,
+        user: &User,
+        twilio_number: Option<String>
+    ) -> Result<Conversation, Box<dyn Error>> {
+        // First check if an active conversation exists
+        if let Some(conversation) = self.find_active_conversation(user.id)? {
+            return Ok(conversation);
+        }
+
+        // If no active conversation exists, create a new one
+        self.create_conversation_for_user(user, twilio_number).await
+    }
 }
 
