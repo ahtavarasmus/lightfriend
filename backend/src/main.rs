@@ -88,7 +88,8 @@ pub fn validate_env() {
         .expect("TWILIO_ACCOUNT_SID must be set");
     let _ = std::env::var("TWILIO_AUTH_TOKEN")
         .expect("TWILIO_AUTH_TOKEN must be set");
-
+    let _ = std::env::var("GROQ_API_KEY")
+        .expect("GROQ_API_KEY must be set");
 }
 
 #[tokio::main]
