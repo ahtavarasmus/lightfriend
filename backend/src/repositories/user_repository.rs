@@ -1,19 +1,13 @@
 
-
-
-
-
-
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use std::error::Error;
-use chrono::Local;
+
 use crate::{
-    models::user_models::{User, Conversation, NewConversation},
+    models::user_models::User,
     handlers::auth_dtos::NewUser,
-    schema::{users, conversations},
+    schema::users,
     DbPool,
-    api::twilio_conversations::setup_conversation,
 };
 
 pub struct UserRepository {
@@ -240,47 +234,5 @@ impl UserRepository {
         Ok(())
     }
 
-    pub async fn create_conversation_for_user(&self, user: &User) -> Result<Conversation, Box<dyn Error>> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // If user doesn't have a preferred number, set one
-        if user.preferred_number.is_none() {
-            self.set_preferred_number_to_default(user.id, &user.phone_number)?;
-        }
-        
-        // Fetch the updated user
-        let updated_user = self.find_by_id(user.id)?.ok_or("User not found")?;
-        let (conv_sid, service_sid) = setup_conversation(&updated_user).await?;
-        
-        let new_conversation = NewConversation {
-            user_id: user.id,
-            conversation_sid: conv_sid,
-            service_sid: service_sid,
-            created_at: Local::now().timestamp() as i32,
-            active: true,
-        };
 
-        diesel::insert_into(conversations::table)
-            .values(&new_conversation)
-            .execute(&mut conn)?;
-
-        // Fetch and return the created conversation
-        let created_conversation = conversations::table
-            .filter(conversations::user_id.eq(user.id))
-            .order(conversations::id.desc())
-            .first(&mut conn)?;
-
-        Ok(created_conversation)
-    }
-
-    pub fn find_active_conversation(&self, user_id: i32) -> Result<Option<Conversation>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        use crate::schema::conversations::dsl::*;
-
-        conversations
-            .filter(user_id.eq(user_id))
-            .filter(active.eq(true))
-            .first(&mut conn)
-            .optional()
-    }
 }

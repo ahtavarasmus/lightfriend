@@ -20,8 +20,8 @@ mod handlers {
 mod api {
     pub mod vapi_endpoints;
     pub mod vapi_dtos;
-    pub mod twilio;
-    pub mod twilio_conversations;
+    pub mod twilio_sms;
+    pub mod twilio_utils;
 }
 
 mod config {
@@ -33,15 +33,21 @@ mod models {
 }
 mod repositories {
     pub mod user_repository;
+    pub mod user_conversations;
 }
 mod schema;
 
 
 use repositories::user_repository::UserRepository;
+use repositories::user_conversations::UserConversations;
 
-use handlers::auth_handlers::{register, login, get_users, delete_user, verify_user, broadcast_message, update_preferred_number_admin, set_preferred_number_default};
-use handlers::profile_handlers::{get_profile, update_profile, increase_iq, reset_iq, update_notify_credits, update_preferred_number};
-use api::vapi_endpoints::{vapi_server, handle_phone_call_event, handle_phone_call_event_print};
+use handlers::auth_handlers;
+use handlers::profile_handlers;
+use api::vapi_endpoints;
+use api::twilio_sms;
+
+
+
 
 type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
 
@@ -52,6 +58,7 @@ async fn health_check() -> &'static str {
 pub struct AppState {
     db_pool: DbPool,
     user_repository: Arc<UserRepository>,
+    user_conversations: Arc<UserConversations>,
 }
 
 pub fn validate_env() {
@@ -108,38 +115,42 @@ async fn main() {
         .expect("Failed to create pool");
 
     let user_repository = Arc::new(UserRepository::new(pool.clone()));
+    let user_conversations = Arc::new(UserConversations::new(pool.clone()));
 
     let _conn = &mut pool.get().expect("Failed to get DB connection");
 
     let state = Arc::new(AppState {
         db_pool: pool,
         user_repository,
+        user_conversations,
     });
 
     // Create a router for VAPI routes with secret validation
     let vapi_routes = Router::new()
-        .route("/api/server", post(handle_phone_call_event))
-        .route_layer(middleware::from_fn(api::vapi_endpoints::validate_vapi_secret));
-
+        .route("/api/server", post(vapi_endpoints::handle_phone_call_event))
+        .route_layer(middleware::from_fn(vapi_endpoints::validate_vapi_secret));
+    let twilio_routes = Router::new()
+        .route("/api/sms/server", post(twilio_sms::handle_incoming_sms));
 
     // Create router with CORS
     let app = Router::new()
         .route("/api/health", get(health_check))
-        .route("/api/login", post(login))
-        .route("/api/register", post(register))
-        .route("/api/admin/users", get(get_users))
-        .route("/api/admin/verify/:user_id", post(verify_user))
-        .route("/api/admin/preferred-number/:user_id", post(update_preferred_number_admin))
-        .route("/api/admin/broadcast", post(broadcast_message))
-        .route("/api/admin/set-preferred-number-default/:user_id", post(set_preferred_number_default))
-        .route("/api/profile/update", post(update_profile))
-        .route("/api/profile/preferred-number", post(update_preferred_number))
-        .route("/api/profile", get(get_profile))
-        .route("/api/profile/delete/:user_id", delete(delete_user))
-        .route("/api/profile/increase-iq/:user_id", post(increase_iq))
-        .route("/api/profile/reset-iq/:user_id", post(reset_iq))
-        .route("/api/profile/notify-credits/:user_id", post(update_notify_credits))
+        .route("/api/login", post(auth_handlers::login))
+        .route("/api/register", post(auth_handlers::register))
+        .route("/api/admin/users", get(auth_handlers::get_users))
+        .route("/api/admin/verify/:user_id", post(auth_handlers::verify_user))
+        .route("/api/admin/preferred-number/:user_id", post(auth_handlers::update_preferred_number_admin))
+        .route("/api/admin/broadcast", post(auth_handlers::broadcast_message))
+        .route("/api/admin/set-preferred-number-default/:user_id", post(auth_handlers::set_preferred_number_default))
+        .route("/api/profile/update", post(profile_handlers::update_profile))
+        .route("/api/profile/preferred-number", post(profile_handlers::update_preferred_number))
+        .route("/api/profile", get(profile_handlers::get_profile))
+        .route("/api/profile/delete/:user_id", delete(auth_handlers::delete_user))
+        .route("/api/profile/increase-iq/:user_id", post(profile_handlers::increase_iq))
+        .route("/api/profile/reset-iq/:user_id", post(profile_handlers::reset_iq))
+        .route("/api/profile/notify-credits/:user_id", post(profile_handlers::update_notify_credits))
         .merge(vapi_routes)
+        .merge(twilio_routes)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
