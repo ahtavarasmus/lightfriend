@@ -1,6 +1,91 @@
 use yew::prelude::*;
 use yew_router::prelude::*;
 use crate::Route;
+
+#[function_component(Pricing)]
+pub fn pricing() -> Html {
+    html! {
+        <div class="pricing-container">
+            <div class="pricing-header">
+                <h1>{"Simple, Usage-Based Pricing"}</h1>
+                <p>{"Pay only for what you use. No subscriptions, no commitments."}</p>
+            </div>
+
+            <div class="pricing-grid">
+                <div class="pricing-card main">
+                    <div class="card-header">
+                        <h3>{"Voice Calls"}</h3>
+                        <div class="price">
+                            <span class="amount">{"€0.20"}</span>
+                            <span class="period">{"/minute"}</span>
+                        </div>
+                    </div>
+                    <ul>
+                        <li>{"High-quality AI assistant voice calls"}</li>
+                        <li>{"All the tools available"}</li>
+                        <li>{"No logging, fully private"}</li>
+                        <li>{"24/7 availability"}</li>
+                    </ul>
+                </div>
+
+                <div class="pricing-card main">
+                    <div class="card-header">
+                        <h3>{"SMS Messages"}</h3>
+                        <div class="price">
+                            <span class="amount">{"€0.20"}</span>
+                            <span class="period">{"/message"}</span>
+                        </div>
+                    </div>
+                    <ul>
+                        <li>{"AI assistant chat responses"}</li>
+                        <li>{"All the tools available"}</li>
+                        <li>{"Message history, only on your device locally"}</li>
+                        <li>{"24/7 availability"}</li>
+                    </ul>
+                </div>
+
+                <div class="pricing-card features">
+                    <div class="card-header">
+                        <h3>{"Included Features"}</h3>
+                    </div>
+                    <ul>
+                        <li>{"Smart AI Assistant"}</li>
+                        <li>{"Calendar Integration"}</li>
+                        <li>{"WhatsApp Integration"}</li>
+                        <li>{"Telegram Integration"}</li>
+                        <li>{"Email Access"}</li>
+                        <li>{"Perplexity Search"}</li>
+                        <li>{"24/7 Availability"}</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="pricing-faq">
+                <h2>{"Common Questions"}</h2>
+                <div class="faq-grid">
+                    <div class="faq-item">
+                        <h3>{"How does billing work?"}</h3>
+                        <p>{"You'll be billed monthly based on your actual usage of voice calls and SMS messages. No minimum fees or hidden charges."}</p>
+                    </div>
+                    <div class="faq-item">
+                        <h3>{"Are there any hidden fees?"}</h3>
+                        <p>{"No hidden fees. You only pay for the calls and messages you make. All features are included at no extra cost."}</p>
+                    </div>
+                    <div class="faq-item">
+                        <h3>{"What about refunds?"}</h3>
+                        <p>{"Due to the pay-as-you-go nature of our service, we don't offer refunds. You're only charged for services you actually use."}</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="legal-links">
+                <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
+                {" | "}
+                <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
+            </div>
+        </div>
+    }
+}
 #[function_component(PrivacyPolicy)]
 pub fn privacy_policy() -> Html {
     html! {
@@ -14,7 +99,6 @@ pub fn privacy_policy() -> Html {
                     <li>{"Phone number (for service access and user identification)"}</li>
                     <li>{"Email address (for account recovery and identification)"}</li>
                     <li>{"User-provided profile information (for AI assistant personalization)"}</li>
-                    <li>{"Usage data related to calling and texting features"}</li>
                 </ul>
             </section>
 
@@ -89,6 +173,7 @@ pub fn terms_and_conditions() -> Html {
     html! {
         <div class="legal-content terms-and-conditions">
             <h1>{"lightfriend Terms and Conditions"}</h1>
+            <p class="company-name">{"Provided by Rasmus Multiverse"}</p>
 
             <section>
                 <h2>{"1. Introduction"}</h2>
@@ -107,12 +192,13 @@ pub fn terms_and_conditions() -> Html {
             </section>
 
             <section>
-                <h2>{"3. Billing and Payments"}</h2>
-                <h3>{"Usage-Based Billing"}</h3>
+                <h2>{"3. Billing, Payments, and Refund Policy"}</h2>
+                <h3>{"Usage-Based Billing and No Refunds Policy"}</h3>
                 <ul>
                     <li>{"The Service operates on a usage-based billing model where charges are calculated based on your monthly usage of calling and texting features."}</li>
                     <li>{"Usage is measured and billed monthly based on actual consumption of the Service's features."}</li>
                     <li>{"You will be automatically billed on a monthly basis for the services consumed."}</li>
+                    <li>{"Due to the nature of our service and its operational costs, we do not offer refunds. You are only charged for the services you actually use."}</li>
                     <li>{"Detailed usage information and billing history can be accessed through your account profile billing section."}</li>
                 </ul>
 

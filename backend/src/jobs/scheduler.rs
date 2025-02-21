@@ -3,10 +3,9 @@ use std::sync::Arc;
 use diesel::prelude::*;
 use tracing::{info, error};
 use crate::AppState;
-use crate::models::user_models::{Call, ElevenLabsResponse};
+use crate::models::user_models::ElevenLabsResponse;
 use crate::schema::users;
 
-use crate::schema::calls;
 use std::env;
 
 pub async fn start_scheduler(state: Arc<AppState>) {
@@ -14,7 +13,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     
     // Create a job that runs every minute
     let state_clone = Arc::clone(&state);
-    let job = Job::new_async("1/1 * * * * *", move |_, _| {
+    let job = Job::new_async("*/30 * * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
             match check_and_update_database(&state).await {
@@ -34,28 +33,48 @@ async fn check_and_update_database(state: &AppState) -> Result<(), Box<dyn std::
 
     let conn = &mut state.db_pool.get()?;
     
-    // Fetch all calls with 'processing' status
-    let processing_calls = calls::table
-        .filter(calls::status.eq("processing"))
-        .load::<Call>(conn)?;
 
     let api_key = env::var("ELEVENLABS_API_KEY")
         .expect("ELEVENLABS_API_KEY must be set");
     
     let client = reqwest::Client::new();
 
-    info!("Found {} calls in processing status", processing_calls.len());
+    // First, fetch all conversations from ElevenLabs
+    let conversations_url = "https://api.elevenlabs.io/v1/convai/conversations";
+    
+    info!("Fetching all conversations from ElevenLabs API");
+    let conversations_response = client
+        .get(conversations_url)
+        .header("xi-api-key", &api_key)
+        .send()
+        .await?;
 
-    for call in processing_calls {
-        info!("Processing call id: {}, conversation_id: {}", call.id, call.conversation_id);
-        
-        // Make API request for each processing call
+    let conversations_text = conversations_response.text().await?;
+    info!("Received conversations response: {}", conversations_text);
+
+    // Parse the response with the correct structure
+    let response: serde_json::Value = serde_json::from_str(&conversations_text)?;
+    
+    // Get the conversations array
+    let conversations = response["conversations"]
+        .as_array()
+        .unwrap_or(&Vec::new())
+        .to_owned();
+
+    // Now process each conversation
+    for conversation in conversations {
+        println!("Starting to go through conversations");
+        let conversation_id = conversation["conversation_id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        // Make API request for the conversation
         let url = format!(
             "https://api.elevenlabs.io/v1/convai/conversations/{}", 
-            call.conversation_id
+            conversation_id
         );
 
-        info!("Fetching status from ElevenLabs API for conversation: {}", call.conversation_id);
+        info!("Fetching status from ElevenLabs API for conversation: {}", conversation_id);
         match client
             .get(&url)
             .header("xi-api-key", &api_key)
@@ -63,69 +82,87 @@ async fn check_and_update_database(state: &AppState) -> Result<(), Box<dyn std::
             .await
         {
             Ok(response) => {
-                info!("Received response from ElevenLabs API for call: {}", call.id);
-                let status = response.status();
-                let response_text = response.text().await?;
-                
-                if !status.is_success() {
-                    error!(
-                        "Error response from ElevenLabs API for call {}: Status: {}, Body: {}", 
-                        call.id, 
-                        status,
-                        response_text
-                    );
-                    
-                    // Delete the failed call from the database
-                    match diesel::delete(calls::table.find(call.id)).execute(conn) {
-                        Ok(_) => {
-                            info!("Successfully deleted failed call {} from database", call.id);
-                        }
-                        Err(e) => {
-                            error!("Failed to delete call {} from database: {}", call.id, e);
-                        }
-                    }
-                    continue;
-                }
-                
-                info!("Received successful response: {}", response_text);
-                match serde_json::from_str::<ElevenLabsResponse>(&response_text) {
-                    Ok(call_data) => {
-                        info!("Parsed response for call {}: status={}, duration={}s", 
-                            call.id, call_data.status, call_data.call_duration_secs);
-                        // Check if status changed from processing to done
-                        if call.status == "processing" && call_data.status == "done" {
-                            // Update user's IQ
-                            if let Err(e) = state.user_repository.decrease_iq(
-                                call.user_id,
-                                call_data.call_duration_secs
-                            ) {
-                                error!("Failed to update IQ for user {}: {}", call.user_id, e);
-                            } else {
-                                info!("Successfully decreased IQ for user {} by {} seconds", 
-                                    call.user_id, call_data.call_duration_secs);
+                match response.text().await {
+                    Ok(text) => {
+                        info!("Received conversation details: {}", text);
+                        match serde_json::from_str::<ElevenLabsResponse>(&text) {
+                            Ok(conversation_details) => {
+
+                                // Handle conversations based on user_id presence and status
+                                match conversation_details.conversation_initiation_client_data.dynamic_variables.user_id {
+                                    Some(user_id_str) => {
+                                        if let Ok(user_id) = user_id_str.parse::<i32>() {
+                                            // Only process if the call status is 'done'
+                                            if conversation_details.status == "done" {
+                                                info!("Call status == done => DECREASE IQ + DELETE");
+                                                // Decrease user's IQ based on call duration
+                                                if let Err(e) = state.user_repository.decrease_iq(user_id, conversation_details.metadata.call_duration_secs) {
+                                                    error!("Failed to decrease user IQ: {}", e);
+                                                } else {
+                                                    info!("Successfully decreased IQ for user {} by {} seconds", user_id, conversation_details.metadata.call_duration_secs);
+                                                                                                       
+                                                    // Delete the conversation from ElevenLabs
+                                                    let delete_url = format!(
+                                                        "https://api.elevenlabs.io/v1/convai/conversations/{}", 
+                                                        conversation_id
+                                                    );
+                                                    
+                                                    match client
+                                                        .delete(&delete_url)
+                                                        .header("xi-api-key", &api_key)
+                                                        .send()
+                                                        .await
+                                                    {
+                                                        Ok(_) => info!("Successfully deleted conversation {} from ElevenLabs", conversation_id),
+                                                        Err(e) => error!("Failed to delete conversation from ElevenLabs: {}", e),
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            info!("Invalid user_id format found, deleting conversation {}", conversation_id);
+                                            // Delete invalid conversation
+                                            let delete_url = format!(
+                                                "https://api.elevenlabs.io/v1/convai/conversations/{}", 
+                                                conversation_id
+                                            );
+                                            if let Err(e) = client
+                                                .delete(&delete_url)
+                                                .header("xi-api-key", &api_key)
+                                                .send()
+                                                .await
+                                            {
+                                                error!("Failed to delete invalid conversation: {}", e);
+                                            }
+                                        }
+                                    }
+                                    None => {
+                                        info!("No user_id found, deleting conversation {}", conversation_id);
+                                        // Delete conversation without user_id
+                                        let delete_url = format!(
+                                            "https://api.elevenlabs.io/v1/convai/conversations/{}", 
+                                            conversation_id
+                                        );
+                                        if let Err(e) = client
+                                            .delete(&delete_url)
+                                            .header("xi-api-key", &api_key)
+                                            .send()
+                                            .await
+                                        {
+                                            error!("Failed to delete conversation without user_id: {}", e);
+                                        }
+
+                                    }
+
+                                }
                             }
-                        }
-
-                        // Update the call using UserCalls repository
-                        if let Err(e) = state.user_calls.update_call(
-                            call.id,
-                            call_data.status.clone(),
-                            call_data.call_duration_secs,
-                        ) {
-                            error!("Failed to update call {}: {}", call.id, e);
-                        } else {
-                            info!("Updated call {} status from {} to {}", 
-                                call.id, call.status, call_data.status);
+                            Err(e) => error!("Failed to parse conversation details: {}", e),
                         }
                     }
-                    Err(e) => {
-                        error!("Failed to parse response for call {}: {}", call.id, e);
-                    }
+                    Err(e) => error!("Failed to get response text: {}", e),
                 }
-
             }
             Err(e) => {
-                error!("Failed to fetch status for call {}: {}", call.id, e);
+                error!("Failed to fetch conversation details: {}", e);
             }
         }
     }

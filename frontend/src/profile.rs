@@ -450,7 +450,7 @@
                                             <span class="iq-amount">{user_profile.iq}</span>
                                             <span class="iq-time">
                                                 {if user_profile.iq >= 60 { 
-                                                    format!("({} minutes)", user_profile.iq / 60)
+                                                    format!("({} minutes/messages)", user_profile.iq / 60)
                                                 } else { 
                                                     format!("({} seconds)", user_profile.iq)
                                                 }}

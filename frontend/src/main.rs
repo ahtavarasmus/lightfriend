@@ -14,7 +14,7 @@ use pages::{
     home::Home,
     home::is_logged_in,
 };
-use termsprivacy::{TermsAndConditions, PrivacyPolicy};
+use termsprivacy::{TermsAndConditions, PrivacyPolicy, Pricing};
 use verify::Verify;
 use admin::Admin;
 use profile::Profile;
@@ -44,6 +44,8 @@ pub enum Route {
     Terms,
     #[at("/privacy")]
     Privacy,
+    #[at("/pricing")]
+    Pricing,
 }
 
 
@@ -81,6 +83,10 @@ fn switch(routes: Route) -> Html {
             info!("Rendering Privacy page");
             html! { <PrivacyPolicy /> }
         },
+        Route::Pricing => {
+            info!("Rendering Pricing page");
+            html! { <Pricing /> }
+        },
     }
 }
 
@@ -113,6 +119,9 @@ pub fn nav(props: &NavProps) -> Html {
                 </Link<Route>>
                 
                 <div class="nav-right">
+                    <Link<Route> to={Route::Pricing} classes="nav-link">
+                        {"Pricing"}
+                    </Link<Route>>
                     {
                         if *logged_in {
                             html! {

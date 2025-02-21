@@ -13,7 +13,6 @@ use crate::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use crate::models::user_models::NewCall;
 
 #[derive(Debug, Deserialize)]
 pub struct PhoneCallPayload {
@@ -31,8 +30,22 @@ pub struct AssistantPayload {
 #[derive(Serialize, Deserialize)]
 pub struct ConversationInitiationClientData {
     r#type: String,
+    conversation_config_override: ConversationConfig,
     dynamic_variables: HashMap<String, Value>,
 }
+
+#[derive(Serialize, Deserialize)]
+pub struct ConversationConfig {
+    agent: AgentConfig,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct AgentConfig {
+    first_message: String,
+}
+
+
+
 
 use std::error::Error;
 use tracing::{error, info};
@@ -87,7 +100,7 @@ pub async fn validate_elevenlabs_secret(
 pub async fn fetch_assistant(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<AssistantPayload>,
-) -> Json<ConversationInitiationClientData> {
+) -> Result<Json<ConversationInitiationClientData>, (StatusCode, Json<serde_json::Value>)> {
     println!("Received assistant request:");
     let agent_id = payload.agent_id;
     println!("Agent ID: {}", agent_id);
@@ -99,36 +112,51 @@ pub async fn fetch_assistant(
     println!("Caller Number: {}", caller_number);
 
     let mut dynamic_variables = HashMap::new();
+    let mut conversation_config_override = ConversationConfig {
+        agent: AgentConfig {
+            first_message: "Hello {{name}}!".to_string(),
+        },
+    };
 
 
     match state.user_repository.find_by_phone_number(&caller_number) {
         Ok(Some(user)) => {
             println!("Found user: {}, {}", user.email, user.phone_number);
+            
+            // Check if user has enough IQ
+            if user.iq <= 0 {
+                println!("User has insufficient IQ: {}", user.iq);
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    Json(json!({
+                        "error": "Insufficient IQ balance",
+                        "message": "Please add more IQ to your account to continue on lightfriend website"
+                    }))
+                ));
+            }
+
+            // If user is not verified, verify them
+            if !user.verified {
+                if let Err(e) = state.user_repository.verify_user(user.id) {
+                    println!("Error verifying user: {}", e);
+                    // Continue even if verification fails
+                } else {
+                    conversation_config_override = ConversationConfig {
+                        agent: AgentConfig {
+                            first_message: "Welcome! Your number is now verified. You can add some information about yourself in the profile page. Anyways, how can I help?".to_string(),
+                        },
+                    };
+                }
+            }
+
             let nickname = match user.nickname {
                 Some(nickname) => nickname,
                 None => "".to_string()
             };
-            let user_info= match user.info {
+            let user_info = match user.info {
                 Some(info) => info,
                 None => "".to_string()
             };
-
-            // Create a new call record
-            let new_call = NewCall {
-                user_id: user.id,
-                conversation_id: call_sid,
-                status: "processing".to_string(),
-                analysis: None,
-                call_duration_secs: 0,
-                created_at: chrono::Utc::now().timestamp() as i32,
-            };
-            state.user_calls.create_call(new_call).map_err(|e| {
-                error!("Failed to create new call record: {}", e);
-                println!("Error creating call record: {}", e);
-                // Return the error to satisfy the Result type
-                e
-            }).ok();
-
 
             dynamic_variables.insert("name".to_string(), json!(nickname));
             dynamic_variables.insert("user_info".to_string(), json!(user_info));
@@ -152,10 +180,11 @@ pub async fn fetch_assistant(
 
     let payload = ConversationInitiationClientData {
         r#type: "conversation_initiation_client_data".to_string(),
+        conversation_config_override,
         dynamic_variables,
     };
 
-    Json(payload)
+    Ok(Json(payload))
 }
 
 
