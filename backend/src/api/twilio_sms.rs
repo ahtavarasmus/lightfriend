@@ -196,17 +196,32 @@ pub async fn handle_incoming_sms(
             content: format!("You are a friendly and helpful AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Be direct and natural in your answers. Since users are using SMS, keep responses clear and brief. Avoid suggesting actions requiring smartphones or internet. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages. Use simple language and focus on the most important information first. This is what the user wants to you to know: {}. When you use tools make sure to add relevant info about the user to the tool messages so they can act accordingly.", Utc::now().format("%Y-%m-%d"), user_info),
         }];
         
-        // Add the conversation history
-        let mut history: Vec<ChatMessage> = messages.into_iter().map(|msg| {
-            ChatMessage {
-                role: if msg.author == "lightfriend" { "assistant" } else { "user" }.to_string(),
-                content: msg.body,
-            }
-        }).collect();
-        history.reverse();
-        
-        // Combine system message with conversation history
-        chat_messages.extend(history);
+        // Process the message body to remove "forget" if it exists at the start
+        let processed_body = if payload.body.to_lowercase().starts_with("forget") {
+            payload.body.trim_start_matches(|c: char| c.is_alphabetic()).trim().to_string()
+        } else {
+            payload.body.clone()
+        };
+
+        // Only include conversation history if message starts with "forget"
+        if !payload.body.to_lowercase().starts_with("forget") {
+            let mut history: Vec<ChatMessage> = messages.into_iter().map(|msg| {
+                ChatMessage {
+                    role: if msg.author == "lightfriend" { "assistant" } else { "user" }.to_string(),
+                    content: msg.body,
+                }
+            }).collect();
+            history.reverse();
+            
+            // Combine system message with conversation history
+            chat_messages.extend(history);
+        }
+
+        // Add the current message with processed body
+        chat_messages.push(ChatMessage {
+            role: "user".to_string(),
+            content: processed_body,
+        });
 
         // Print formatted messages for debugging
         for msg in &chat_messages {
