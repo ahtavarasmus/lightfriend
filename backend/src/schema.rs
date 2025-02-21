@@ -8,6 +8,8 @@ diesel::table! {
         service_sid -> Text,
         created_at -> Integer,
         active -> Bool,
+        twilio_number -> Text,
+        user_number -> Text,
     }
 }
 

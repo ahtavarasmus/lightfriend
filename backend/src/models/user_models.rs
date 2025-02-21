@@ -55,6 +55,8 @@ pub struct Conversation {
     pub service_sid: String,
     pub created_at: i32,
     pub active: bool,
+    pub twilio_number: String,
+    pub user_number: String,
 }
 
 #[derive(Insertable)]
@@ -65,5 +67,7 @@ pub struct NewConversation {
     pub service_sid: String,
     pub created_at: i32,
     pub active: bool,
+    pub twilio_number: String,
+    pub user_number: String,
 }
 
