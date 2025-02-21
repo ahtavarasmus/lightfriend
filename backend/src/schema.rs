@@ -1,6 +1,18 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    calls (id) {
+        id -> Integer,
+        user_id -> Integer,
+        conversation_id -> Text,
+        status -> Text,
+        analysis -> Nullable<Text>,
+        call_duration_secs -> Integer,
+        created_at -> Integer,
+    }
+}
+
+diesel::table! {
     conversations (id) {
         id -> Integer,
         user_id -> Integer,
@@ -28,9 +40,11 @@ diesel::table! {
     }
 }
 
+diesel::joinable!(calls -> users (user_id));
 diesel::joinable!(conversations -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    calls,
     conversations,
     users,
 );

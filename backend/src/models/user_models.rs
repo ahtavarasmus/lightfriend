@@ -1,6 +1,14 @@
 use diesel::prelude::*;
 use crate::schema::users;
 use crate::schema::conversations;
+use crate::schema::calls;
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+pub struct ElevenLabsResponse {
+    pub status: String,
+    pub call_duration_secs: i32,
+}
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = users)]
@@ -41,3 +49,28 @@ pub struct NewConversation {
     pub created_at: i32,
     pub active: bool,
 }
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = calls)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct Call {
+    pub id: i32,
+    pub user_id: i32,
+    pub conversation_id: String,
+    pub status: String,
+    pub analysis: Option<String>,
+    pub call_duration_secs: i32,
+    pub created_at: i32,
+}
+
+#[derive(Insertable, Clone)]
+#[diesel(table_name = calls)]
+pub struct NewCall {
+    pub user_id: i32,
+    pub conversation_id: String,
+    pub status: String,
+    pub analysis: Option<String>,
+    pub call_duration_secs: i32,
+    pub created_at: i32,
+}
+
