@@ -5,17 +5,53 @@ use crate::models::user_models::User;
 use std::error::Error;
 
 #[derive(Deserialize)]
-struct MessageResponse {
+pub struct MessageResponse {
     sid: String,
 }
 
 #[derive(Deserialize)]
-struct ConversationResponse {
+pub struct ConversationResponse {
     sid: String,
     chat_service_sid: String,
 }
 
-pub async fn setup_conversation(user: &User, twilio_number: Option<String>) -> Result<(String, String), Box<dyn Error>> {
+#[derive(Deserialize, Debug)]
+pub struct ParticipantResponse {
+    pub sid: String,
+    pub messaging_binding: Option<MessagingBinding>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct MessagingBinding {
+    pub address: Option<String>,
+    pub proxy_address: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ParticipantsListResponse {
+    participants: Vec<ParticipantResponse>,
+}
+
+pub async fn fetch_conversation_participants(conversation_sid: &str) -> Result<Vec<ParticipantResponse>, Box<dyn Error>> {
+    let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
+    let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
+    let client = Client::new();
+
+    let response: ParticipantsListResponse = client
+        .get(format!(
+            "https://conversations.twilio.com/v1/Conversations/{}/Participants",
+            conversation_sid
+        ))
+        .basic_auth(&account_sid, Some(&auth_token))
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    Ok(response.participants)
+}
+
+pub async fn create_twilio_conversation_for_participant(user: &User, proxy_address: String) -> Result<(String, String), Box<dyn Error>> {
     let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
     let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
     let client = Client::new();
@@ -30,15 +66,10 @@ pub async fn setup_conversation(user: &User, twilio_number: Option<String>) -> R
         .json()
         .await?;
 
-    // Use provided Twilio number or fall back to user's preferred number
-    let proxy_address = twilio_number.unwrap_or_else(|| 
-        user.preferred_number.as_ref()
-            .expect("User must have either a preferred number or a provided Twilio number")
-            .clone()
-    );
+    println!("conversation.conversation_sid: {}",conversation.sid);
 
     // Add the user as participant
-    client
+    let participant_response = client
         .post(format!(
             "https://conversations.twilio.com/v1/Conversations/{}/Participants",
             conversation.sid
@@ -51,18 +82,55 @@ pub async fn setup_conversation(user: &User, twilio_number: Option<String>) -> R
         .send()
         .await?;
 
+
+    let status = participant_response.status();
+    if !status.is_success() {
+        let error_text = participant_response.text().await?;
+        println!("Participant addition response: {}", error_text);
+        
+        // Check if this is the "participant already exists" error
+        if status.as_u16() == 409 {
+            // Extract the existing conversation SID from the error message
+            if let Some(conv_sid) = error_text.find("Conversation ").and_then(|i| {
+                let start = i + "Conversation ".len();
+                error_text[start..].find('"').map(|end| error_text[start..start+end].to_string())
+            }) {
+                // Fetch the conversation details to get the service_sid
+                let conversation: ConversationResponse = client
+                    .get(format!(
+                        "https://conversations.twilio.com/v1/Conversations/{}",
+                        conv_sid
+                    ))
+                    .basic_auth(&account_sid, Some(&auth_token))
+                    .send()
+                    .await?
+                    .json()
+                    .await?;
+                
+                println!("Found existing conversation: {}", conv_sid);
+                return Ok((conv_sid, conversation.chat_service_sid));
+            }
+        }
+        
+        return Err(error_text.into());
+    }
+
+    println!("Successfully added participant to conversation");
+
     Ok((conversation.sid, conversation.chat_service_sid))
 }
 
+
 pub async fn send_conversation_message(
     conversation_sid: &str, 
+    twilio_number: &String,
     body: &str
 ) -> Result<String, Box<dyn Error>> {
     let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
     let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
     let client = Client::new();
 
-    let form_data = vec![("Body", body), ("Author", "lightfriend")];
+    let form_data = vec![("Body", body), ("Author", twilio_number)];
 
     let response: MessageResponse = client
         .post(format!(
@@ -75,6 +143,7 @@ pub async fn send_conversation_message(
         .await?
         .json()
         .await?;
+    println!("successfully sent the conversation message");
 
     Ok(response.sid)
 }

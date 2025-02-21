@@ -141,6 +141,7 @@ pub async fn handle_incoming_sms(
             }
         };
 
+
         // Check if user has enough IQ points
         if user.iq < 60 {
             return (
@@ -164,7 +165,7 @@ pub async fn handle_incoming_sms(
 
 
 
-        let conversation = match state.user_conversations.ensure_conversation_exists(&user, Some(payload.from)).await {
+        let conversation = match state.user_conversations.get_conversation(&user, payload.to).await {
             Ok(conv) => conv,
             Err(e) => {
                 eprintln!("Failed to ensure conversation exists: {}", e);
@@ -469,7 +470,7 @@ pub async fn handle_incoming_sms(
         }
 
         // Send the final response to the conversation
-        match send_conversation_message(&conversation.conversation_sid, &final_response).await {
+        match send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number,&final_response).await {
             Ok(_) => (
                 StatusCode::OK,
                 axum::Json(TwilioResponse {
