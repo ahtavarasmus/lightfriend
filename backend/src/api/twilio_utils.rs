@@ -2,7 +2,6 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::env;
 use crate::models::user_models::User;
-use crate::repositories::user_conversations::UserConversations;
 use std::error::Error;
 
 #[derive(Deserialize)]

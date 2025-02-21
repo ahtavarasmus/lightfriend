@@ -141,7 +141,8 @@ pub async fn handle_tool_calls(event: &MessageResponse, state: &Arc<AppState>) -
                         let message = arguments.get("message").and_then(|v| v.as_str()).unwrap_or("");
                         println!("📤 Message to Perplexity: {}", message);
                         println!("🔄 Making API request to Perplexity...");
-                        match ask_perplexity(message).await {
+                        let sys_prompt = "You are assisting an AI voice calling service. The questions you receive are from voice conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read aloud 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. Use natural language sentence structure 5. When listing multiple points, use simple numbering (1, 2, 3) or natural language transitions (First... Second... Finally...) 6. Focus on the most relevant information that addresses the user's immediate needs 7. If specific numbers, dates, or proper names are important, spell them out clearly 8. Format numerical data in a way that's easy to read aloud (e.g., twenty-five percent instead of 25%) Your responses will be incorporated into a voice conversation, so clarity and natural flow are essential.";
+                        match ask_perplexity(message, sys_prompt).await {
                             Ok(result) => {
                                 println!("✅ Perplexity API call successful!");
                                 println!("📥 Response received: {}", result);
@@ -425,16 +426,16 @@ pub async fn handle_phone_call_event(
 
 
 
-pub async fn ask_perplexity(message: &str) -> Result<String, Box<dyn Error>> {
+pub async fn ask_perplexity(message: &str, system_prompt: &str) -> Result<String, Box<dyn Error>> {
     let api_key = std::env::var("PERPLEXITY_API_KEY").expect("PERPLEXITY_API_KEY must be set");
     let client = reqwest::Client::new();
     
     let payload = json!({
-        "model": "sonar",
+        "model": "sonar-pro",
         "messages": [
                 {
                     "role": "system",
-                    "content": "You are assisting an AI voice calling service. The questions you receive are from voice conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read aloud 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. Use natural language sentence structure 5. When listing multiple points, use simple numbering (1, 2, 3) or natural language transitions (First... Second... Finally...) 6. Focus on the most relevant information that addresses the user's immediate needs 7. If specific numbers, dates, or proper names are important, spell them out clearly 8. Format numerical data in a way that's easy to read aloud (e.g., twenty-five percent instead of 25%) Your responses will be incorporated into a voice conversation, so clarity and natural flow are essential."
+                    "content": system_prompt, 
                 },
                 {
                     "role": "user",

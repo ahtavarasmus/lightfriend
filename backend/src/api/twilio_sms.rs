@@ -5,6 +5,8 @@ use std::sync::Arc;
 use crate::AppState;
 use crate::api::twilio_utils::send_conversation_message;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use crate::api::vapi_endpoints;
 use axum::{
     extract::Form,
     response::IntoResponse,
@@ -13,10 +15,63 @@ use axum::{
 };
 use chrono::{DateTime, Utc};
 
+use serde_json::json;
+use crate::api::vapi_endpoints::ask_perplexity;
+
+use openai_api_rs::v1::{
+    chat_completion,
+    types,
+    api::OpenAIClient,
+    common::GPT4_O,
+};
+
 #[derive(Debug, Serialize)]
 struct GroqRequest {
     messages: Vec<ChatMessage>,
     model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<Tool>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct Tool {
+    #[serde(rename = "type")]
+    tool_type: String,
+    function: ToolFunction,
+}
+
+#[derive(Debug, Serialize)]
+struct ToolFunction {
+    name: String,
+    description: String,
+    parameters: ToolParameters,
+}
+
+#[derive(Debug, Serialize)]
+struct ToolParameters {
+    #[serde(rename = "type")]
+    param_type: String,
+    properties: serde_json::Value,
+    required: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolCall {
+    id: String,
+    function: ToolCallFunction,
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolCallFunction {
+    name: String,
+    arguments: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PerplexityArgument {
+    query: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -26,10 +81,19 @@ struct GroqResponse {
 
 #[derive(Debug, Deserialize)]
 struct GroqChoice {
-    message: ChatMessage,
+    message: ChatMessageWithTools,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
+struct ChatMessageWithTools {
+    role: String,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<ToolCall>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct ChatMessage {
     role: String,
     content: String,
@@ -61,7 +125,7 @@ async fn fetch_conversation_messages(conversation_sid: &str) -> Result<Vec<Twili
     let response = client
         .get(&url)
         .basic_auth(&account_sid, Some(&auth_token))
-        .query(&[("Order", "desc"), ("PageSize", "20")])
+        .query(&[("Order", "desc"), ("PageSize", "15")])
         .send()
         .await?;
 
@@ -116,6 +180,7 @@ pub async fn send_sms(to: &str, body: &str) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+
 pub async fn handle_incoming_sms(
     State(state): State<Arc<AppState>>,
     Form(payload): Form<TwilioWebhookPayload>,
@@ -143,6 +208,27 @@ pub async fn handle_incoming_sms(
             }
         };
 
+        // Check if user has enough IQ points
+        if user.iq < 60 {
+            return (
+                StatusCode::BAD_REQUEST,
+                axum::Json(TwilioResponse {
+                    message: "Insufficient IQ points to send message. Please add more credits to continue.".to_string(),
+                })
+            );
+        }
+
+        // Deduct 60 IQ points for the message
+        if let Err(e) = state.user_repository.update_user_iq(user.id, user.iq - 60) {
+            eprintln!("Failed to update user IQ: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(TwilioResponse {
+                    message: "Failed to process IQ points".to_string(),
+                })
+            );
+        }
+
 
 
         let conversation = match state.user_conversations.ensure_conversation_exists(&user, Some(payload.to)).await {
@@ -167,10 +253,14 @@ pub async fn handle_incoming_sms(
             }
         };
 
+        let user_info = match user.info {
+            Some(info) => info,
+            None => "".to_string()
+        };
         // Start with the system message
         let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
             role: "system".to_string(),
-            content: "You are a friendly and helpful AI assistant named Lightfriend. You provide concise, accurate, and helpful responses while maintaining a warm and engaging tone. You should be direct in your answers while still being conversational and natural. Since users are interacting with you through SMS on basic phones, keep your responses clear, and avoid suggesting actions that require smartphones or internet access. Use simple language and break complex information into digestible parts. Make sure you answer the user's question throughly since they are paying for each response.".to_string(),
+            content: format!("You are a friendly and helpful AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Be direct and natural in your answers. Since users are using SMS, keep responses clear and brief. Avoid suggesting actions requiring smartphones or internet. Use simple language and focus on the most important information first. This is what the user wants to you to know: {}. When you use tools make sure to add relevant info about the user to the tool messages so they can act accordingly.", Utc::now().format("%Y-%m-%d"), user_info),
         }];
         
         // Add the conversation history
@@ -190,66 +280,252 @@ pub async fn handle_incoming_sms(
             println!("Formatted message - Role: {}, Content: {}", msg.role, msg.content);
         }
 
-        // Send messages to Groq API
-        let groq_api_key = env::var("GROQ_API_KEY").expect("GROQ_API_KEY not set");
+        let mut plex_properties = HashMap::new();
+        plex_properties.insert(
+            "query".to_string(),
+            Box::new(types::JSONSchemaDefine {
+                schema_type: Some(types::JSONSchemaType::String),
+                description: Some("The question or topic to get information about".to_string()),
+                ..Default::default()
+            }),
+        );
 
-        let client = Client::new();
-        let groq_request = GroqRequest {
-            messages: chat_messages,
-            model: "llama-3.3-70b-versatile".to_string(),
-        };
-        let response = match client
-            .post("https://api.groq.com/openai/v1/chat/completions")
-            .header("Authorization", format!("Bearer {}", groq_api_key))
-            .header("Content-Type", "application/json")
-            .json(&groq_request)
-            .send()
-            .await
-        {
-            Ok(resp) => resp,
-            Err(e) => {
-                eprintln!("Failed to send request to Groq: {}", e);
+        // Define tools
+        let tools = vec![chat_completion::Tool {
+                r#type: chat_completion::ToolType::Function,
+                function: types::Function {
+                    name: String::from("ask_perplexity"),
+                    description: Some(String::from("Get factual or timely information about any topic")),
+                    parameters: types::FunctionParameters {
+                        schema_type: types::JSONSchemaType::Object,
+                        properties: Some(plex_properties),
+                        required: Some(vec![String::from("query")]),
+                    },
+                },
+            },
+        ];
+
+        let api_key = match env::var("OPENROUTER_API_KEY") {
+            Ok(key) => key,
+            Err(_) => {
+                eprintln!("OPENROUTER_API_KEY not set");
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     axum::Json(TwilioResponse {
-                        message: "Failed to get AI response".to_string(),
+                        message: "Server configuration error".to_string(),
                     })
                 );
             }
         };
 
-        if !response.status().is_success() {
-            eprintln!("Groq API error: {}", response.status());
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(TwilioResponse {
-                    message: "Failed to get AI response".to_string(),
-                })
-            );
+        let client = match OpenAIClient::builder()
+            .with_endpoint("https://openrouter.ai/api/v1")
+            .with_api_key(api_key)
+            .build() {
+                Ok(client) => client,
+                Err(e) => {
+                    eprintln!("Failed to build OpenAI client: {}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        axum::Json(TwilioResponse {
+                            message: "Failed to initialize AI service".to_string(),
+                        })
+                    );
+                }
+            };
+
+        println!("built client");
+
+        // Convert ChatMessage vec into ChatCompletionMessage vec
+        let completion_messages: Vec<chat_completion::ChatCompletionMessage> = chat_messages
+            .into_iter()
+            .map(|msg| chat_completion::ChatCompletionMessage {
+                role: match msg.role.as_str() {
+                    "user" => chat_completion::MessageRole::user,
+                    "assistant" => chat_completion::MessageRole::assistant,
+                    "system" => chat_completion::MessageRole::system,
+                    _ => chat_completion::MessageRole::user, // default to user if unknown
+                },
+                content: chat_completion::Content::Text(msg.content),
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+            })
+            .collect();
+
+        let req = chat_completion::ChatCompletionRequest::new(
+            GPT4_O.to_string(),
+            completion_messages.clone(),
+        )
+        .tools(tools)
+        .tool_choice(chat_completion::ToolChoiceType::Auto)
+        .max_tokens(250); // This will result in responses around 400-450 characters
+
+        println!("built request");
+
+        let result = match client.chat_completion(req).await {
+            Ok(result) => result,
+            Err(e) => {
+                eprintln!("Failed to get chat completion: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    axum::Json(TwilioResponse {
+                        message: "Failed to process your request".to_string(),
+                    })
+                );
+            }
+        };
+
+        println!("built completion");
+
+        println!("Processing model response with finish reason: {:?}", result.choices[0].finish_reason);
+        let mut final_response = match result.choices[0].finish_reason {
+            None | Some(chat_completion::FinishReason::stop) => {
+                println!("Model provided direct response (no tool calls needed)");
+                // Direct response from the model
+                let resp = result.choices[0].message.content.clone().unwrap_or_default();
+                println!("Direct response from model: {}", resp);
+                resp
+            }
+            Some(chat_completion::FinishReason::tool_calls) => {
+                println!("Model requested tool calls - beginning tool execution phase");
+                #[derive(Deserialize, Serialize)]
+                struct PerplexityQuestion {
+                    query: String,
+                }
+                
+                let tool_calls = match result.choices[0].message.tool_calls.as_ref() {
+                    Some(calls) => {
+                        println!("Found {} tool call(s) in response", calls.len());
+                        calls
+                    },
+                    None => {
+                        eprintln!("No tool calls found in response despite tool_calls finish reason");
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            axum::Json(TwilioResponse {
+                                message: "Failed to process your request".to_string(),
+                            })
+                        );
+                    }
+                };
+
+                let mut perplexity_answer = String::new();
+                for tool_call in tool_calls {
+                    println!("Processing tool call: {:?}", tool_call);
+                    let name = match &tool_call.function.name {
+                        Some(n) => {
+                            println!("Tool call function name: {}", n);
+                            n
+                        },
+                        None => {
+                            println!("Tool call missing function name, skipping");
+                            continue;
+                        },
+                    };
+                    let arguments = match &tool_call.function.arguments {
+                        Some(args) => args,
+                        None => continue,
+                    };
+                    if name == "ask_perplexity" {
+                        println!("Executing ask_perplexity tool call");
+                        println!("Raw arguments: {}", arguments);
+                        let c: PerplexityQuestion = match serde_json::from_str(arguments) {
+                            Ok(q) => q,
+                            Err(e) => {
+                                eprintln!("Failed to parse perplexity question: {}", e);
+                                continue;
+                            }
+                        };
+                        let query = format!("User info: {}. Query: {}", user_info, c.query);
+                        println!("question for perplexity: {}", query);
+                        println!("Calling Perplexity API with query: {}", query);
+
+                        let sys_prompt = "You are assisting an AI text messaging service. The questions you receive are from text messaging conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. When listing multiple points, use simple numbering (1, 2, 3) 5. Focus on the most relevant information that addresses the user's immediate needs.";
+                        match ask_perplexity(&query, &sys_prompt).await {
+                            Ok(answer) => {
+                                println!("Successfully received Perplexity answer");
+                                println!("Perplexity response: {}", answer);
+                                perplexity_answer = answer;
+                                break; // Use the first successful perplexity answer
+                            }
+                            Err(e) => {
+                                eprintln!("Failed to get perplexity answer: {}", e);
+                                continue;
+                            }
+                        };
+                    }
+                }
+
+                // Make a second call to Openrouter with the perplexity answer
+                if !perplexity_answer.is_empty() {
+                    let mut follow_up_messages = completion_messages.clone();
+                    // Add the assistant's message with tool calls
+                    follow_up_messages.push(chat_completion::ChatCompletionMessage {
+                        role: chat_completion::MessageRole::assistant,
+                        content: chat_completion::Content::Text(result.choices[0].message.content.clone().unwrap_or_default()),
+                        name: None,
+                        tool_calls: result.choices[0].message.tool_calls.clone(),
+                        tool_call_id: None,
+                    });
+                    // Add the tool response
+                    if let Some(tool_calls) = &result.choices[0].message.tool_calls {
+                        for tool_call in tool_calls {
+                            follow_up_messages.push(chat_completion::ChatCompletionMessage {
+                                role: chat_completion::MessageRole::tool,
+                                content: chat_completion::Content::Text(perplexity_answer.clone()),
+                                name: None,
+                                tool_calls: None,
+                                tool_call_id: Some(tool_call.id.clone()),
+                            });
+                        }
+                    }
+
+                    println!("Making follow-up request to model with Perplexity answer");
+                    let follow_up_req = chat_completion::ChatCompletionRequest::new(
+                        GPT4_O.to_string(),
+                        follow_up_messages,
+                    )
+                    .max_tokens(250); // Consistent token limit for follow-up messages
+                    println!("Follow-up request created");
+
+                    match client.chat_completion(follow_up_req).await {
+                        Ok(follow_up_result) => {
+                            println!("Received follow-up response from model");
+                            let response = follow_up_result.choices[0].message.content.clone().unwrap_or_default();
+                            println!("Final response: {}", response);
+                            response
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to get follow-up completion: {}", e);
+                            format!("Based on my research: {}", perplexity_answer)
+                        }
+                    }
+                } else {
+                    "I apologize, but I couldn't find the information you requested.".to_string()
+                }
+            }
+            Some(chat_completion::FinishReason::length) => {
+                "I apologize, but my response was too long. Could you please ask your question in a more specific way?".to_string()
+            }
+            Some(chat_completion::FinishReason::content_filter) => {
+                "I apologize, but I cannot provide an answer to that question due to content restrictions.".to_string()
+            }
+            Some(chat_completion::FinishReason::null) => {
+                "I apologize, but something went wrong while processing your request.".to_string()
+            }
+        };
+
+        if user.iq - 60 > 60 && user.iq - 60 < 120 {
+            final_response = format!("{}\n\n(enough IQ left for 1 free message)", final_response);
         }
 
-        let groq_response: GroqResponse = match response.json().await {
-            Ok(resp) => resp,
-            Err(e) => {
-                eprintln!("Failed to parse Groq response: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    axum::Json(TwilioResponse {
-                        message: "Failed to process AI response".to_string(),
-                    })
-                );
-            }
-        };
-
-        
-        let body = groq_response.choices[0].message.content.clone();
-        println!("Sending response to user: {}", body);
-
-        match send_conversation_message(&conversation.conversation_sid, &body).await {
+        // Send the final response to the conversation
+        match send_conversation_message(&conversation.conversation_sid, &final_response).await {
             Ok(_) => (
                 StatusCode::OK,
                 axum::Json(TwilioResponse {
-                    message: "Message received and processed!".to_string(),
+                    message: "Message sent successfully".to_string(),
                 })
             ),
             Err(e) => {

@@ -22,6 +22,7 @@ mod api {
     pub mod vapi_dtos;
     pub mod twilio_sms;
     pub mod twilio_utils;
+    pub mod elevenlabs;
 }
 
 mod config {
@@ -34,17 +35,23 @@ mod models {
 mod repositories {
     pub mod user_repository;
     pub mod user_conversations;
+    pub mod user_calls;
 }
 mod schema;
+mod jobs {
+    pub mod scheduler;
+}
 
 
 use repositories::user_repository::UserRepository;
 use repositories::user_conversations::UserConversations;
+use repositories::user_calls::UserCalls;
 
 use handlers::auth_handlers;
 use handlers::profile_handlers;
 use api::vapi_endpoints;
 use api::twilio_sms;
+use api::elevenlabs;
 
 
 
@@ -59,6 +66,7 @@ pub struct AppState {
     db_pool: DbPool,
     user_repository: Arc<UserRepository>,
     user_conversations: Arc<UserConversations>,
+    user_calls: Arc<UserCalls>,
 }
 
 pub fn validate_env() {
@@ -76,6 +84,8 @@ pub fn validate_env() {
         .expect("ASSISTANT_ID must be set");
     let _ = std::env::var("VAPI_SERVER_URL_SECRET")
         .expect("VAPI_SERVER_URL_SECRET must be set");
+    let _ = std::env::var("ELEVENLABS_SERVER_URL_SECRET")
+        .expect("ELEVENLABS_SERVER_URL_SECRET must be set");
     let _ = std::env::var("FIN_PHONE")
         .expect("FIN_PHONE must be set");
     let _ = std::env::var("USA_PHONE")
@@ -117,6 +127,7 @@ async fn main() {
 
     let user_repository = Arc::new(UserRepository::new(pool.clone()));
     let user_conversations = Arc::new(UserConversations::new(pool.clone()));
+    let user_calls= Arc::new(UserCalls::new(pool.clone()));
 
     let _conn = &mut pool.get().expect("Failed to get DB connection");
 
@@ -124,14 +135,20 @@ async fn main() {
         db_pool: pool,
         user_repository,
         user_conversations,
+        user_calls,
     });
 
     // Create a router for VAPI routes with secret validation
     let vapi_routes = Router::new()
-        .route("/api/server", post(vapi_endpoints::handle_phone_call_event))
+        .route("/api/vapi/server", post(vapi_endpoints::handle_phone_call_event))
         .route_layer(middleware::from_fn(vapi_endpoints::validate_vapi_secret));
     let twilio_routes = Router::new()
         .route("/api/sms/server", post(twilio_sms::handle_incoming_sms));
+    let elevenlabs_routes = Router::new()
+        .route("/api/call/perplexity", post(elevenlabs::handle_perplexity_tool_call))
+        .route("/api/call/assistant", post(elevenlabs::fetch_assistant))
+        .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
+
 
     // Create router with CORS
     let app = Router::new()
@@ -152,6 +169,7 @@ async fn main() {
         .route("/api/profile/notify-credits/:user_id", post(profile_handlers::update_notify_credits))
         .merge(vapi_routes)
         .merge(twilio_routes)
+        .merge(elevenlabs_routes)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
@@ -169,7 +187,13 @@ async fn main() {
                 .allow_headers(Any)
                 .expose_headers([axum::http::header::CONTENT_TYPE])
         )
-        .with_state(state);
+        .with_state(state.clone());
+    // Start the scheduler
+    let state_for_scheduler = state;
+    tokio::spawn(async move {
+        jobs::scheduler::start_scheduler(state_for_scheduler).await;
+    });
+
     // Start server
     axum::Server::bind(&"127.0.0.1:3000".parse().unwrap())
         .serve(app.into_make_service())
