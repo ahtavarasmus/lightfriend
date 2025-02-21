@@ -35,7 +35,6 @@ mod models {
 mod repositories {
     pub mod user_repository;
     pub mod user_conversations;
-    pub mod user_calls;
 }
 mod schema;
 mod jobs {
@@ -45,7 +44,6 @@ mod jobs {
 
 use repositories::user_repository::UserRepository;
 use repositories::user_conversations::UserConversations;
-use repositories::user_calls::UserCalls;
 
 use handlers::auth_handlers;
 use handlers::profile_handlers;
@@ -66,7 +64,6 @@ pub struct AppState {
     db_pool: DbPool,
     user_repository: Arc<UserRepository>,
     user_conversations: Arc<UserConversations>,
-    user_calls: Arc<UserCalls>,
 }
 
 pub fn validate_env() {
@@ -98,8 +95,6 @@ pub fn validate_env() {
         .expect("TWILIO_ACCOUNT_SID must be set");
     let _ = std::env::var("TWILIO_AUTH_TOKEN")
         .expect("TWILIO_AUTH_TOKEN must be set");
-    let _ = std::env::var("GROQ_API_KEY")
-        .expect("GROQ_API_KEY must be set");
 }
 
 #[tokio::main]
@@ -127,7 +122,6 @@ async fn main() {
 
     let user_repository = Arc::new(UserRepository::new(pool.clone()));
     let user_conversations = Arc::new(UserConversations::new(pool.clone()));
-    let user_calls= Arc::new(UserCalls::new(pool.clone()));
 
     let _conn = &mut pool.get().expect("Failed to get DB connection");
 
@@ -135,7 +129,6 @@ async fn main() {
         db_pool: pool,
         user_repository,
         user_conversations,
-        user_calls,
     });
 
     // Create a router for VAPI routes with secret validation

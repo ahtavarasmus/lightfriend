@@ -25,73 +25,6 @@ use openai_api_rs::v1::{
     common::GPT4_O,
 };
 
-#[derive(Debug, Serialize)]
-struct GroqRequest {
-    messages: Vec<ChatMessage>,
-    model: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<Vec<Tool>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_choice: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct Tool {
-    #[serde(rename = "type")]
-    tool_type: String,
-    function: ToolFunction,
-}
-
-#[derive(Debug, Serialize)]
-struct ToolFunction {
-    name: String,
-    description: String,
-    parameters: ToolParameters,
-}
-
-#[derive(Debug, Serialize)]
-struct ToolParameters {
-    #[serde(rename = "type")]
-    param_type: String,
-    properties: serde_json::Value,
-    required: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ToolCall {
-    id: String,
-    function: ToolCallFunction,
-}
-
-#[derive(Debug, Deserialize)]
-struct ToolCallFunction {
-    name: String,
-    arguments: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct PerplexityArgument {
-    query: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct GroqResponse {
-    choices: Vec<GroqChoice>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GroqChoice {
-    message: ChatMessageWithTools,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatMessageWithTools {
-    role: String,
-    #[serde(default)]
-    content: Option<String>,
-    #[serde(default)]
-    tool_calls: Option<Vec<ToolCall>>,
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct ChatMessage {
@@ -260,7 +193,7 @@ pub async fn handle_incoming_sms(
         // Start with the system message
         let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
             role: "system".to_string(),
-            content: format!("You are a friendly and helpful AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Be direct and natural in your answers. Since users are using SMS, keep responses clear and brief. Avoid suggesting actions requiring smartphones or internet. Use simple language and focus on the most important information first. This is what the user wants to you to know: {}. When you use tools make sure to add relevant info about the user to the tool messages so they can act accordingly.", Utc::now().format("%Y-%m-%d"), user_info),
+            content: format!("You are a friendly and helpful AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Be direct and natural in your answers. Since users are using SMS, keep responses clear and brief. Avoid suggesting actions requiring smartphones or internet. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages. Use simple language and focus on the most important information first. This is what the user wants to you to know: {}. When you use tools make sure to add relevant info about the user to the tool messages so they can act accordingly.", Utc::now().format("%Y-%m-%d"), user_info),
         }];
         
         // Add the conversation history
@@ -441,7 +374,7 @@ pub async fn handle_incoming_sms(
                         println!("question for perplexity: {}", query);
                         println!("Calling Perplexity API with query: {}", query);
 
-                        let sys_prompt = "You are assisting an AI text messaging service. The questions you receive are from text messaging conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. When listing multiple points, use simple numbering (1, 2, 3) 5. Focus on the most relevant information that addresses the user's immediate needs.";
+                        let sys_prompt = "You are assisting an AI text messaging service. The questions you receive are from text messaging conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. When listing multiple points, use simple numbering (1, 2, 3) 5. Focus on the most relevant information that addresses the user's immediate needs. ";
                         match ask_perplexity(&query, &sys_prompt).await {
                             Ok(answer) => {
                                 println!("Successfully received Perplexity answer");
