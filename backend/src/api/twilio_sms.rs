@@ -164,7 +164,7 @@ pub async fn handle_incoming_sms(
 
 
 
-        let conversation = match state.user_conversations.ensure_conversation_exists(&user, Some(payload.to)).await {
+        let conversation = match state.user_conversations.ensure_conversation_exists(&user, Some(payload.from)).await {
             Ok(conv) => conv,
             Err(e) => {
                 eprintln!("Failed to ensure conversation exists: {}", e);
