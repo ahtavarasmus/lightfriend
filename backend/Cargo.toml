@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 tokio-cron-scheduler = "0.9"
-axum = "0.6"
+axum = "0.8"
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -13,7 +13,7 @@ chrono = "0.4"
 diesel = { version = "2.1.0", features = ["sqlite", "r2d2"] }
 diesel_migrations = "2.1.0"
 dotenvy = "0.15"
-tower-http = { version = "0.4", features = ["cors", "trace"] }
+tower-http = { version = "0.5", features = ["cors", "trace"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing = "0.1"
 bcrypt = "0.10"
@@ -26,3 +26,11 @@ rusqlite = { version = "0.31.0", features = ["bundled"] }  # Auto-compiles SQLit
 sentry = "0.36.0"
 once_cell = "1.20.3"
 openai-api-rs = "5.2.6"
+sha2 = "0.10"
+hmac = "0.12"
+hyper = { version = "1", features = ["server", "http1"] }
+bytes = "1.10.0"
+http-body-util = "0.1"
+openssl = "0.10"
+url = "2"
+hex = "0.4"

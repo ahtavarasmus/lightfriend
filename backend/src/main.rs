@@ -23,6 +23,7 @@ mod api {
     pub mod twilio_sms;
     pub mod twilio_utils;
     pub mod elevenlabs;
+    pub mod paddle_webhooks;
 }
 
 mod config {
@@ -50,6 +51,7 @@ use handlers::profile_handlers;
 use api::vapi_endpoints;
 use api::twilio_sms;
 use api::elevenlabs;
+use api::paddle_webhooks;
 
 
 
@@ -95,6 +97,8 @@ pub fn validate_env() {
         .expect("TWILIO_ACCOUNT_SID must be set");
     let _ = std::env::var("TWILIO_AUTH_TOKEN")
         .expect("TWILIO_AUTH_TOKEN must be set");
+    let _ = std::env::var("PADDLE_WEBHOOK_SECRET")
+        .expect("PADDLE_WEBHOOK_SECRET must be set");
 }
 
 #[tokio::main]
@@ -142,6 +146,10 @@ async fn main() {
         .route("/api/call/assistant", post(elevenlabs::fetch_assistant))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 
+    let paddle_routes = Router::new()
+        .route("/api/webhooks/paddle", post(paddle_webhooks::handle_subscription_webhook))
+        .route_layer(middleware::from_fn(paddle_webhooks::validate_paddle_secret));
+
 
     // Create router with CORS
     let app = Router::new()
@@ -149,20 +157,22 @@ async fn main() {
         .route("/api/login", post(auth_handlers::login))
         .route("/api/register", post(auth_handlers::register))
         .route("/api/admin/users", get(auth_handlers::get_users))
-        .route("/api/admin/verify/:user_id", post(auth_handlers::verify_user))
-        .route("/api/admin/preferred-number/:user_id", post(auth_handlers::update_preferred_number_admin))
+
+        .route("/api/admin/verify/{user_id}", post(auth_handlers::verify_user))
+        .route("/api/admin/preferred-number/{user_id}", post(auth_handlers::update_preferred_number_admin))
         .route("/api/admin/broadcast", post(auth_handlers::broadcast_message))
-        .route("/api/admin/set-preferred-number-default/:user_id", post(auth_handlers::set_preferred_number_default))
+        .route("/api/admin/set-preferred-number-default/{user_id}", post(auth_handlers::set_preferred_number_default))
         .route("/api/profile/update", post(profile_handlers::update_profile))
         .route("/api/profile/preferred-number", post(profile_handlers::update_preferred_number))
         .route("/api/profile", get(profile_handlers::get_profile))
-        .route("/api/profile/delete/:user_id", delete(auth_handlers::delete_user))
-        .route("/api/profile/increase-iq/:user_id", post(profile_handlers::increase_iq))
-        .route("/api/profile/reset-iq/:user_id", post(profile_handlers::reset_iq))
-        .route("/api/profile/notify-credits/:user_id", post(profile_handlers::update_notify_credits))
+        .route("/api/profile/delete/{user_id}", delete(auth_handlers::delete_user))
+        .route("/api/profile/increase-iq/{user_id}", post(profile_handlers::increase_iq))
+        .route("/api/profile/notify-credits/{user_id}", post(profile_handlers::update_notify_credits))
+
         .merge(vapi_routes)
         .merge(twilio_routes)
         .merge(elevenlabs_routes)
+        .merge(paddle_routes)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
@@ -187,10 +197,9 @@ async fn main() {
         jobs::scheduler::start_scheduler(state_for_scheduler).await;
     });
 
-    // Start server
-    axum::Server::bind(&"127.0.0.1:3000".parse().unwrap())
-        .serve(app.into_make_service())
-        .await
-        .unwrap();
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
+    axum::serve(listener, app.into_make_service()).await.unwrap();
 }
 
