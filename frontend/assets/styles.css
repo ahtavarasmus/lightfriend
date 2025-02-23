@@ -23,8 +23,28 @@ body {
     background-color: #000000;
 }
 
-.pdl_btn {
-    padding-top: 50px;
+.pdl-btn {
+    position: fixed;
+    top: 50px;
+    right: 20px;
+    z-index: 1000; /* Ensure it stays above other elements */
+    padding: 10px 20px;
+    border-radius: 6px;
+    font-weight: 600;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease;
+}
+
+.pdl-btn:hover {
+    transform: translateY(-2px);
+}
+
+/* Add media query for mobile responsiveness */
+@media (max-width: 768px) {
+    .pdl-btn {
+        right: 10px;
+        padding: 8px 16px;
+    }
 }
 
 
