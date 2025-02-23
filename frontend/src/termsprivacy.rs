@@ -1,6 +1,34 @@
 use yew::prelude::*;
 use yew_router::prelude::*;
 use crate::Route;
+use serde_json::json;
+
+
+
+use wasm_bindgen::prelude::*;
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = window)]
+    fn openCheckout(items: JsValue);
+}
+
+#[function_component(CheckoutButton)]
+fn checkout_button() -> Html {
+    let onclick = Callback::from(move |e: MouseEvent| {
+        e.prevent_default();
+        let items = json!({"items": [{
+            "priceId": "pri_01jmqk1r39nk4h7bbr10jbatsz",
+            "quantity": 1
+        }]});
+        openCheckout(serde_wasm_bindgen::to_value(&items).unwrap());
+    });
+
+    html! {
+        <a href="#" {onclick}><b>{"Sign up now"}</b></a>
+    }
+}
+
 
 #[function_component(Pricing)]
 pub fn pricing() -> Html {
@@ -58,7 +86,8 @@ pub fn pricing() -> Html {
                         <li>{"24/7 Availability"}</li>
                     </ul>
                 </div>
-            </div>
+                </div>
+                <CheckoutButton />
 
             <div class="pricing-faq">
                 <h2>{"Common Questions"}</h2>
@@ -86,6 +115,7 @@ pub fn pricing() -> Html {
         </div>
     }
 }
+
 #[function_component(PrivacyPolicy)]
 pub fn privacy_policy() -> Html {
     html! {

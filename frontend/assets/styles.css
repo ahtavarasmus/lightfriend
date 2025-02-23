@@ -23,6 +23,10 @@ body {
     background-color: #000000;
 }
 
+.pdl_btn {
+    padding-top: 50px;
+}
+
 
 .landing-page {
     position: relative;
@@ -1447,6 +1451,16 @@ button[type="submit"].loading::after {
 .feature-status h3 {
     color: #7EB2FF;
     font-size: 1.1rem;
+    margin: 1rem 0 0.5rem 0;
+}
+
+.feature-status h3:first-child {
+    margin-top: 0;
+}
+
+.feature-status h4 {
+    color: #7EB2FF;
+    font-size: 0.9rem;
     margin: 1rem 0 0.5rem 0;
 }
 
