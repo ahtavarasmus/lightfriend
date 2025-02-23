@@ -10,18 +10,25 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = window)]
-    fn openCheckout(items: JsValue);
+    fn openCheckout(items: JsValue, customer: JsValue);
 }
 
 #[function_component(CheckoutButton)]
 fn checkout_button() -> Html {
     let onclick = Callback::from(move |e: MouseEvent| {
         e.prevent_default();
-        let items = json!({"items": [{
+        let items = json!([{
             "priceId": "pri_01jmqk1r39nk4h7bbr10jbatsz",
             "quantity": 1
-        }]});
-        openCheckout(serde_wasm_bindgen::to_value(&items).unwrap());
+        }]);
+        let customer_info = json!({
+            "email": "sam@example.com",
+            "address": {
+                "countryCode": "US", 
+                "postalCode": "10021"
+            }
+        });
+        openCheckout(serde_wasm_bindgen::to_value(&items).unwrap(), serde_wasm_bindgen::to_value(&customer_info).unwrap());
     });
 
     html! {

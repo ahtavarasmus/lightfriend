@@ -5,8 +5,9 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
         <title>lightfriend</title>
         <link data-trunk rel="css" href="assets/styles.css">
-        <script src="https://cdn.paddle.com/paddle/paddle.js"></script>
-        <script>
+        <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
+        <script type="text/javascript">
+
             Paddle.Environment.set("sandbox");
             Paddle.Initialize({
               token: "test_3a24ff0a4993527b6a5008528f6", // replace with a client-side token
@@ -15,6 +16,7 @@
                 console.log(data);
               }
             });
+            console.log("Paddle initialized:", Paddle);
 
             // define items
             let itemsList = [
@@ -24,16 +26,50 @@
               },
             ];
 
-            // open checkout
-            function openCheckout(items) {
-              Paddle.Checkout.open({
-                items: items,
-              });
+            // define customer details
+            let customerInfo = {
+              email: "sam@example.com",
+              address: {
+                countryCode: "US",
+                postalCode: "10021"
+              }
+            };
+
+            function mapToObject(map) {
+                if (!(map instanceof Map)) {
+                    return map;
+                }
+                const obj = {};
+                for (const [key, value] of map) {
+                    obj[key] = value instanceof Map ? mapToObject(value) : value;
+                }
+                return obj;
             }
+
+            // open checkout
+            function openCheckout(items, customer) {
+                console.log("Items received:", items);
+                console.log("Customer received:", customer);
+
+                // Convert items to plain array of objects
+                const plainItems = items.map(item => mapToObject(item));
+
+                // Convert customer to plain object
+                const plainCustomer = mapToObject(customer);
+
+                // Log the converted data for verification
+                console.log("Plain items:", plainItems);
+                console.log("Plain customer:", plainCustomer);
+
+                Paddle.Checkout.open({
+                    items: plainItems,
+                    customer: plainCustomer,
+                });
+            }
+            
         </script>
         </head>
-    <body>
-
+    <body> 
         <script async src="https://scripts.simpleanalyticscdn.com/latest.js"></script>
         <script
           src="https://browser.sentry-cdn.com/9.0.1/bundle.min.js"
