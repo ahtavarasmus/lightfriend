@@ -62,6 +62,9 @@
                 console.log("Plain customer:", plainCustomer);
 
                 Paddle.Checkout.open({
+                    settings: {
+                        theme: "dark",
+                    },
                     items: plainItems,
                     customer: plainCustomer,
                 });

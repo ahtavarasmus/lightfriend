@@ -55,7 +55,7 @@ use diesel::prelude::*;
 pub async fn validate_elevenlabs_secret(
     headers: HeaderMap,
     request: Request<Body>,
-    next: middleware::Next<Body>,
+    next: middleware::Next,
 ) -> Result<Response, StatusCode> {
     println!("\n=== Starting Elevenlabs Secret Validation ===");
     

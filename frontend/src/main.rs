@@ -10,14 +10,16 @@ mod admin;
 mod profile;
 mod verify;
 mod termsprivacy;
+mod money;
 use pages::{
     home::Home,
     home::is_logged_in,
 };
-use termsprivacy::{TermsAndConditions, PrivacyPolicy, Pricing};
+use termsprivacy::{TermsAndConditions, PrivacyPolicy};
 use verify::Verify;
 use admin::Admin;
 use profile::Profile;
+use money::Pricing;
 
 mod auth_components;
 use auth_components::{

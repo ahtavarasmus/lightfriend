@@ -18,7 +18,7 @@ use tracing::{error, info};
 pub async fn validate_vapi_secret(
     headers: HeaderMap,
     request: Request<Body>,
-    next: middleware::Next<Body>,
+    next: middleware::Next,
 ) -> Result<Response, StatusCode> {
     println!("\n=== Starting VAPI Secret Validation ===");
     

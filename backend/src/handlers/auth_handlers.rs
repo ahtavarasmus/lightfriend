@@ -424,9 +424,9 @@ pub async fn login(
                 
                 // Create response with HttpOnly cookies
                 let mut response = Response::new(
-                    axum::body::boxed(axum::body::Full::from(
+                    axum::body::Body::from(
                         Json(json!({"message": "Login successful", "token": access_token})).to_string()
-                    ))
+                    )
                 );
                 println!("Created base response");
                 
@@ -699,12 +699,12 @@ pub async fn register(
 
     // Create response with HttpOnly cookies
     let mut response = Response::new(
-        axum::body::boxed(axum::body::Full::from(
+        axum::body::Body::from(
             Json(json!({
                 "message": "User registered and logged in successfully! Redirecting...",
                 "token": access_token
             })).to_string()
-        ))
+        )
     );
 
     let cookie_options = "; HttpOnly; Secure; SameSite=Strict; Path=/";
