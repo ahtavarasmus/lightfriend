@@ -5,16 +5,42 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
         <title>lightfriend</title>
         <link data-trunk rel="css" href="assets/styles.css">
-    </head>
+        <script src="https://cdn.paddle.com/paddle/paddle.js"></script>
+        <script>
+            Paddle.Environment.set("sandbox");
+            Paddle.Initialize({
+              token: "test_3a24ff0a4993527b6a5008528f6", // replace with a client-side token
+              // prints events to console for debugging
+              eventCallback: function(data) {
+                console.log(data);
+              }
+            });
+
+            // define items
+            let itemsList = [
+              {
+                priceId: "pri_01jmqk1r39nk4h7bbr10jbatsz",
+                quantity: 1,
+              },
+            ];
+
+            // open checkout
+            function openCheckout(items) {
+              Paddle.Checkout.open({
+                items: items,
+              });
+            }
+        </script>
+        </head>
     <body>
 
-    <script async src="https://scripts.simpleanalyticscdn.com/latest.js"></script>
-    <script
-      src="https://browser.sentry-cdn.com/9.0.1/bundle.min.js"
-      integrity="sha384-WUKfUKJWWozTO86fecAQl5HFU+mPCfwD/8YKsZivWNSWM2B7aFDZWGO9671FxUcq"
-      crossorigin="anonymous"
-    ></script>
-    <script src="wasm-support.js"></script>
+        <script async src="https://scripts.simpleanalyticscdn.com/latest.js"></script>
+        <script
+          src="https://browser.sentry-cdn.com/9.0.1/bundle.min.js"
+          integrity="sha384-WUKfUKJWWozTO86fecAQl5HFU+mPCfwD/8YKsZivWNSWM2B7aFDZWGO9671FxUcq"
+          crossorigin="anonymous"
+        ></script>
+        <script src="wasm-support.js"></script>
     </body>
 
 </html>

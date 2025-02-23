@@ -348,15 +348,19 @@ pub mod home {
                             </p>
                             <div class="feature-status">
                                 <h3>{"Currently Available"}</h3>
+                                <h4>{"Tools"}</h4>
                                 <ul>
-                                    <li>{"Perplexity AI search through voice calls"}</li>
-                                    <li>{"Adding more IQ(credits) for free in the profile(when you ran out)"}</li>
+                                    <li>{"Perplexity AI search"}</li>
+                                </ul>
+                                <h4>{"Methods"}</h4>
+                                <ul>
+                                    <li>{"Voice calling"}</li>
+                                    <li>{"Text messaging"}</li>
                                 </ul>
                                 
                                 <h3>{"Coming Soon"}</h3>
                                 <ul>
-                                    <li>{"Purchase additional IQ(credits)"}</li>
-                                    <li>{"Text messaging support"}</li>
+                                    <li>{"Purchase additional IQ(credits), currently free boost when you ran out"}</li>
                                     <li>{"WhatsApp and Telegram integration"}</li>
                                     <li>{"Reminder setting"}</li>
                                     <li>{"Email and calendar integration"}</li>
