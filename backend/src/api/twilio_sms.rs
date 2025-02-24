@@ -163,6 +163,18 @@ pub async fn handle_incoming_sms(
             );
         }
 
+        // Log the SMS usage
+        if let Err(e) = state.user_repository.log_usage(
+            user.id,
+            "sms",
+            60,  // IQ points used
+            true, // Success
+            None,
+        ) {
+            eprintln!("Failed to log SMS usage: {}", e);
+            // Continue execution even if logging fails
+        }
+
 
 
         let conversation = match state.user_conversations.get_conversation(&user, payload.to).await {

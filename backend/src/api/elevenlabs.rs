@@ -7,12 +7,43 @@ use axum::{
     body::Body
 };
 use axum::middleware;
-use std::future::Future;
 use std::sync::Arc;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+
+
+#[derive(Deserialize)]
+pub struct ElevenLabsResponse {
+    pub status: String,
+    pub metadata: CallMetaData,
+    pub analysis: Analysis,
+    pub conversation_initiation_client_data: CallInitiationData,
+}
+
+#[derive(Deserialize)]
+pub struct Analysis {
+    pub call_successful: String, // success, failure, unknown
+    pub transcript_summary: String,
+}
+
+#[derive(Deserialize)]
+pub struct CallMetaData {
+    pub call_duration_secs: i32,
+}
+
+#[derive(Deserialize)]
+pub struct CallInitiationData {
+    pub dynamic_variables: DynVariables,
+}
+
+#[derive(Deserialize)]
+pub struct DynVariables {
+    pub user_id: Option<String>,
+}
+
+
 
 #[derive(Debug, Deserialize)]
 pub struct PhoneCallPayload {
@@ -49,7 +80,6 @@ pub struct AgentConfig {
 
 use std::error::Error;
 use tracing::{error, info};
-use diesel::prelude::*;
 
 
 pub async fn validate_elevenlabs_secret(

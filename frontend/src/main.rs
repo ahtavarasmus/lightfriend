@@ -11,10 +11,13 @@ mod profile;
 mod verify;
 mod termsprivacy;
 mod money;
+mod usage_graph;
+
 use pages::{
     home::Home,
     home::is_logged_in,
 };
+
 use termsprivacy::{TermsAndConditions, PrivacyPolicy};
 use verify::Verify;
 use admin::Admin;

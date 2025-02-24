@@ -10,10 +10,12 @@ use axum::extract::Path;
 use serde_json::json;
 use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 
+use crate::repositories::user_repository::UsageDataPoint;
 use crate::{
     AppState,
     handlers::auth_dtos::Claims,
 };
+
 
 #[derive(Deserialize)]
 pub struct UpdateProfileRequest {
@@ -296,6 +298,56 @@ pub async fn update_preferred_number(
     })))
 }
 
+
+#[derive(Deserialize)]
+pub struct UsageDataRequest {
+    user_id: i32,
+    from: i32,
+}
+
+pub async fn get_usage_data(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<UsageDataRequest>,
+) -> Result<Json<Vec<UsageDataPoint>>, (StatusCode, Json<serde_json::Value>)> {
+    println!("in get_usage_data route");
+    // Extract and validate token
+    let auth_header = headers.get("Authorization")
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| header.strip_prefix("Bearer "));
+
+    let token = match auth_header {
+        Some(token) => token,
+        None => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "No authorization token provided"}))
+        )),
+    };
+
+    // Decode JWT token
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+            .expect("JWT_SECRET_KEY must be set in environment")
+            .as_bytes()),
+        &Validation::new(Algorithm::HS256)
+    ) {
+        Ok(token_data) => token_data.claims,
+        Err(_) => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Invalid token"}))
+        )),
+    };
+
+    // Get usage data using the provided 'from' timestamp
+    let usage_data = state.user_repository.get_usage_data(claims.sub, request.from)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        ))?;
+
+    Ok(Json(usage_data))
+}
 
 pub async fn update_notify_credits(
     State(state): State<Arc<AppState>>,
