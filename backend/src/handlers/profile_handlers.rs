@@ -26,6 +26,14 @@ pub struct UpdateProfileRequest {
 }
 
 #[derive(Serialize)]
+pub struct SubscriptionInfo {
+    id: String,
+    status: String,
+    next_bill_date: i32,
+    stage: String,
+}
+
+#[derive(Serialize)]
 pub struct ProfileResponse {
     id: i32,
     email: String,
@@ -39,6 +47,7 @@ pub struct ProfileResponse {
     local_phone_number: String,
     info: Option<String>,
     preferred_number: Option<String>,
+    subscription: Option<SubscriptionInfo>,
 }
 
 pub async fn get_profile(
@@ -94,6 +103,22 @@ pub async fn get_profile(
                 _ => std::env::var("FIN_PHONE").unwrap_or_default(), // Default to Finnish number
             };
 
+            // Check subscription status
+            let has_subscription = state.user_subscriptions.has_active_subscription(user.id).unwrap_or(false);
+            let subscription_info = if has_subscription {
+                match state.user_subscriptions.find_by_user_id(user.id) {
+                    Ok(Some(sub)) => Some(SubscriptionInfo {
+                        id: sub.paddle_subscription_id,
+                        status: sub.status,
+                        next_bill_date: sub.next_bill_date,
+                        stage: sub.stage,
+                    }),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+
             Ok(Json(ProfileResponse {
                 id: user.id,
                 email: user.email,
@@ -107,6 +132,7 @@ pub async fn get_profile(
                 local_phone_number: local_phone_number,
                 info: user.info,
                 preferred_number: user.preferred_number,
+                subscription: subscription_info,
             }))
         }
         None => Err((
