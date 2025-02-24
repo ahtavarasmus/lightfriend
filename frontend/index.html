@@ -47,9 +47,10 @@
             }
 
             // open checkout
-            function openCheckout(items, customer) {
+            function openCheckout(items, customer, passthrough) {
                 console.log("Items received:", items);
                 console.log("Customer received:", customer);
+                console.log("Passthrough received:", passthrough);
 
                 // Convert items to plain array of objects
                 const plainItems = items.map(item => mapToObject(item));
@@ -57,9 +58,14 @@
                 // Convert customer to plain object
                 const plainCustomer = mapToObject(customer);
 
+                // Convert passthrough to plain object
+                const plainPassthrough = mapToObject(passthrough);
+
                 // Log the converted data for verification
                 console.log("Plain items:", plainItems);
                 console.log("Plain customer:", plainCustomer);
+                console.log("Plain passthrough:", plainPassthrough);
+
 
                 Paddle.Checkout.open({
                     settings: {
@@ -67,6 +73,7 @@
                     },
                     items: plainItems,
                     customer: plainCustomer,
+                    customData: plainPassthrough,
                 });
             }
             

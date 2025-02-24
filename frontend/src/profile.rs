@@ -522,7 +522,7 @@ let info = use_state(String::new);
                                 <div class="billing-info">
                                     <p>{"Subscribe to usage based billing, pay only for what you use monthly."}</p>
 
-                                    <CheckoutButton />
+                                    <CheckoutButton user_id={user_profile.id} />
                                 </div>
                                 </div>
                             </div>

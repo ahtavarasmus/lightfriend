@@ -8,16 +8,22 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = window)]
-    fn openCheckout(items: JsValue, customer: JsValue);
+    fn openCheckout(items: JsValue, customer: JsValue, passthrough: JsValue);
+}
+
+#[derive(Properties, PartialEq)]
+pub struct CheckoutButtonProps {
+    pub user_id: i32,
 }
 
 #[function_component(CheckoutButton)]
-pub fn checkout_button() -> Html {
+pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
+    let user_id = props.user_id;
     let onclick = Callback::from(move |e: MouseEvent| {
         e.prevent_default();
         let items = json!([{
             "priceId": "pri_01jmqk1r39nk4h7bbr10jbatsz",
-            "quantity": 1
+            "quantity": 1,
         }]);
         let customer_info = json!({
             "email": "sam@example.com",
@@ -26,7 +32,14 @@ pub fn checkout_button() -> Html {
                 "postalCode": "10021"
             }
         });
-        openCheckout(serde_wasm_bindgen::to_value(&items).unwrap(), serde_wasm_bindgen::to_value(&customer_info).unwrap());
+        let passthrough = json!({
+            "user_id": user_id
+        });
+        openCheckout(
+            serde_wasm_bindgen::to_value(&items).unwrap(),
+            serde_wasm_bindgen::to_value(&customer_info).unwrap(),
+            serde_wasm_bindgen::to_value(&passthrough).unwrap()
+        );
     });
 
     html! {
