@@ -3,6 +3,7 @@ use diesel::prelude::*;
 use crate::schema::users;
 use crate::schema::conversations;
 use crate::schema::usage_logs;
+use crate::schema::subscriptions;
 
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -24,6 +25,32 @@ pub struct User {
     pub iq_cost_per_euro: i32, // the cost for iq in iq/€ (e.g. 300iq -> 1€)
     pub debug_logging_permission: bool,
 }
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = subscriptions)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct Subscription {
+    pub id: Option<i32>, // Assuming auto-incrementing primary key
+    pub user_id: i32, // App's user ID
+    pub paddle_subscription_id: String,
+    pub paddle_customer_id: String,
+    pub stage: String,
+    pub status: String,
+    pub next_bill_date: i32,
+}
+
+
+#[derive(Insertable)]
+#[diesel(table_name = subscriptions)]
+pub struct NewSubscription {
+    pub user_id: i32, 
+    pub paddle_subscription_id: String,
+    pub paddle_customer_id: String,
+    pub stage: String,
+    pub status: String,
+    pub next_bill_date: i32,
+}
+
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = usage_logs)]

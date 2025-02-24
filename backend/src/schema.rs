@@ -14,6 +14,18 @@ diesel::table! {
 }
 
 diesel::table! {
+    subscriptions (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        paddle_subscription_id -> Text,
+        paddle_customer_id -> Text,
+        stage -> Text,
+        status -> Text,
+        next_bill_date -> Integer,
+    }
+}
+
+diesel::table! {
     usage_logs (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -46,10 +58,12 @@ diesel::table! {
 }
 
 diesel::joinable!(conversations -> users (user_id));
+diesel::joinable!(subscriptions -> users (user_id));
 diesel::joinable!(usage_logs -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     conversations,
+    subscriptions,
     usage_logs,
     users,
 );

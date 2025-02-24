@@ -7,6 +7,8 @@ use axum::{
     middleware::Next,
 
 };
+use crate::models::user_models::NewSubscription;
+use serde_json::json;
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use axum::body::to_bytes;
@@ -23,57 +25,57 @@ use crate::AppState;
 
 type HmacSha256 = Hmac<Sha256>;
 
-
 #[derive(Debug, Deserialize)]
-pub struct PaddleWebhookPayload {
-    event_id: String,
-    event_type: String,
-    occurred_at: String,
-    notification_id: String,
-    data: SubscriptionData,
+pub struct PassthroughData {
+    pub user_id: i32,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct SubscriptionData {
-    id: String,
-    status: String,
-    customer_id: String,
-    items: Vec<SubscriptionItem>,
-    currency_code: String,
-    billing_cycle: BillingCycle,
-    next_billed_at: String,
+pub struct PaddleWebhookPayload {
+    pub event_type: String,
+    pub data: Data,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CustomData {
+    pub user_id: i32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Data {
+    #[serde(rename = "id")]
+    pub subscription_id: String, // subscription id
+    pub customer_id: Option<String>, // Paddle's customer ID
+    pub status: Option<String>, // active, inactive, trialing
+    pub next_billed_at: Option<String>,
+    pub items: Option<Vec<SubscriptionItem>>,
+    pub custom_data: Option<CustomData>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct SubscriptionItem {
-    price: Price,
-    product: Product,
-    status: String,
-    quantity: i32,
+    pub price: Price,
+    pub product: Product,
+    pub status: String, // active, inactive, trialing
+    pub quantity: i32,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Price {
-    id: String,
-    unit_price: UnitPrice,
+    pub id: String,
+    pub unit_price: UnitPrice,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct UnitPrice {
-    amount: String,
-    currency_code: String,
+    pub amount: String,
+    pub currency_code: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Product {
-    id: String,
-    name: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct BillingCycle {
-    interval: String,
-    frequency: i32,
+    pub id: String,
+    pub name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -85,9 +87,13 @@ pub async fn handle_subscription_webhook(
     State(state): State<Arc<AppState>>,
     payload_result: Result<Json<PaddleWebhookPayload>, axum::extract::rejection::JsonRejection>,
 ) -> Result<Json<WebhookResponse>, StatusCode> {
+
     // Handle potential JSON parsing errors
     let payload = match payload_result {
-        Ok(Json(payload)) => payload,
+        Ok(Json(payload)) => {
+            println!("Raw webhook payload: {:?}", payload);
+            payload
+        },
         Err(err) => {
             tracing::error!("Failed to parse webhook payload: {:?}", err);
             return Err(StatusCode::UNPROCESSABLE_ENTITY);
@@ -100,14 +106,122 @@ pub async fn handle_subscription_webhook(
     );
 
     match payload.event_type.as_str() {
+        "subscription.canceled" => {
+            let subscription_id = &payload.data.subscription_id;
+            match state.user_subscriptions.update_subscription_status(subscription_id, "canceled") {
+                Ok(_) => {
+                    tracing::info!("Successfully updated subscription {} status to canceled", subscription_id);
+                    Ok(Json(WebhookResponse {
+                        status: "success".to_string(),
+                    }))
+                },
+                Err(err) => {
+                    tracing::error!("Failed to update subscription status: {:?}", err);
+                    Err(StatusCode::INTERNAL_SERVER_ERROR)
+                }
+            }
+        },
+        "subscription.updated" => {
+            let subscription_id = &payload.data.subscription_id;
+            let customer_id = payload.data.customer_id.as_deref().unwrap_or_default();
+            let status = payload.data.status.as_deref().unwrap_or("canceled");
+            
+            // Calculate next bill timestamp
+            let next_bill_timestamp = payload.data.next_billed_at
+                .and_then(|date_str| chrono::DateTime::parse_from_rfc3339(&date_str).ok())
+                .map(|dt| dt.timestamp() as i32)
+                .unwrap_or_else(|| (chrono::Utc::now().timestamp() + 30 * 24 * 60 * 60) as i32);
+
+            // Verify if it's still a zero subscription
+            let zero_sub_exists = payload.data.items
+                .as_ref()
+                .map(|items| items.iter().any(|item| item.price.id == "pri_01jmqk1r39nk4h7bbr10jbatsz"))
+                .unwrap_or(false);
+
+            if !zero_sub_exists {
+                tracing::error!("Updated subscription missing zero subscription price");
+                return Err(StatusCode::BAD_REQUEST);
+            }
+            let stage = "tier 1".to_string();
+
+            match state.user_subscriptions.update_subscription(
+                subscription_id,
+                customer_id,
+                status,
+                next_bill_timestamp,
+                &stage,
+            ) {
+                Ok(_) => {
+                    tracing::info!("Successfully updated subscription {}", subscription_id);
+                    Ok(Json(WebhookResponse {
+                        status: "success".to_string(),
+                    }))
+                },
+                Err(err) => {
+                    tracing::error!("Failed to update subscription: {:?}", err);
+                    Err(StatusCode::INTERNAL_SERVER_ERROR)
+                }
+            }
+        },
         "subscription.created" => {
-            // Handle subscription creation
-            // TODO: Update user's subscription status in the database
-            // You'll need to add subscription-related fields to your user model
-            // and create methods in UserRepository to handle subscription updates
-            Ok(Json(WebhookResponse {
-                status: "success".to_string(),
-            }))
+            let custom_data = match payload.data.custom_data {
+                Some(data) => data,
+                None => {
+                    tracing::error!("Subscription created without custom user_id data");
+                    return Err(StatusCode::BAD_REQUEST);
+                }
+            };
+
+            
+            // Check if user already has a subscription
+            if let Ok(Some(_)) = state.user_subscriptions.find_by_user_id(custom_data.user_id) {
+                tracing::warn!("User {} already has an active subscription", custom_data.user_id);
+                return Ok(Json(WebhookResponse {
+                    status: "existing_subscription".to_string(),
+                }));
+            }
+
+            // Create new subscription
+            let next_bill_timestamp = payload.data.next_billed_at
+                .and_then(|date_str| chrono::DateTime::parse_from_rfc3339(&date_str).ok())
+                .map(|dt| dt.timestamp() as i32)
+                .unwrap_or_else(|| (chrono::Utc::now().timestamp() + 30 * 24 * 60 * 60) as i32); // Default to 30 days from now
+
+            
+            // search if items have price id == pri_01jmqk1r39nk4h7bbr10jbatsz 
+            let zero_sub_exists = payload.data.items
+                .as_ref()
+                .map(|items| items.iter().any(|item| item.price.id == "pri_01jmqk1r39nk4h7bbr10jbatsz"))
+                .unwrap_or(false);
+
+            if !zero_sub_exists {
+                tracing::error!("Subscription created without zero subscription price");
+                return Err(StatusCode::BAD_REQUEST);
+            } 
+            let stage = "tier 1".to_string();
+
+
+            let new_subscription = NewSubscription {
+                user_id: custom_data.user_id,
+                paddle_subscription_id: payload.data.subscription_id,
+                paddle_customer_id: payload.data.customer_id.unwrap_or_default(),
+                stage: stage,
+                status: payload.data.status.unwrap_or_else(|| "active".to_string()),
+                next_bill_date: next_bill_timestamp,
+            };
+
+            match state.user_subscriptions.create_subscription(new_subscription) {
+                Ok(_) => {
+                    tracing::info!("Successfully created subscription for user_id: {}", custom_data.user_id);
+                    Ok(Json(WebhookResponse {
+                        status: "success".to_string(),
+                    }))
+                },
+                Err(err) => {
+                    tracing::error!("Failed to create subscription: {:?}", err);
+                    Err(StatusCode::INTERNAL_SERVER_ERROR)
+                }
+            }
         }
         // Add other event types as needed
         _ => {
