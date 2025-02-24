@@ -7,6 +7,15 @@ use crate::usage_graph::UsageGraph;
 use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
 use crate::money::CheckoutButton;
+use chrono::{DateTime, TimeZone, Utc};
+
+#[derive(Deserialize, Clone, PartialEq)]
+struct SubscriptionInfo {
+    id: String,
+    status: String,
+    next_bill_date: i32,
+    stage: String,
+}
 
 #[derive(Deserialize, Clone, PartialEq)]
 struct UserProfile {
@@ -19,10 +28,20 @@ struct UserProfile {
     time_to_delete: bool,
     iq: i32,
     info: Option<String>,
+    subscription: Option<SubscriptionInfo>,
 }
 
 const MAX_NICKNAME_LENGTH: usize = 30;
 const MAX_INFO_LENGTH: usize = 500;
+
+fn format_timestamp(timestamp: i32) -> String {
+    match Utc.timestamp_opt(timestamp as i64, 0) {
+        chrono::offset::LocalResult::Single(dt) => {
+            dt.format("%B %d, %Y").to_string()
+        },
+        _ => "Unknown date".to_string(),
+    }
+}
 
 #[derive(Serialize)]
 struct UpdateProfileRequest {
@@ -449,80 +468,79 @@ let info = use_state(String::new);
                                 <div class="billing-section">
                                     <h3>{"IQ Balance"}</h3>
                                     <div class="iq-balance">
-                                        <span class="iq-amount">{user_profile.iq}</span>
-                                        <span class="iq-time">
-                                            {if user_profile.iq >= 60 { 
-                                                format!("({} minutes/messages)", user_profile.iq / 60)
-                                            } else { 
-                                                format!("({} seconds)", user_profile.iq)
-                                            }}
-                                        </span>
+                                        {
+                                            if user_profile.iq < 0 {
+                                                html! {
+                                                    <>
+                                                        <span class="iq-amount">{format!("Usage this month: {}", user_profile.iq.abs())}</span>
+                                                        <span class="iq-time">
+                                                            {if user_profile.iq.abs() >= 60 { 
+                                                                format!("({} minutes/messages)", user_profile.iq.abs() / 60)
+                                                            } else { 
+                                                                format!("({} seconds)", user_profile.iq.abs())
+                                                            }}
+                                                        </span>
+                                                    </>
+                                                }
+                                            } else {
+                                                html! {
+                                                    <>
+                                                        <span class="iq-amount">{format!("Available credits: {}", user_profile.iq)}</span>
+                                                        <span class="iq-time">
+                                                            {if user_profile.iq >= 60 { 
+                                                                format!("({} minutes/messages)", user_profile.iq / 60)
+                                                            } else { 
+                                                                format!("({} seconds)", user_profile.iq)
+                                                            }}
+                                                        </span>
+                                                    </>
+                                                }
+                                            }
+                                        }
                                     </div>
 
                                     <UsageGraph user_id={user_profile.id} />
+                                <div class="billing-info">
                                     {
-                                        if user_profile.iq <= 0 {
-                                            let onclick = {
-                                                let profile = profile.clone();
-                                                let error = error.clone();
-                                                let success = success.clone();
-                                                Callback::from(move |_| {
-                                                    let profile = profile.clone();
-                                                    let error = error.clone();
-                                                    let success = success.clone();
-                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                        if let Some(token) = window()
-                                                            .and_then(|w| w.local_storage().ok())
-                                                            .flatten()
-                                                            .and_then(|storage| storage.get_item("token").ok())
-                                                            .flatten()
-                                                        {
-                                                            match Request::post(&format!("{}/api/profile/increase-iq/{}", config::get_backend_url(), user_profile.id))
-                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                .send()
-                                                                .await
-                                                            {
-                                                                Ok(response) => {
-                                                                    if response.ok() {
-                                                                        success.set(Some("IQ increased successfully".to_string()));
-                                                                        error.set(None);
-                                                                        
-                                                                        // Fetch updated profile
-                                                                        if let Ok(profile_response) = Request::get(&format!("{}/api/profile", config::get_backend_url()))
-                                                                            .header("Authorization", &format!("Bearer {}", token))
-                                                                            .send()
-                                                                            .await
-                                                                        {
-                                                                            if let Ok(updated_profile) = profile_response.json::<UserProfile>().await {
-                                                                                profile.set(Some(updated_profile));
-                                                                            }
-                                                                        }
-                                                                    } else {
-                                                                        error.set(Some("Failed to increase IQ".to_string()));
-                                                                    }
-                                                                }
-                                                                Err(_) => {
-                                                                    error.set(Some("Failed to send request".to_string()));
-                                                                }
-                                                            }
-                                                        }
-                                                    });
-                                                })
-                                            };
+                                        if let Some(subscription) = &user_profile.subscription {
+                                            let next_bill_date = format_timestamp(subscription.next_bill_date);
                                             html! {
-                                                <button onclick={onclick} class="iq-button">
-                                                    {"Get 500 IQ"}
-                                                </button>
-
+                                                <div class="subscription-info">
+                                                    <h4>{"Active Subscription"}</h4>
+                                                    <p>
+                                                        <span class="label">{"Status:"}</span>
+                                                        <span class={classes!("value", format!("status-{}", subscription.status.to_lowercase()))}>
+                                                            {subscription.status.clone()}
+                                                        </span>
+                                                    </p>
+                                                    <p>
+                                                        <span class="label">{"Next billing date:"}</span>
+                                                        <span class="value">{next_bill_date}</span>
+                                                    </p>
+                                                    <p>
+                                                        <span class="label">{"Subscription plan:"}</span>
+                                                        <span class="value">{subscription.stage.clone()}</span>
+                                                    </p>
+                                                    <div class="subscription-actions">
+                                                        <a 
+                                                            href="https://paddle.com/customer/subscription" 
+                                                            target="_blank" 
+                                                            class="paddle-dashboard-button"
+                                                        >
+                                                            {"Manage Subscription"}
+                                                        </a>
+                                                    </div>
+                                                </div>
                                             }
                                         } else {
-                                            html! {}
+                                            html! {
+                                                <>
+                                                    <p>{"Subscribe to usage based billing, pay only for what you use monthly."}</p>
+                                                    <CheckoutButton user_id={user_profile.id} />
+                                                </>
+                                            }
                                         }
                                     }
-                                <div class="billing-info">
-                                    <p>{"Subscribe to usage based billing, pay only for what you use monthly."}</p>
-
-                                    <CheckoutButton user_id={user_profile.id} />
                                 </div>
                                 </div>
                             </div>

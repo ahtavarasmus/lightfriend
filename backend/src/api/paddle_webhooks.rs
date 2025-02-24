@@ -25,10 +25,6 @@ use crate::AppState;
 
 type HmacSha256 = Hmac<Sha256>;
 
-#[derive(Debug, Deserialize)]
-pub struct PassthroughData {
-    pub user_id: i32,
-}
 
 #[derive(Debug, Deserialize)]
 pub struct PaddleWebhookPayload {

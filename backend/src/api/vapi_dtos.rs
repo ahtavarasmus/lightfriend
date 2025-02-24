@@ -19,16 +19,6 @@ pub struct MessageResponse {
     pub message: Message,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AssistantOverrides {
-    pub first_message: String,
-    pub variable_values: VariableValues,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct VariableValues {
-    pub name: String,
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Message {
