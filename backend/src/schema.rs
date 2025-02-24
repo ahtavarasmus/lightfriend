@@ -14,6 +14,19 @@ diesel::table! {
 }
 
 diesel::table! {
+    usage_logs (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        activity_type -> Text,
+        iq_used -> Integer,
+        iq_cost_per_euro -> Integer,
+        created_at -> Integer,
+        success -> Bool,
+        summary -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
     users (id) {
         id -> Integer,
         email -> Text,
@@ -27,12 +40,16 @@ diesel::table! {
         locality -> Text,
         info -> Nullable<Text>,
         preferred_number -> Nullable<Text>,
+        iq_cost_per_euro -> Integer,
+        debug_logging_permission -> Bool,
     }
 }
 
 diesel::joinable!(conversations -> users (user_id));
+diesel::joinable!(usage_logs -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     conversations,
+    usage_logs,
     users,
 );

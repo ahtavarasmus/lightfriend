@@ -168,6 +168,7 @@ async fn main() {
         .route("/api/profile/delete/{user_id}", delete(auth_handlers::delete_user))
         .route("/api/profile/increase-iq/{user_id}", post(profile_handlers::increase_iq))
         .route("/api/profile/notify-credits/{user_id}", post(profile_handlers::update_notify_credits))
+        .route("/api/profile/usage", post(profile_handlers::get_usage_data))
 
         .merge(vapi_routes)
         .merge(twilio_routes)

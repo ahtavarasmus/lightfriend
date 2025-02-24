@@ -1,12 +1,19 @@
-
 use diesel::prelude::*;
+use serde::Serialize;
 use diesel::result::Error as DieselError;
 use std::error::Error;
+use rand;
+
+#[derive(Serialize, PartialEq)]
+pub struct UsageDataPoint {
+    pub timestamp: i32,
+    pub iq_used: i32,
+}
 
 use crate::{
-    models::user_models::User,
+    models::user_models::{User, NewUsageLog},
     handlers::auth_dtos::NewUser,
-    schema::users,
+    schema::{users, usage_logs},
     DbPool,
 };
 
@@ -224,6 +231,43 @@ impl UserRepository {
             .execute(&mut conn)?;
         Ok(())
     }
+
+    // log the usage of either call or sms
+    pub fn log_usage(&self, user_id: i32, activity_type: &str, iq_used: i32, success: bool, possible_summary: Option<String>) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Get the user to access their iq_cost_per_euro
+        let user = users::table
+            .find(user_id)
+            .first::<User>(&mut conn)?;
+
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        // only store the summary if user has given permission
+        let summary = match user.debug_logging_permission {
+            true => possible_summary,
+            false => None,
+        };
+
+        let new_log = NewUsageLog {
+            user_id,
+            activity_type: activity_type.to_string(),
+            iq_used,
+            iq_cost_per_euro: user.iq_cost_per_euro,
+            created_at: current_time,
+            success,
+            summary,
+        };
+
+        diesel::insert_into(usage_logs::table)
+            .values(&new_log)
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
     // Increase user's IQ by a specified amount
     pub fn increase_iq(&self, user_id: i32, amount: i32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -246,6 +290,66 @@ impl UserRepository {
             .set(users::notify_credits.eq(notify))
             .execute(&mut conn)?;
         Ok(())
+    }
+
+    pub fn get_usage_data(&self, user_id: i32, from_timestamp: i32) -> Result<Vec<UsageDataPoint>, DieselError> {
+        // Check if we're in development mode
+        if std::env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string()) == "development" {
+            // Generate example data for the last 30 days
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+            
+            let mut example_data = Vec::new();
+            let day_in_seconds = 24 * 60 * 60;
+            
+            // Generate random usage data for each day
+            for i in 0..30 {
+                let timestamp = now - (i * day_in_seconds);
+                if timestamp >= from_timestamp {
+                    // Random usage between 50 and 500
+                    let usage = rand::random::<i32>() % 451 + 50;
+                    example_data.push(UsageDataPoint {
+                        timestamp,
+                        iq_used: usage,
+                    });
+                    
+                    // Sometimes add multiple entries per day
+                    if rand::random::<f32>() > 0.7 {
+                        let second_usage = rand::random::<i32>() % 301 + 20;
+                        example_data.push(UsageDataPoint {
+                            timestamp: timestamp + 3600, // 1 hour later
+                            iq_used: second_usage,
+                        });
+                    }
+                }
+            }
+            
+            example_data.sort_by_key(|point| point.timestamp);
+            println!("returning example data");
+            return Ok(example_data);
+        }
+        println!("getting real usage data");
+        use crate::schema::usage_logs::dsl::*;
+        
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Query usage logs for the user within the time range
+        let usage_data = usage_logs
+            .filter(user_id.eq(user_id))
+            .filter(created_at.ge(from_timestamp))
+            .select((created_at, iq_used))
+            .order_by(created_at.asc())
+            .load::<(i32, i32)>(&mut conn)?
+            .into_iter()
+            .map(|(timestamp, iq)| UsageDataPoint {
+                timestamp,
+                iq_used: iq,
+            })
+            .collect();
+
+        Ok(usage_data)
     }
 
 

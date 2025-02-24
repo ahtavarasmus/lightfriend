@@ -3,7 +3,7 @@ use std::sync::Arc;
 use diesel::prelude::*;
 use tracing::{info, error};
 use crate::AppState;
-use crate::models::user_models::ElevenLabsResponse;
+use crate::api::elevenlabs::ElevenLabsResponse;
 use crate::schema::users;
 
 use std::env;
@@ -96,10 +96,30 @@ async fn check_and_update_database(state: &AppState) -> Result<(), Box<dyn std::
                                             if conversation_details.status == "done" {
                                                 info!("Call status == done => DECREASE IQ + DELETE");
                                                 // Decrease user's IQ based on call duration
-                                                if let Err(e) = state.user_repository.decrease_iq(user_id, conversation_details.metadata.call_duration_secs) {
+                                                let iq_used = conversation_details.metadata.call_duration_secs;
+                                                let success = match conversation_details.analysis.call_successful.as_str() {
+                                                    "success" => true,
+                                                    "failure" => false,
+                                                    _ => false,
+                                                };
+                                                let summary = Some(conversation_details.analysis.transcript_summary.to_string());
+                                                
+                                                // First log the usage
+                                                if let Err(e) = state.user_repository.log_usage(
+                                                    user_id,
+                                                    "call",
+                                                    iq_used,
+                                                    success, 
+                                                    summary,
+                                                ) {
+                                                    error!("Failed to log usage: {}", e);
+                                                }
+
+                                                // Then decrease the IQ
+                                                if let Err(e) = state.user_repository.decrease_iq(user_id, iq_used) {
                                                     error!("Failed to decrease user IQ: {}", e);
                                                 } else {
-                                                    info!("Successfully decreased IQ for user {} by {} seconds", user_id, conversation_details.metadata.call_duration_secs);
+                                                    info!("Successfully decreased IQ for user {} by {} seconds", user_id, iq_used);
                                                                                                        
                                                     // Delete the conversation from ElevenLabs
                                                     let delete_url = format!(

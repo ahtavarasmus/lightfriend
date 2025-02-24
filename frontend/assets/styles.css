@@ -1697,7 +1697,7 @@ button[type="submit"].loading::after {
     border-radius: 16px;
     padding: 3rem;
     width: 100%;
-    max-width: 600px;
+    max-width: 700px;
     backdrop-filter: blur(10px);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
@@ -1793,6 +1793,21 @@ button[type="submit"].loading::after {
     color: #999;
     font-size: 1rem;
 }
+
+.usage-graph {
+    margin-bottom: 2rem;
+    padding: 1rem;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.usage-graph h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    color: #333;
+}
+
 
 .billing-info {
     margin-top: 2rem;

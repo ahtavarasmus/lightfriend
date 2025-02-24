@@ -3,6 +3,7 @@ use web_sys::{HtmlInputElement, window};
 use yew_router::prelude::*;
 use crate::Route;
 use crate::config;
+use crate::usage_graph::UsageGraph;
 use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
 use crate::money::CheckoutButton;
@@ -443,7 +444,7 @@ let info = use_state(String::new);
                                 </button>
                             </div>
                         },
-                        ProfileTab::Billing => html! {
+                            ProfileTab::Billing => html! {
                             <div class="profile-info">
                                 <div class="billing-section">
                                     <h3>{"IQ Balance"}</h3>
@@ -457,6 +458,8 @@ let info = use_state(String::new);
                                             }}
                                         </span>
                                     </div>
+
+                                    <UsageGraph user_id={user_profile.id} />
                                     {
                                         if user_profile.iq <= 0 {
                                             let onclick = {
