@@ -144,12 +144,26 @@ pub async fn handle_incoming_sms(
 
         // Check if user has enough IQ points
         if user.iq < 60 {
-            return (
-                StatusCode::BAD_REQUEST,
-                axum::Json(TwilioResponse {
-                    message: "Insufficient IQ points to send message. Please add more credits to continue.".to_string(),
-                })
-            );
+            // Check if user has an active subscription
+            let has_subscription = match state.user_subscriptions.has_active_subscription(user.id) {
+                Ok(true) => true,
+                Ok(false) => false,
+                Err(e) => {
+                    eprintln!("Failed to check subscription status: {}", e);
+                    false
+                }
+            };
+            
+            // If user doesn't have a subscription, return error
+            if !has_subscription {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    axum::Json(TwilioResponse {
+                        message: "Insufficient IQ points to send message. Please add more credits to continue.".to_string(),
+                    })
+                );
+            }
+            // If user has subscription, continue processing
         }
 
         // Deduct 60 IQ points for the message
@@ -447,7 +461,7 @@ pub async fn handle_incoming_sms(
                         GPT4_O.to_string(),
                         follow_up_messages,
                     )
-                    .max_tokens(250); // Consistent token limit for follow-up messages
+                    .max_tokens(100); // Consistent token limit for follow-up messages
                     println!("Follow-up request created");
 
                     match client.chat_completion(follow_up_req).await {
@@ -476,10 +490,6 @@ pub async fn handle_incoming_sms(
                 "I apologize, but something went wrong while processing your request.".to_string()
             }
         };
-
-        if user.iq - 60 > 60 && user.iq - 60 < 120 {
-            final_response = format!("{}\n\n(enough IQ left for 1 free message)", final_response);
-        }
 
         // Send the final response to the conversation
         match send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number,&final_response).await {
