@@ -52,6 +52,30 @@ pub async fn fetch_conversation_participants(conversation_sid: &str) -> Result<V
 }
 
 
+pub async fn delete_twilio_conversation(conversation_sid: &str) -> Result<(), Box<dyn Error>> {
+    let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
+    let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
+    let client = Client::new();
+
+    let response = client
+        .delete(format!(
+            "https://conversations.twilio.com/v1/Conversations/{}",
+            conversation_sid
+        ))
+        .basic_auth(&account_sid, Some(&auth_token))
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await?;
+        return Err(error_text.into());
+    }
+
+    println!("Successfully deleted conversation: {}", conversation_sid);
+    Ok(())
+}
+
+
 pub async fn create_twilio_conversation_for_participant(user: &User, proxy_address: String) -> Result<(String, String), Box<dyn Error>> {
     let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
     let auth_token = env::var("TWILIO_AUTH_TOKEN")?;

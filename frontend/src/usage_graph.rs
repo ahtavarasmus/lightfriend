@@ -130,7 +130,7 @@ pub fn UsageGraph(props: &Props) -> Html {
                                     .unwrap_or_default()
                             })
                             .y_label_formatter(&|y| {
-                                format!("{} (€{:.1})", y, *y as f64 / 60.0)
+                                format!("{} (€{:.1})", y, *y as f64 / 300.0)
                             })
                             .draw()
                             .unwrap();

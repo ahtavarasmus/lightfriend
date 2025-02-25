@@ -481,7 +481,7 @@ pub fn Profile() -> Html {
                                                     <div class="iq-balance">
                                                         <span class="iq-time">
                                                             { 
-                                                                format!("{} IQ (approx. {:.2}€)", user_profile.iq.abs(), (user_profile.iq.abs() as f64 / 300.0) / 100.0)
+                                                                format!("{} IQ (approx. {:.2}€)", user_profile.iq.abs(), (user_profile.iq.abs() as f64 / 300.0))
                                                             }
                                                         </span>
 
