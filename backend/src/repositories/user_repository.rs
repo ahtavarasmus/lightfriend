@@ -295,7 +295,7 @@ impl UserRepository {
 
     pub fn get_usage_data(&self, user_id: i32, from_timestamp: i32) -> Result<Vec<UsageDataPoint>, DieselError> {
         // Check if we're in development mode
-        if std::env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string()) == "development" {
+        if std::env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_string()) != "development" {
             // Generate example data for the last 30 days
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

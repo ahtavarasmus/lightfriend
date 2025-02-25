@@ -73,7 +73,19 @@ impl UserConversations {
             .optional()
     }
 
-pub async fn get_conversation(
+    pub async fn delete_conversation(&self, conversation_sid: &str) -> Result<(), Box<dyn Error>> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Then delete the conversation record from the database
+        use crate::schema::conversations::dsl::*;
+        
+        diesel::delete(conversations)
+            .filter(conversation_sid.eq(conversation_sid))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub async fn get_conversation(
         &self,
         user: &User,
         twilio_number: String,
@@ -83,6 +95,16 @@ pub async fn get_conversation(
         match self.find_active_conversation(user, twilio_number.clone())? {
             Some(conversation) => {
                 println!("Found active conversation for user {} with number {}", user.phone_number, twilio_number);
+
+                if user.phone_number == "+358442105886" && twilio_number == "+358454901197" {
+                    // Delete the Twilio conversation first
+                    crate::api::twilio_utils::delete_twilio_conversation(&conversation.conversation_sid).await?;
+                    // Then delete the conversation from our database
+                    self.delete_conversation(&conversation.conversation_sid).await?;
+                    // Create a new conversation
+                    return self.create_conversation_for_user(user, twilio_number).await;
+
+                }
                 
                 
                 // Fetch and log participants
