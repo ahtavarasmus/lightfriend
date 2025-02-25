@@ -351,6 +351,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
     println!("built completion");
 
     println!("Processing model response with finish reason: {:?}", result.choices[0].finish_reason);
+    let mut fail = false;
     let mut final_response = match result.choices[0].finish_reason {
         None | Some(chat_completion::FinishReason::stop) => {
             println!("Model provided direct response (no tool calls needed)");
@@ -474,54 +475,60 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     }
                 }
             } else {
-                "I apologize, but I couldn't find the information you requested.".to_string()
+                fail = true;
+                "I apologize, but I couldn't find the information you requested. (you were not charged for this message)".to_string()
             }
         }
         Some(chat_completion::FinishReason::length) => {
-            "I apologize, but my response was too long. Could you please ask your question in a more specific way?".to_string()
+            fail = true;
+            "I apologize, but my response was too long. Could you please ask your question in a more specific way? (you were not charged for this message)".to_string()
         }
         Some(chat_completion::FinishReason::content_filter) => {
-            "I apologize, but I cannot provide an answer to that question due to content restrictions.".to_string()
+            fail = true;
+            "I apologize, but I cannot provide an answer to that question due to content restrictions. (you were not charged for this message)".to_string()
         }
         Some(chat_completion::FinishReason::null) => {
-            "I apologize, but something went wrong while processing your request.".to_string()
+            fail = true;
+            "I apologize, but something went wrong while processing your request. (you were not charged for this message)".to_string()
         }
     };
 
 
-    // Deduct 60 IQ points for the message
-    if let Err(e) = state.user_repository.update_user_iq(user.id, user.iq - 60) {
-        eprintln!("Failed to update user IQ: {}", e);
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            axum::Json(TwilioResponse {
-                message: "Failed to process IQ points".to_string(),
-            })
-        );
-    }
-
-    // Log the SMS usage
-    if let Err(e) = state.user_repository.log_usage(
-        user.id,
-        "sms",
-        60,  // IQ points used
-        true, // Success
-        None,
-    ) {
-        eprintln!("Failed to log SMS usage: {}", e);
-        // Continue execution even if logging fails
-    }
-
-
-
     // Send the final response to the conversation
     match send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number,&final_response).await {
-        Ok(_) => (
-            StatusCode::OK,
-            axum::Json(TwilioResponse {
-                message: "Message sent successfully".to_string(),
-            })
-        ),
+        Ok(_) => {
+            if !fail {
+                // Deduct 60 IQ points for the message
+                if let Err(e) = state.user_repository.update_user_iq(user.id, user.iq - 60) {
+                    eprintln!("Failed to update user IQ: {}", e);
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        axum::Json(TwilioResponse {
+                            message: "Failed to process IQ points".to_string(),
+                        })
+                    );
+                }
+
+                // Log the SMS usage
+                if let Err(e) = state.user_repository.log_usage(
+                    user.id,
+                    "sms",
+                    60,  // IQ points used
+                    true, // Success
+                    None,
+                ) {
+                    eprintln!("Failed to log SMS usage: {}", e);
+                    // Continue execution even if logging fails
+                }
+            }
+
+            (
+                StatusCode::OK,
+                axum::Json(TwilioResponse {
+                    message: "Message sent successfully".to_string(),
+                })
+            )
+        }
         Err(e) => {
             eprintln!("Failed to send conversation message: {}", e);
             (
