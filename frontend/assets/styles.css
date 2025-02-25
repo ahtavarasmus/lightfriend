@@ -1765,7 +1765,6 @@ button[type="submit"].loading::after {
 
 .billing-section {
     padding: 2rem;
-    background: rgba(0, 0, 0, 0.2);
     border-radius: 12px;
     border: 1px solid rgba(30, 144, 255, 0.1);
 }

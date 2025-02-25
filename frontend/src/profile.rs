@@ -473,38 +473,39 @@ pub fn Profile() -> Html {
                             ProfileTab::Billing => html! {
                             <div class="profile-info">
                                 <div class="billing-section">
-                                    <h3>{"IQ Balance"}</h3>
-                                    <div class="iq-balance">
                                         {
                                             if user_profile.iq < 0 {
                                                 html! {
                                                     <>
-                                                        <span class="iq-amount">{format!("Usage this month: {}", user_profile.iq.abs())}</span>
+                                                    <h3>{"IQ Usage this month"}</h3>
+                                                    <div class="iq-balance">
                                                         <span class="iq-time">
-                                                            {if user_profile.iq.abs() >= 60 { 
-                                                                format!("({} minutes/messages)", user_profile.iq.abs() / 60)
-                                                            } else { 
-                                                                format!("({} seconds)", user_profile.iq.abs())
-                                                            }}
+                                                            { 
+                                                                format!("{} IQ (approx. {:.2}€)", user_profile.iq.abs(), (user_profile.iq.abs() as f64 / 300.0) / 100.0)
+                                                            }
                                                         </span>
+
+                                                    </div>
                                                     </>
                                                 }
                                             } else {
                                                 html! {
                                                     <>
-                                                        <span class="iq-amount">{format!("Available credits: {}", user_profile.iq)}</span>
+                                                    <h3>{"Available credits"}</h3>
+                                                    <div class="iq-balance">
                                                         <span class="iq-time">
                                                             {if user_profile.iq >= 60 { 
-                                                                format!("({} minutes/messages)", user_profile.iq / 60)
+                                                                format!("{} IQ ({} minutes/messages)", user_profile.iq, user_profile.iq / 60)
                                                             } else { 
-                                                                format!("({} seconds)", user_profile.iq)
+                                                                format!("{} IQ ({} seconds)", user_profile.iq, user_profile.iq)
                                                             }}
                                                         </span>
+
+                                                    </div>
                                                     </>
                                                 }
                                             }
                                         }
-                                    </div>
 
                                     <UsageGraph user_id={user_profile.id} />
                                 <div class="billing-info">

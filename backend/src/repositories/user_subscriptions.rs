@@ -102,17 +102,6 @@ impl UserSubscription {
     } 
 
 
-    pub fn get_active_subscription(&self, user_id: i32) -> Result<Option<Subscription>, Box<dyn Error>> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let active_subscription = subscriptions::table
-            .filter(subscriptions::user_id.eq(user_id))
-            .filter(subscriptions::status.eq_any(&["active", "trialing"]))
-            .first::<Subscription>(&mut conn)
-            .optional()?;
-        
-        Ok(active_subscription)
-    }
-
 
     pub fn has_active_subscription(&self, user_id: i32) -> Result<bool, Box<dyn Error>> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
