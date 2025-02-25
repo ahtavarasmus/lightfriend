@@ -509,6 +509,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     );
                 }
 
+                
                 // Log the SMS usage
                 if let Err(e) = state.user_repository.log_usage(
                     user.id,
@@ -520,6 +521,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     eprintln!("Failed to log SMS usage: {}", e);
                     // Continue execution even if logging fails
                 }
+
             }
 
             (

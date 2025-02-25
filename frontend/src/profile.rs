@@ -585,7 +585,7 @@ pub fn Profile() -> Html {
                                                         {
                                                             if subscription.status.to_lowercase() != "active" && subscription.status.to_lowercase() != "trialing" {
                                                                 html! {
-                                                                    <CheckoutButton user_id={user_profile.id} />
+                                                                    <CheckoutButton user_id={user_profile.id} user_email={user_profile.email} />
                                                                 }
                                                             } else {
                                                                 html! {}
@@ -598,7 +598,7 @@ pub fn Profile() -> Html {
                                             html! {
                                                 <>
                                                     <p>{"Subscribe to usage based billing, pay only for what you use monthly."}</p>
-                                                    <CheckoutButton user_id={user_profile.id} />
+                                                    <CheckoutButton user_id={user_profile.id} user_email={user_profile.email} />
                                                 </>
                                             }
                                         }

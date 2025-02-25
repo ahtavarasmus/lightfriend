@@ -24,6 +24,7 @@ mod api {
     pub mod twilio_utils;
     pub mod elevenlabs;
     pub mod paddle_webhooks;
+    pub mod paddle_utils;
 }
 
 mod config {
