@@ -11,26 +11,25 @@ extern "C" {
     fn openCheckout(items: JsValue, customer: JsValue, passthrough: JsValue);
 }
 
-#[derive(Properties, PartialEq)]
+#[derive(Properties, PartialEq, Clone)]
 pub struct CheckoutButtonProps {
     pub user_id: i32,
+    pub user_email: String,
 }
 
 #[function_component(CheckoutButton)]
 pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
     let user_id = props.user_id;
+    let user_email = props.user_email.clone();
     let onclick = Callback::from(move |e: MouseEvent| {
         e.prevent_default();
+        // zero dollar subscription
         let items = json!([{
             "priceId": "pri_01jmqk1r39nk4h7bbr10jbatsz",
             "quantity": 1,
         }]);
         let customer_info = json!({
-            "email": "sam@example.com",
-            "address": {
-                "countryCode": "US", 
-                "postalCode": "10021"
-            }
+            "email": user_email,
         });
         let passthrough = json!({
             "user_id": user_id
@@ -38,7 +37,7 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
         openCheckout(
             serde_wasm_bindgen::to_value(&items).unwrap(),
             serde_wasm_bindgen::to_value(&customer_info).unwrap(),
-            serde_wasm_bindgen::to_value(&passthrough).unwrap()
+            serde_wasm_bindgen::to_value(&passthrough).unwrap(),
         );
     });
 

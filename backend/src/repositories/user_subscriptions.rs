@@ -39,6 +39,33 @@ impl UserSubscription {
         Ok(())
     }
 
+    pub async fn update_usage(
+        &self,
+        user_id: i32,
+        new_iq_amount: i32,
+    ) -> Result<(), Box<dyn Error>> {
+        // Get subscription or return early with Ok if none found
+        let subscription = match self.find_by_user_id(user_id)? {  // Note the ? here to handle the Result
+            Some(sub) => sub,
+            None => return Ok(()),  // No subscription found, return early
+        };
+        
+        // Check subscription status
+        if subscription.status != "active" && subscription.status != "trialing" {
+            return Ok(()); // No update needed for inactive subscriptions
+        }
+        // Only update Paddle if tokens are being consumed (negative amount)
+        if new_iq_amount < 0 {
+            let iq_quantity = (new_iq_amount.abs() / 3).max(1);
+            crate::api::paddle_utils::sync_paddle_subscription_items(
+                &subscription.paddle_subscription_id,
+                iq_quantity
+            ).await?;
+        }
+        
+        Ok(())
+    }
+
 
     pub fn update_subscription_status(
         &self,
