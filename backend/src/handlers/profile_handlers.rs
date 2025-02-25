@@ -105,19 +105,14 @@ pub async fn get_profile(
             };
 
             // Check subscription status
-            let has_subscription = state.user_subscriptions.has_active_subscription(user.id).unwrap_or(false);
-            let subscription_info = if has_subscription {
-                match state.user_subscriptions.find_by_user_id(user.id) {
-                    Ok(Some(sub)) => Some(SubscriptionInfo {
-                        id: sub.paddle_subscription_id,
-                        status: sub.status,
-                        next_bill_date: sub.next_bill_date,
-                        stage: sub.stage,
-                    }),
-                    _ => None,
-                }
-            } else {
-                None
+            let subscription_info = match state.user_subscriptions.find_by_user_id(user.id) {
+                Ok(Some(sub)) => Some(SubscriptionInfo {
+                    id: sub.paddle_subscription_id,
+                    status: sub.status,
+                    next_bill_date: sub.next_bill_date,
+                    stage: sub.stage,
+                }),
+                _ => None,
             };
 
             Ok(Json(ProfileResponse {
@@ -593,7 +588,6 @@ pub async fn get_customer_portal_link(
             Json(json!({"error": "No customer ID found for this subscription"}))
         ));
     }
-    println!("customerid: {:#?}", customer_id);
 
     // Create HTTP client
     let client = reqwest::Client::new();

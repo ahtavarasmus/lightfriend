@@ -172,6 +172,7 @@ async fn main() {
         .route("/api/profile", get(profile_handlers::get_profile))
         .route("/api/profile/delete/{user_id}", delete(auth_handlers::delete_user))
         .route("/api/profile/increase-iq/{user_id}", post(profile_handlers::increase_iq))
+        .route("/api/profile/reset-iq/{user_id}", post(profile_handlers::reset_iq))
         .route("/api/profile/notify-credits/{user_id}", post(profile_handlers::update_notify_credits))
         .route("/api/profile/usage", post(profile_handlers::get_usage_data))
         .route("/api/profile/get-customer-portal-link/{user_id}", get(profile_handlers::get_customer_portal_link))

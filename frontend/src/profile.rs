@@ -581,6 +581,15 @@ pub fn Profile() -> Html {
                                                         >
                                                             {"Manage Subscription"}
                                                         </a>
+                                                        {
+                                                            if subscription.status.to_lowercase() != "active" && subscription.status.to_lowercase() != "trialing" {
+                                                                html! {
+                                                                    <CheckoutButton user_id={user_profile.id} />
+                                                                }
+                                                            } else {
+                                                                html! {}
+                                                            }
+                                                        }
                                                     </div>
                                                 </div>
                                             }
