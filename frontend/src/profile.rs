@@ -8,6 +8,7 @@ use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
 use crate::money::CheckoutButton;
 use chrono::{DateTime, TimeZone, Utc};
+use wasm_bindgen_futures::spawn_local;
 
 #[derive(Deserialize, Clone, PartialEq)]
 struct SubscriptionInfo {
@@ -15,6 +16,11 @@ struct SubscriptionInfo {
     status: String,
     next_bill_date: i32,
     stage: String,
+}
+
+#[derive(Deserialize, Clone, PartialEq)]
+struct PaddlePortalSessionResponse {
+    portal_url: String,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]
@@ -59,16 +65,17 @@ enum ProfileTab {
 
 #[function_component]
 pub fn Profile() -> Html {
-let profile = use_state(|| None::<UserProfile>);
-let email = use_state(String::new);
-let phone_number = use_state(String::new);
-let nickname = use_state(String::new);
-let info = use_state(String::new);
+    let profile = use_state(|| None::<UserProfile>);
+    let email = use_state(String::new);
+    let phone_number = use_state(String::new);
+    let nickname = use_state(String::new);
+    let info = use_state(String::new);
     let error = use_state(|| None::<String>);
     let success = use_state(|| None::<String>);
     let is_editing = use_state(|| false);
     let active_tab = use_state(|| ProfileTab::Settings);
     let navigator = use_navigator().unwrap();
+    let portal_url = use_state(|| None::<String>);
 
     // Check authentication immediately
     {
@@ -523,9 +530,54 @@ let info = use_state(String::new);
                                                     </p>
                                                     <div class="subscription-actions">
                                                         <a 
-                                                            href="https://paddle.com/customer/subscription" 
+                                                            href={
+                                                                if let Some(url) = (*portal_url).clone() {
+                                                                    url
+                                                                } else {
+                                                                    "#".to_string()
+                                                                }
+                                                            }
                                                             target="_blank" 
                                                             class="paddle-dashboard-button"
+                                                            onclick={
+                                                                let portal_url = portal_url.clone();
+                                                                let user_id = user_profile.id;
+                                                                Callback::from(move |e: MouseEvent| {
+                                                                    if (*portal_url).is_none() {
+                                                                        e.prevent_default();
+                                                                        let portal_url = portal_url.clone();
+                                                                        spawn_local(async move {
+                                                                            if let Some(token) = window()
+                                                                                .and_then(|w| w.local_storage().ok())
+                                                                                .flatten()
+                                                                                .and_then(|storage| storage.get_item("token").ok())
+                                                                                .flatten()
+                                                                            {
+                                                                                match Request::get(&format!("{}/api/profile/get-customer-portal-link/{}", config::get_backend_url(), user_id))
+                                                                                    .header("Authorization", &format!("Bearer {}", token))
+                                                                                    .send()
+                                                                                    .await
+                                                                                {
+                                                                                    Ok(response) => {
+                                                                                        if response.ok() {
+                                                                                            if let Ok(data) = response.json::<PaddlePortalSessionResponse>().await {
+                                                                                                portal_url.set(Some(data.portal_url.clone()));
+                                                                                                // Redirect to the portal URL
+                                                                                                if let Some(window) = window() {
+                                                                                                    let _ = window.open_with_url(&data.portal_url);
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                    Err(_) => {
+                                                                                        // Handle error
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                    }
+                                                                })
+                                                            }
                                                         >
                                                             {"Manage Subscription"}
                                                         </a>

@@ -34,7 +34,7 @@ pub struct PaddleWebhookPayload {
 
 #[derive(Debug, Deserialize)]
 pub struct CustomData {
-    pub user_id: i32,
+    pub user_id: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -167,11 +167,18 @@ pub async fn handle_subscription_webhook(
                     return Err(StatusCode::BAD_REQUEST);
                 }
             };
+            let user_id = match custom_data.user_id {
+                Some(id) => id,
+                None => {
+                    tracing::error!("Subscription created without user_id in custom data");
+                    return Err(StatusCode::BAD_REQUEST);
+                }
+            };
 
             
             // Check if user already has a subscription
-            if let Ok(Some(_)) = state.user_subscriptions.find_by_user_id(custom_data.user_id) {
-                tracing::warn!("User {} already has an active subscription", custom_data.user_id);
+            if let Ok(Some(_)) = state.user_subscriptions.find_by_user_id(user_id) {
+                tracing::warn!("User {} already has an active subscription", user_id);
                 return Ok(Json(WebhookResponse {
                     status: "existing_subscription".to_string(),
                 }));
@@ -198,7 +205,7 @@ pub async fn handle_subscription_webhook(
 
 
             let new_subscription = NewSubscription {
-                user_id: custom_data.user_id,
+                user_id: user_id,
                 paddle_subscription_id: payload.data.subscription_id,
                 paddle_customer_id: payload.data.customer_id.unwrap_or_default(),
                 stage: stage,
@@ -208,7 +215,7 @@ pub async fn handle_subscription_webhook(
 
             match state.user_subscriptions.create_subscription(new_subscription) {
                 Ok(_) => {
-                    tracing::info!("Successfully created subscription for user_id: {}", custom_data.user_id);
+                    tracing::info!("Successfully created subscription for user_id: {}", user_id);
                     Ok(Json(WebhookResponse {
                         status: "success".to_string(),
                     }))
