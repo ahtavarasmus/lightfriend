@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use axum::extract::Path;
 use serde_json::json;
 use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+use reqwest::header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 
 use crate::repositories::user_repository::UsageDataPoint;
 use crate::{
@@ -499,4 +500,146 @@ pub async fn update_profile(
     Ok(Json(json!({
         "message": "Profile updated successfully"
     })))
+}
+
+#[derive(Serialize)]
+pub struct PaddlePortalSessionResponse {
+    pub portal_url: String,
+}
+
+#[derive(Deserialize)]
+pub struct PaddleResponse {
+    pub data: PaddlePortalData,
+}
+
+#[derive(Deserialize)]
+pub struct PaddlePortalData {
+    pub urls: PaddleUrls,
+}
+
+#[derive(Deserialize)]
+pub struct PaddleUrls {
+    pub general: PaddleGeneralUrls,
+}
+
+#[derive(Deserialize)]
+pub struct PaddleGeneralUrls {
+    pub overview: String,
+}
+
+pub async fn get_customer_portal_link(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(user_id): Path<i32>,
+) -> Result<Json<PaddlePortalSessionResponse>, (StatusCode, Json<serde_json::Value>)> {
+    println!("getting the link");
+    // Extract and validate token
+    let auth_header = headers.get("Authorization")
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| header.strip_prefix("Bearer "));
+
+    let token = match auth_header {
+        Some(token) => token,
+        None => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "No authorization token provided"}))
+        )),
+    };
+
+    // Decode JWT token
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+            .expect("JWT_SECRET_KEY must be set in environment")
+            .as_bytes()),
+        &Validation::new(Algorithm::HS256)
+    ) {
+        Ok(token_data) => token_data.claims,
+        Err(_) => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "Invalid token"}))
+        )),
+    };
+
+    // Check if user is requesting their own portal or is an admin
+    if claims.sub != user_id && !state.user_repository.is_admin(claims.sub).map_err(|e| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": format!("Database error: {}", e)}))
+    ))? {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "You can only access your own customer portal unless you're an admin"}))
+        ));
+    }
+
+    // Get subscription for the user
+    let subscription = match state.user_subscriptions.find_by_user_id(user_id) {
+        Ok(Some(sub)) => sub,
+        Ok(None) => return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "No subscription found for this user"}))
+        )),
+        Err(e) => return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        )),
+    };
+
+    // Get customer ID from subscription
+    let customer_id = subscription.paddle_customer_id;
+    if customer_id.is_empty() {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "No customer ID found for this subscription"}))
+        ));
+    }
+    println!("customerid: {:#?}", customer_id);
+
+    // Create HTTP client
+    let client = reqwest::Client::new();
+    
+    // Get Paddle API key from environment
+    let paddle_api_key = std::env::var("PADDLE_API_KEY")
+        .map_err(|_| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "PADDLE_API_KEY not set in environment"}))
+        ))?;
+
+    // Create request to Paddle API
+    let url = format!("https://sandbox-api.paddle.com/customers/{}/portal-sessions", customer_id);
+    
+    // Make the request to Paddle API
+    let response = client.post(&url)
+        .header(AUTHORIZATION, format!("Bearer {}", paddle_api_key))
+        .header(CONTENT_TYPE, "application/json")
+        .send()
+        .await
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to connect to Paddle API: {}", e)}))
+        ))?;
+    
+
+    // Check if request was successful
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        println!("Error from Paddle API: {}", error_text);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Paddle API error: {}", error_text)}))
+        ));
+    }
+
+    // Parse response
+    let paddle_response = response.json::<PaddleResponse>().await
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to parse Paddle API response: {}", e)}))
+        ))?;
+    println!("paddle_response success");
+
+    // Return the overview URL
+    Ok(Json(PaddlePortalSessionResponse {
+        portal_url: paddle_response.data.urls.general.overview,
+    }))
 }
