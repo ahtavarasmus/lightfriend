@@ -166,30 +166,7 @@ pub async fn handle_incoming_sms(
             // If user has subscription, continue processing
         }
 
-        // Deduct 60 IQ points for the message
-        if let Err(e) = state.user_repository.update_user_iq(user.id, user.iq - 60) {
-            eprintln!("Failed to update user IQ: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(TwilioResponse {
-                    message: "Failed to process IQ points".to_string(),
-                })
-            );
-        }
-
-        // Log the SMS usage
-        if let Err(e) = state.user_repository.log_usage(
-            user.id,
-            "sms",
-            60,  // IQ points used
-            true, // Success
-            None,
-        ) {
-            eprintln!("Failed to log SMS usage: {}", e);
-            // Continue execution even if logging fails
-        }
-
-
+        
 
         let conversation = match state.user_conversations.get_conversation(&user, payload.to).await {
             Ok(conv) => conv,
@@ -490,6 +467,32 @@ pub async fn handle_incoming_sms(
                 "I apologize, but something went wrong while processing your request.".to_string()
             }
         };
+
+
+        // Deduct 60 IQ points for the message
+        if let Err(e) = state.user_repository.update_user_iq(user.id, user.iq - 60) {
+            eprintln!("Failed to update user IQ: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(TwilioResponse {
+                    message: "Failed to process IQ points".to_string(),
+                })
+            );
+        }
+
+        // Log the SMS usage
+        if let Err(e) = state.user_repository.log_usage(
+            user.id,
+            "sms",
+            60,  // IQ points used
+            true, // Success
+            None,
+        ) {
+            eprintln!("Failed to log SMS usage: {}", e);
+            // Continue execution even if logging fails
+        }
+
+
 
         // Send the final response to the conversation
         match send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number,&final_response).await {

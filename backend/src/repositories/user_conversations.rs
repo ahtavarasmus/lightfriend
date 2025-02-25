@@ -83,7 +83,7 @@ pub async fn get_conversation(
         match self.find_active_conversation(user, twilio_number.clone())? {
             Some(conversation) => {
                 println!("Found active conversation for user {} with number {}", user.phone_number, twilio_number);
-                println!("Conversation sid: {}", conversation.conversation_sid);
+                
                 
                 // Fetch and log participants
                 match crate::api::twilio_utils::fetch_conversation_participants(&conversation.conversation_sid).await {
