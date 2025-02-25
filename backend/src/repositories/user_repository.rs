@@ -217,6 +217,7 @@ impl UserRepository {
             .execute(&mut conn)?;
         Ok(())
     }
+
     // Decrease user's IQ by a specified amount
     pub fn decrease_iq(&self, user_id: i32, amount: i32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");

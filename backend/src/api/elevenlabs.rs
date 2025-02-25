@@ -153,16 +153,36 @@ pub async fn fetch_assistant(
         Ok(Some(user)) => {
             println!("Found user: {}, {}", user.email, user.phone_number);
             
-            // Check if user has enough IQ
+            // Check if user has enough IQ or has an active subscription
             if user.iq <= 0 {
-                println!("User has insufficient IQ: {}", user.iq);
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    Json(json!({
-                        "error": "Insufficient IQ balance",
-                        "message": "Please add more IQ to your account to continue on lightfriend website"
-                    }))
-                ));
+                // If IQ is negative or zero, check if they have an active subscription
+                match state.user_subscriptions.has_active_subscription(user.id) {
+                    Ok(has_subscription) => {
+                        if !has_subscription {
+                            println!("User has insufficient IQ: {} and no active subscription", user.iq);
+                            return Err((
+                                StatusCode::FORBIDDEN,
+                                Json(json!({
+                                    "error": "Insufficient IQ balance",
+                                    "message": "Please add more IQ to your account or subscribe to continue using the voice assistant"
+                                }))
+                            ));
+                        } else {
+                            println!("User has active subscription, allowing call despite low IQ: {}", user.iq);
+                        }
+                    },
+                    Err(e) => {
+                        println!("Error checking subscription status: {}", e);
+                        // If we can't check subscription status, default to requiring positive IQ
+                        return Err((
+                            StatusCode::FORBIDDEN,
+                            Json(json!({
+                                "error": "Insufficient IQ balance",
+                                "message": "Please add more IQ to your account to continue on lightfriend website"
+                            }))
+                        ));
+                    }
+                }
             }
 
             // If user is not verified, verify them

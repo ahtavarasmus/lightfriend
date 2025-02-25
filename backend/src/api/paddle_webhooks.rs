@@ -215,6 +215,14 @@ pub async fn handle_subscription_webhook(
 
             match state.user_subscriptions.create_subscription(new_subscription) {
                 Ok(_) => {
+                    // Update user's IQ (credits) to 0
+                    if let Err(err) = state.user_repository.update_user_iq(user_id, 0) {
+                        tracing::error!("Failed to update user IQ to 0: {:?}", err);
+                        // Continue with subscription creation even if IQ update fails
+                    } else {
+                        tracing::info!("Successfully updated user_id: {} IQ to 0", user_id);
+                    }
+                    
                     tracing::info!("Successfully created subscription for user_id: {}", user_id);
                     Ok(Json(WebhookResponse {
                         status: "success".to_string(),
@@ -225,6 +233,8 @@ pub async fn handle_subscription_webhook(
                     Err(StatusCode::INTERNAL_SERVER_ERROR)
                 }
             }
+
+
         }
         // Add other event types as needed
         _ => {
