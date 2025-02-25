@@ -107,6 +107,7 @@ pub async fn handle_subscription_webhook(
             match state.user_subscriptions.update_subscription_status(subscription_id, "canceled") {
                 Ok(_) => {
                     tracing::info!("Successfully updated subscription {} status to canceled", subscription_id);
+                    // TODO here we should send the bill
                     Ok(Json(WebhookResponse {
                         status: "success".to_string(),
                     }))
@@ -140,7 +141,7 @@ pub async fn handle_subscription_webhook(
             }
             let stage = "tier 1".to_string();
 
-            match state.user_subscriptions.update_subscription(
+            match state.user_subscriptions.update_subscription_with_customer_id(
                 subscription_id,
                 customer_id,
                 status,
@@ -174,16 +175,6 @@ pub async fn handle_subscription_webhook(
                     return Err(StatusCode::BAD_REQUEST);
                 }
             };
-
-            
-            // Check if user already has a subscription
-            if let Ok(Some(_)) = state.user_subscriptions.find_by_user_id(user_id) {
-                tracing::warn!("User {} already has an active subscription", user_id);
-                return Ok(Json(WebhookResponse {
-                    status: "existing_subscription".to_string(),
-                }));
-            }
-
             // Create new subscription
             let next_bill_timestamp = payload.data.next_billed_at
                 .and_then(|date_str| chrono::DateTime::parse_from_rfc3339(&date_str).ok())
@@ -204,6 +195,38 @@ pub async fn handle_subscription_webhook(
             let stage = "tier 1".to_string();
 
 
+            // Get subscription for the user
+            let subscription = match state.user_subscriptions.find_by_user_id(user_id) {
+                Ok(Some(sub)) => Some(sub),
+                Ok(None) => None,
+                Err(e) => {
+                    tracing::error!("error when fetching subscription by user id: {:?}", e);
+                    return Err(StatusCode::BAD_REQUEST);
+                }
+            };
+            if let Some(_) = subscription {
+                return match state.user_subscriptions.update_subscription_with_user_id(
+                    user_id,
+                    &payload.data.subscription_id, 
+                    &payload.data.customer_id.unwrap_or_default(),
+                    &payload.data.status.unwrap_or_else(|| "active".to_string()),
+                    next_bill_timestamp,
+                    &stage
+                ) {
+                    Ok(_) => {
+                        tracing::info!("Successfully updated subscription for user_id: {}", user_id);
+                        Ok(Json(WebhookResponse {
+                            status: "success".to_string(),
+                        }))
+                    },
+                    Err(err) => {
+                        tracing::error!("Failed to update subscription: {:?}", err);
+                        Err(StatusCode::INTERNAL_SERVER_ERROR)
+                    }
+                };
+            }
+
+                        
             let new_subscription = NewSubscription {
                 user_id: user_id,
                 paddle_subscription_id: payload.data.subscription_id,
