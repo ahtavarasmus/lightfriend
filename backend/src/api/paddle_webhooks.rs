@@ -110,6 +110,32 @@ pub async fn handle_subscription_webhook(
                     tracing::info!("Successfully resetted user's iq to zero for the next billing period");
                     // Spawn the reset operation as a background task
                     tokio::spawn(async move {
+                        // Fetch next_billed_at
+                        match crate::api::paddle_utils::get_next_billed_at(&subscription_id).await {
+                            Ok(next_billed_at) => {
+                                tracing::info!(
+                                    "Next billing date for sub {}: {}",
+                                    subscription_id,
+                                    next_billed_at
+                                );
+                                // Update the DB with the new next_billed_at
+                                if let Err(e) = state.user_subscriptions.update_next_billed_at(&subscription_id, &next_billed_at) {
+                                    tracing::error!(
+                                        "Failed to update next_billed_at for sub {}: {}",
+                                        subscription_id,
+                                        e
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    "Failed to fetch next_billed_at for sub {}: {}",
+                                    subscription_id,
+                                    e
+                                );
+                            }
+                        }
+                        
                         match crate::api::paddle_utils::reset_paddle_subcription_items(&subscription_id).await {
                             Ok(_) => {
                                 tracing::info!(
@@ -126,6 +152,7 @@ pub async fn handle_subscription_webhook(
                             }
                         }
                     });
+
                     Ok(Json(WebhookResponse {
                         status: "success".to_string(),
                     }))

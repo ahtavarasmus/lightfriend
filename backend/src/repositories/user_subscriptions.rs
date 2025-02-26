@@ -2,6 +2,7 @@ use diesel::prelude::*;
 use serde::Serialize;
 use diesel::result::Error as DieselError;
 use std::error::Error;
+use chrono::{DateTime, Utc};
 
 use crate::{
     models::user_models::{Subscription, NewSubscription},
@@ -153,6 +154,26 @@ impl UserSubscription {
         Ok(())
     } 
 
+    pub fn update_next_billed_at(
+        &self,
+        subscription_id: &str,
+        next_billed_at: &str,
+    ) -> Result<(), Box<dyn Error>> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Parse the RFC 3339 string (e.g., "2025-03-26T00:00:00Z") into a timestamp
+        let parsed_date = DateTime::parse_from_rfc3339(next_billed_at)
+            .map_err(|e| format!("Failed to parse next_billed_at: {}", e))?;
+        let timestamp = parsed_date.timestamp() as i32; // Convert to Unix timestamp (seconds)
+
+        // Update the next_bill_date for the matching subscription
+        diesel::update(subscriptions::table)
+            .filter(subscriptions::paddle_subscription_id.eq(subscription_id))
+            .set(subscriptions::next_bill_date.eq(timestamp))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
 
 
     pub fn has_active_subscription(&self, user_id: i32) -> Result<bool, Box<dyn Error>> {
