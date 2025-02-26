@@ -41,7 +41,7 @@ pub struct CustomData {
 pub struct Data {
     #[serde(rename = "id")]
     pub subscription_id: String, // subscription id
-    pub customer_id: Option<String>, // Paddle's customer ID
+    pub customer_id: String, // Paddle's customer ID
     pub status: Option<String>, // active, inactive, trialing
     pub next_billed_at: Option<String>,
     pub items: Option<Vec<SubscriptionItem>>,
@@ -102,12 +102,45 @@ pub async fn handle_subscription_webhook(
     );
 
     match payload.event_type.as_str() {
+        "transaction.billed" => {
+            let subscription_id = payload.data.subscription_id;
+            let customer_id= &payload.data.customer_id;
+            match state.user_subscriptions.reset_user_iq_with_customer_id(customer_id) {
+                Ok(_) => {
+                    tracing::info!("Successfully resetted user's iq to zero for the next billing period");
+                    // Spawn the reset operation as a background task
+                    tokio::spawn(async move {
+                        match crate::api::paddle_utils::reset_paddle_subcription_items(&subscription_id).await {
+                            Ok(_) => {
+                                tracing::info!(
+                                    "Successfully reset paddle's subscription items for sub: {}", 
+                                    subscription_id
+                                );
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    "Failed to reset paddle subscription items for sub:{}: {}", 
+                                    subscription_id, 
+                                    e
+                                );
+                            }
+                        }
+                    });
+                    Ok(Json(WebhookResponse {
+                        status: "success".to_string(),
+                    }))
+                },
+                Err(err) => {
+                    tracing::error!("Failed to reset user's iq for the next billing period: {:?}", err);
+                    Err(StatusCode::INTERNAL_SERVER_ERROR)
+                }
+            }
+        },
         "subscription.canceled" => {
             let subscription_id = &payload.data.subscription_id;
             match state.user_subscriptions.update_subscription_status(subscription_id, "canceled") {
                 Ok(_) => {
                     tracing::info!("Successfully updated subscription {} status to canceled", subscription_id);
-                    // TODO here we should send the bill
                     Ok(Json(WebhookResponse {
                         status: "success".to_string(),
                     }))
@@ -120,7 +153,7 @@ pub async fn handle_subscription_webhook(
         },
         "subscription.updated" => {
             let subscription_id = &payload.data.subscription_id;
-            let customer_id = payload.data.customer_id.as_deref().unwrap_or_default();
+            let customer_id = &payload.data.customer_id;
             let status = payload.data.status.as_deref().unwrap_or("canceled");
             
             // Calculate next bill timestamp
@@ -208,7 +241,7 @@ pub async fn handle_subscription_webhook(
                 return match state.user_subscriptions.update_subscription_with_user_id(
                     user_id,
                     &payload.data.subscription_id, 
-                    &payload.data.customer_id.unwrap_or_default(),
+                    &payload.data.customer_id,
                     &payload.data.status.unwrap_or_else(|| "active".to_string()),
                     next_bill_timestamp,
                     &stage
@@ -230,7 +263,7 @@ pub async fn handle_subscription_webhook(
             let new_subscription = NewSubscription {
                 user_id: user_id,
                 paddle_subscription_id: payload.data.subscription_id,
-                paddle_customer_id: payload.data.customer_id.unwrap_or_default(),
+                paddle_customer_id: payload.data.customer_id,
                 stage: stage,
                 status: payload.data.status.unwrap_or_else(|| "active".to_string()),
                 next_bill_date: next_bill_timestamp,
