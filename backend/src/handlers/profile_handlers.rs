@@ -32,6 +32,7 @@ pub struct SubscriptionInfo {
     status: String,
     next_bill_date: i32,
     stage: String,
+    is_scheduled_to_cancel: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -111,6 +112,7 @@ pub async fn get_profile(
                     status: sub.status,
                     next_bill_date: sub.next_bill_date,
                     stage: sub.stage,
+                    is_scheduled_to_cancel: sub.is_scheduled_to_cancel,
                 }),
                 _ => None,
             };

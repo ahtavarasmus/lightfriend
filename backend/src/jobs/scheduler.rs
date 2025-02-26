@@ -54,6 +54,11 @@ async fn sync_all_active_subscriptions(state: &AppState) -> Result<(), Box<dyn s
     // First query to get all active subscriptions with their user_id
     let active_subscription_users = subscriptions::table
         .filter(subscriptions::status.eq("active"))
+        .filter(
+            subscriptions::is_scheduled_to_cancel
+                .eq(false) // Explicitly false
+                .or(subscriptions::is_scheduled_to_cancel.is_null()) // Or NULL
+        )
         .select((subscriptions::paddle_subscription_id, subscriptions::user_id))
         .load::<(String, i32)>(conn)?;
     

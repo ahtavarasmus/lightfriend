@@ -37,6 +37,7 @@ pub struct Subscription {
     pub stage: String,
     pub status: String,
     pub next_bill_date: i32,
+    pub is_scheduled_to_cancel: Option<bool>,
 }
 
 
@@ -49,6 +50,7 @@ pub struct NewSubscription {
     pub stage: String,
     pub status: String,
     pub next_bill_date: i32,
+    pub is_scheduled_to_cancel: Option<bool>,
 }
 
 
