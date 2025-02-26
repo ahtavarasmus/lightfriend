@@ -22,6 +22,7 @@ diesel::table! {
         stage -> Text,
         status -> Text,
         next_bill_date -> Integer,
+        is_scheduled_to_cancel -> Nullable<Bool>,
     }
 }
 

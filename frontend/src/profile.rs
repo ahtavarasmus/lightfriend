@@ -16,6 +16,7 @@ struct SubscriptionInfo {
     status: String,
     next_bill_date: i32,
     stage: String,
+    is_scheduled_to_cancel: Option<bool>,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]
@@ -517,10 +518,21 @@ pub fn Profile() -> Html {
                                                     <h4>{"Active Subscription"}</h4>
                                                     <p>
                                                         <span class="label">{"Status:"}</span>
-                                                        <span class={classes!("value", format!("status-{}", subscription.status.to_lowercase()))}>
-                                                            {subscription.status.clone()}
-                                                        </span>
+                                                        {
+                                                            if let Some(true) = subscription.is_scheduled_to_cancel {
+                                                                html! {
+                                                                    <span class="value status-canceled">{"to be cancelled"}</span>
+                                                                }
+                                                            } else {
+                                                                html! {
+                                                                    <span class={classes!("value", format!("status-{}", subscription.status.to_lowercase()))}>
+                                                                        {subscription.status.clone()}
+                                                                    </span>
+                                                                }
+                                                            }
+                                                        }
                                                     </p>
+
                                                     <p>
                                                         <span class="label">{"Next billing date:"}</span>
                                                         <span class="value">{next_bill_date}</span>
@@ -582,15 +594,6 @@ pub fn Profile() -> Html {
                                                         >
                                                             {"Manage Subscription"}
                                                         </a>
-                                                        {
-                                                            if subscription.status.to_lowercase() != "active" && subscription.status.to_lowercase() != "trialing" {
-                                                                html! {
-                                                                    <CheckoutButton user_id={user_profile.id} user_email={user_profile.email} />
-                                                                }
-                                                            } else {
-                                                                html! {}
-                                                            }
-                                                        }
                                                     </div>
                                                 </div>
                                             }

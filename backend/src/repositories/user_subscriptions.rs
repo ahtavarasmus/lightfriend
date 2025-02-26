@@ -115,6 +115,7 @@ impl UserSubscription {
         status: &str,
         next_bill_date: i32,
         stage: &str,
+        is_scheduled_to_cancel: bool,
     ) -> Result<(), Box<dyn Error>> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(subscriptions::table)
@@ -123,6 +124,7 @@ impl UserSubscription {
                 subscriptions::paddle_subscription_id.eq(subscription_id),
                 subscriptions::status.eq(status),
                 subscriptions::next_bill_date.eq(next_bill_date),
+                subscriptions::is_scheduled_to_cancel.eq(is_scheduled_to_cancel),
                 subscriptions::stage.eq(stage),
             ))
             .execute(&mut conn)?;
@@ -180,12 +182,18 @@ impl UserSubscription {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let active_subscription = subscriptions::table
             .filter(subscriptions::user_id.eq(user_id))
-            .filter(subscriptions::status.eq_any(&["active", "trialing"]))
+            .filter(subscriptions::status.eq("active"))
+            .filter(
+                subscriptions::is_scheduled_to_cancel
+                    .eq(false) // Explicitly false
+                    .or(subscriptions::is_scheduled_to_cancel.is_null()) // Or NULL
+            )
             .first::<Subscription>(&mut conn)
             .optional()?;
         
         Ok(active_subscription.is_some())
     }
+
 }
 
 

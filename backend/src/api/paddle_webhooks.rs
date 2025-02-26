@@ -45,8 +45,17 @@ pub struct Data {
     pub status: Option<String>, // active, inactive, trialing
     pub next_billed_at: Option<String>,
     pub items: Option<Vec<SubscriptionItem>>,
+    pub scheduled_change: Option<ScheduledChange>,
     pub custom_data: Option<CustomData>,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct ScheduledChange {
+    pub action: String, // cancel, pause, resume
+    pub effective_at: String, // timestamp where this state will happen(separete cancelled event will be delivered)
+    pub resume_at: Option<String>, // when paused sub should resume(only for pause scheduled changes)
+}
+
 
 #[derive(Debug, Deserialize)]
 pub struct SubscriptionItem {
@@ -201,12 +210,30 @@ pub async fn handle_subscription_webhook(
             }
             let stage = "tier 1".to_string();
 
+            // Check if the subscription is scheduled to be canceled
+            let is_scheduled_to_cancel = payload.data.scheduled_change
+                .as_ref()
+                .map(|change| change.action == "cancel")
+                .unwrap_or(false);
+
+            // Optionally, you could also store or log the effective_at timestamp if needed
+            if is_scheduled_to_cancel {
+                if let Some(scheduled_change) = &payload.data.scheduled_change {
+                    tracing::info!(
+                        "Subscription {} is scheduled to cancel at timestamp {}",
+                        subscription_id,
+                        scheduled_change.effective_at
+                    );
+                }
+            }
+
             match state.user_subscriptions.update_subscription_with_customer_id(
                 subscription_id,
                 customer_id,
                 status,
                 next_bill_timestamp,
                 &stage,
+                is_scheduled_to_cancel,
             ) {
                 Ok(_) => {
                     tracing::info!("Successfully updated subscription {}", subscription_id);
@@ -294,6 +321,7 @@ pub async fn handle_subscription_webhook(
                 stage: stage,
                 status: payload.data.status.unwrap_or_else(|| "active".to_string()),
                 next_bill_date: next_bill_timestamp,
+                is_scheduled_to_cancel: Some(false),
             };
 
             match state.user_subscriptions.create_subscription(new_subscription) {
