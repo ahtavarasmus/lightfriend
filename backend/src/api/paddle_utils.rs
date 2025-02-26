@@ -11,7 +11,7 @@ pub async fn reset_paddle_subcription_items(
         .map_err(|_| "PADDLE_API_KEY environment variable not set")?;
     let zero_sub_price_id = env::var("ZERO_SUB_PRICE_ID").expect("ZERO_SUB_PRICE_ID not set");
 
-    let url = format!("https://api.paddle.com/subscriptions/{}", subscription_id);
+    let url = format!("https://sandbox-api.paddle.com/subscriptions/{}", subscription_id);
 
     let client = Client::new();
 
@@ -58,7 +58,7 @@ pub async fn sync_paddle_subscription_items(
     let zero_sub_price_id = env::var("ZERO_SUB_PRICE_ID").expect("ZERO_SUB_PRICE_ID not set");
     let iq_usage_price_id= env::var("IQ_USAGE_PRICE_ID").expect("IQ_USAGE_PRICE_ID not set");
 
-    let url = format!("https://api.paddle.com/subscriptions/{}", subscription_id);
+    let url = format!("https://sandbox-api.paddle.com/subscriptions/{}", subscription_id);
 
     let client = Client::new();
 

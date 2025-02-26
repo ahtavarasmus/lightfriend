@@ -80,7 +80,32 @@ impl UserSubscription {
 
         Ok(())
     }
-
+    pub fn reset_user_iq_with_customer_id(
+        &self,
+        customer_id: &str,
+    ) -> Result<(), Box<dyn Error>> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Find subscription with customer_id
+        let subscription = subscriptions::table
+            .filter(subscriptions::paddle_customer_id.eq(customer_id))
+            .first::<Subscription>(&mut conn)
+            .optional()?;
+        
+        if let Some(sub) = subscription {
+            // Get user_id from subscription
+            let user_id = sub.user_id;
+            
+            // Update user's IQ to zero if it's negative
+            diesel::update(crate::schema::users::table)
+                .filter(crate::schema::users::id.eq(user_id))
+                .filter(crate::schema::users::iq.lt(0))
+                .set(crate::schema::users::iq.eq(0))
+                .execute(&mut conn)?;
+        }
+        
+        Ok(())
+    }
 
     pub fn update_subscription_with_customer_id(
         &self,

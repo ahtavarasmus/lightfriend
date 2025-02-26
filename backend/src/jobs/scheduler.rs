@@ -5,28 +5,86 @@ use tracing::{info, error};
 use crate::AppState;
 use crate::api::elevenlabs::ElevenLabsResponse;
 use crate::schema::users;
+use crate::schema::subscriptions;
+use std::error::Error;
 
 use std::env;
 
 pub async fn start_scheduler(state: Arc<AppState>) {
     let sched = JobScheduler::new().await.expect("Failed to create scheduler");
     
-    // Create a job that runs every minute
+    // Create a job that runs every 30 seconds to check and update database
     let state_clone = Arc::clone(&state);
     let job = Job::new_async("*/30 * * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
             match check_and_update_database(&state).await {
-                Ok(_) => info!("Successfully ran scheduled task"),
-                Err(e) => error!("Error in scheduled task: {}", e),
+                Ok(_) => info!("Successfully ran scheduled task for database updates"),
+                Err(e) => error!("Error in scheduled database update task: {}", e),
             }
         })
     }).expect("Failed to create job");
 
     sched.add(job).await.expect("Failed to add job to scheduler");
     
+    // Create a job that runs every 30 seconds to sync paddle subscriptions
+    let state_clone = Arc::clone(&state);
+    let sync_job = Job::new_async("*/30 * * * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            match sync_all_active_subscriptions(&state).await {
+                Ok(_) => info!("Successfully synced all active subscriptions with Paddle"),
+                Err(e) => error!("Error in subscription sync task: {}", e),
+            }
+        })
+    }).expect("Failed to create subscription sync job");
+
+    sched.add(sync_job).await.expect("Failed to add subscription sync job to scheduler");
+    
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");
+}
+
+// Function to sync all active subscriptions with Paddle
+async fn sync_all_active_subscriptions(state: &AppState) -> Result<(), Box<dyn std::error::Error>> {
+    info!("Starting to sync all active subscriptions with Paddle");
+    
+    let conn = &mut state.db_pool.get()?;
+    
+    // First query to get all active subscriptions with their user_id
+    let active_subscription_users = subscriptions::table
+        .filter(subscriptions::status.eq("active"))
+        .select((subscriptions::paddle_subscription_id, subscriptions::user_id))
+        .load::<(String, i32)>(conn)?;
+    
+    // Create a vector to store subscription_id and iq pairs
+    let mut active_subscriptions = Vec::new();
+    
+    // Second query to get the iq for each user
+    for (subscription_id, user_id) in active_subscription_users {
+        let user_iq = users::table
+            .filter(users::id.eq(user_id))
+            .select(users::iq)
+            .first::<i32>(conn)?;
+        
+        active_subscriptions.push((subscription_id, user_iq));
+    }
+    
+    info!("Found {} active subscriptions to sync", active_subscriptions.len());
+    
+    for (subscription_id, iq_quantity) in active_subscriptions {
+        if iq_quantity < 0 {
+            let iq_q = iq_quantity.abs() / 3;
+            println!("iq_q: {}",iq_q);
+            match crate::api::paddle_utils::sync_paddle_subscription_items(&subscription_id, iq_q).await {
+                Ok(_) => info!("Successfully synced subscription {} with IQ quantity {}", subscription_id, iq_quantity),
+                Err(e) => error!("Failed to sync subscription {}: {}", subscription_id, e),
+            }
+        }
+    }
+    
+    info!("Completed syncing all active subscriptions");
+    Ok(())
 }
 
 async fn check_and_update_database(state: &AppState) -> Result<(), Box<dyn std::error::Error>> {
