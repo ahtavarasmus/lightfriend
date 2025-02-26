@@ -1,7 +1,47 @@
 use reqwest::Client;
-use serde_json::json;
+use serde_json::{json, Value};
 use std::env;
 use std::error::Error;
+
+
+pub async fn get_next_billed_at(
+    subscription_id: &str
+) -> Result<String, Box<dyn Error>> {
+    // Fetch the Paddle API key from environment variable
+    let api_key = env::var("PADDLE_API_KEY")
+        .map_err(|_| "PADDLE_API_KEY environment variable not set")?;
+
+    // Use the sandbox API URL consistent with your other functions
+    let url = format!("https://sandbox-api.paddle.com/subscriptions/{}", subscription_id);
+
+    let client = Client::new();
+
+    // Send GET request to retrieve subscription details
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .send()
+        .await?;
+
+    if response.status().is_success() {
+        let json: Value = response.json().await?;
+        let next_billed_at = json["data"]["next_billed_at"]
+            .as_str()
+            .ok_or("next_billed_at not found in response")?
+            .to_string();
+
+        println!(
+            "Successfully fetched next_billed_at for subscription {}: {}",
+            subscription_id, next_billed_at
+        );
+        Ok(next_billed_at) // Returns something like "2025-03-26T00:00:00Z"
+    } else {
+        let error_text = response.text().await?;
+        eprintln!("Failed to fetch subscription details: {}", error_text);
+        Err(format!("Paddle API error: {}", error_text).into())
+    }
+}
 
 pub async fn reset_paddle_subcription_items(
     subscription_id: &str,
