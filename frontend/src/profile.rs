@@ -474,6 +474,7 @@ pub fn Profile() -> Html {
                             ProfileTab::Billing => html! {
                             <div class="profile-info">
                                 <div class="billing-section">
+                                /*
                                         {
                                             if user_profile.iq < 0 {
                                                 html! {
@@ -607,8 +608,84 @@ pub fn Profile() -> Html {
                                         }
                                     }
                                 </div>
+                                    */
+                                    // remove from here when paddle is ready
+                                <h3>{"IQ Balance"}</h3>
+                                    <div class="iq-balance">
+                                        <span class="iq-amount">{user_profile.iq}</span>
+                                        <span class="iq-time">
+                                            {if user_profile.iq >= 60 { 
+                                                format!("({} minutes/messages)", user_profile.iq / 60)
+                                            } else { 
+                                                format!("({} seconds)", user_profile.iq)
+                                            }}
+                                        </span>
+                                    </div>
+                                    {
+                                        if user_profile.iq <= 0 {
+                                            let onclick = {
+                                                let profile = profile.clone();
+                                                let error = error.clone();
+                                                let success = success.clone();
+                                                Callback::from(move |_| {
+                                                    let profile = profile.clone();
+                                                    let error = error.clone();
+                                                    let success = success.clone();
+                                                    wasm_bindgen_futures::spawn_local(async move {
+                                                        if let Some(token) = window()
+                                                            .and_then(|w| w.local_storage().ok())
+                                                            .flatten()
+                                                            .and_then(|storage| storage.get_item("token").ok())
+                                                            .flatten()
+                                                        {
+                                                            match Request::post(&format!("{}/api/profile/increase-iq/{}", config::get_backend_url(), user_profile.id))
+                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                .send()
+                                                                .await
+                                                            {
+                                                                Ok(response) => {
+                                                                    if response.ok() {
+                                                                        success.set(Some("IQ increased successfully".to_string()));
+                                                                        error.set(None);
+                                                                        
+                                                                        // Fetch updated profile
+                                                                        if let Ok(profile_response) = Request::get(&format!("{}/api/profile", config::get_backend_url()))
+                                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                                            .send()
+                                                                            .await
+                                                                        {
+                                                                            if let Ok(updated_profile) = profile_response.json::<UserProfile>().await {
+                                                                                profile.set(Some(updated_profile));
+                                                                            }
+                                                                        }
+                                                                    } else {
+                                                                        error.set(Some("Failed to increase IQ".to_string()));
+                                                                    }
+                                                                }
+                                                                Err(_) => {
+                                                                    error.set(Some("Failed to send request".to_string()));
+                                                                }
+                                                            }
+                                                        }
+                                                    });
+                                                })
+                                            };
+                                            html! {
+                                                <button onclick={onclick} class="iq-button">
+                                                    {"Get 500 IQ"}
+                                                </button>
+
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                                <div class="billing-info">
+                                    <p>{"Purchase additional IQ soon... for now you can just add more IQ for free if they run out"}</p>
                                 </div>
+                                // remove until here
                             </div>
+                        </div>
                         }
                     }
                 } else {
