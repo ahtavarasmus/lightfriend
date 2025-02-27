@@ -12,6 +12,8 @@ mod verify;
 mod termsprivacy;
 mod money;
 mod usage_graph;
+mod billing;
+mod settings;
 
 use pages::{
     home::Home,
