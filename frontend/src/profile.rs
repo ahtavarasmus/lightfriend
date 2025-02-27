@@ -474,7 +474,7 @@ pub fn Profile() -> Html {
                             ProfileTab::Billing => html! {
                             <div class="profile-info">
                                 <div class="billing-section">
-                                /*
+                                if true {
                                         {
                                             if user_profile.iq < 0 {
                                                 html! {
@@ -608,7 +608,7 @@ pub fn Profile() -> Html {
                                         }
                                     }
                                 </div>
-                                    */
+                                } else {
                                     // remove from here when paddle is ready
                                 <h3>{"IQ Balance"}</h3>
                                     <div class="iq-balance">
@@ -683,7 +683,7 @@ pub fn Profile() -> Html {
                                 <div class="billing-info">
                                     <p>{"Purchase additional IQ soon... for now you can just add more IQ for free if they run out"}</p>
                                 </div>
-                                // remove until here
+                                }
                             </div>
                         </div>
                         }
