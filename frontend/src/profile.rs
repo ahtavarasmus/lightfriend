@@ -474,7 +474,8 @@ pub fn Profile() -> Html {
                             ProfileTab::Billing => html! {
                             <div class="profile-info">
                                 <div class="billing-section">
-                                if true {
+                                // turn true when billing comes
+                                if false {
                                         {
                                             if user_profile.iq < 0 {
                                                 html! {
