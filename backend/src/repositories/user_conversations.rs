@@ -96,7 +96,8 @@ impl UserConversations {
             Some(conversation) => {
                 println!("Found active conversation for user {} with number {}", user.phone_number, twilio_number);
 
-                if (user.phone_number == "+358442105886" && twilio_number == "+358454901197") || user.phone_number == "+358442105886" && twilio_number == "+358454901522"{
+                // used to just reset the conversation if problems
+                if false {
                     // Delete the Twilio conversation first
                     crate::api::twilio_utils::delete_twilio_conversation(&conversation.conversation_sid).await?;
                     // Then delete the conversation from our database
