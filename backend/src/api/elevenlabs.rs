@@ -18,7 +18,7 @@ use std::collections::HashMap;
 pub struct ElevenLabsResponse {
     pub status: String,
     pub metadata: CallMetaData,
-    pub analysis: Analysis,
+    pub analysis: Option<Analysis>,
     pub conversation_initiation_client_data: CallInitiationData,
 }
 
