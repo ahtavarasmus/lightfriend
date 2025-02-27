@@ -3,35 +3,14 @@ use web_sys::{HtmlInputElement, window};
 use yew_router::prelude::*;
 use crate::Route;
 use crate::config;
-use crate::usage_graph::UsageGraph;
 use gloo_net::http::Request;
-use serde::{Deserialize, Serialize};
-use crate::money::CheckoutButton;
-use chrono::{DateTime, TimeZone, Utc};
+use serde::Serialize;
 use wasm_bindgen_futures::spawn_local;
-use std::str::FromStr;
-
-
-#[derive(Deserialize, Clone, PartialEq)]
-struct UserProfile {
-    id: i32,
-    email: String,
-    phone_number: String,
-    nickname: Option<String>,
-    info: Option<String>,
-}
+use gloo_timers::future::TimeoutFuture;
+use crate::billing::UserProfile;
 
 const MAX_NICKNAME_LENGTH: usize = 30;
 const MAX_INFO_LENGTH: usize = 500;
-
-fn format_timestamp(timestamp: i32) -> String {
-    match Utc.timestamp_opt(timestamp as i64, 0) {
-        chrono::offset::LocalResult::Single(dt) => {
-            dt.format("%B %d, %Y").to_string()
-        },
-        _ => "Unknown date".to_string(),
-    }
-}
 
 #[derive(Serialize)]
 struct UpdateProfileRequest {
@@ -41,22 +20,25 @@ struct UpdateProfileRequest {
     info: String,
 }
 
+#[derive(Properties, PartialEq, Clone)]
+pub struct SettingsPageProps {
+    pub user_profile: UserProfile,
+}
+
 
 
 #[function_component]
-pub fn SettingsPage() -> Html {
-    let profile = use_state(|| None::<UserProfile>);
-    let email = use_state(String::new);
-    let phone_number = use_state(String::new);
-    let nickname = use_state(String::new);
-    let info = use_state(String::new);
+pub fn SettingsPage(props: &SettingsPageProps) -> Html {
+    let user_profile = &props.user_profile;
+    let email = use_state(|| user_profile.email.clone());
+    let phone_number = use_state(|| user_profile.phone_number.clone());
+    let nickname = use_state(|| user_profile.nickname.clone().unwrap_or_default());
+    let info = use_state(|| user_profile.info.clone().unwrap_or_default());
     let error = use_state(|| None::<String>);
     let success = use_state(|| None::<String>);
     let is_editing = use_state(|| false);
     let navigator = use_navigator().unwrap();
-
-
- 
+    
     let on_edit = {
         let email = email.clone();
         let phone_number = phone_number.clone();
@@ -64,7 +46,6 @@ pub fn SettingsPage() -> Html {
         let info = info.clone();
         let error = error.clone();
         let success = success.clone();
-        let profile = profile.clone();
         let is_editing = is_editing.clone();
         let navigator = navigator.clone();
 
@@ -75,7 +56,6 @@ pub fn SettingsPage() -> Html {
             let user_info = (*info).clone();
             let error = error.clone();
             let success = success.clone();
-            let profile = profile.clone();
             let is_editing = is_editing.clone();
             let navigator = navigator.clone();
 
@@ -98,7 +78,7 @@ pub fn SettingsPage() -> Html {
                 return;
             }
 
-            wasm_bindgen_futures::spawn_local(async move {
+            spawn_local(async move {
                 if let Some(token) = window()
                     .and_then(|w| w.local_storage().ok())
                     .flatten()
@@ -134,22 +114,10 @@ pub fn SettingsPage() -> Html {
                                 
                                 // Clear success message after 3 seconds
                                 let success_clone = success.clone();
-                                wasm_bindgen_futures::spawn_local(async move {
+                                spawn_local(async move {
                                     gloo_timers::future::TimeoutFuture::new(3_000).await;
                                     success_clone.set(None);
                                 });
-                                
-                                // Fetch updated profile data after successful update
-                                if let Ok(profile_response) = Request::get(&format!("{}/api/profile", config::get_backend_url()))
-
-                                    .header("Authorization", &format!("Bearer {}", token))
-                                    .send()
-                                    .await
-                                {
-                                    if let Ok(updated_profile) = profile_response.json::<UserProfile>().await {
-                                        profile.set(Some(updated_profile));
-                                    }
-                                }
                             } else {
                                 error.set(Some("Failed to update profile. Phone number/email already exists?".to_string()));
                             }
@@ -164,8 +132,22 @@ pub fn SettingsPage() -> Html {
     };
 
 
-    {
+    html! {
         <div class="profile-info">
+            {
+                if let Some(error_msg) = (*error).as_ref() {
+                    html! {
+                        <div class="message error-message">{error_msg}</div>
+                    }
+                } else if let Some(success_msg) = (*success).as_ref() {
+                    html! {
+                        <div class="message success-message">{success_msg}</div>
+                    }
+                } else {
+                    html! {}
+                }
+            }
+            
             <div class="profile-field">
                 <span class="field-label">{"Email"}</span>
                 {
@@ -209,7 +191,7 @@ pub fn SettingsPage() -> Html {
                     } else {
                         html! {
                             <span class="field-value">
-                                {user_profile.phone_number.clone()}
+                                {&user_profile.phone_number}
                             </span>
                         }
                     }
