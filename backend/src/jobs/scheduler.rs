@@ -160,12 +160,18 @@ async fn check_and_update_database(state: &AppState) -> Result<(), Box<dyn std::
                                                 info!("Call status == done => DECREASE IQ + DELETE");
                                                 // Decrease user's IQ based on call duration
                                                 let iq_used = conversation_details.metadata.call_duration_secs;
-                                                let success = match conversation_details.analysis.call_successful.as_str() {
-                                                    "success" => true,
-                                                    "failure" => false,
-                                                    _ => false,
+                                                let success = match conversation_details.analysis {
+                                                    Some(ref analysis) => match analysis.call_successful.as_str() {
+                                                        "success" => true,
+                                                        "failure" => false,
+                                                        _ => false,
+                                                    },
+                                                    None => false,
                                                 };
-                                                let summary = Some(conversation_details.analysis.transcript_summary.to_string());
+                                                let summary = conversation_details.analysis
+                                                    .as_ref()
+                                                    .map(|analysis| analysis.transcript_summary.to_string())
+                                                    .or(Some(String::from("")));
                                                 
                                                 // First log the usage
                                                 if let Err(e) = state.user_repository.log_usage(
