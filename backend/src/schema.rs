@@ -55,6 +55,8 @@ diesel::table! {
         preferred_number -> Nullable<Text>,
         iq_cost_per_euro -> Integer,
         debug_logging_permission -> Bool,
+        charge_when_under -> Bool,
+        charge_back_to -> Nullable<Integer>,
     }
 }
 

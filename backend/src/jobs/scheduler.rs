@@ -78,14 +78,18 @@ async fn sync_all_active_subscriptions(state: &AppState) -> Result<(), Box<dyn s
     info!("Found {} active subscriptions to sync", active_subscriptions.len());
     
     for (subscription_id, iq_quantity) in active_subscriptions {
+        // TODO if user has set charge_when_under field and the iq is under that, charge it back to charge_back_to
+        /*
         if iq_quantity < 0 {
             let iq_q = iq_quantity.abs() / 3;
             println!("iq_q: {}",iq_q);
+            
             match crate::api::paddle_utils::sync_paddle_subscription_items(&subscription_id, iq_q).await {
                 Ok(_) => info!("Successfully synced subscription {} with IQ quantity {}", subscription_id, iq_quantity),
                 Err(e) => error!("Failed to sync subscription {}: {}", subscription_id, e),
             }
         }
+        */
     }
     
     info!("Completed syncing all active subscriptions");
@@ -95,7 +99,6 @@ async fn sync_all_active_subscriptions(state: &AppState) -> Result<(), Box<dyn s
 async fn check_and_update_database(state: &AppState) -> Result<(), Box<dyn std::error::Error>> {
 
     let conn = &mut state.db_pool.get()?;
-    
 
     let api_key = env::var("ELEVENLABS_API_KEY")
         .expect("ELEVENLABS_API_KEY must be set");

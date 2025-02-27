@@ -24,6 +24,8 @@ pub struct User {
     pub preferred_number: Option<String>, // number the user prefers lightfriend texting/calling them from
     pub iq_cost_per_euro: i32, // the cost for iq in iq/€ (e.g. 300iq -> 1€)
     pub debug_logging_permission: bool,
+    pub charge_when_under: bool,
+    pub charge_back_to: Option<i32>,
 }
 
 #[derive(Queryable, Selectable, Insertable)]

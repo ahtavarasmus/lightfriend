@@ -81,6 +81,7 @@ impl UserSubscription {
 
         Ok(())
     }
+
     pub fn reset_user_iq_with_customer_id(
         &self,
         customer_id: &str,
