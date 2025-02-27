@@ -302,8 +302,10 @@ pub async fn handle_subscription_webhook(
                 ) {
                     Ok(_) => {
                         tracing::info!("Successfully updated subscription for user_id: {}", user_id);
-                        // TODO set the iq amount to zero at the start of the new sub
-                        // also think about what happens to the possible existing sub(probably just set it to canceled)
+                        state.user_repository.update_user_iq(user_id, 0).unwrap_or_else(|err| {
+                            tracing::error!("Failed to update user IQ to 0: {:?}", err);
+                        });
+                        // TODO think about what happens to the possible existing sub(probably just set it to canceled)
                         Ok(Json(WebhookResponse {
                             status: "success".to_string(),
                         }))
