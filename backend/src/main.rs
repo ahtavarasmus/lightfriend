@@ -16,6 +16,8 @@ mod handlers {
     pub mod auth_handlers;
     pub mod auth_dtos;
     pub mod profile_handlers;
+    pub mod billing_handlers;
+    pub mod admin_handlers;
 }
 mod api {
     pub mod vapi_endpoints;
@@ -51,6 +53,8 @@ use repositories::user_subscriptions::UserSubscription;
 
 use handlers::auth_handlers;
 use handlers::profile_handlers;
+use handlers::billing_handlers;
+use handlers::admin_handlers;
 use api::vapi_endpoints;
 use api::twilio_sms;
 use api::elevenlabs;
@@ -164,19 +168,22 @@ async fn main() {
         .route("/api/register", post(auth_handlers::register))
         .route("/api/admin/users", get(auth_handlers::get_users))
 
-        .route("/api/admin/verify/{user_id}", post(auth_handlers::verify_user))
-        .route("/api/admin/preferred-number/{user_id}", post(auth_handlers::update_preferred_number_admin))
-        .route("/api/admin/broadcast", post(auth_handlers::broadcast_message))
-        .route("/api/admin/set-preferred-number-default/{user_id}", post(auth_handlers::set_preferred_number_default))
+        .route("/api/admin/verify/{user_id}", post(admin_handlers::verify_user))
+        .route("/api/admin/preferred-number/{user_id}", post(admin_handlers::update_preferred_number_admin))
+        .route("/api/admin/broadcast", post(admin_handlers::broadcast_message))
+        .route("/api/admin/set-preferred-number-default/{user_id}", post(admin_handlers::set_preferred_number_default))
+
+        .route("/api/profile/delete/{user_id}", delete(profile_handlers::delete_user))
         .route("/api/profile/update", post(profile_handlers::update_profile))
         .route("/api/profile/preferred-number", post(profile_handlers::update_preferred_number))
         .route("/api/profile", get(profile_handlers::get_profile))
-        .route("/api/profile/delete/{user_id}", delete(auth_handlers::delete_user))
-        .route("/api/profile/increase-iq/{user_id}", post(profile_handlers::increase_iq))
-        .route("/api/profile/reset-iq/{user_id}", post(profile_handlers::reset_iq))
         .route("/api/profile/notify-credits/{user_id}", post(profile_handlers::update_notify_credits))
-        .route("/api/profile/usage", post(profile_handlers::get_usage_data))
-        .route("/api/profile/get-customer-portal-link/{user_id}", get(profile_handlers::get_customer_portal_link))
+
+        .route("/api/billing/increase-iq/{user_id}", post(billing_handlers::increase_iq))
+        .route("/api/billing/usage", post(billing_handlers::get_usage_data))
+        .route("/api/billing/update-auto-topup/{user_id}", post(billing_handlers::update_topup))
+        .route("/api/billing/reset-iq/{user_id}", post(billing_handlers::reset_iq))
+        .route("/api/billing/get-customer-portal-link/{user_id}", get(billing_handlers::get_customer_portal_link))
 
 
         .merge(vapi_routes)

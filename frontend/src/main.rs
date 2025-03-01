@@ -2,35 +2,44 @@ use yew::prelude::*;
 use yew_router::prelude::*;
 use log::{info, Level};
 use web_sys::window;
-use wasm_bindgen::prelude::*;
 
 mod config;
-mod pages;
-mod admin;
-mod profile;
-mod verify;
-mod termsprivacy;
-mod money;
-mod usage_graph;
-mod billing;
-mod settings;
+mod profile {
+    pub mod stripe;
+    pub mod billing;
+    pub mod profile;
+    pub mod settings;
+    pub mod usage_graph;
+}
+mod pages {
+    pub mod home;
+    pub mod money;
+    pub mod termsprivacy;
+}
+mod auth {
+    pub mod verify;
+    pub mod signup;
+}
+mod admin {
+    pub mod dashboard;
+}
 
 use pages::{
     home::Home,
     home::is_logged_in,
+    termsprivacy::{TermsAndConditions, PrivacyPolicy},
+    money::Pricing,
 };
 
-use termsprivacy::{TermsAndConditions, PrivacyPolicy};
-use verify::Verify;
-use admin::Admin;
-use profile::Profile;
-use money::Pricing;
-
-mod auth_components;
-use auth_components::{
-    login::Login,
-    register::Register,
+use auth::{
+    signup::register::Register,
+    signup::login::Login,
+    verify::Verify,
 };
+
+use profile::profile::Profile;
+use admin::dashboard::AdminDashboard;
+
 
 
 #[derive(Clone, Routable, PartialEq)]
@@ -72,7 +81,7 @@ fn switch(routes: Route) -> Html {
         }
         Route::Admin => {
             info!("Rendering Admin page");
-            html! { <Admin /> }
+            html! { <AdminDashboard /> }
         },
         Route::Profile => {
             info!("Rendering Profile page");
@@ -97,9 +106,6 @@ fn switch(routes: Route) -> Html {
     }
 }
 
-// Create a new component called Nav.rs
-use yew::prelude::*;
-use yew_router::prelude::*;
 
 #[derive(Properties, PartialEq)]
 pub struct NavProps {

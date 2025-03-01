@@ -26,6 +26,7 @@ pub struct User {
     pub debug_logging_permission: bool,
     pub charge_when_under: bool,
     pub charge_back_to: Option<i32>,
+    pub stripe_customer_id: Option<String>,
 }
 
 #[derive(Queryable, Selectable, Insertable)]

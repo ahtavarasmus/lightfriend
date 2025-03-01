@@ -4,10 +4,8 @@ use crate::config;
 use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
 use yew_router::prelude::*;
-use serde_json::json;
 use crate::Route;
-use chrono::{DateTime, Utc, TimeZone};
-use wasm_bindgen::JsCast;
+use chrono::{Utc, TimeZone};
 
 #[derive(Serialize)]
 struct BroadcastMessage {
@@ -27,7 +25,6 @@ struct UserInfo {
     id: i32,
     email: String,
     phone_number: String,
-    nickname: Option<String>,
     time_to_live: Option<i32>,
     verified: bool,
     iq: i32,
@@ -35,55 +32,13 @@ struct UserInfo {
     preferred_number: Option<String>,
 }
 
-#[derive(Serialize)]
-struct UpdateUserRequest {
-    email: String,
-    phone_number: String,
-    nickname: Option<String>,
-    time_to_live: Option<i32>,
-    verified: bool,
-}
-
 #[function_component]
-pub fn Admin() -> Html {
+pub fn AdminDashboard() -> Html {
     let users = use_state(|| Vec::new());
     let error = use_state(|| None::<String>);
     let selected_user_id = use_state(|| None::<i32>);
     let message = use_state(|| String::new());
-    let phone_numbers = use_state(|| None::<PhoneNumbers>);
 
-    // Clone state handles for the phone numbers effect
-    let phone_numbers_effect = phone_numbers.clone();
-    
-    // Fetch phone numbers from environment
-    use_effect_with_deps(move |_| {
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Some(token) = window()
-                .and_then(|w| w.local_storage().ok())
-                .flatten()
-                .and_then(|storage| storage.get_item("token").ok())
-                .flatten()
-            {
-                match Request::get(&format!("{}/api/admin/phone-numbers", config::get_backend_url()))
-                    .header("Authorization", &format!("Bearer {}", token))
-                    .send()
-                    .await
-                {
-                    Ok(response) => {
-                        if response.ok() {
-                            if let Ok(numbers) = response.json::<PhoneNumbers>().await {
-                                phone_numbers_effect.set(Some(numbers));
-                            }
-                        }
-                    }
-                    Err(_) => {}
-                }
-            }
-        });
-        || ()
-    }, ());
-
-    // Clone state handles for the effect
     let users_effect = users.clone();
     let error_effect = error.clone();
 
@@ -281,7 +236,7 @@ pub fn Admin() -> Html {
                                                                                             .and_then(|storage| storage.get_item("token").ok())
                                                                                             .flatten()
                                                                                         {
-                                                                                            match Request::post(&format!("{}/api/profile/increase-iq/{}", config::get_backend_url(), user_id))
+                                                                                            match Request::post(&format!("{}/api/billing/increase-iq/{}", config::get_backend_url(), user_id))
                                                                                                 .header("Authorization", &format!("Bearer {}", token))
                                                                                                 .send()
                                                                                                 .await
@@ -329,7 +284,7 @@ pub fn Admin() -> Html {
                                                                                             .and_then(|storage| storage.get_item("token").ok())
                                                                                             .flatten()
                                                                                         {
-                                                                                            match Request::post(&format!("{}/api/profile/reset-iq/{}", config::get_backend_url(), user_id))
+                                                                                            match Request::post(&format!("{}/api/billing/reset-iq/{}", config::get_backend_url(), user_id))
                                                                                                 .header("Authorization", &format!("Bearer {}", token))
                                                                                                 .send()
                                                                                                 .await

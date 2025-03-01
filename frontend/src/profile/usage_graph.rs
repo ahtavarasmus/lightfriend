@@ -39,7 +39,7 @@ pub fn UsageGraph(props: &Props) -> Html {
                     .flatten()
                 {
                     if let Ok(response) = Request::post(&format!(
-                        "{}/api/profile/usage",
+                        "{}/api/billing/usage",
                         config::get_backend_url()
                     ))
                     .header("Authorization", &format!("Bearer {}", token))
@@ -106,7 +106,6 @@ pub fn UsageGraph(props: &Props) -> Html {
                     if !data.is_empty() {
 
                         let max_usage = data.iter().map(|(_, usage)| *usage).max().unwrap_or(0);
-                        let max_euros = (max_usage as f64 / 60.0).ceil() as i32;
 
                         let mut chart = ChartBuilder::on(&root)
                             .margin(10)
