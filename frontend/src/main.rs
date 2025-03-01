@@ -6,7 +6,9 @@ use web_sys::window;
 mod config;
 mod profile {
     pub mod stripe;
-    pub mod billing;
+    pub mod billing_credits;
+    pub mod billing_payments;
+    pub mod billing_models;
     pub mod profile;
     pub mod settings;
     pub mod usage_graph;

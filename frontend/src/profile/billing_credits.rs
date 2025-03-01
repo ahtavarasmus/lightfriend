@@ -1,87 +1,28 @@
-/* Your existing imports remain unchanged */
 use yew::prelude::*;
 use web_sys::{HtmlInputElement, window};
 use crate::config;
 use crate::profile::usage_graph::UsageGraph;
 use gloo_net::http::Request;
-use serde::{Deserialize, Serialize};
-use crate::pages::money::CheckoutButton;
-use chrono::{TimeZone, Utc};
+use crate::profile::billing_models::{ // Import from the new file
+    AutoTopupSettings, BuyCreditsRequest, ApiResponse, UserProfile, StripeSetupIntentResponse,
+    IQ_TO_EURO_RATE, MIN_TOPUP_AMOUNT_DOLLARS, MIN_TOPUP_AMOUNT_IQ, format_timestamp,
+};
+use crate::profile::billing_payments::PaymentMethodButton; // Import the new button component
+use chrono::Utc;
 use wasm_bindgen_futures::spawn_local;
 use gloo_timers::future::TimeoutFuture;
 use wasm_bindgen::JsValue; // For debugging/logging
-
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct SubscriptionInfo {
-    pub id: String,
-    pub status: String,
-    pub next_bill_date: i32,
-    pub stage: String,
-    pub is_scheduled_to_cancel: Option<bool>,
-}
-
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct PaddlePortalSessionResponse {
-    pub portal_url: String,
-}
-
-#[derive(Serialize, Clone, PartialEq)]
-pub struct AutoTopupSettings {
-    pub active: bool,
-    pub amount: Option<i32>,
-}
-
-#[derive(Serialize, Clone, PartialEq)]
-pub struct BuyCreditsRequest {
-    pub amount_dollars: f64, // Amount in dollars
-}
-
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct ApiResponse {
-    pub success: bool,
-    pub message: String,
-}
-
-#[derive(Deserialize, Clone, PartialEq)]
-pub struct UserProfile {
-    pub id: i32,
-    pub email: String,
-    pub phone_number: String,
-    pub nickname: Option<String>,
-    pub verified: bool,
-    pub time_to_live: i32,
-    pub time_to_delete: bool,
-    pub iq: i32,
-    pub info: Option<String>,
-    pub subscription: Option<SubscriptionInfo>,
-    pub charge_when_under: bool,
-    pub charge_back_to: Option<i32>,
-}
-
-pub fn format_timestamp(timestamp: i32) -> String {
-    match Utc.timestamp_opt(timestamp as i64, 0) {
-        chrono::offset::LocalResult::Single(dt) => {
-            dt.format("%B %d, %Y").to_string()
-        },
-        _ => "Unknown date".to_string(),
-    }
-}
 
 #[derive(Properties, PartialEq, Clone)]
 pub struct BillingPageProps {
     pub user_profile: UserProfile,
 }
 
-const IQ_TO_EURO_RATE: f64 = 60.0; // 60 IQ = 1 Euro
-const MIN_TOPUP_AMOUNT_DOLLARS: f64 = 5.0;
-const MIN_TOPUP_AMOUNT_IQ: i32 = (MIN_TOPUP_AMOUNT_DOLLARS * IQ_TO_EURO_RATE) as i32;
-
 #[function_component]
 pub fn BillingPage(props: &BillingPageProps) -> Html {
     let user_profile = &props.user_profile;
     let error = use_state(|| None::<String>);
     let success = use_state(|| None::<String>);
-    let portal_url = use_state(|| None::<String>);
 
     // Auto top-up related states
     let show_auto_topup_modal = use_state(|| false);
@@ -617,103 +558,10 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                 }
 
                 <div class="billing-info">
-                    {
-                        if let Some(subscription) = &user_profile.subscription {
-                            let next_bill_date = format_timestamp(subscription.next_bill_date);
-                            html! {
-                                <div class="subscription-info">
-                                    <h4>{"Active Subscription"}</h4>
-                                    <p>
-                                        <span class="label">{"Status:"}</span>
-                                        {
-                                            if let Some(true) = subscription.is_scheduled_to_cancel {
-                                                html! {
-                                                    <span class="value status-canceled">{"to be cancelled"}</span>
-                                                }
-                                            } else {
-                                                html! {
-                                                    <span class={classes!("value", format!("status-{}", subscription.status.to_lowercase()))}>
-                                                        {subscription.status.clone()}
-                                                    </span>
-                                                }
-                                            }
-                                        }
-                                    </p>
 
-                                    <p>
-                                        <span class="label">{"Next billing date:"}</span>
-                                        <span class="value">{next_bill_date}</span>
-                                    </p>
-                                    <p>
-                                        <span class="label">{"Subscription plan:"}</span>
-                                        <span class="value">{subscription.stage.clone()}</span>
-                                    </p>
-                                    <div class="subscription-actions">
-                                        <a 
-                                            href={
-                                                if let Some(url) = (*portal_url).clone() {
-                                                    url
-                                                } else {
-                                                    "#".to_string()
-                                                }
-                                            }
-                                            target="_blank" 
-                                            class="paddle-dashboard-button"
-                                            onclick={
-                                                let portal_url = portal_url.clone();
-                                                let user_id = user_profile.id;
-                                                Callback::from(move |e: MouseEvent| {
-                                                    if (*portal_url).is_none() {
-                                                        e.prevent_default();
-                                                        let portal_url = portal_url.clone();
-                                                        spawn_local(async move {
-                                                            if let Some(token) = window()
-                                                                .and_then(|w| w.local_storage().ok())
-                                                                .flatten()
-                                                                .and_then(|storage| storage.get_item("token").ok())
-                                                                .flatten()
-                                                            {
-                                                                match Request::get(&format!("{}/api/profile/get-customer-portal-link/{}", config::get_backend_url(), user_id))
-                                                                    .header("Authorization", &format!("Bearer {}", token))
-                                                                    .send()
-                                                                    .await
-                                                                {
-                                                                    Ok(response) => {
-                                                                        if response.ok() {
-                                                                            if let Ok(data) = response.json::<PaddlePortalSessionResponse>().await {
-                                                                                portal_url.set(Some(data.portal_url.clone()));
-                                                                                if let Some(window) = window() {
-                                                                                    let _ = window.open_with_url(&data.portal_url);
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                    Err(_) => {
-                                                                        // Handle error
-                                                                    }
-                                                                }
-                                                            }
-                                                        });
-                                                    }
-                                                })
-                                            }
-                                        >
-                                            {"Manage Subscription"}
-                                        </a>
-                                        <CheckoutButton user_id={user_profile.id} user_email={user_profile.email.clone()} />
-                                    </div>
-                                </div>
-                            }
-                        } else {
-                            html! {
-                                <>
-                                    <p>{"Subscribe to usage based billing, pay only for what you use monthly."}</p>
-                                    <CheckoutButton user_id={user_profile.id} user_email={user_profile.email.clone()} />
-                                </>
-                            }
-                        }
-                    }
+                    <PaymentMethodButton user_id={user_profile.id} /> 
                 </div>
+                <UsageGraph user_id={user_profile.id} />
             </div>
         </div>
     }

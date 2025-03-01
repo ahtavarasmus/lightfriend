@@ -367,3 +367,79 @@ input:checked + .slider:before {
     transform: translateY(-2px);
     box-shadow: 0 6px 20px rgba(30, 144, 255, 0.4);
 }
+
+/* Payment Method Button */
+.payment-method-button {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    margin-left: 1rem; /* Space between this and other buttons */
+}
+
+.payment-method-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(30, 144, 255, 0.3);
+}
+
+/* Payment Method Container */
+.payment-method-container {
+    display: flex;
+    align-items: center;
+    margin-top: 1rem;
+}
+
+/* Stripe Modal */
+.stripe-modal {
+    position: absolute;
+    background: #222; /* Dark background for the modal */
+    border: 1px solid rgba(30, 144, 255, 0.1); /* Subtle blue border */
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-top: 0.5rem;
+    z-index: 90;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); /* Slightly stronger shadow for depth */
+    width: 340px; /* Matches width in your image */
+    color: #fff; /* White text for contrast against dark background */
+}
+
+.stripe-modal p {
+    color: #B3D1FF; /* Lighter blue for text, readable on dark */
+    font-size: 0.95rem;
+    margin-bottom: 1rem;
+    line-height: 1.4;
+}
+
+.close-button {
+    background: #666; /* Dark gray for Close button */
+    color: white;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    width: 100%;
+}
+
+.close-button:hover {
+    background: #555; /* Slightly darker gray on hover */
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+/* Success Message */
+.success-message {
+    background: #4CAF50; /* Green for success */
+    color: white;
+    padding: 0.8rem;
+    border-radius: 8px;
+    margin-top: 1rem;
+    width: 100%;
+    text-align: center;
+}
