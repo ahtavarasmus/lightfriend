@@ -5,9 +5,9 @@ use crate::Route;
 use crate::config;
 use gloo_net::http::Request;
 use wasm_bindgen_futures::spawn_local;
-use crate::profile::billing::UserProfile;
+use crate::profile::billing_models::UserProfile;
 use crate::profile::settings::SettingsPage;
-use crate::profile::billing::BillingPage;
+use crate::profile::billing_credits::BillingPage;
 
 #[derive(Clone, PartialEq)]
 enum ProfileTab {

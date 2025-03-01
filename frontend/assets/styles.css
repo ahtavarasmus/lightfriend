@@ -1796,6 +1796,7 @@ button[type="submit"].loading::after {
 .usage-graph {
     margin-bottom: 2rem;
     padding: 1rem;
+    margin-top: 3rem;
     background: white;
     border-radius: 8px;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
