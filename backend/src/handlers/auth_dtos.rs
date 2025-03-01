@@ -57,12 +57,3 @@ pub struct Claims {
     pub exp: i64,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct UpdateUserRequest {
-    pub email: String,
-    pub phone_number: String,
-    pub nickname: Option<String>,
-    pub time_to_live: Option<i32>,
-    pub verified: bool,
-}
-

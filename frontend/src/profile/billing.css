@@ -1,0 +1,369 @@
+/* Auto Top-up Button (unchanged but included for context) */
+.auto-topup-button {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    z-index: 100;
+}
+
+.auto-topup-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(30, 144, 255, 0.3);
+}
+
+/* Auto Top-up Modal (dark theme with your colors) */
+.auto-topup-modal {
+    position: absolute;
+    background: #222; /* Dark background for the modal */
+    border: 1px solid rgba(30, 144, 255, 0.1); /* Subtle blue border */
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-top: 0.5rem;
+    z-index: 90;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); /* Slightly stronger shadow for depth */
+    width: 340px; /* Matches width in your image */
+    color: #fff; /* White text for contrast against dark background */
+}
+
+/* Modal Header (Automatic Top-up title and toggle) */
+.auto-topup-modal h3 {
+    color: #7EB2FF; /* Blue accent for title, matching your app’s colors */
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+    font-weight: 500;
+}
+.toggle-status {
+    color: #B3D1FF; /* Lighter blue for readability on dark background */
+    font-size: 1rem;
+    margin-left: 1rem; /* Space between the toggle and the status label */
+    font-weight: 500;
+}
+
+.auto-topup-modal .message {
+    padding: 0.8rem;
+    border-radius: 8px;
+    margin-top: 1rem;
+    width: 100%;
+    text-align: center;
+}
+
+/* Toggle Switch Container */
+.auto-topup-toggle {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.2rem;
+}
+
+.auto-topup-toggle span {
+    color: #B3D1FF; /* Lighter blue for secondary text, readable on dark */
+    font-size: 1rem;
+}
+
+/* Switch Styling (matches image’s turquoise-blue toggle) */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 60px;
+    height: 34px;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #666; /* Dark gray for inactive state */
+    transition: .4s;
+    border-radius: 34px;
+    border: 1px solid rgba(255, 255, 255, 0.1); /* Subtle white border */
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 26px;
+    width: 26px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+input:checked + .slider {
+    background-color: #1E90FF; /* Blue from your app’s colors for active state */
+}
+
+input:checked + .slider:before {
+    transform: translateX(26px);
+}
+
+/* Current Balance */
+.current-balance {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1); /* Subtle white border */
+    margin-bottom: 1rem;
+}
+
+.current-balance span {
+    color: #B3D1FF; /* Lighter blue for secondary text */
+    font-size: 0.95rem;
+}
+
+.balance-amount {
+    color: #fff !important;
+    font-weight: 600;
+}
+
+/* Top-up Settings */
+.topup-settings p {
+    color: #fff;
+    font-size: 0.95rem;
+    margin: 1rem 0 0.8rem;
+    line-height: 1.4;
+}
+
+.amount-input-container {
+    margin-bottom: 1.2rem;
+}
+
+.amount-input-container label {
+    color: #B3D1FF;
+    font-size: 0.9rem;
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.amount-input {
+    width: 100%;
+    padding: 0.6rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: #333; /* Slightly lighter dark background for input */
+    color: #fff;
+    font-size: 0.9rem;
+    transition: border-color 0.3s ease;
+}
+
+.amount-input:focus {
+    border-color: #7EB2FF; /* Blue accent on focus, matching your app */
+    outline: none;
+    box-shadow: 0 0 5px rgba(126, 178, 255, 0.3);
+}
+
+.iq-equivalent {
+    color: #7EB2FF;
+    font-size: 0.9rem;
+    margin-top: 0.5rem;
+    display: block;
+    font-weight: 500;
+}
+
+/* Save Button (matches image’s turquoise-blue) */
+.save-button {
+    background: #1E90FF; /* Solid blue, matching your app’s colors */
+    color: white;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    width: 100%;
+    font-weight: 500;
+}
+
+.save-button:hover {
+    background: linear-gradient(45deg, #1E90FF, #4169E1); /* Gradient on hover, matching your app */
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(30, 144, 255, 0.4);
+}
+
+/* New Buy Credits Button */
+.buy-credits-button {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    z-index: 100;
+    margin-left: 1rem; /* Space between this and the auto-topup button */
+}
+
+.buy-credits-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(30, 144, 255, 0.3);
+}
+
+/* Buy Credits Modal */
+.buy-credits-modal {
+    position: absolute;
+    background: #222; /* Dark background for the modal */
+    border: 1px solid rgba(30, 144, 255, 0.1); /* Subtle blue border */
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-top: 0.5rem;
+    z-index: 90;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); /* Slightly stronger shadow for depth */
+    width: 340px; /* Matches width in your image */
+    color: #fff; /* White text for contrast against dark background */
+}
+
+.buy-credits-modal h3 {
+    color: #7EB2FF; /* Blue accent for title, matching your app’s colors */
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+    font-weight: 500;
+}
+
+.buy-credits-modal .message {
+    padding: 0.8rem;
+    border-radius: 8px;
+    margin-top: 1rem;
+    width: 100%;
+    text-align: center;
+}
+
+/* Modal Actions */
+.modal-actions {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.cancel-button {
+    background: #666; /* Dark gray for Cancel button */
+    color: white;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    flex: 1;
+}
+
+.cancel-button:hover {
+    background: #555; /* Slightly darker gray on hover */
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.buy-now-button {
+    background: #1E90FF; /* Blue for Buy Now button, matching your app’s colors */
+    color: white;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    flex: 1;
+}
+
+.buy-now-button:hover {
+    background: linear-gradient(45deg, #1E90FF, #4169E1); /* Gradient on hover, matching your app */
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(30, 144, 255, 0.4);
+}
+/* Confirmation Modal */
+.confirmation-modal {
+    position: absolute;
+    background: #222; /* Dark background for the modal */
+    border: 1px solid rgba(30, 144, 255, 0.1); /* Subtle blue border */
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-top: 0.5rem;
+    z-index: 90;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); /* Slightly stronger shadow for depth */
+    width: 340px; /* Matches width in your image */
+    color: #fff; /* White text for contrast against dark background */
+}
+
+.confirmation-modal h3 {
+    color: #7EB2FF; /* Blue accent for title, matching your app’s colors */
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+    font-weight: 500;
+}
+
+.confirmation-modal p {
+    color: #B3D1FF; /* Lighter blue for text, readable on dark */
+    font-size: 0.95rem;
+    margin-bottom: 1.5rem;
+    line-height: 1.4;
+}
+
+.confirmation-modal .message {
+    padding: 0.8rem;
+    border-radius: 8px;
+    margin-top: 1rem;
+    width: 100%;
+    text-align: center;
+}
+
+/* Modal Actions (shared with buy-credits-modal) */
+.modal-actions {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.cancel-button {
+    background: #666; /* Dark gray for Cancel button */
+    color: white;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    flex: 1;
+}
+
+.cancel-button:hover {
+    background: #555; /* Slightly darker gray on hover */
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.confirm-button {
+    background: #1E90FF; /* Blue for Confirm button, matching your app’s colors */
+    color: white;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    flex: 1;
+}
+
+.confirm-button:hover {
+    background: linear-gradient(45deg, #1E90FF, #4169E1); /* Gradient on hover, matching your app */
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(30, 144, 255, 0.4);
+}

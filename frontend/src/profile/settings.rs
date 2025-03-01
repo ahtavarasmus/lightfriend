@@ -6,8 +6,7 @@ use crate::config;
 use gloo_net::http::Request;
 use serde::Serialize;
 use wasm_bindgen_futures::spawn_local;
-use gloo_timers::future::TimeoutFuture;
-use crate::billing::UserProfile;
+use crate::profile::billing::UserProfile;
 
 const MAX_NICKNAME_LENGTH: usize = 30;
 const MAX_INFO_LENGTH: usize = 500;

@@ -9,7 +9,6 @@ use serde::Deserialize;
 #[derive(Deserialize, Clone)]
 struct UserProfile {
     verified: bool,
-    time_to_delete: bool,
 }
 
 const PHONE_NUMBERS: &[(&str, &str)] = &[

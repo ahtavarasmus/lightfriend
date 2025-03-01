@@ -353,5 +353,21 @@ impl UserRepository {
         Ok(usage_data)
     }
 
+    // Update user's auto top-up settings
+    pub fn update_auto_topup(&self, user_id: i32, active: bool, amount: Option<i32>) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Update the user's auto top-up settings
+        diesel::update(users::table.find(user_id))
+            .set((
+                users::charge_when_under.eq(active),
+                users::charge_back_to.eq(amount),
+            ))
+            .execute(&mut conn)?;
+            
+        Ok(())
+    }
+
+
 
 }

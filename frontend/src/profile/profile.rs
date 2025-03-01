@@ -1,13 +1,13 @@
 use yew::prelude::*;
-use web_sys::{window};
+use web_sys::window;
 use yew_router::prelude::*;
 use crate::Route;
 use crate::config;
 use gloo_net::http::Request;
 use wasm_bindgen_futures::spawn_local;
-use crate::billing::{UserProfile, SubscriptionInfo};
-use crate::settings::{SettingsPage, SettingsPageProps};
-use crate::billing::{BillingPage, BillingPageProps};
+use crate::profile::billing::UserProfile;
+use crate::profile::settings::SettingsPage;
+use crate::profile::billing::BillingPage;
 
 #[derive(Clone, PartialEq)]
 enum ProfileTab {

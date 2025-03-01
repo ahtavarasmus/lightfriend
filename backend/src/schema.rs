@@ -57,6 +57,7 @@ diesel::table! {
         debug_logging_permission -> Bool,
         charge_when_under -> Bool,
         charge_back_to -> Nullable<Integer>,
+        stripe_customer_id -> Nullable<Text>,
     }
 }
 
