@@ -127,6 +127,7 @@ create_session,
 }
 
 
+
 pub async fn create_checkout_session(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -188,46 +189,56 @@ pub async fn create_checkout_session(
 
     println!("Stripe client initialized");
     // Check if user has a Stripe customer ID; if not, create one
+
+    // Check if user has a Stripe customer ID; if not, create one
     let customer_id = match state.user_repository.get_stripe_customer_id(user_id) {
         Ok(Some(id)) => {
             println!("Found existing Stripe customer ID: {}", id);
-            id
+            // Try to retrieve the customer to verify it exists
+            match Customer::retrieve(&client, &id.parse().unwrap(), &[]).await {
+                Ok(customer) => {
+                    // Customer exists 
+                    create_new_customer(&client, user_id, &user.email, &state).await?
+                    //id // Return as String
+                },
+                Err(e) => match e {
+                    stripe::StripeError::Stripe(stripe_error) => {
+                        if stripe_error.error_type == stripe::ErrorType::Api {
+                            // Handle the case where the customer doesn't exist
+                            println!("Customer {} does not exist, creating new customer", id);
+                            create_new_customer(&client, user_id, &user.email, &state).await?
+                        } else {
+                            // Handle other types of API errors
+                            let error = stripe_error.message.unwrap();
+                            println!("API error: {}", error);
+                            return Err((
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({"error": format!("Stripe API error: {}", error)})),
+                            ))
+                        }
+                    },
+                    _ => {
+                        // Handle other types of errors
+                        println!("An error occurred: {:?}", e);
+                        return Err((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": format!("Stripe error: {:?}", e)})),
+                        ));
+                    }
+                }
+            }
         },
         Ok(None) => {
             println!("No Stripe customer ID found, creating new customer");
-            let customer = Customer::create(
-                &client,
-                CreateCustomer {
-                    email: Some(user.email.as_str()),
-                    name: Some(&format!("User {}", user_id)),
-                    ..Default::default()
-                },
-            )
-            .await
-            .map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to create Stripe customer: {}", e)})),
-            ))?;
-
-            println!("Created new Stripe customer: {}", customer.id);
-            // Save the customer ID to your database
-            state
-                .user_repository
-                .set_stripe_customer_id(user_id, &customer.id.to_string())
-                .map_err(|e| (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Database error: {}", e)})),
-                ))?;
-
-            customer.id.to_string()
-        }
+            create_new_customer(&client, user_id, &user.email, &state).await?
+        },
         Err(e) => return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)})),
         )),
     };
-
-    // Convert credits amount to dollars (assuming IQ_TO_EURO_RATE is defined)
+    
+        // Convert credits amount to dollars (assuming IQ_TO_EURO_RATE is defined)
     let amount_dollars = payload.amount_dollars; // From BuyCreditsRequest
     let amount_cents = (amount_dollars * 100.0).round() as i64; // Convert to cents for Stripe
     let amount_in_iq = (amount_cents * 3) as u64;
@@ -250,10 +261,7 @@ pub async fn create_checkout_session(
                 stripe::CreateCheckoutSessionLineItems {
                     price_data: Some(stripe::CreateCheckoutSessionLineItemsPriceData {
                         currency: stripe::Currency::EUR,
-                        product_data: Some(stripe::CreateCheckoutSessionLineItemsPriceDataProductData {
-                            name: "IQ Credits".to_string(),
-                            ..Default::default()
-                        }),
+                        product: Some(std::env::var("STRIPE_CREDITS_PRODUCT_ID").expect("STRIPE_CREDITS_PRODUCT_ID not set")),
                         unit_amount: Some(amount_cents), // Amount in cents
                         ..Default::default()
                     }),
@@ -262,19 +270,31 @@ pub async fn create_checkout_session(
                 }
             ]),
             customer: Some(customer_id.parse().unwrap()),
+            customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
+                address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
+                ..Default::default()
+            }),
             payment_intent_data: Some(stripe::CreateCheckoutSessionPaymentIntentData {
                 setup_future_usage: Some(stripe::CreateCheckoutSessionPaymentIntentDataSetupFutureUsage::OffSession),
                 ..Default::default()
             }), 
+            automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
+                enabled: true, // Enable Stripe Tax to calculate taxes automatically
+                liability: None, // default behavior
+            }),
+            billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
             allow_promotion_codes: Some(true), // Allow discount codes
             ..Default::default()
         },
     )
     .await
-    .map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Failed to create Checkout Session: {}", e)})),
-    ))?;
+    .map_err(|e| {
+    println!("Stripe error details: {:?}", e); // Log the full error
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to create Checkout Session: {}", e)})),
+        )
+    })?;
 
     println!("Checkout session created successfully");
     // Save the session ID for later use (optional, if you need to track it)
@@ -295,6 +315,46 @@ pub async fn create_checkout_session(
     })))
 }
 
+
+// Helper function to create a new Stripe customer
+async fn create_new_customer(
+    client: &Client,
+    user_id: i32,
+    email: &str,
+    state: &Arc<AppState>,
+) -> Result<String, (StatusCode, Json<Value>)> {
+    let customer = Customer::create(
+        client,
+        CreateCustomer {
+            email: Some(email),
+            name: Some(&format!("User {}", user_id)),
+            address: None, // Explicitly set no address to avoid pre-filling
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| {
+        println!("Failed to create customer: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to create Stripe customer: {}", e)})),
+        )
+    })?;
+
+    println!("Created new Stripe customer: {}", customer.id);
+    state
+        .user_repository
+        .set_stripe_customer_id(user_id, &customer.id.to_string())
+        .map_err(|e| {
+            println!("Failed to update database with new customer ID: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)})),
+            )
+        })?;
+    Ok(customer.id.to_string())
+}
+
 pub async fn stripe_webhook(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -305,8 +365,9 @@ pub async fn stripe_webhook(
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "Invalid payload encoding"})),
         ))?;
-   println!("Stripe webhook received");
-    // Initialize Stripe client (optional, if you need it for other operations)
+    println!("Stripe webhook received");
+
+    // Initialize Stripe client
     let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY")
         .expect("STRIPE_SECRET_KEY must be set in environment");
     let client = Client::new(stripe_secret_key);
@@ -349,11 +410,40 @@ pub async fn stripe_webhook(
                             stripe::Expandable::Object(customer) => customer.id.clone(),
                         };
                         println!("Customer ID: {}", customer_id);
+
+                        // Update customer address with billing address from Checkout
+                        if let Some(billing_details) = &session.shipping_details {
+                            if let Some(address) = &billing_details.address {
+                                println!("Updating customer address with billing details");
+                                Customer::update(
+                                    &client,
+                                    &customer_id,
+                                    stripe::UpdateCustomer {
+                                        address: Some(stripe::Address {
+                                            line1: address.line1.clone(),
+                                            city: address.city.clone(),
+                                            country: address.country.clone(),
+                                            postal_code: address.postal_code.clone(),
+                                            state: address.state.clone(),
+                                            ..Default::default()
+                                        }),
+                                        ..Default::default()
+                                    },
+                                )
+                                .await
+                                .map_err(|e| {
+                                    eprintln!("Failed to update customer address: {}", e);
+                                    // Continue processing even if address update fails (non-critical)
+                                })
+                                .ok();
+                            }
+                        }
+
                         let payment_intent = session.payment_intent.as_ref()
                             .ok_or_else(|| (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({"error": "No payment intent in session"})),
-                        ))?;
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({"error": "No payment intent in session"})),
+                            ))?;
 
                         // Retrieve the payment method from the payment intent
                         let payment_intent_id = match payment_intent {
@@ -400,7 +490,6 @@ pub async fn stripe_webhook(
                                 ))?;
                             println!("Successfully saved payment method ID for user");
 
-
                             let amount_in_cents = session.amount_subtotal.unwrap_or(0);
                             let amount_in_iq = (amount_in_cents * 3) as i32;
                             state
@@ -409,10 +498,9 @@ pub async fn stripe_webhook(
                                 .map_err(|e| (
                                     StatusCode::INTERNAL_SERVER_ERROR,
                                     Json(json!({"error": format!("Database error: {}", e)})),
-                            ))?;
+                                ))?;
                             println!("Increased the iq amount by {} successfully", amount_in_iq);
                         }
-
                     }
                 },
                 _ => {
@@ -428,6 +516,7 @@ pub async fn stripe_webhook(
     println!("Webhook processed successfully");
     Ok(StatusCode::OK) // Return 200 OK for successful webhook processing
 }
+
 
 pub async fn automatic_charge(
     State(state): State<Arc<AppState>>,

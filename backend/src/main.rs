@@ -111,6 +111,9 @@ pub fn validate_env() {
         .expect("PADDLE_WEBHOOK_SECRET must be set");
     let _ = std::env::var("DOMAIN_URL")
         .expect("DOMAIN_URL must be set");
+    let _ = std::env::var("STRIPE_CREDITS_PRODUCT_ID")
+        .expect("STRIPE_CREDITS_PRODUCT_ID must be set");
+
 
 }
 
