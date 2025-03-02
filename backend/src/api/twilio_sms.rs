@@ -1,5 +1,6 @@
 use reqwest::Client;
 use std::env;
+use crate::models::user_models::User;
 use std::error::Error;
 use std::sync::Arc;
 use crate::AppState;
@@ -11,6 +12,7 @@ use axum::{
     extract::Form,
     response::IntoResponse,
     extract::State,
+    Json,
     http::StatusCode,
 };
 use chrono::{DateTime, Utc};
@@ -87,33 +89,39 @@ struct TwilioResponse {
 }
 
 
-
-pub async fn send_sms(to: &str, body: &str) -> Result<(), Box<dyn Error>> {
+pub async fn send_conversation_outmessage(
+    conversation_sid: &str,
+    from_number: &str,
+    body: &str
+) -> Result<(), Box<dyn Error>> {
     let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
     let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
-    let from = env::var("FIN_PHONE")?;
 
     let client = Client::new();
+    let url = format!(
+        "https://conversations.twilio.com/v1/Conversations/{}/Messages",
+        conversation_sid
+    );
+
     let response = client
-        .post(format!(
-            "https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json",
-            account_sid
-        ))
+        .post(&url)
         .basic_auth(&account_sid, Some(&auth_token))
         .form(&[
-            ("To", to),
-            ("From", &from),
             ("Body", body),
+            ("Author", from_number),
         ])
         .send()
         .await?;
 
     if !response.status().is_success() {
-        return Err(format!("Failed to send SMS: {}", response.status()).into());
+        return Err(format!("Failed to send conversation message: {}", response.status()).into());
     }
 
     Ok(())
 }
+
+
+
 
 pub async fn handle_incoming_sms(
     State(state): State<Arc<AppState>>,

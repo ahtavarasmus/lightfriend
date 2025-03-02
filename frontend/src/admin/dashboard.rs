@@ -12,13 +12,6 @@ struct BroadcastMessage {
     message: String,
 }
 
-#[derive(Deserialize, Clone, Debug)]
-struct PhoneNumbers {
-    usa: String,
-    fin: String,
-    nld: String,
-    chz: String,
-}
 
 #[derive(Deserialize, Clone, Debug)]
 struct UserInfo {
