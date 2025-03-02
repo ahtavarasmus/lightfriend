@@ -9,8 +9,6 @@ use serde_json::json;
 use jsonwebtoken::{encode, decode, Header, EncodingKey, DecodingKey, Validation, Algorithm};
 use chrono::{Duration, Utc};
 use serde::Deserialize;
-use crate::api::twilio_sms;
-use crate::config::phone_numbers;
 
 #[derive(Deserialize)]
 pub struct BroadcastMessageRequest {
@@ -18,7 +16,7 @@ pub struct BroadcastMessageRequest {
 }
 
 use crate::{
-    handlers::auth_dtos::{LoginRequest, RegisterRequest, RegisterResponse, UserResponse, Claims, NewUser},
+    handlers::auth_dtos::{LoginRequest, RegisterRequest, UserResponse, Claims, NewUser},
     AppState
 };
 
