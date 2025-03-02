@@ -144,7 +144,6 @@ pub async fn create_setup_intent(
     })))
 }
 
-
 pub async fn create_checkout_session(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -252,10 +251,10 @@ pub async fn create_checkout_session(
 
     println!("Processing payment of {} EUR ({} cents) for {} IQ credits", amount_dollars, amount_cents, amount_in_iq);
 
-    let domain_url =std::env::var("DOMAIN_URL").expect("DOMAIN_URL not set");
+    let domain_url = std::env::var("DOMAIN_URL").expect("DOMAIN_URL not set");
     println!("Using domain: {}", domain_url);
     
-    // Create a Checkout Session
+    // Create a Checkout Session with payment method attachment
     println!("Creating Stripe checkout session");
     let checkout_session = CheckoutSession::create(
         &client,
@@ -263,23 +262,28 @@ pub async fn create_checkout_session(
             success_url: Some(&format!("{}/profile", domain_url)), // Redirect after success
             cancel_url: Some(&format!("{}/profile", domain_url)), // Redirect after cancellation
             payment_method_types: Some(vec![stripe::CreateCheckoutSessionPaymentMethodTypes::Card]), // Allow card payments
-            mode: Some(stripe::CheckoutSessionMode::Payment),// One-time payment mode
+            mode: Some(stripe::CheckoutSessionMode::Payment), // One-time payment mode
             line_items: Some(vec![
                 stripe::CreateCheckoutSessionLineItems {
-                price_data: Some(stripe::CreateCheckoutSessionLineItemsPriceData {
-                    currency: stripe::Currency::EUR,
-                    product_data: Some(stripe::CreateCheckoutSessionLineItemsPriceDataProductData {
-                        name: "IQ Credits".to_string(),
+                    price_data: Some(stripe::CreateCheckoutSessionLineItemsPriceData {
+                        currency: stripe::Currency::EUR,
+                        product_data: Some(stripe::CreateCheckoutSessionLineItemsPriceDataProductData {
+                            name: "IQ Credits".to_string(),
+                            ..Default::default()
+                        }),
+                        unit_amount: Some(amount_cents), // Amount in cents
                         ..Default::default()
                     }),
-                    unit_amount: Some(amount_cents), // Amount in cents
+                    quantity: Some(1),
                     ..Default::default()
-                }),
-                quantity: Some(1),
-                ..Default::default()
-            }]),
+                }
+            ]),
             customer: Some(customer_id.parse().unwrap()),
-            allow_promotion_codes: Some(true), // Optional: Allow discount codes
+            payment_intent_data: Some(stripe::CreateCheckoutSessionPaymentIntentData {
+                setup_future_usage: Some(stripe::CreateCheckoutSessionPaymentIntentDataSetupFutureUsage::OffSession),
+                ..Default::default()
+            }), 
+            allow_promotion_codes: Some(true), // Allow discount codes
             ..Default::default()
         },
     )
@@ -290,7 +294,7 @@ pub async fn create_checkout_session(
     ))?;
 
     println!("Checkout session created successfully");
-    // Save the session ID or payment method for later use (you can store it in your database)
+    // Save the session ID for later use (optional, if you need to track it)
     state
         .user_repository
         .set_stripe_checkout_session_id(user_id, &checkout_session.id.to_string())
