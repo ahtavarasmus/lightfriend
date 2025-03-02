@@ -1,4 +1,3 @@
-
 use axum::{
     Json,
     extract::State,
@@ -79,7 +78,7 @@ pub struct AgentConfig {
 
 
 use std::error::Error;
-use tracing::{error, info};
+use tracing::error;
 
 
 pub async fn validate_elevenlabs_secret(
@@ -242,7 +241,7 @@ pub async fn fetch_assistant(
 
 
 pub async fn handle_perplexity_tool_call(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
     Json(payload): Json<PhoneCallPayload>,
 ) -> Json<serde_json::Value> {
     println!("Received message: {}", payload.message);

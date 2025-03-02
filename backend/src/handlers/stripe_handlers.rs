@@ -55,7 +55,7 @@ pub async fn create_customer_portal_session(
     };
 
     // Decode and validate JWT token (assuming Claims and other imports are defined)
-    let claims = match decode::<Claims>(
+    let _claims = match decode::<Claims>(
         token,
         &DecodingKey::from_secret(
             std::env::var("JWT_SECRET_KEY")
@@ -70,19 +70,6 @@ pub async fn create_customer_portal_session(
             Json(json!({"error": "Invalid token"})),
         )),
     };
-
-    // Fetch user from the database
-    let user = state
-        .user_repository
-        .find_by_id(user_id)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)})),
-        ))?
-        .ok_or_else(|| (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "User not found"})),
-        ))?;
 
     // Get Stripe customer ID
     let customer_id = state
@@ -149,7 +136,7 @@ pub async fn create_checkout_session(
 
     println!("Token extracted successfully");
     // Decode and validate JWT token
-    let claims = match decode::<Claims>(
+    let _claims = match decode::<Claims>(
         token,
         &DecodingKey::from_secret(
             std::env::var("JWT_SECRET_KEY")
@@ -179,7 +166,7 @@ pub async fn create_checkout_session(
             Json(json!({"error": "User not found"})),
         ))?;
 
-    println!("User found: {}", user.email);
+    println!("User found: {}", user.id);
     // Initialize Stripe client
     let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY")
         .expect("STRIPE_SECRET_KEY must be set in environment");
@@ -194,10 +181,9 @@ pub async fn create_checkout_session(
             println!("Found existing Stripe customer ID: {}", id);
             // Try to retrieve the customer to verify it exists
             match Customer::retrieve(&client, &id.parse().unwrap(), &[]).await {
-                Ok(customer) => {
+                Ok(_customer) => {
                     // Customer exists 
-                    create_new_customer(&client, user_id, &user.email, &state).await?
-                    //id // Return as String
+                    id // Return as String
                 },
                 Err(e) => match e {
                     stripe::StripeError::Stripe(stripe_error) => {
@@ -537,7 +523,7 @@ pub async fn automatic_charge(
             StatusCode::NOT_FOUND,
             Json(json!({"error": "User not found"})),
         ))?;
-    println!("User found: {}", user.email);
+    println!("User found: {}", user.id);
 
     // Get Stripe customer ID and payment method ID
     let customer_id = state

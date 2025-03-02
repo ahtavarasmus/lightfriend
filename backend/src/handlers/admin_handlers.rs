@@ -7,8 +7,6 @@ use axum::{
 use serde_json::json;
 use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use serde::Deserialize;
-use crate::api::twilio_sms;
-use crate::config::phone_numbers;
 
 #[derive(Deserialize)]
 pub struct BroadcastMessageRequest {

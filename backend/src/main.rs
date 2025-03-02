@@ -30,9 +30,6 @@ mod api {
     pub mod paddle_utils;
 }
 
-mod config {
-    pub mod phone_numbers;
-}
 
 mod models {
     pub mod user_models;
@@ -58,7 +55,6 @@ use handlers::stripe_handlers;
 use api::vapi_endpoints;
 use api::twilio_sms;
 use api::elevenlabs;
-use api::paddle_webhooks;
 
 
 
@@ -82,14 +78,10 @@ pub fn validate_env() {
         .expect("JWT_REFRESH_KEY must be set");
     let _ = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set");
-    let _ = std::env::var("VAPI_API_KEY")
-        .expect("VAPI_API_KEY must be set");
     let _ = std::env::var("PERPLEXITY_API_KEY")
         .expect("PERPLEXITY_API_KEY must be set");
     let _ = std::env::var("ASSISTANT_ID")
         .expect("ASSISTANT_ID must be set");
-    let _ = std::env::var("VAPI_SERVER_URL_SECRET")
-        .expect("VAPI_SERVER_URL_SECRET must be set");
     let _ = std::env::var("ELEVENLABS_SERVER_URL_SECRET")
         .expect("ELEVENLABS_SERVER_URL_SECRET must be set");
     let _ = std::env::var("FIN_PHONE")
@@ -104,17 +96,27 @@ pub fn validate_env() {
         .expect("TWILIO_ACCOUNT_SID must be set");
     let _ = std::env::var("TWILIO_AUTH_TOKEN")
         .expect("TWILIO_AUTH_TOKEN must be set");
-    let _ = std::env::var("PADDLE_WEBHOOK_SECRET")
-        .expect("PADDLE_WEBHOOK_SECRET must be set");
-    let _ = std::env::var("DOMAIN_URL")
+    let _ = std::env::var("ENVIRONMENT") // for dev its 'development' and for prod anything else
+        .expect("ENVIRONMENT must be set");
+    let _ = std::env::var("DOMAIN_URL") // frontend url
         .expect("DOMAIN_URL must be set");
+    let _ = std::env::var("OPENROUTER_API_KEY") 
+        .expect("OPENROUTER_API_KEY must be set");
     let _ = std::env::var("STRIPE_CREDITS_PRODUCT_ID")
         .expect("STRIPE_CREDITS_PRODUCT_ID must be set");
+    let _ = std::env::var("STRIPE_SECRET_KEY")
+        .expect("STRIPE_SECRET_KEY must be set");
+    let _ = std::env::var("STRIPE_PUBLISHABLE_KEY")
+        .expect("STRIPE_PUBLISHABLE_KEY must be set");
+    let _ = std::env::var("STRIPE_WEBHOOK_SECRET")
+        .expect("STRIPE_WEBHOOK_SECRET must be set");
+
     let _ = std::env::var("MESSAGE_COST")
         .expect("MESSAGE_COST must be set");
     let _ = std::env::var("VOICE_SECOND_COST")
         .expect("VOICE_SECOND_COST must be set");
-
+    let _ = std::env::var("CHARGE_BACK_THRESHOLD")
+        .expect("CHARGE_BACK_THRESHOLD must be set");
 
 }
 
@@ -152,10 +154,12 @@ async fn main() {
         user_conversations,
     });
 
-    // Create a router for VAPI routes with secret validation
+    // keep the vapi around if they become cracked at some point
+    /*
     let vapi_routes = Router::new()
         .route("/api/vapi/server", post(vapi_endpoints::handle_phone_call_event))
         .route_layer(middleware::from_fn(vapi_endpoints::validate_vapi_secret));
+    */
     let twilio_routes = Router::new()
         .route("/api/sms/server", post(twilio_sms::handle_incoming_sms));
     let elevenlabs_routes = Router::new()
@@ -192,7 +196,9 @@ async fn main() {
         .route("/api/stripe/customer-portal/{user_id}", get(stripe_handlers::create_customer_portal_session)) // New route
 
 
+        /*
         .merge(vapi_routes)
+        */
         .merge(twilio_routes)
         .merge(elevenlabs_routes)
         .layer(
