@@ -7,7 +7,8 @@ use crate::profile::billing_models::{ // Import from the new file
     AutoTopupSettings, BuyCreditsRequest, ApiResponse, UserProfile, StripeSetupIntentResponse,
     IQ_TO_EURO_RATE, MIN_TOPUP_AMOUNT_DOLLARS, MIN_TOPUP_AMOUNT_IQ, format_timestamp,
 };
-use crate::profile::billing_payments::PaymentMethodButton; // Import the new button component
+use crate::profile::billing_payments::PaymentMethodButton;
+use serde_json::{Value, json};
 use chrono::Utc;
 use wasm_bindgen_futures::spawn_local;
 use gloo_timers::future::TimeoutFuture;
@@ -188,7 +189,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
         })
     };
 
-    // Function to handle buying credits after confirmation
+    // Function to handle buying credits via Stripe Checkout
     let confirm_buy_credits = {
         let user_id = user_profile.id;
         let error = error.clone();
@@ -213,7 +214,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                     let amount_dollars = *buy_credits_amount; // Safely dereference the cloned handle
                     let request = BuyCreditsRequest { amount_dollars };
 
-                    match Request::post(&format!("{}/api/buy-credits", config::get_backend_url()))
+                    match Request::post(&format!("{}/api/stripe/checkout-session/{}", config::get_backend_url(), user_id))
                         .header("Authorization", &format!("Bearer {}", token))
                         .header("Content-Type", "application/json")
                         .json(&request)
@@ -223,29 +224,163 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                     {
                         Ok(response) => {
                             if response.ok() {
-                                if let Ok(data) = response.json::<ApiResponse>().await {
-                                    success.set(Some(data.message));
-                                    show_confirmation_modal.set(false); // Close confirmation modal on success
-                                    TimeoutFuture::new(3_000).await;
-                                    success.set(None); // Clear success message after 3 seconds
+                                if let Ok(data) = response.json::<Value>().await {
+                                    if let Some(url) = data.get("url").and_then(|v| v.as_str()) {
+                                        // Redirect to Stripe Checkout
+                                        web_sys::window()
+                                            .unwrap()
+                                            .location()
+                                            .set_href(url)
+                                            .unwrap_or_else(|e| {
+                                                error.set(Some(format!("Failed to redirect to Stripe: {:?}", e)));
+                                            });
+                                        show_confirmation_modal.set(false); // Close confirmation modal
+                                    } else {
+                                        error.set(Some("No URL in Stripe response".to_string()));
+                                    }
                                 } else {
-                                    error.set(Some("Failed to parse response".to_string()));
-                                    // Clear error after 3 seconds
-                                    let error_clone = error.clone();
-                                    spawn_local(async move {
-                                        TimeoutFuture::new(3_000).await;
-                                        error_clone.set(None);
-                                    });
+                                    error.set(Some("Failed to parse Stripe response".to_string()));
                                 }
                             } else {
-                                error.set(Some("Failed to buy credits".to_string()));
-                                // Clear error after 3 seconds
-                                let error_clone = error.clone();
-                                spawn_local(async move {
-                                    TimeoutFuture::new(3_000).await;
-                                    error_clone.set(None);
-                                });
+                                error.set(Some("Failed to create Stripe Checkout session".to_string()));
                             }
+                            // Clear error after 3 seconds
+                            let error_clone = error.clone();
+                            spawn_local(async move {
+                                TimeoutFuture::new(3_000).await;
+                                error_clone.set(None);
+                            });
+                        }
+                        Err(e) => {
+                            error.set(Some(format!("Network error occurred: {:?}", e)));
+                            // Clear error after 3 seconds
+                            let error_clone = error.clone();
+                            spawn_local(async move {
+                                TimeoutFuture::new(3_000).await;
+                                error_clone.set(None);
+                            });
+                        }
+                    }
+                } else {
+                    error.set(Some("Authentication token not found".to_string()));
+                    // Clear error after 3 seconds
+                    let error_clone = error.clone();
+                    spawn_local(async move {
+                        TimeoutFuture::new(3_000).await;
+                        error_clone.set(None);
+                    });
+                }
+            });
+        })
+    };
+
+    // Handle redirect after successful payment
+    let handle_successful_payment = {
+        let user_id = user_profile.id;
+        let success = success.clone();
+        let error = error.clone();
+        
+        use_effect_with_deps(move |()| {
+            let window = web_sys::window().unwrap();
+            let search = window.location().search().unwrap_or_default();
+            if search.contains("session_id=") {
+                // Extract session_id from URL
+                let session_id = search.split("session_id=").nth(1)
+                    .and_then(|s| s.split('&').next())
+                    .unwrap_or_default()
+                    .to_string();
+
+                spawn_local(async move {
+                    if let Some(token) = window
+                        .local_storage()
+                        .ok()
+                        .flatten()
+                        .and_then(|storage| storage.get_item("token").ok())
+                        .flatten()
+                    {
+                        match Request::post(&format!("{}/api/stripe/confirm-checkout", config::get_backend_url()))
+                            .header("Authorization", &format!("Bearer {}", token))
+                            .header("Content-Type", "application/json")
+                            .json(&json!({ "session_id": session_id }))
+                            .expect("Failed to serialize session ID")
+                            .send()
+                            .await
+                        {
+                            Ok(response) => {
+                                if response.ok() {
+                                    if let Ok(data) = response.json::<ApiResponse>().await {
+                                        success.set(Some(data.message));
+                                    } else {
+                                        error.set(Some("Failed to parse confirmation response".to_string()));
+                                    }
+                                } else {
+                                    error.set(Some("Failed to confirm Stripe payment".to_string()));
+                                }
+                            }
+                            Err(e) => {
+                                error.set(Some(format!("Network error confirming payment: {:?}", e)));
+                            }
+                        }
+                        // Clear messages after 3 seconds
+                        let success_clone = success.clone();
+                        let error_clone = error.clone();
+                        spawn_local(async move {
+                            TimeoutFuture::new(3_000).await;
+                            success_clone.set(None);
+                            error_clone.set(None);
+                        });
+                    }
+                });
+            }
+
+            || () // Cleanup function (none needed here)
+        }, ())
+    };
+
+    // Function to trigger test purchase
+    let test_purchase = {
+        let user_id = user_profile.id;
+        let error = error.clone();
+        let success = success.clone();
+
+        Callback::from(move |_| {
+            let user_id = user_id;
+            let error = error.clone();
+            let success = success.clone();
+
+            spawn_local(async move {
+                if let Some(token) = window()
+                    .and_then(|w| w.local_storage().ok())
+                    .flatten()
+                    .and_then(|storage| storage.get_item("token").ok())
+                    .flatten()
+                {
+                    match Request::post(&format!("{}/api/stripe/automatic-charge/{}", config::get_backend_url(), user_id))
+                        .header("Authorization", &format!("Bearer {}", token))
+                        .header("Content-Type", "application/json")
+                        .send()
+                        .await
+                    {
+                        Ok(response) => {
+                            if response.ok() {
+                                if let Ok(data) = response.json::<Value>().await {
+                                    if let Some(message) = data.get("message").and_then(|v| v.as_str()) {
+                                        success.set(Some(message.to_string()));
+                                    }
+                                } else {
+                                    error.set(Some("Failed to parse test purchase response".to_string()));
+                                }
+                            } else {
+                                error.set(Some("Failed to process test purchase".to_string()));
+                            }
+                            // Clear messages after 3 seconds
+                            let error_clone = error.clone();
+                            let success_clone = success.clone();
+                            spawn_local(async move {
+                                TimeoutFuture::new(3_000).await;
+                                error_clone.set(None);
+                                success_clone.set(None);
+                            });
                         }
                         Err(e) => {
                             error.set(Some(format!("Network error occurred: {:?}", e)));
@@ -314,6 +449,12 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                         onclick={toggle_buy_credits_modal.clone()}
                                     >
                                         {"Buy Credits"}
+                                    </button>
+                                    <button 
+                                        class="test-purchase-button"
+                                        onclick={test_purchase.clone()}
+                                    >
+                                        {"Test 5 EUR Purchase"}
                                     </button>
                                     {
                                         if *show_auto_topup_modal {
@@ -558,7 +699,6 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                 }
 
                 <div class="billing-info">
-
                     <PaymentMethodButton user_id={user_profile.id} /> 
                 </div>
                 <UsageGraph user_id={user_profile.id} />

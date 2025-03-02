@@ -6,7 +6,6 @@ use crate::AppState;
 use crate::api::elevenlabs::ElevenLabsResponse;
 use crate::schema::users;
 use crate::schema::subscriptions;
-use std::error::Error;
 
 use std::env;
 
@@ -96,7 +95,7 @@ async fn sync_all_active_subscriptions(state: &AppState) -> Result<(), Box<dyn s
     Ok(())
 }
 
-async fn check_and_update_database(state: &AppState) -> Result<(), Box<dyn std::error::Error>> {
+async fn check_and_update_database(state: &Arc<AppState>) -> Result<(), Box<dyn std::error::Error>> {
 
     let conn = &mut state.db_pool.get()?;
 
@@ -192,6 +191,32 @@ async fn check_and_update_database(state: &AppState) -> Result<(), Box<dyn std::
                                                     error!("Failed to decrease user IQ: {}", e);
                                                 } else {
                                                     info!("Successfully decreased IQ for user {} by {} seconds", user_id, iq_used);
+
+
+                                                    
+                                                    match state.user_repository.is_iq_under_threshold(user_id, 180) {
+                                                        Ok(is_under) => {
+                                                            if is_under {
+                                                                info!("User {} IQ is under threshold, attempting automatic charge", user_id);
+                                                                // Get user information
+                                                                match state.user_repository.find_by_id(user_id) {
+                                                                    Ok(Some(user)) => {
+                                                                        if user.charge_when_under {
+                                                                            use axum::extract::{State, Path};
+                                                                            let _ = crate::handlers::stripe_handlers::automatic_charge(
+                                                                                State(state.clone()),
+                                                                                Path(user_id),
+                                                                            ).await;
+                                                                            info!("recharged the user successfully back up!");
+                                                                        }
+                                                                    },
+                                                                    Ok(None) => error!("User {} not found for automatic charge", user_id),
+                                                                    Err(e) => error!("Failed to get user for automatic charge: {}", e),
+                                                                }
+                                                            }
+                                                        },
+                                                        Err(e) => error!("Failed to check if user IQ is under threshold: {}", e),
+                                                    }
                                                                                                        
                                                     // Delete the conversation from ElevenLabs
                                                     let delete_url = format!(

@@ -284,6 +284,15 @@ impl UserRepository {
         Ok(())
     }
 
+    pub fn is_iq_under_threshold(&self, user_id: i32, threshold: i32) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let user = users::table
+            .find(user_id)
+            .first::<User>(&mut conn)?;
+        
+        Ok(user.iq < threshold)
+    }
+
     // Update user's notify_credits preference
     pub fn update_notify_credits(&self, user_id: i32, notify: bool) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -368,6 +377,65 @@ impl UserRepository {
         Ok(())
     }
 
+    pub fn get_stripe_customer_id(&self, user_id: i32) -> Result<Option<String>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let stripe_id = users::table
+            .find(user_id)
+            .select(users::stripe_customer_id)
+            .first::<Option<String>>(&mut conn)?;
+        Ok(stripe_id)
+    }
+
+    pub fn set_stripe_customer_id(&self, user_id: i32, customer_id: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::stripe_customer_id.eq(customer_id))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_stripe_payment_method_id(&self, user_id: i32) -> Result<Option<String>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let payment_method_id = users::table
+            .find(user_id)
+            .select(users::stripe_payment_method_id)
+            .first::<Option<String>>(&mut conn)?;
+        Ok(payment_method_id)
+    }
+    
+    pub fn set_stripe_payment_method_id(&self, user_id: i32, payment_method_id: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::stripe_payment_method_id.eq(payment_method_id))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn find_by_stripe_customer_id(&self, customer_id: &str) -> Result<Option<User>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let user = users::table
+            .filter(users::stripe_customer_id.eq(customer_id))
+            .first::<User>(&mut conn)
+            .optional()?;
+        Ok(user)
+    }
+
+    pub fn set_stripe_checkout_session_id(&self, user_id: i32, session_id: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::stripe_checkout_session_id.eq(session_id))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+    
+    pub fn get_stripe_checkout_session_id(&self, user_id: i32) -> Result<Option<String>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let session_id = users::table
+            .find(user_id)
+            .select(users::stripe_checkout_session_id)
+            .first::<Option<String>>(&mut conn)?;
+        Ok(session_id)
+    }
 
 
 }
