@@ -168,32 +168,42 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         }
     };
 
-
-    // Check if user has enough IQ points
-    if user.iq < 60 {
-        // Check if user has an active subscription
-        let has_subscription = match state.user_subscriptions.has_active_subscription(user.id) {
-            Ok(true) => true,
-            Ok(false) => false,
-            Err(e) => {
-                eprintln!("Failed to check subscription status: {}", e);
-                false
+    match state.user_repository.is_credits_under_threshold(user.id) {
+        Ok(is_under) => {
+            if is_under {
+                println!("User {} credits is under threshold, attempting automatic charge", user.id);
+                // Get user information
+                if user.charge_when_under {
+                    use axum::extract::{State, Path};
+                    let state_clone = Arc::clone(&state);
+                    tokio::spawn(async move {
+                        let _ = crate::handlers::stripe_handlers::automatic_charge(
+                            State(state_clone),
+                            Path(user.id),
+                        ).await;
+                        println!("Recharged the user successfully back up!");
+                    });
+                    println!("recharged the user successfully back up!");
+                }
             }
-        };
-        
-        // If user doesn't have a subscription, return error
-        if !has_subscription {
-            return (
-                StatusCode::BAD_REQUEST,
-                axum::Json(TwilioResponse {
-                    message: "Insufficient IQ points to send message. Please add more credits to continue.".to_string(),
-                })
-            );
-        }
-        // If user has subscription, continue processing
+        },
+        Err(e) => eprintln!("Failed to check if user credits is under threshold: {}", e),
     }
 
-    
+    // Check if user has enough credits 
+    let message_credits_cost = std::env::var("MESSAGE_COST")
+        .expect("MESSAGE_COST not set")
+        .parse::<f32>()
+        .unwrap_or(0.20);
+
+    if user.credits < message_credits_cost {
+        return (
+            StatusCode::BAD_REQUEST,
+            axum::Json(TwilioResponse {
+                message: "Insufficient credits points to send message.".to_string(),
+            })
+        );
+    }
 
     let conversation = match state.user_conversations.get_conversation(&user, payload.to).await {
         Ok(conv) => conv,
@@ -506,54 +516,41 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
     match send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number,&final_response).await {
         Ok(_) => {
             if !fail {
-                // Deduct 60 IQ points for the message
-                if let Err(e) = state.user_repository.update_user_iq(user.id, user.iq - 60) {
-                    eprintln!("Failed to update user IQ: {}", e);
+                // Deduct credits for the message
+                let message_credits_cost = std::env::var("MESSAGE_COST")
+                    .expect("MESSAGE_COST not set")
+                    .parse::<f32>()
+                    .unwrap_or(0.20);
+
+                if let Err(e) = state.user_repository
+                    .update_user_credits(user.id, user.credits - message_credits_cost) {
+
+                    eprintln!("Failed to update user credits: {}", e);
                     return (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         axum::Json(TwilioResponse {
-                            message: "Failed to process IQ points".to_string(),
+                            message: "Failed to process credits points".to_string(),
                         })
                     );
                 }
 
-                
+                let message_credits_cost = std::env::var("MESSAGE_COST")
+                    .expect("MESSAGE_COST not set")
+                    .parse::<f32>()
+                    .unwrap_or(0.20);
+
                 // Log the SMS usage
                 if let Err(e) = state.user_repository.log_usage(
                     user.id,
                     "sms",
-                    60,  // IQ points used
+                    message_credits_cost,  // credits points used
                     true, // Success
                     None,
                 ) {
                     eprintln!("Failed to log SMS usage: {}", e);
                     // Continue execution even if logging fails
                 }
-
- 
-                match state.user_repository.is_iq_under_threshold(user.id, 120) {
-                    Ok(is_under) => {
-                        if is_under {
-                            println!("User {} IQ is under threshold, attempting automatic charge", user.id);
-                            // Get user information
-                            if user.charge_when_under {
-                                use axum::extract::{State, Path};
-                                let state_clone = Arc::clone(&state);
-                                tokio::spawn(async move {
-                                    let _ = crate::handlers::stripe_handlers::automatic_charge(
-                                        State(state_clone),
-                                        Path(user.id),
-                                    ).await;
-                                    println!("Recharged the user successfully back up!");
-                                });
-                                println!("recharged the user successfully back up!");
-                            }
-                        }
-                    },
-                    Err(e) => eprintln!("Failed to check if user IQ is under threshold: {}", e),
-                }
             }
-
             (
                 StatusCode::OK,
                 axum::Json(TwilioResponse {

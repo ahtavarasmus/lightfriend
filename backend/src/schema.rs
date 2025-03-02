@@ -31,8 +31,7 @@ diesel::table! {
         id -> Nullable<Integer>,
         user_id -> Integer,
         activity_type -> Text,
-        iq_used -> Integer,
-        iq_cost_per_euro -> Integer,
+        credits -> Float,
         created_at -> Integer,
         success -> Bool,
         summary -> Nullable<Text>,
@@ -48,24 +47,21 @@ diesel::table! {
         nickname -> Nullable<Text>,
         time_to_live -> Nullable<Integer>,
         verified -> Bool,
-        iq -> Integer,
-        notify_credits -> Bool,
-        locality -> Text,
+        credits -> Float,
+        notify -> Bool,
         info -> Nullable<Text>,
         preferred_number -> Nullable<Text>,
-        iq_cost_per_euro -> Integer,
         debug_logging_permission -> Bool,
         charge_when_under -> Bool,
-        charge_back_to -> Nullable<Integer>,
+        charge_back_to -> Nullable<Float>,
+        stripe_customer_id -> Nullable<Text>,
         stripe_payment_method_id -> Nullable<Text>,
         stripe_checkout_session_id -> Nullable<Text>,
-        stripe_customer_id -> Nullable<Text>,
     }
 }
 
 diesel::joinable!(conversations -> users (user_id));
 diesel::joinable!(subscriptions -> users (user_id));
-diesel::joinable!(usage_logs -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     conversations,

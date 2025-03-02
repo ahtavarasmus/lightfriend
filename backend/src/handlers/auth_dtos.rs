@@ -11,8 +11,7 @@ pub struct NewUser {
     pub phone_number: String,
     pub time_to_live: i32,
     pub verified: bool,
-    pub iq: i32,
-    pub locality: String,
+    pub credits: f32,
 }
 
 #[derive(Deserialize)]
@@ -46,8 +45,8 @@ pub struct UserResponse {
     pub nickname: Option<String>,
     pub time_to_live: Option<i32>,
     pub verified: bool,
-    pub iq: i32,
-    pub notify_credits: bool,
+    pub credits: f32,
+    pub notify: bool,
     pub preferred_number: Option<String>,
 }
 

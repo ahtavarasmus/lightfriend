@@ -15,7 +15,7 @@ pub struct Props {
 #[derive(Deserialize, Clone, PartialEq)]
 struct UsageDataPoint {
     timestamp: i32,
-    iq_used: i32,
+    credits: f32,
 }
 
 #[function_component]
@@ -97,7 +97,7 @@ pub fn UsageGraph(props: &Props) -> Html {
                             .unwrap()
                             .format("%d")
                             .to_string();
-                        *daily_usage.entry(date).or_insert(0) += point.iq_used;
+                        *daily_usage.entry(date).or_insert(0) += point.credits as i32;
                     }
 
                     let mut data: Vec<(String, i32)> = daily_usage.into_iter().collect();
@@ -109,7 +109,7 @@ pub fn UsageGraph(props: &Props) -> Html {
 
                         let mut chart = ChartBuilder::on(&root)
                             .margin(10)
-                            .caption("Daily IQ Usage", ("sans-serif", 20))
+                            .caption("Daily Usage", ("sans-serif", 20))
                             .x_label_area_size(40)
                             .y_label_area_size(60) // Increased to accommodate both scales
                             .build_cartesian_2d(
@@ -129,7 +129,7 @@ pub fn UsageGraph(props: &Props) -> Html {
                                     .unwrap_or_default()
                             })
                             .y_label_formatter(&|y| {
-                                format!("{} (€{:.1})", y, *y as f64 / 300.0)
+                                format!("€{:.1}", (*y as f64 / 300.0))
                             })
                             .draw()
                             .unwrap();

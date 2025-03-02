@@ -7,7 +7,7 @@ use rand;
 #[derive(Serialize, PartialEq)]
 pub struct UsageDataPoint {
     pub timestamp: i32,
-    pub iq_used: i32,
+    pub credits: f32,
 }
 
 use crate::{
@@ -209,35 +209,34 @@ impl UserRepository {
         Ok(())
     }
 
-    // Update user's IQ (credits)
-    pub fn update_user_iq(&self, user_id: i32, new_iq: i32) -> Result<(), DieselError> {
+    // Update user's (credits)
+    pub fn update_user_credits(&self, user_id: i32, new_credits: f32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table.find(user_id))
-            .set(users::iq.eq(new_iq))
+            .set(users::credits.eq(new_credits))
             .execute(&mut conn)?;
         Ok(())
     }
 
-    // Decrease user's IQ by a specified amount
-    pub fn decrease_iq(&self, user_id: i32, amount: i32) -> Result<(), DieselError> {
+    // Decrease user's credits by a specified amount
+    pub fn decrease_credits(&self, user_id: i32, amount: f32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let user = users::table
             .find(user_id)
             .first::<User>(&mut conn)?;
         
-        let new_iq = user.iq - amount;
+        let new_credits = user.credits - amount;
         
         diesel::update(users::table.find(user_id))
-            .set(users::iq.eq(new_iq))
+            .set(users::credits.eq(new_credits))
             .execute(&mut conn)?;
         Ok(())
     }
 
     // log the usage of either call or sms
-    pub fn log_usage(&self, user_id: i32, activity_type: &str, iq_used: i32, success: bool, possible_summary: Option<String>) -> Result<(), DieselError> {
+    pub fn log_usage(&self, user_id: i32, activity_type: &str, credits: f32, success: bool, possible_summary: Option<String>) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
-        // Get the user to access their iq_cost_per_euro
         let user = users::table
             .find(user_id)
             .first::<User>(&mut conn)?;
@@ -256,8 +255,7 @@ impl UserRepository {
         let new_log = NewUsageLog {
             user_id,
             activity_type: activity_type.to_string(),
-            iq_used,
-            iq_cost_per_euro: user.iq_cost_per_euro,
+            credits,
             created_at: current_time,
             success,
             summary,
@@ -269,35 +267,41 @@ impl UserRepository {
         Ok(())
     }
 
-    // Increase user's IQ by a specified amount
-    pub fn increase_iq(&self, user_id: i32, amount: i32) -> Result<(), DieselError> {
+    // Increase user's credits by a specified amount
+    pub fn increase_credits(&self, user_id: i32, amount: f32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let user = users::table
             .find(user_id)
             .first::<User>(&mut conn)?;
         
-        let new_iq = user.iq + amount;
+        let new_credits = user.credits + amount;
         
         diesel::update(users::table.find(user_id))
-            .set(users::iq.eq(new_iq))
+            .set(users::credits.eq(new_credits))
             .execute(&mut conn)?;
         Ok(())
     }
 
-    pub fn is_iq_under_threshold(&self, user_id: i32, threshold: i32) -> Result<bool, DieselError> {
+    pub fn is_credits_under_threshold(&self, user_id: i32) -> Result<bool, DieselError> {
+
+        let charge_back_threshold= std::env::var("CHARGE_BACK_THRESHOLD")
+            .expect("CHARGE_BACK_THRESHOLD not set")
+            .parse::<f32>()
+            .unwrap_or(2.00);
+
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let user = users::table
             .find(user_id)
             .first::<User>(&mut conn)?;
         
-        Ok(user.iq < threshold)
+        Ok(user.credits < charge_back_threshold)
     }
 
-    // Update user's notify_credits preference
-    pub fn update_notify_credits(&self, user_id: i32, notify: bool) -> Result<(), DieselError> {
+    // Update user's notify preference
+    pub fn update_notify(&self, user_id: i32, notify: bool) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table.find(user_id))
-            .set(users::notify_credits.eq(notify))
+            .set(users::notify.eq(notify))
             .execute(&mut conn)?;
         Ok(())
     }
@@ -319,18 +323,18 @@ impl UserRepository {
                 let timestamp = now - (i * day_in_seconds);
                 if timestamp >= from_timestamp {
                     // Random usage between 50 and 500
-                    let usage = rand::random::<i32>() % 451 + 50;
+                    let usage = rand::random::<f32>() % 451.00 + 50.00;
                     example_data.push(UsageDataPoint {
                         timestamp,
-                        iq_used: usage,
+                        credits: usage,
                     });
                     
                     // Sometimes add multiple entries per day
                     if rand::random::<f32>() > 0.7 {
-                        let second_usage = rand::random::<i32>() % 301 + 20;
+                        let credit_usage = rand::random::<f32>() % 301.00 + 20.00;
                         example_data.push(UsageDataPoint {
                             timestamp: timestamp + 3600, // 1 hour later
-                            iq_used: second_usage,
+                            credits: credit_usage,
                         });
                     }
                 }
@@ -349,13 +353,13 @@ impl UserRepository {
         let usage_data = usage_logs
             .filter(user_id.eq(user_id))
             .filter(created_at.ge(from_timestamp))
-            .select((created_at, iq_used))
+            .select((created_at, credits))
             .order_by(created_at.asc())
-            .load::<(i32, i32)>(&mut conn)?
+            .load::<(i32, f32)>(&mut conn)?
             .into_iter()
-            .map(|(timestamp, iq)| UsageDataPoint {
+            .map(|(timestamp, credit_amount)| UsageDataPoint {
                 timestamp,
-                iq_used: iq,
+                credits: credit_amount,
             })
             .collect();
 
@@ -363,7 +367,7 @@ impl UserRepository {
     }
 
     // Update user's auto top-up settings
-    pub fn update_auto_topup(&self, user_id: i32, active: bool, amount: Option<i32>) -> Result<(), DieselError> {
+    pub fn update_auto_topup(&self, user_id: i32, active: bool, amount: Option<f32>) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // Update the user's auto top-up settings

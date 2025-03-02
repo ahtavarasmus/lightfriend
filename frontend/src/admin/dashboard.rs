@@ -20,8 +20,8 @@ struct UserInfo {
     phone_number: String,
     time_to_live: Option<i32>,
     verified: bool,
-    iq: i32,
-    notify_credits: bool,
+    credits: f32,
+    notify: bool,
     preferred_number: Option<String>,
 }
 
@@ -179,7 +179,7 @@ pub fn AdminDashboard() -> Html {
                                             <tr>
                                                 <th>{"ID"}</th>
                                                 <th>{"Email"}</th>
-                                            <th>{"IQ"}</th>
+                                            <th>{"Credits"}</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -194,7 +194,7 @@ pub fn AdminDashboard() -> Html {
                                                             <tr onclick={onclick} key={user.id} class={classes!("user-row", is_selected.then(|| "selected"))}>
                                                                 <td>{user.id}</td>
                                                                 <td>{&user.email}</td>
-                                                                <td>{user.iq}</td>
+                                                                <td>{format!("{:.2}", user.credits)}</td>
                                                             </tr>
                                                             if is_selected {
                                                                 <tr class="details-row">
@@ -209,7 +209,7 @@ pub fn AdminDashboard() -> Html {
                                                                                         .unwrap_or_else(|| "Invalid timestamp".to_string())
                                                                                 })
                                                                             }</p>
-                                                                            <p><strong>{"Notify: "}</strong>{if user.notify_credits { "Yes" } else { "No" }}</p>
+                                                                            <p><strong>{"Notify: "}</strong>{if user.notify { "Yes" } else { "No" }}</p>
                                                                             <div class="preferred-number-section">
                                                                                 <p><strong>{"Current Preferred Number: "}</strong>{user.preferred_number.clone().unwrap_or_else(|| "Not set".to_string())}</p>
                                                                             </div>
@@ -229,14 +229,14 @@ pub fn AdminDashboard() -> Html {
                                                                                             .and_then(|storage| storage.get_item("token").ok())
                                                                                             .flatten()
                                                                                         {
-                                                                                            match Request::post(&format!("{}/api/billing/increase-iq/{}", config::get_backend_url(), user_id))
+                                                                                            match Request::post(&format!("{}/api/billing/increase-credits/{}", config::get_backend_url(), user_id))
                                                                                                 .header("Authorization", &format!("Bearer {}", token))
                                                                                                 .send()
                                                                                                 .await
                                                                                             {
                                                                                                 Ok(response) => {
                                                                                                     if response.ok() {
-                                                                                                        // Refresh the users list after increasing IQ
+                                                                                                        // Refresh the users list after increasing credits 
                                                                                                         if let Ok(response) = Request::get(&format!("{}/api/admin/users", config::get_backend_url()))
                                                                                                             .header("Authorization", &format!("Bearer {}", token))
                                                                                                             .send()
@@ -247,7 +247,7 @@ pub fn AdminDashboard() -> Html {
                                                                                                             }
                                                                                                         }
                                                                                                     } else {
-                                                                                                        error.set(Some("Failed to increase IQ".to_string()));
+                                                                                                        error.set(Some("Failed to increase Credits".to_string()));
                                                                                                     }
                                                                                                 }
                                                                                                 Err(_) => {
@@ -260,7 +260,7 @@ pub fn AdminDashboard() -> Html {
                                                                             }}
                                                                             class="iq-button"
                                                                         >
-                                                                            {"Get 500 IQ"}
+                                                                            {"Get €2.00 credits"}
                                                                         </button>
                                                                         <button 
                                                                             onclick={{
@@ -277,14 +277,14 @@ pub fn AdminDashboard() -> Html {
                                                                                             .and_then(|storage| storage.get_item("token").ok())
                                                                                             .flatten()
                                                                                         {
-                                                                                            match Request::post(&format!("{}/api/billing/reset-iq/{}", config::get_backend_url(), user_id))
+                                                                                            match Request::post(&format!("{}/api/billing/reset-credits/{}", config::get_backend_url(), user_id))
                                                                                                 .header("Authorization", &format!("Bearer {}", token))
                                                                                                 .send()
                                                                                                 .await
                                                                                             {
                                                                                                 Ok(response) => {
                                                                                                     if response.ok() {
-                                                                                                        // Refresh the users list after resetting IQ
+                                                                                                        // Refresh the users list after resetting credits
                                                                                                         if let Ok(response) = Request::get(&format!("{}/api/admin/users", config::get_backend_url()))
                                                                                                             .header("Authorization", &format!("Bearer {}", token))
                                                                                                             .send()
@@ -295,7 +295,7 @@ pub fn AdminDashboard() -> Html {
                                                                                                             }
                                                                                                         }
                                                                                                     } else {
-                                                                                                        error.set(Some("Failed to reset IQ".to_string()));
+                                                                                                        error.set(Some("Failed to reset credits".to_string()));
                                                                                                     }
                                                                                                 }
                                                                                                 Err(_) => {
@@ -308,7 +308,7 @@ pub fn AdminDashboard() -> Html {
                                                                             }}
                                                                             class="iq-button reset"
                                                                         >
-                                                                            {"Reset IQ"}
+                                                                            {"Reset credits"}
                                                                         </button>
                                                                         <button 
                                                                             onclick={{

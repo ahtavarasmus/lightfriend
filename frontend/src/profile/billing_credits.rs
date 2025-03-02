@@ -5,13 +5,14 @@ use serde_json::{Value, json};
 use crate::profile::usage_graph::UsageGraph;
 use gloo_net::http::Request;
 use crate::profile::billing_models::{ // Import from the new file
-    AutoTopupSettings, BuyCreditsRequest, ApiResponse, UserProfile, StripeSetupIntentResponse,
-    IQ_TO_EURO_RATE, MIN_TOPUP_AMOUNT_DOLLARS, MIN_TOPUP_AMOUNT_IQ, format_timestamp,
+    AutoTopupSettings, 
+    BuyCreditsRequest, 
+    ApiResponse, 
+    UserProfile,
+    MIN_TOPUP_AMOUNT_CREDITS
 };
-use chrono::Utc;
 use wasm_bindgen_futures::spawn_local;
 use gloo_timers::future::TimeoutFuture;
-use wasm_bindgen::JsValue; // For debugging/logging
 
 #[derive(Properties, PartialEq, Clone)]
 pub struct BillingPageProps {
@@ -27,14 +28,14 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
     // Auto top-up related states
     let show_auto_topup_modal = use_state(|| false);
     let auto_topup_active = use_state(|| user_profile.charge_when_under);
-    let auto_topup_amount = use_state(|| user_profile.charge_back_to.unwrap_or(0)); // Default to 0 (empty) for the input
+    let auto_topup_amount = use_state(|| user_profile.charge_back_to.unwrap_or(5.00)); 
 
     // State to track the saved auto-topup amount for display in "Currently:"
-    let saved_auto_topup_amount = use_state(|| user_profile.charge_back_to.unwrap_or(0));
+    let saved_auto_topup_amount = use_state(|| user_profile.charge_back_to.unwrap_or(5.00));
 
     // Buy credits related states
     let show_buy_credits_modal = use_state(|| false);
-    let buy_credits_amount = use_state(|| MIN_TOPUP_AMOUNT_DOLLARS); // Default to $5 (minimum)
+    let buy_credits_amount = use_state(|| MIN_TOPUP_AMOUNT_CREDITS); 
     let show_confirmation_modal = use_state(|| false); // New state for confirmation modal
 
     // Function to update auto top-up settings and refresh the profile
@@ -418,297 +419,283 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
         <div class="profile-info">
             <div class="billing-section">
                 {
-                    if user_profile.iq < 0 {
-                        html! {
-                            <>
-                                <h3>{"IQ Usage this month"}</h3>
-                                <div class="iq-balance">
-                                    <span class="iq-time">
-                                        {format!("{} IQ (approx. {:.2}€)", user_profile.iq.abs(), (user_profile.iq.abs() as f64 / IQ_TO_EURO_RATE))}
-                                    </span>
-                                </div>
-                            </>
-                        }
-                    } else {
-                        html! {
-                            <>
-                                <h3>{"Available credits"}</h3>
-                                <div class="iq-balance">
-                                    <span class="iq-time">
-                                        {if user_profile.iq >= 60 { 
-                                            format!("{:.2}€  ({} minutes/messages)", user_profile.iq as f32 / 300.0, user_profile.iq / 60)
-                                        } else { 
-                                            format!("{:.2}€ ({} seconds)", (user_profile.iq as f32 / 300.0), user_profile.iq)
+                    html! {
+                        <>
+                            <h3>{"Available credits"}</h3>
+                            <div class="iq-balance">
+                                <span class="iq-time">
+                                    {if user_profile.credits < 0.00 { 
+                                        format!("{:.2}€  (0 minutes/messages)", user_profile.credits)
+                                    } else { 
+                                        format!("{:.2}€ ({:.0}min {:.0}s or {:.0} messages)", user_profile.credits, user_profile.credits / crate::profile::billing_models::VOICE_SECOND_COST / 60.00, (user_profile.credits / crate::profile::billing_models::VOICE_SECOND_COST) % 60.0, user_profile.credits / crate::profile::billing_models::MESSAGE_COST)
+                                    }}
+                                </span>
+                            </div>
+                            
+                            <div class="auto-topup-container">
+                                if user_profile.stripe_payment_method_id.is_some() {
+                                    <button 
+                                        class="auto-topup-button"
+                                        onclick={{
+                                            let show_modal = show_auto_topup_modal.clone();
+                                            Callback::from(move |_| show_modal.set(!*show_modal))
                                         }}
-                                    </span>
-                                </div>
-                                
-                                <div class="auto-topup-container">
-                                    if user_profile.stripe_payment_method_id.is_some() {
-                                        <button 
-                                            class="auto-topup-button"
-                                            onclick={{
-                                                let show_modal = show_auto_topup_modal.clone();
-                                                Callback::from(move |_| show_modal.set(!*show_modal))
-                                            }}
-                                        >
-                                            {"Automatic Top-up"}
-                                        </button>
-                                    }
-                                        <button 
-                                            class="buy-credits-button"
-                                            onclick={toggle_buy_credits_modal.clone()}
-                                        >
-                                            {"Buy Credits"}
-                                        </button>
+                                    >
+                                        {"Automatic Top-up"}
+                                    </button>
+                                }
+                                    <button 
+                                        class="buy-credits-button"
+                                        onclick={toggle_buy_credits_modal.clone()}
+                                    >
+                                        {"Buy Credits"}
+                                    </button>
 
-                                    if user_profile.stripe_payment_method_id.is_some() {
-                                        <button 
-                                            class="customer-portal-button"
-                                            onclick={open_customer_portal.clone()}
-                                        >
-                                            {"Manage Payments"}
-                                        </button>
-                                    }
-                                    {
-                                        if *show_auto_topup_modal {
-                                            html! {
-                                                <div class="auto-topup-modal">
-                                                    <div class="auto-topup-toggle">
-                                                        <span>{"Automatic Top-up"}</span>
-                                                        <span class="toggle-status">
-                                                            {if *auto_topup_active {"Active"} else {"Inactive"}}
-                                                        </span>
-                                                        <label class="switch">
-                                                            <input 
-                                                                type="checkbox" 
-                                                                checked={*auto_topup_active}
-                                                                onchange={{
-                                                                    let auto_topup_active = auto_topup_active.clone();
-                                                                    let update_auto_topup = update_auto_topup.clone();
-                                                                    let auto_topup_amount = auto_topup_amount.clone();
-                                                                    Callback::from(move |e: Event| {
-                                                                        let input: HtmlInputElement = e.target_unchecked_into();
-                                                                        let new_active_state = input.checked();
-                                                                        auto_topup_active.set(new_active_state);
-                                                                        update_auto_topup.emit(AutoTopupSettings {
-                                                                            active: new_active_state,
-                                                                            amount: Some(*auto_topup_amount),
-                                                                        });
-                                                                    })
-                                                                }}
-                                                            />
-                                                            <span class="slider round"></span>
-                                                        </label>
-                                                    </div>
-                                                    
-                                                    <div class="current-balance">
-                                                        <span>{"Currently: "}</span>
-                                                        <span class="balance-amount">{format!("${:.2}", (*saved_auto_topup_amount as f64 / IQ_TO_EURO_RATE).max(0.0))}</span>
-                                                    </div>
-                                                    
-                                                    {
-                                                        if *auto_topup_active {
-                                                            html! {
-                                                                <div class="topup-settings">
-                                                                    <p>{"How much would you like to automatically top up when your balance drops below $2.00?"}</p>
-                                                                    <div class="amount-input-container">
-                                                                        <label for="amount">{"Amount ($)"}</label>
-                                                                        <input 
-                                                                            id="amount"
-                                                                            type="number" 
-                                                                            step="0.01"
-                                                                            min="5"
-                                                                            class="amount-input"
-                                                                            value="" // Default to empty
-                                                                            onchange={{
-                                                                                let auto_topup_amount = auto_topup_amount.clone();
-                                                                                let error = error.clone();
-                                                                                Callback::from(move |e: Event| {
-                                                                                    let input: HtmlInputElement = e.target_unchecked_into();
-                                                                                    if let Ok(dollars) = input.value().parse::<f64>() {
-                                                                                        // Enforce minimum of $5 (300 IQ)
-                                                                                        let final_dollars = dollars.max(MIN_TOPUP_AMOUNT_DOLLARS);
-                                                                                        if dollars < MIN_TOPUP_AMOUNT_DOLLARS {
-                                                                                            error.set(Some("Minimum amount is $5".to_string()));
-                                                                                            // Clear error after 3 seconds
-                                                                                            let error_clone = error.clone();
-                                                                                            spawn_local(async move {
-                                                                                                TimeoutFuture::new(3_000).await;
-                                                                                                error_clone.set(None);
-                                                                                            });
-                                                                                        }
-                                                                                        // Convert dollars to IQ credits
-                                                                                        let iq_amount = (final_dollars * IQ_TO_EURO_RATE).round() as i32;
-                                                                                        auto_topup_amount.set(iq_amount);
-                                                                                        // Update the input value to reflect the enforced minimum
-                                                                                        input.set_value(&format!("{:.2}", final_dollars));
-                                                                                    } else {
-                                                                                        // If parsing fails (e.g., empty or invalid input), set to minimum
-                                                                                        auto_topup_amount.set(MIN_TOPUP_AMOUNT_IQ);
-                                                                                        input.set_value(&format!("{:.2}", MIN_TOPUP_AMOUNT_DOLLARS));
-                                                                                    }
-                                                                                })
-                                                                            }}
-                                                                        />
-                                                                    </div>
-                                                                    <button 
-                                                                        class="save-button"
-                                                                        onclick={{
-                                                                            let update_auto_topup = update_auto_topup.clone();
-                                                                            let auto_topup_active = auto_topup_active.clone();
-                                                                            let auto_topup_amount = auto_topup_amount.clone();
-                                                                            Callback::from(move |_| {
-                                                                                update_auto_topup.emit(AutoTopupSettings {
-                                                                                    active: *auto_topup_active,
-                                                                                    amount: Some(*auto_topup_amount),
-                                                                                });
-                                                                            })
-                                                                        }}
-                                                                    >
-                                                                        {"Save"}
-                                                                    </button>
-                                                                    
-                                                                    {
-                                                                        if let Some(error_msg) = (*error).as_ref() {
-                                                                            html! {
-                                                                                <div class="message error-message" style="margin-top: 1rem;">
-                                                                                    {error_msg}
-                                                                                </div>
-                                                                            }
-                                                                        } else {
-                                                                            html! {}
-                                                                        }
-                                                                    }
-                                                                </div>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-                                                    }
-                                                </div>
-                                            }
-                                        } else {
-                                            html! {}
-                                        }
-                                    }
-                                    {
-                                        if *show_buy_credits_modal {
-                                            html! {
-                                                <div class="buy-credits-modal">
-                                                    <h3>{"How many credits would you like to buy?"}</h3>
-                                                    <div class="amount-input-container">
-                                                        <label for="credits-amount">{"Amount ($)"}</label>
+                                if user_profile.stripe_payment_method_id.is_some() {
+                                    <button 
+                                        class="customer-portal-button"
+                                        onclick={open_customer_portal.clone()}
+                                    >
+                                        {"Manage Payments"}
+                                    </button>
+                                }
+                                {
+                                    if *show_auto_topup_modal {
+                                        html! {
+                                            <div class="auto-topup-modal">
+                                                <div class="auto-topup-toggle">
+                                                    <span>{"Automatic Top-up"}</span>
+                                                    <span class="toggle-status">
+                                                        {if *auto_topup_active {"Active"} else {"Inactive"}}
+                                                    </span>
+                                                    <label class="switch">
                                                         <input 
-                                                            id="credits-amount"
-                                                            type="number" 
-                                                            step="0.01"
-                                                            min="3"
-                                                            class="amount-input"
-                                                            value={format!("{:.2}", *buy_credits_amount)}
+                                                            type="checkbox" 
+                                                            checked={*auto_topup_active}
                                                             onchange={{
-                                                                let buy_credits_amount = buy_credits_amount.clone();
-                                                                let error = error.clone();
+                                                                let auto_topup_active = auto_topup_active.clone();
+                                                                let update_auto_topup = update_auto_topup.clone();
+                                                                let auto_topup_amount = auto_topup_amount.clone();
                                                                 Callback::from(move |e: Event| {
                                                                     let input: HtmlInputElement = e.target_unchecked_into();
-                                                                    if let Ok(dollars) = input.value().parse::<f64>() {
-                                                                        // Enforce minimum of $5
-                                                                        let final_dollars = dollars.max(MIN_TOPUP_AMOUNT_DOLLARS);
-                                                                        if dollars < MIN_TOPUP_AMOUNT_DOLLARS {
-                                                                            error.set(Some("Minimum amount is $3".to_string()));
-                                                                            // Clear error after 3 seconds
-                                                                            let error_clone = error.clone();
-                                                                            spawn_local(async move {
-                                                                                TimeoutFuture::new(3_000).await;
-                                                                                error_clone.set(None);
-                                                                            });
-                                                                        }
-                                                                        buy_credits_amount.set(final_dollars);
-                                                                        // Update the input value to reflect the enforced minimum
-                                                                        input.set_value(&format!("{:.2}", final_dollars));
-                                                                    } else {
-                                                                        // If parsing fails (e.g., empty or invalid input), set to minimum
-                                                                        buy_credits_amount.set(MIN_TOPUP_AMOUNT_DOLLARS);
-                                                                        input.set_value(&format!("{:.2}", MIN_TOPUP_AMOUNT_DOLLARS));
-                                                                    }
+                                                                    let new_active_state = input.checked();
+                                                                    auto_topup_active.set(new_active_state);
+                                                                    update_auto_topup.emit(AutoTopupSettings {
+                                                                        active: new_active_state,
+                                                                        amount: Some(*auto_topup_amount),
+                                                                    });
                                                                 })
                                                             }}
                                                         />
-                                                    </div>
-                                                    <div class="modal-actions">
-                                                        <button 
-                                                            class="cancel-button"
-                                                            onclick={toggle_buy_credits_modal.clone()}
-                                                        >
-                                                            {"Cancel"}
-                                                        </button>
-                                                        <button 
-                                                            class="buy-now-button"
-                                                            onclick={show_confirmation.clone()}
-                                                        >
-                                                            {"Buy Now"}
-                                                        </button>
-                                                    </div>
-                                                    {
-                                                        if let Some(error_msg) = (*error).as_ref() {
-                                                            html! {
-                                                                <div class="message error-message" style="margin-top: 1rem;">
-                                                                    {error_msg}
-                                                                </div>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-                                                    }
+                                                        <span class="slider round"></span>
+                                                    </label>
                                                 </div>
-                                            }
-                                        } else {
-                                            html! {}
-                                        }
-                                    }
-                                    {
-                                        if *show_confirmation_modal {
-                                            html! {
-                                                <div class="confirmation-modal">
-                                                    <h3>{"Confirm Purchase"}</h3>
-                                                    <p>{format!("Are you sure you want to buy ${:.2} in credits?", *buy_credits_amount)}</p>
-                                                    <div class="modal-actions">
-                                                        <button 
-                                                            class="cancel-button"
-                                                            onclick={{
-                                                                let show_confirmation_modal = show_confirmation_modal.clone();
-                                                                Callback::from(move |_| show_confirmation_modal.set(false))
-                                                            }}
-                                                        >
-                                                            {"Cancel"}
-                                                        </button>
-                                                        <button 
-                                                            class="confirm-button"
-                                                            onclick={confirm_buy_credits.clone()}
-                                                        >
-                                                            {"Confirm"}
-                                                        </button>
-                                                    </div>
-                                                    {
-                                                        if let Some(error_msg) = (*error).as_ref() {
-                                                            html! {
-                                                                <div class="message error-message" style="margin-top: 1rem;">
-                                                                    {error_msg}
-                                                                </div>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-                                                    }
+                                                
+                                                <div class="current-balance">
+                                                    <span>{"Currently: "}</span>
+                                                    <span class="balance-amount">{format!("${:.2}", *saved_auto_topup_amount)}</span>
                                                 </div>
-                                            }
-                                        } else {
-                                            html! {}
+                                                
+                                                {
+                                                    if *auto_topup_active {
+                                                        html! {
+                                                            <div class="topup-settings">
+                                                                <p>{"How much would you like to automatically top up when your balance drops below $2.00?"}</p>
+                                                                <div class="amount-input-container">
+                                                                    <label for="amount">{"Amount ($)"}</label>
+                                                                    <input 
+                                                                        id="amount"
+                                                                        type="number" 
+                                                                        step="0.01"
+                                                                        min="5"
+                                                                        class="amount-input"
+                                                                        value="" // Default to empty
+                                                                        onchange={{
+                                                                            let auto_topup_amount = auto_topup_amount.clone();
+                                                                            let error = error.clone();
+                                                                            Callback::from(move |e: Event| {
+                                                                                let input: HtmlInputElement = e.target_unchecked_into();
+                                                                                if let Ok(dollars) = input.value().parse::<f32>() {
+                                                                                    // Enforce minimum of $5 
+                                                                                    let final_dollars = dollars.max(MIN_TOPUP_AMOUNT_CREDITS);
+                                                                                    if dollars < MIN_TOPUP_AMOUNT_CREDITS {
+                                                                                        error.set(Some("Minimum amount is $5".to_string()));
+                                                                                        // Clear error after 3 seconds
+                                                                                        let error_clone = error.clone();
+                                                                                        spawn_local(async move {
+                                                                                            TimeoutFuture::new(3_000).await;
+                                                                                            error_clone.set(None);
+                                                                                        });
+                                                                                    }
+                                                                                    // Convert dollars to credits credits
+                                                                                    auto_topup_amount.set(final_dollars);
+                                                                                    // Update the input value to reflect the enforced minimum
+                                                                                    input.set_value(&format!("{:.2}", final_dollars));
+                                                                                } else {
+                                                                                    // If parsing fails (e.g., empty or invalid input), set to minimum
+                                                                                    auto_topup_amount.set(MIN_TOPUP_AMOUNT_CREDITS);
+                                                                                    input.set_value(&format!("{:.2}", MIN_TOPUP_AMOUNT_CREDITS));
+                                                                                }
+                                                                            })
+                                                                        }}
+                                                                    />
+                                                                </div>
+                                                                <button 
+                                                                    class="save-button"
+                                                                    onclick={{
+                                                                        let update_auto_topup = update_auto_topup.clone();
+                                                                        let auto_topup_active = auto_topup_active.clone();
+                                                                        let auto_topup_amount = auto_topup_amount.clone();
+                                                                        Callback::from(move |_| {
+                                                                            update_auto_topup.emit(AutoTopupSettings {
+                                                                                active: *auto_topup_active,
+                                                                                amount: Some(*auto_topup_amount),
+                                                                            });
+                                                                        })
+                                                                    }}
+                                                                >
+                                                                    {"Save"}
+                                                                </button>
+                                                                
+                                                                {
+                                                                    if let Some(error_msg) = (*error).as_ref() {
+                                                                        html! {
+                                                                            <div class="message error-message" style="margin-top: 1rem;">
+                                                                                {error_msg}
+                                                                            </div>
+                                                                        }
+                                                                    } else {
+                                                                        html! {}
+                                                                    }
+                                                                }
+                                                            </div>
+                                                        }
+                                                    } else {
+                                                        html! {}
+                                                    }
+                                                }
+                                            </div>
                                         }
+                                    } else {
+                                        html! {}
                                     }
-                                </div>
-                            </>
-                        }
+                                }
+                                {
+                                    if *show_buy_credits_modal {
+                                        html! {
+                                            <div class="buy-credits-modal">
+                                                <h3>{"How many credits would you like to buy?"}</h3>
+                                                <div class="amount-input-container">
+                                                    <label for="credits-amount">{"Amount ($)"}</label>
+                                                    <input 
+                                                        id="credits-amount"
+                                                        type="number" 
+                                                        step="0.01"
+                                                        min="3"
+                                                        class="amount-input"
+                                                        value={format!("{:.2}", *buy_credits_amount)}
+                                                        onchange={{
+                                                            let buy_credits_amount = buy_credits_amount.clone();
+                                                            let error = error.clone();
+                                                            Callback::from(move |e: Event| {
+                                                                let input: HtmlInputElement = e.target_unchecked_into();
+                                                                if let Ok(dollars) = input.value().parse::<f32>() {
+                                                                    // Enforce minimum of $5
+                                                                    let final_dollars = dollars.max(MIN_TOPUP_AMOUNT_CREDITS);
+                                                                    if dollars < MIN_TOPUP_AMOUNT_CREDITS {
+                                                                        error.set(Some("Minimum amount is $3".to_string()));
+                                                                        // Clear error after 3 seconds
+                                                                        let error_clone = error.clone();
+                                                                        spawn_local(async move {
+                                                                            TimeoutFuture::new(3_000).await;
+                                                                            error_clone.set(None);
+                                                                        });
+                                                                    }
+                                                                    buy_credits_amount.set(final_dollars);
+                                                                    // Update the input value to reflect the enforced minimum
+                                                                    input.set_value(&format!("{:.2}", final_dollars));
+                                                                } else {
+                                                                    // If parsing fails (e.g., empty or invalid input), set to minimum
+                                                                    buy_credits_amount.set(MIN_TOPUP_AMOUNT_CREDITS);
+                                                                    input.set_value(&format!("{:.2}", MIN_TOPUP_AMOUNT_CREDITS));
+                                                                }
+                                                            })
+                                                        }}
+                                                    />
+                                                </div>
+                                                <div class="modal-actions">
+                                                    <button 
+                                                        class="cancel-button"
+                                                        onclick={toggle_buy_credits_modal.clone()}
+                                                    >
+                                                        {"Cancel"}
+                                                    </button>
+                                                    <button 
+                                                        class="buy-now-button"
+                                                        onclick={show_confirmation.clone()}
+                                                    >
+                                                        {"Buy Now"}
+                                                    </button>
+                                                </div>
+                                                {
+                                                    if let Some(error_msg) = (*error).as_ref() {
+                                                        html! {
+                                                            <div class="message error-message" style="margin-top: 1rem;">
+                                                                {error_msg}
+                                                            </div>
+                                                        }
+                                                    } else {
+                                                        html! {}
+                                                    }
+                                                }
+                                            </div>
+                                        }
+                                    } else {
+                                        html! {}
+                                    }
+                                }
+                                {
+                                    if *show_confirmation_modal {
+                                        html! {
+                                            <div class="confirmation-modal">
+                                                <h3>{"Confirm Purchase"}</h3>
+                                                <p>{format!("Are you sure you want to buy ${:.2} in credits?", *buy_credits_amount)}</p>
+                                                <div class="modal-actions">
+                                                    <button 
+                                                        class="cancel-button"
+                                                        onclick={{
+                                                            let show_confirmation_modal = show_confirmation_modal.clone();
+                                                            Callback::from(move |_| show_confirmation_modal.set(false))
+                                                        }}
+                                                    >
+                                                        {"Cancel"}
+                                                    </button>
+                                                    <button 
+                                                        class="confirm-button"
+                                                        onclick={confirm_buy_credits.clone()}
+                                                    >
+                                                        {"Confirm"}
+                                                    </button>
+                                                </div>
+                                                {
+                                                    if let Some(error_msg) = (*error).as_ref() {
+                                                        html! {
+                                                            <div class="message error-message" style="margin-top: 1rem;">
+                                                                {error_msg}
+                                                            </div>
+                                                        }
+                                                    } else {
+                                                        html! {}
+                                                    }
+                                                }
+                                            </div>
+                                        }
+                                    } else {
+                                        html! {}
+                                    }
+                                }
+                            </div>
+                        </>
                     }
                 }
 
