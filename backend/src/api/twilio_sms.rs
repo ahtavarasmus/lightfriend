@@ -1,23 +1,19 @@
 use reqwest::Client;
 use std::env;
-use crate::models::user_models::User;
 use std::error::Error;
 use std::sync::Arc;
 use crate::AppState;
 use crate::api::twilio_utils::send_conversation_message;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::api::vapi_endpoints;
 use axum::{
     extract::Form,
     response::IntoResponse,
     extract::State,
-    Json,
     http::StatusCode,
 };
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 
-use serde_json::json;
 use crate::api::vapi_endpoints::ask_perplexity;
 
 use openai_api_rs::v1::{
@@ -370,7 +366,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
 
     println!("Processing model response with finish reason: {:?}", result.choices[0].finish_reason);
     let mut fail = false;
-    let mut final_response = match result.choices[0].finish_reason {
+    let final_response = match result.choices[0].finish_reason {
         None | Some(chat_completion::FinishReason::stop) => {
             println!("Model provided direct response (no tool calls needed)");
             // Direct response from the model
@@ -510,7 +506,6 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
             "I apologize, but something went wrong while processing your request. (you were not charged for this message)".to_string()
         }
     };
-
 
     // Send the final response to the conversation
     match send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number,&final_response).await {

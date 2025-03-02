@@ -372,22 +372,16 @@ pub async fn register(
 
     let reg_r = reg_req.clone();
 
-    // Determine locality based on phone number
-    let locality = if reg_r.phone_number.starts_with("+358") {
-        "fin".to_string()
-    } else if reg_r.phone_number.starts_with("+1") {
-        "usa".to_string()
-    } else {
-        "usa".to_string()
-    };
-
     let new_user = NewUser {
         email: reg_r.email,
         password_hash,
         phone_number: reg_r.phone_number,
         time_to_live: five_minutes_from_now,
+        notify: true,
+        debug_logging_permission: false,
         verified: false,
         credits: 2.00,
+        charge_when_under: false,
     };
 
     state.user_repository.create_user(new_user).map_err(|e| {

@@ -1,15 +1,12 @@
 use std::sync::Arc;
-use diesel::result::Error as DieselError;
 use axum::{
     Json,
     extract::State,
     http::{StatusCode, HeaderMap}
 };
 use serde::{Deserialize, Serialize};
-use axum::extract::Path;
 use serde_json::json;
 use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
-use reqwest::header::{HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 
 use crate::repositories::user_repository::UsageDataPoint;
 use crate::{
