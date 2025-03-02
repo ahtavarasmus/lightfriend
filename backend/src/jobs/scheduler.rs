@@ -1,11 +1,8 @@
 use tokio_cron_scheduler::{JobScheduler, Job};
 use std::sync::Arc;
-use diesel::prelude::*;
 use tracing::{info, error};
 use crate::AppState;
 use crate::api::elevenlabs::ElevenLabsResponse;
-use crate::schema::users;
-use crate::schema::subscriptions;
 
 use std::env;
 
@@ -26,78 +23,13 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
     sched.add(job).await.expect("Failed to add job to scheduler");
     
-    // Create a job that runs every 30 seconds to sync paddle subscriptions
-    let state_clone = Arc::clone(&state);
-    let sync_job = Job::new_async("*/30 * * * * *", move |_, _| {
-        let state = state_clone.clone();
-        Box::pin(async move {
-            match sync_all_active_subscriptions(&state).await {
-                Ok(_) => info!("Successfully synced all active subscriptions with Paddle"),
-                Err(e) => error!("Error in subscription sync task: {}", e),
-            }
-        })
-    }).expect("Failed to create subscription sync job");
-
-    sched.add(sync_job).await.expect("Failed to add subscription sync job to scheduler");
-    
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");
 }
 
-// Function to sync all active subscriptions with Paddle
-async fn sync_all_active_subscriptions(state: &AppState) -> Result<(), Box<dyn std::error::Error>> {
-    info!("Starting to sync all active subscriptions with Paddle");
-    
-    let conn = &mut state.db_pool.get()?;
-    
-    // First query to get all active subscriptions with their user_id
-    let active_subscription_users = subscriptions::table
-        .filter(subscriptions::status.eq("active"))
-        .filter(
-            subscriptions::is_scheduled_to_cancel
-                .eq(false) // Explicitly false
-                .or(subscriptions::is_scheduled_to_cancel.is_null()) // Or NULL
-        )
-        .select((subscriptions::paddle_subscription_id, subscriptions::user_id))
-        .load::<(String, i32)>(conn)?;
-    
-    // Create a vector to store subscription_id and iq pairs
-    let mut active_subscriptions = Vec::new();
-    
-    // Second query to get the iq for each user
-    for (subscription_id, user_id) in active_subscription_users {
-        let user_iq = users::table
-            .filter(users::id.eq(user_id))
-            .select(users::iq)
-            .first::<i32>(conn)?;
-        
-        active_subscriptions.push((subscription_id, user_iq));
-    }
-    
-    info!("Found {} active subscriptions to sync", active_subscriptions.len());
-    
-    for (subscription_id, iq_quantity) in active_subscriptions {
-        // TODO if user has set charge_when_under field and the iq is under that, charge it back to charge_back_to
-        /*
-        if iq_quantity < 0 {
-            let iq_q = iq_quantity.abs() / 3;
-            println!("iq_q: {}",iq_q);
-            
-            match crate::api::paddle_utils::sync_paddle_subscription_items(&subscription_id, iq_q).await {
-                Ok(_) => info!("Successfully synced subscription {} with IQ quantity {}", subscription_id, iq_quantity),
-                Err(e) => error!("Failed to sync subscription {}: {}", subscription_id, e),
-            }
-        }
-        */
-    }
-    
-    info!("Completed syncing all active subscriptions");
-    Ok(())
-}
 
 async fn check_and_update_database(state: &Arc<AppState>) -> Result<(), Box<dyn std::error::Error>> {
 
-    let conn = &mut state.db_pool.get()?;
 
     let api_key = env::var("ELEVENLABS_API_KEY")
         .expect("ELEVENLABS_API_KEY must be set");
@@ -159,9 +91,14 @@ async fn check_and_update_database(state: &Arc<AppState>) -> Result<(), Box<dyn 
                                         if let Ok(user_id) = user_id_str.parse::<i32>() {
                                             // Only process if the call status is 'done'
                                             if conversation_details.status == "done" {
-                                                info!("Call status == done => DECREASE IQ + DELETE");
-                                                // Decrease user's IQ based on call duration
-                                                let iq_used = conversation_details.metadata.call_duration_secs;
+                                                info!("Call status == done => DECREASE CREDITS + DELETE");
+                                                // Decrease user's credits based on call duration
+                                                
+                                                let voice_second_cost = std::env::var("VOICE_SECOND_COST")
+                                                    .expect("VOICE_SECOND_COST not set")
+                                                    .parse::<f32>()
+                                                    .unwrap_or(0.0033);
+                                                let credits_used = conversation_details.metadata.call_duration_secs as f32 * voice_second_cost;
                                                 let success = match conversation_details.analysis {
                                                     Some(ref analysis) => match analysis.call_successful.as_str() {
                                                         "success" => true,
@@ -179,25 +116,23 @@ async fn check_and_update_database(state: &Arc<AppState>) -> Result<(), Box<dyn 
                                                 if let Err(e) = state.user_repository.log_usage(
                                                     user_id,
                                                     "call",
-                                                    iq_used,
+                                                    credits_used,
                                                     success, 
                                                     summary,
                                                 ) {
                                                     error!("Failed to log usage: {}", e);
                                                 }
 
-                                                // Then decrease the IQ
-                                                if let Err(e) = state.user_repository.decrease_iq(user_id, iq_used) {
-                                                    error!("Failed to decrease user IQ: {}", e);
-                                                } else {
-                                                    info!("Successfully decreased IQ for user {} by {} seconds", user_id, iq_used);
+                                                // Then decrease the credits 
+                                                if let Err(e) = state.user_repository.decrease_credits(user_id, credits_used) {
+                                                    error!("Failed to decrease user credits: {}", e);
+                                                } else { 
+                                                    info!("Successfully decreased credits for user {} by {}", user_id, credits_used);
 
-
-                                                    
-                                                    match state.user_repository.is_iq_under_threshold(user_id, 120) {
+                                                    match state.user_repository.is_credits_under_threshold(user_id) {
                                                         Ok(is_under) => {
                                                             if is_under {
-                                                                info!("User {} IQ is under threshold, attempting automatic charge", user_id);
+                                                                info!("User {} credits is under threshold, attempting automatic charge", user_id);
                                                                 // Get user information
                                                                 match state.user_repository.find_by_id(user_id) {
                                                                     Ok(Some(user)) => {
@@ -219,7 +154,7 @@ async fn check_and_update_database(state: &Arc<AppState>) -> Result<(), Box<dyn 
                                                                 }
                                                             }
                                                         },
-                                                        Err(e) => error!("Failed to check if user IQ is under threshold: {}", e),
+                                                        Err(e) => error!("Failed to check if user credits is under threshold: {}", e),
                                                     }
                                                                                                        
                                                     // Delete the conversation from ElevenLabs

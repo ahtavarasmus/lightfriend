@@ -22,25 +22,33 @@ use crate::{
     AppState
 };
 
-
 pub async fn get_users(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<UserResponse>>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Attempting to get all users");
+    
     // Extract token from Authorization header
     let auth_header = headers.get("Authorization")
         .and_then(|header| header.to_str().ok())
         .and_then(|header| header.strip_prefix("Bearer "));
 
     let token = match auth_header {
-        Some(token) => token,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "No authorization token provided"}))
-        )),
+        Some(token) => {
+            println!("Authorization token found");
+            token
+        },
+        None => {
+            println!("No authorization token provided");
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "No authorization token provided"}))
+            ))
+        },
     };
 
     // Decode and validate JWT token
+    println!("Decoding and validating JWT token");
     let claims = match decode::<Claims>(
         token,
         &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
@@ -48,27 +56,46 @@ pub async fn get_users(
                     .as_bytes()),
         &Validation::new(Algorithm::HS256)
     ) {
-        Ok(token_data) => token_data.claims,
-        Err(_) => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "Invalid token"}))
-        )),
+        Ok(token_data) => {
+            println!("Token successfully decoded");
+            token_data.claims
+        },
+        Err(_) => {
+            println!("Invalid token");
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "Invalid token"}))
+            ))
+        },
     };
+    
     // Check if the user is admin
-    if !state.user_repository.is_admin(claims.sub).map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Database error: {}", e)}))
-    ))? {
+    println!("Checking admin status for user ID: {}", claims.sub);
+    if !state.user_repository.is_admin(claims.sub).map_err(|e| {
+        println!("Database error while checking admin status: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        )
+    })? {
+        println!("User is not an admin");
         return Err((
             StatusCode::FORBIDDEN, 
             Json(json!({"error": "Only admin can access this endpoint"}))
         ));
     }
+    println!("Admin status confirmed");
 
-    let users_list = state.user_repository.get_all_users().map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Database error: {}", e)}))
-            ))?;
+    println!("Fetching all users from database");
+    let users_list = state.user_repository.get_all_users().map_err(|e| {
+        println!("Database error while fetching users: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        )
+    })?;
+    
+    println!("Converting users to response format");
     let users_response: Vec<UserResponse> = users_list
         .into_iter()
         .map(|user| UserResponse {
@@ -78,15 +105,15 @@ pub async fn get_users(
             nickname: user.nickname,
             time_to_live: user.time_to_live,
             verified: user.verified,
-            iq: user.iq,
-            notify_credits: user.notify_credits,
+            credits: user.credits,
+            notify: user.notify,
             preferred_number: user.preferred_number,
         })
         .collect();
 
+    println!("Successfully retrieved {} users", users_response.len());
     Ok(Json(users_response))
 }
-
 
 
 pub async fn set_preferred_number_default(
@@ -360,8 +387,7 @@ pub async fn register(
         phone_number: reg_r.phone_number,
         time_to_live: five_minutes_from_now,
         verified: false,
-        iq: 500,
-        locality: locality,
+        credits: 2.00,
     };
 
     state.user_repository.create_user(new_user).map_err(|e| {

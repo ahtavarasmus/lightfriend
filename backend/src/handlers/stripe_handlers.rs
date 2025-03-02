@@ -2,8 +2,6 @@ use stripe::{
     Client,
     Customer,
     CheckoutSession,
-    SetupIntent,
-    CreateSetupIntent,
     CreateCheckoutSession,
     CreateCustomer,
     PaymentIntent,
@@ -29,7 +27,7 @@ use std::sync::Arc;
 // Assuming BuyCreditsRequest is defined in billing_models.rs
 #[derive(Deserialize, Serialize, Clone, PartialEq)]
 pub struct BuyCreditsRequest {
-    pub amount_dollars: f64,
+    pub amount_dollars: f32,
 }
 
 pub async fn create_customer_portal_session(
@@ -238,12 +236,10 @@ pub async fn create_checkout_session(
         )),
     };
     
-        // Convert credits amount to dollars (assuming IQ_TO_EURO_RATE is defined)
     let amount_dollars = payload.amount_dollars; // From BuyCreditsRequest
     let amount_cents = (amount_dollars * 100.0).round() as i64; // Convert to cents for Stripe
-    let amount_in_iq = (amount_cents * 3) as u64;
 
-    println!("Processing payment of {} EUR ({} cents) for {} IQ credits", amount_dollars, amount_cents, amount_in_iq);
+    println!("Processing payment of {} EUR ({} cents)", amount_dollars, amount_cents);
 
     let domain_url = std::env::var("DOMAIN_URL").expect("DOMAIN_URL not set");
     println!("Using domain: {}", domain_url);
@@ -491,15 +487,15 @@ pub async fn stripe_webhook(
                             println!("Successfully saved payment method ID for user");
 
                             let amount_in_cents = session.amount_subtotal.unwrap_or(0);
-                            let amount_in_iq = (amount_in_cents * 3) as i32;
+                            let amount = amount_in_cents as f32 / 100.00;
                             state
                                 .user_repository
-                                .increase_iq(user.id, amount_in_iq)
+                                .increase_credits(user.id, amount)
                                 .map_err(|e| (
                                     StatusCode::INTERNAL_SERVER_ERROR,
                                     Json(json!({"error": format!("Database error: {}", e)})),
                                 ))?;
-                            println!("Increased the iq amount by {} successfully", amount_in_iq);
+                            println!("Increased the credits amount by {} successfully", amount);
                         }
                     }
                 },
@@ -571,23 +567,20 @@ pub async fn automatic_charge(
     println!("Stripe payment method ID found: {}", payment_method_id);
 
     // Fetch the user's auto-topup settings to determine the charge amount
-    // Calculate the amount to charge (e.g., convert IQ credits to dollars using IQ_TO_EURO_RATE)
-    // user iq can be negative here. we need to add so much iq to it until it's back to the number they have setup themselves(charge_back_to)
-    let charge_back_to = user.charge_back_to.unwrap_or(600);
-    println!("User charge_back_to: {}, current IQ: {}", charge_back_to, user.iq);
-    
-    let charge_amount_iq = charge_back_to - user.iq; 
-    if charge_amount_iq < 0 {
-        println!("User IQ already over the charge back to amount, no charge needed");
+    let charge_back_to = user.charge_back_to.unwrap_or(5.00);
+    println!("User charge_back_to: {}, current credits: {}", charge_back_to, user.credits);
+
+    let charge_amount = charge_back_to - user.credits; 
+    if charge_amount < 0.00 {
+        println!("User credits already over the charge back to amount, no charge needed");
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({"error": format!("user iq already over the charge back to amount")})),
+            Json(json!({"error": format!("user credits already over the charge back to amount")})),
         ));
     }
     
-    let charge_amount_dollars = (charge_amount_iq as f64 / 300.00).max(5.0); // Minimum $5
-    let charge_amount_cents = (charge_amount_dollars * 100.0).round() as i64; // Convert to cents for Stripe
-    println!("Charging {} IQ credits (€{}, {} cents)", charge_amount_iq, charge_amount_dollars, charge_amount_cents);
+    let charge_amount_cents = (charge_amount * 100.0).round() as i64; // Convert to cents for Stripe
+    println!("Charging credits (€{})", charge_amount);
 
     // Create a PaymentIntent for the off-session charge
     println!("Creating payment intent");
@@ -612,24 +605,23 @@ pub async fn automatic_charge(
     
     // Check if the payment was successful
     if payment_intent.status == stripe::PaymentIntentStatus::Succeeded {
-        println!("Payment succeeded, updating user IQ");
-        // Update user's credits in the database (e.g., add the charged IQ amount)
+        println!("Payment succeeded, updating user credits");
+        // Update user's credits 
         state
             .user_repository
-            .increase_iq(user_id, charge_amount_iq) // Assuming this method exists
+            .increase_credits(user_id, charge_amount) 
             .map_err(|e| {
-                println!("Failed to update user IQ: {}", e);
+                println!("Failed to update user credits: {}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"error": format!("Database error updating credits: {}", e)})),
                 )
             })?;
 
-        println!("User IQ updated successfully, returning success response");
+        println!("User credits updated successfully, returning success response");
         Ok(Json(json!({
             "message": "Automatic charge successful, credits updated",
-            "amount_iq": charge_amount_iq,
-            "amount_dollars": charge_amount_dollars
+            "amount": charge_amount,
         })))
     } else {
         println!("Payment intent failed or requires action, status: {:?}", payment_intent.status);

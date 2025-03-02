@@ -40,7 +40,6 @@ mod models {
 mod repositories {
     pub mod user_repository;
     pub mod user_conversations;
-    pub mod user_subscriptions;
 }
 mod schema;
 mod jobs {
@@ -50,7 +49,6 @@ mod jobs {
 
 use repositories::user_repository::UserRepository;
 use repositories::user_conversations::UserConversations;
-use repositories::user_subscriptions::UserSubscription;
 
 use handlers::auth_handlers;
 use handlers::profile_handlers;
@@ -75,7 +73,6 @@ pub struct AppState {
     db_pool: DbPool,
     user_repository: Arc<UserRepository>,
     user_conversations: Arc<UserConversations>,
-    user_subscriptions: Arc<UserSubscription>,
 }
 
 pub fn validate_env() {
@@ -113,6 +110,10 @@ pub fn validate_env() {
         .expect("DOMAIN_URL must be set");
     let _ = std::env::var("STRIPE_CREDITS_PRODUCT_ID")
         .expect("STRIPE_CREDITS_PRODUCT_ID must be set");
+    let _ = std::env::var("MESSAGE_COST")
+        .expect("MESSAGE_COST must be set");
+    let _ = std::env::var("VOICE_SECOND_COST")
+        .expect("VOICE_SECOND_COST must be set");
 
 
 }
@@ -142,7 +143,6 @@ async fn main() {
 
     let user_repository = Arc::new(UserRepository::new(pool.clone()));
     let user_conversations = Arc::new(UserConversations::new(pool.clone()));
-    let user_subscriptions = Arc::new(UserSubscription::new(pool.clone()));
 
     let _conn = &mut pool.get().expect("Failed to get DB connection");
 
@@ -150,7 +150,6 @@ async fn main() {
         db_pool: pool,
         user_repository,
         user_conversations,
-        user_subscriptions,
     });
 
     // Create a router for VAPI routes with secret validation
@@ -163,11 +162,6 @@ async fn main() {
         .route("/api/call/perplexity", post(elevenlabs::handle_perplexity_tool_call))
         .route("/api/call/assistant", post(elevenlabs::fetch_assistant))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
-
-    let paddle_routes = Router::new()
-        .route("/api/webhooks/paddle", post(paddle_webhooks::handle_subscription_webhook))
-        .route_layer(middleware::from_fn(paddle_webhooks::validate_paddle_secret));
-
 
     // Create router with CORS
     let app = Router::new()
@@ -185,13 +179,12 @@ async fn main() {
         .route("/api/profile/update", post(profile_handlers::update_profile))
         .route("/api/profile/preferred-number", post(profile_handlers::update_preferred_number))
         .route("/api/profile", get(profile_handlers::get_profile))
-        .route("/api/profile/notify-credits/{user_id}", post(profile_handlers::update_notify_credits))
+        .route("/api/profile/update-notify/{user_id}", post(profile_handlers::update_notify))
 
-        .route("/api/billing/increase-iq/{user_id}", post(billing_handlers::increase_iq))
+        .route("/api/billing/increase-credits/{user_id}", post(billing_handlers::increase_credits))
         .route("/api/billing/usage", post(billing_handlers::get_usage_data))
         .route("/api/billing/update-auto-topup/{user_id}", post(billing_handlers::update_topup))
-        .route("/api/billing/reset-iq/{user_id}", post(billing_handlers::reset_iq))
-        .route("/api/billing/get-customer-portal-link/{user_id}", get(billing_handlers::get_customer_portal_link))
+        .route("/api/billing/reset-credits/{user_id}", post(billing_handlers::reset_credits))
 
         .route("/api/stripe/checkout-session/{user_id}", post(stripe_handlers::create_checkout_session))
         .route("/api/stripe/webhook", post(stripe_handlers::stripe_webhook))
@@ -202,7 +195,6 @@ async fn main() {
         .merge(vapi_routes)
         .merge(twilio_routes)
         .merge(elevenlabs_routes)
-        .merge(paddle_routes)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))

@@ -17,15 +17,13 @@ pub struct User {
     pub nickname: Option<String>, // what user wants the ai to call them
     pub time_to_live: Option<i32>, // if user has not verified their account in some time it will be deleted
     pub verified: bool, 
-    pub iq: i32, // user's iq balance. can be either positive(if given free credits) or negative when on usage based sub
-    pub notify_credits: bool, // not used currently
-    pub locality: String, // not used currently
+    pub credits: f32, // user credits
+    pub notify: bool, // notify when new features
     pub info: Option<String>, // extra info about the user for the ai
     pub preferred_number: Option<String>, // number the user prefers lightfriend texting/calling them from
-    pub iq_cost_per_euro: i32, // the cost for iq in iq/€ (e.g. 300iq -> 1€)
     pub debug_logging_permission: bool,
     pub charge_when_under: bool,
-    pub charge_back_to: Option<i32>,
+    pub charge_back_to: Option<f32>,
     pub stripe_customer_id: Option<String>,
     pub stripe_payment_method_id: Option<String>,
     pub stripe_checkout_session_id: Option<String>,
@@ -66,8 +64,7 @@ pub struct UsageLog {
     pub id: Option<i32>,
     pub user_id: i32,
     pub activity_type: String, // text or sms
-    pub iq_used: i32, // the amount of iq used
-    pub iq_cost_per_euro: i32, // the cost for iq in iq/€ (e.g. 300iq -> 1€)
+    pub credits: f32, // the amount of credits used
     pub created_at: i32, // int timestamp utc epoch
     pub success: bool, // if call was successful judged by ai
     pub summary: Option<String>, // if call was not successful store it if user gives permission
@@ -78,8 +75,7 @@ pub struct UsageLog {
 pub struct NewUsageLog {
     pub user_id: i32,
     pub activity_type: String,
-    pub iq_used: i32,
-    pub iq_cost_per_euro: i32,
+    pub credits: f32,
     pub created_at: i32,
     pub success: bool,
     pub summary: Option<String>,

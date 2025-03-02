@@ -352,11 +352,11 @@ pub fn Home() -> Html {
                             
                             <h3>{"Coming Soon"}</h3>
                             <ul>
-                                <li>{"Purchase additional IQ(credits), currently free boost when you ran out"}</li>
+                                <li>{"Email and calendar integration"}</li>
                                 <li>{"WhatsApp and Telegram integration"}</li>
                                 <li>{"Reminder setting"}</li>
-                                <li>{"Email and calendar integration"}</li>
                                 <li>{"Camera functionality for photo translation and more"}</li>
+                                <li>{"Proactive messages(notifications for critical messages)"}</li>
                             </ul>
                             
                             <p class="feature-suggestion">

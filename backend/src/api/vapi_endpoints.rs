@@ -199,6 +199,12 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
         match state.user_repository.find_by_phone_number(&phone_number) {
             Ok(Some(user)) => {
                 println!("User found for phone number: {}", phone_number);
+ 
+                let voice_second_cost = std::env::var("VOICE_SECOND_COST")
+                    .expect("VOICE_SECOND_COST not set")
+                    .parse::<f32>()
+                    .unwrap_or(0.0033);
+
 
                 if let Some(assistant_number) = event.get_assistant_number() {
                     if let Err(e) = state.user_repository.update_preferred_number(user.id, &assistant_number) {
@@ -212,12 +218,12 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                     let nickname = user.nickname.unwrap_or_else(|| "".to_string());
                     println!("User nickname: {}", nickname);
                     
-                    if user.iq <= 0 {
+                    if user.credits <= 0.00 {
                         let response = json!({
                             "messageResponse": {
                                 "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
                                 "assistantOverrides": {
-                                    "firstMessage": "Hey, I don't have enough IQ to talk, you can give me more by visiting lightfriend website.",
+                                    "firstMessage": "Hey, I don't have enough credits to talk, you can give me more by visiting lightfriend website.",
                                     "variableValues": {
                                         "name": nickname
                                     },
@@ -236,7 +242,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                                         "name": nickname,
                                         "user_info": user.info,
                                     },
-                                    "maxDurationSeconds": user.iq,
+                                    "maxDurationSeconds": (user.credits / voice_second_cost) as i32,
                                 }
                             }
                         });
@@ -252,6 +258,12 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                             let nickname = user.nickname.unwrap_or_else(|| "".to_string());
                             // TODO: make assistant explain the service
                             // cap the call length to users credits and make the assistant say that
+ 
+                            let voice_second_cost = std::env::var("VOICE_SECOND_COST")
+                                .expect("VOICE_SECOND_COST not set")
+                                .parse::<f32>()
+                                .unwrap_or(0.0033);
+
                             let response = json!({
                                 "messageResponse": {
                                     "assistantId": &std::env::var("ASSISTANT_ID").expect("ASSISTANT_ID must be set"),
@@ -261,7 +273,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                                             "name": nickname,
                                             "user_info": user.info,
                                         },
-                                        "maxDurationSeconds": std::cmp::max(user.iq, 10),
+                                        "maxDurationSeconds": std::cmp::max((user.credits / voice_second_cost) as i32, 10),
                                     }
                                 }
                             });
@@ -336,15 +348,21 @@ pub async fn handle_end_of_call_report(
         println!("⏱️ Call Duration: {:.2} seconds", duration);
         
         // Update user's remaining credits based on call duration
-        if let Ok(Some(mut user)) = state.user_repository.find_by_phone_number(&phone_number) {
-            let new_iq = user.iq.saturating_sub(duration as i32);
+        if let Ok(Some(user)) = state.user_repository.find_by_phone_number(&phone_number) {
+
+            let voice_second_cost = std::env::var("VOICE_SECOND_COST")
+                .expect("VOICE_SECOND_COST not set")
+                .parse::<f32>()
+                .unwrap_or(0.0033);
+            let call_cost = duration as f32 * voice_second_cost;
+            let new_credits = user.credits - call_cost;
             
-            match state.user_repository.update_user_iq(user.id, new_iq) {
+            match state.user_repository.update_user_credits(user.id, new_credits) {
                 Ok(_) => {
-                    println!("✅ Updated user IQ to: {}", new_iq);
+                    println!("✅ Updated user credits to: {}", new_credits);
                 },
                 Err(e) => {
-                    error!("Failed to update user IQ: {}", e);
+                    error!("Failed to update user credits: {}", e);
                     return Json(json!({
                         "status": "error",
                         "message": "Failed to update user credits",

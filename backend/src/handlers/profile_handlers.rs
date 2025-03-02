@@ -42,14 +42,12 @@ pub struct ProfileResponse {
     verified: bool,
     time_to_live: i32,
     time_to_delete: bool,
-    iq: i32,
-    notify_credits: bool,
-    local_phone_number: String,
+    credits: f32,
+    notify: bool,
     info: Option<String>,
     preferred_number: Option<String>,
-    subscription: Option<SubscriptionInfo>,
     charge_when_under: bool,
-    charge_back_to: Option<i32>,
+    charge_back_to: Option<f32>,
     stripe_payment_method_id: Option<String>,
 }
 
@@ -100,23 +98,6 @@ pub async fn get_profile(
 
             let ttl = user.time_to_live.unwrap_or(0);
             let time_to_delete = current_time > ttl;
-            let local_phone_number = match user.locality.as_str() {
-                "fin" => std::env::var("FIN_PHONE").unwrap_or_default(),
-                "usa" => std::env::var("USA_PHONE").unwrap_or_default(), 
-                _ => std::env::var("FIN_PHONE").unwrap_or_default(), // Default to Finnish number
-            };
-
-            // Check subscription status
-            let subscription_info = match state.user_subscriptions.find_by_user_id(user.id) {
-                Ok(Some(sub)) => Some(SubscriptionInfo {
-                    id: sub.paddle_subscription_id,
-                    status: sub.status,
-                    next_bill_date: sub.next_bill_date,
-                    stage: sub.stage,
-                    is_scheduled_to_cancel: sub.is_scheduled_to_cancel,
-                }),
-                _ => None,
-            };
 
             Ok(Json(ProfileResponse {
                 id: user.id,
@@ -126,12 +107,10 @@ pub async fn get_profile(
                 verified: user.verified,
                 time_to_live: ttl,
                 time_to_delete: time_to_delete,
-                iq: user.iq,
-                notify_credits: user.notify_credits,
-                local_phone_number: local_phone_number,
+                credits: user.credits,
+                notify: user.notify,
                 info: user.info,
                 preferred_number: user.preferred_number,
-                subscription: subscription_info,
                 charge_when_under: user.charge_when_under,
                 charge_back_to: user.charge_back_to,
                 stripe_payment_method_id: user.stripe_payment_method_id,
@@ -216,7 +195,7 @@ pub async fn update_preferred_number(
 
 
 
-pub async fn update_notify_credits(
+pub async fn update_notify(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(user_id): Path<i32>,
@@ -261,8 +240,8 @@ pub async fn update_notify_credits(
         ));
     }
 
-    // Update notify_credits preference
-    state.user_repository.update_notify_credits(user_id, request.notify)
+    // Update notify preference
+    state.user_repository.update_notify(user_id, request.notify)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)}))
