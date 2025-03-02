@@ -31,6 +31,7 @@ pub struct UserProfile {
     pub info: Option<String>,
     pub charge_when_under: bool,
     pub charge_back_to: Option<i32>,
+    pub stripe_payment_method_id: Option<String>,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]
@@ -39,7 +40,7 @@ pub struct StripeSetupIntentResponse {
 }
 
 pub const IQ_TO_EURO_RATE: f64 = 60.0; // 60 IQ = 1 Euro
-pub const MIN_TOPUP_AMOUNT_DOLLARS: f64 = 5.0;
+pub const MIN_TOPUP_AMOUNT_DOLLARS: f64 = 3.0;
 pub const MIN_TOPUP_AMOUNT_IQ: i32 = (MIN_TOPUP_AMOUNT_DOLLARS * IQ_TO_EURO_RATE) as i32;
 
 pub fn format_timestamp(timestamp: i32) -> String {

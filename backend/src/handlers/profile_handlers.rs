@@ -48,8 +48,9 @@ pub struct ProfileResponse {
     info: Option<String>,
     preferred_number: Option<String>,
     subscription: Option<SubscriptionInfo>,
-    pub charge_when_under: bool,
-    pub charge_back_to: Option<i32>,
+    charge_when_under: bool,
+    charge_back_to: Option<i32>,
+    stripe_payment_method_id: Option<String>,
 }
 
 pub async fn get_profile(
@@ -133,6 +134,7 @@ pub async fn get_profile(
                 subscription: subscription_info,
                 charge_when_under: user.charge_when_under,
                 charge_back_to: user.charge_back_to,
+                stripe_payment_method_id: user.stripe_payment_method_id,
             }))
         }
         None => Err((

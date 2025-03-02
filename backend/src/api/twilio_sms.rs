@@ -522,6 +522,28 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     // Continue execution even if logging fails
                 }
 
+ 
+                match state.user_repository.is_iq_under_threshold(user.id, 120) {
+                    Ok(is_under) => {
+                        if is_under {
+                            println!("User {} IQ is under threshold, attempting automatic charge", user.id);
+                            // Get user information
+                            if user.charge_when_under {
+                                use axum::extract::{State, Path};
+                                let state_clone = Arc::clone(&state);
+                                tokio::spawn(async move {
+                                    let _ = crate::handlers::stripe_handlers::automatic_charge(
+                                        State(state_clone),
+                                        Path(user.id),
+                                    ).await;
+                                    println!("Recharged the user successfully back up!");
+                                });
+                                println!("recharged the user successfully back up!");
+                            }
+                        }
+                    },
+                    Err(e) => eprintln!("Failed to check if user IQ is under threshold: {}", e),
+                }
             }
 
             (

@@ -194,7 +194,7 @@ async fn check_and_update_database(state: &Arc<AppState>) -> Result<(), Box<dyn 
 
 
                                                     
-                                                    match state.user_repository.is_iq_under_threshold(user_id, 180) {
+                                                    match state.user_repository.is_iq_under_threshold(user_id, 120) {
                                                         Ok(is_under) => {
                                                             if is_under {
                                                                 info!("User {} IQ is under threshold, attempting automatic charge", user_id);
@@ -203,10 +203,14 @@ async fn check_and_update_database(state: &Arc<AppState>) -> Result<(), Box<dyn 
                                                                     Ok(Some(user)) => {
                                                                         if user.charge_when_under {
                                                                             use axum::extract::{State, Path};
-                                                                            let _ = crate::handlers::stripe_handlers::automatic_charge(
-                                                                                State(state.clone()),
-                                                                                Path(user_id),
-                                                                            ).await;
+                                                                            let state_clone = Arc::clone(&state);
+                                                                            tokio::spawn(async move {
+                                                                                let _ = crate::handlers::stripe_handlers::automatic_charge(
+                                                                                    State(state_clone),
+                                                                                    Path(user.id),
+                                                                                ).await;
+                                                                                info!("Recharged the user successfully back up!");
+                                                                            });                                                                            
                                                                             info!("recharged the user successfully back up!");
                                                                         }
                                                                     },

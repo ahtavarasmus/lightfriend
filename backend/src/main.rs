@@ -190,10 +190,10 @@ async fn main() {
         .route("/api/billing/reset-iq/{user_id}", post(billing_handlers::reset_iq))
         .route("/api/billing/get-customer-portal-link/{user_id}", get(billing_handlers::get_customer_portal_link))
 
-        .route("/api/stripe/setup-intent/{user_id}", post(stripe_handlers::create_setup_intent))
         .route("/api/stripe/checkout-session/{user_id}", post(stripe_handlers::create_checkout_session))
         .route("/api/stripe/webhook", post(stripe_handlers::stripe_webhook))
         .route("/api/stripe/automatic-charge/{user_id}", post(stripe_handlers::automatic_charge))
+        .route("/api/stripe/customer-portal/{user_id}", get(stripe_handlers::create_customer_portal_session)) // New route
 
 
         .merge(vapi_routes)
