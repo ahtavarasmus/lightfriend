@@ -155,7 +155,7 @@ pub async fn broadcast_message(
     headers: HeaderMap,
     Json(request): Json<BroadcastMessageRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Extract and validate token
+    // Authentication code remains unchanged
     let auth_header = headers.get("Authorization")
         .and_then(|header| header.to_str().ok())
         .and_then(|header| header.strip_prefix("Bearer "));
@@ -168,7 +168,6 @@ pub async fn broadcast_message(
         )),
     };
 
-    // Decode JWT token
     let claims = match decode::<Claims>(
         token,
         &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
@@ -183,7 +182,6 @@ pub async fn broadcast_message(
         )),
     };
 
-    // Check if user is an admin
     if !state.user_repository.is_admin(claims.sub).map_err(|e| (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": format!("Database error: {}", e)}))
@@ -194,38 +192,102 @@ pub async fn broadcast_message(
         ));
     }
 
-    // Get all users
     let users = state.user_repository.get_all_users().map_err(|e| (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": format!("Database error: {}", e)}))
     ))?;
 
+    tokio::spawn(async move {
+        process_broadcast_messages(state.clone(), users, request.message.clone()).await;
+    });
+    // Immediately return a success response
+    Ok(Json(json!({
+        "message": "Broadcast request received, processing in progress",
+        "status": "ok"
+    })))
+
+}
+
+
+#[derive(Debug)]
+enum BroadcastError {
+    ConversationError(String),
+    MessageSendError(String),
+}
+
+impl std::fmt::Display for BroadcastError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BroadcastError::ConversationError(msg) => write!(f, "Conversation error: {}", msg),
+            BroadcastError::MessageSendError(msg) => write!(f, "Message send error: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for BroadcastError {}
+
+async fn process_broadcast_messages(
+    state: Arc<AppState>,
+    users: Vec<crate::models::user_models::User>,
+    message: String,
+) {
     let mut success_count = 0;
     let mut failed_count = 0;
 
-    // Filter and send messages
     for user in users {
-        // Get the appropriate sender number based on user's locality
-        let sender_number = match phone_numbers::get_sender_number(&user.locality) {
+        let sender_number = match user.preferred_number.clone() {
             Some(number) => number,
             None => {
+                eprintln!("No preferred number for user: {}", user.phone_number);
                 failed_count += 1;
-                continue; // Skip this user if we can't determine appropriate sender
+                continue;
             }
         };
 
-        //match twilio_sms::send_sms(&user.phone_number, &request.message, &sender_number).await {
-        //    Ok(_) => success_count += 1,
-        //    Err(_) => failed_count += 1,
-        //}
+        let conversation_result = state
+            .user_conversations
+            .get_conversation(&user, sender_number.to_string())
+            .await
+            .map_err(|e| BroadcastError::ConversationError(e.to_string()));
+
+        match conversation_result {
+            Ok(conversation) => {
+                match crate::api::twilio_sms::send_conversation_outmessage(
+                    &conversation.conversation_sid,
+                    &sender_number,
+                    &message,
+                )
+                .await
+                .map_err(|e| BroadcastError::MessageSendError(e.to_string()))
+                {
+                    Ok(_) => {
+                        success_count += 1;
+                        println!("Successfully sent message to {}", user.phone_number);
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to send message to {}: {}", user.phone_number, e);
+                        failed_count += 1;
+                    }
+                }
+            }
+            Err(e) => {
+
+                eprintln!(
+                    "Failed to get/create conversation for {}: {}",
+                    user.phone_number,
+                    e
+                );
+                failed_count += 1;
+            }
+        }
     }
 
-    Ok(Json(json!({
-        "message": "Broadcast completed",
-        "success_count": success_count,
-        "failed_count": failed_count
-    })))
+    println!(
+        "Broadcast completed: {} successful, {} failed",
+        success_count, failed_count
+    );
 }
+
 
 
 pub async fn set_preferred_number_default(
