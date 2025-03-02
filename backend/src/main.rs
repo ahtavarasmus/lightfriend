@@ -18,6 +18,7 @@ mod handlers {
     pub mod profile_handlers;
     pub mod billing_handlers;
     pub mod admin_handlers;
+    pub mod stripe_handlers;
 }
 mod api {
     pub mod vapi_endpoints;
@@ -55,6 +56,7 @@ use handlers::auth_handlers;
 use handlers::profile_handlers;
 use handlers::billing_handlers;
 use handlers::admin_handlers;
+use handlers::stripe_handlers;
 use api::vapi_endpoints;
 use api::twilio_sms;
 use api::elevenlabs;
@@ -107,6 +109,9 @@ pub fn validate_env() {
         .expect("TWILIO_AUTH_TOKEN must be set");
     let _ = std::env::var("PADDLE_WEBHOOK_SECRET")
         .expect("PADDLE_WEBHOOK_SECRET must be set");
+    let _ = std::env::var("DOMAIN_URL")
+        .expect("DOMAIN_URL must be set");
+
 }
 
 #[tokio::main]
@@ -185,6 +190,11 @@ async fn main() {
         .route("/api/billing/reset-iq/{user_id}", post(billing_handlers::reset_iq))
         .route("/api/billing/get-customer-portal-link/{user_id}", get(billing_handlers::get_customer_portal_link))
 
+        .route("/api/stripe/setup-intent/{user_id}", post(stripe_handlers::create_setup_intent))
+        .route("/api/stripe/checkout-session/{user_id}", post(stripe_handlers::create_checkout_session))
+        .route("/api/stripe/webhook", post(stripe_handlers::stripe_webhook))
+        .route("/api/stripe/automatic-charge/{user_id}", post(stripe_handlers::automatic_charge))
+
 
         .merge(vapi_routes)
         .merge(twilio_routes)
@@ -203,8 +213,8 @@ async fn main() {
                     axum::http::Method::OPTIONS,
                     axum::http::Method::DELETE,
                 ])
-                .allow_origin(Any)
-                .allow_headers(Any)
+                .allow_origin(Any) // Be cautious with `Any` in production; restrict to your frontend origin
+                .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION]) // Explicitly allow Authorization
                 .expose_headers([axum::http::header::CONTENT_TYPE])
         )
         .with_state(state.clone());

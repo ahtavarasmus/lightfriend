@@ -6,73 +6,7 @@
         <title>lightfriend</title>
         <link data-trunk rel="css" href="assets/styles.css">
         <link data-trunk rel="css" href="src/profile/billing.css">
-        <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
-        <script type="text/javascript">
-            // Determine environment based on hostname
-            const isProd = window.location.hostname === 'lightfriend.quest' || 
-                          window.location.hostname === 'www.lightfriend.quest';
-            
-            // Set environment and token based on detected environment
-            const paddleEnv = isProd ? "production" : "sandbox";
-            // TODO put prod token
-            const paddleToken = isProd 
-                ? "YOUR_PRODUCTION_TOKEN" // Replace with your production token
-                : "test_3a24ff0a4993527b6a5008528f6";
-            
-            Paddle.Environment.set(paddleEnv);
-            Paddle.Initialize({
-              token: paddleToken,
-              // prints events to console for debugging
-              eventCallback: function(data) {
-                console.log(data);
-              }
-            });
-            console.log("Paddle initialized:", Paddle, "Environment:", paddleEnv);
-
-            function mapToObject(map) {
-                if (!(map instanceof Map)) {
-                    return map;
-                }
-                const obj = {};
-                for (const [key, value] of map) {
-                    obj[key] = value instanceof Map ? mapToObject(value) : value;
-                }
-                return obj;
-            }
-
-            // open checkout
-            function openCheckout(items, customer, passthrough) {
-                console.log("Items received:", items);
-                console.log("Customer received:", customer);
-                console.log("Passthrough received:", passthrough);
-
-                // Convert items to plain array of objects
-                const plainItems = items.map(item => mapToObject(item));
-
-                // Convert customer to plain object
-                const plainCustomer = mapToObject(customer);
-
-                // Convert passthrough to plain object
-                const plainPassthrough = mapToObject(passthrough);
-
-                // Log the converted data for verification
-                console.log("Plain items:", plainItems);
-                console.log("Plain customer:", plainCustomer);
-                console.log("Plain passthrough:", plainPassthrough);
-
-
-                Paddle.Checkout.open({
-                    settings: {
-                        theme: "dark",
-                    },
-                    items: plainItems,
-                    customer: plainCustomer,
-                    customData: plainPassthrough,
-                });
-            }
-            
-        </script>
-        </head>
+    </head>
     <body> 
         <script async src="https://scripts.simpleanalyticscdn.com/latest.js"></script>
         <script
@@ -80,7 +14,7 @@
           integrity="sha384-WUKfUKJWWozTO86fecAQl5HFU+mPCfwD/8YKsZivWNSWM2B7aFDZWGO9671FxUcq"
           crossorigin="anonymous"
         ></script>
+        <script src="https://js.stripe.com/v3/"></script> 
         <script src="wasm-support.js"></script>
     </body>
-
 </html>

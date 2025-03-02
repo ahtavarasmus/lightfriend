@@ -34,3 +34,5 @@ http-body-util = "0.1"
 openssl = "0.10"
 url = "2"
 hex = "0.4"
+uuid = { version = "1.4", features = ["v4"] }  # For generating unique IDs if needed
+async-stripe = { version = "0.36", features = ["runtime-tokio-hyper"] }

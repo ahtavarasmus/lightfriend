@@ -415,6 +415,45 @@ input:checked + .slider:before {
     line-height: 1.4;
 }
 
+.stripe-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+}
+
+#card-element {
+    margin: 10px 0;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+#card-errors {
+    color: red;
+    font-size: 14px;
+    margin-top: 10px;
+}
+
+#payment-form button[type="submit"] {
+    margin-top: 10px;
+    padding: 8px 16px;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+#payment-form button[type="submit"]:hover {
+    background: #0056b3;
+}
+
 .close-button {
     background: #666; /* Dark gray for Close button */
     color: white;
