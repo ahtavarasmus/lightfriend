@@ -8,6 +8,8 @@ use stripe::{
     CreateCustomer,
     PaymentIntent,
     CreatePaymentIntent,
+    BillingPortalSession,
+    CreateBillingPortalSession,
 };
 use crate::handlers::auth_dtos::Claims;
 use jsonwebtoken::{DecodingKey, Validation, Algorithm, decode};
@@ -30,13 +32,16 @@ pub struct BuyCreditsRequest {
     pub amount_dollars: f64,
 }
 
-
-pub async fn create_setup_intent(
+pub async fn create_customer_portal_session(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(user_id): Path<i32>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    println!("starting create_setup_intent");
+    // Initialize Stripe client
+    let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY")
+        .expect("STRIPE_SECRET_KEY must be set in environment");
+    let client = Client::new(stripe_secret_key);
+
     // Extract token from Authorization header
     let auth_header = headers
         .get("Authorization")
@@ -51,7 +56,7 @@ pub async fn create_setup_intent(
         )),
     };
 
-    // Decode and validate JWT token
+    // Decode and validate JWT token (assuming Claims and other imports are defined)
     let claims = match decode::<Claims>(
         token,
         &DecodingKey::from_secret(
@@ -81,68 +86,46 @@ pub async fn create_setup_intent(
             Json(json!({"error": "User not found"})),
         ))?;
 
-    // Initialize Stripe client
-    let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY")
-        .expect("STRIPE_SECRET_KEY must be set in environment");
-    let client = Client::new(stripe_secret_key);
-
-    // Check if user has a Stripe customer ID; if not, create one
-    let customer_id = match state.user_repository.get_stripe_customer_id(user_id) {
-        Ok(Some(id)) => id,
-        Ok(None) => {
-            let customer = Customer::create(
-                &client,
-                CreateCustomer {
-                    email: Some(user.email.as_str()),
-                    name: Some(&format!("User {}", user_id)),
-                    ..Default::default()
-                },
-            )
-            .await
-            .map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to create Stripe customer: {}", e)})),
-            ))?;
-
-            // Save the customer ID to your database
-            state
-                .user_repository
-                .set_stripe_customer_id(user_id, &customer.id.to_string())
-                .map_err(|e| (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Database error: {}", e)})),
-                ))?;
-
-            customer.id.to_string()
-        }
-        Err(e) => return Err((
+    // Get Stripe customer ID
+    let customer_id = state
+        .user_repository
+        .get_stripe_customer_id(user_id)
+        .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)})),
-        )),
-    };
+        ))?
+        .ok_or_else(|| (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "No Stripe customer ID found for user"})),
+        ))?;
 
-    // Create a SetupIntent for the customer
-    let setup_intent = SetupIntent::create(
+    // Create a Billing Portal Session
+    // Create a Billing Portal Session
+    let mut create_session = CreateBillingPortalSession::new(customer_id.parse().unwrap());
+
+    // Store the formatted URL in a variable first
+    let return_url = format!(
+        "{}/profile",
+        std::env::var("DOMAIN_URL").expect("DOMAIN_URL not set")
+    );
+    create_session.return_url = Some(&return_url);
+    let portal_session = BillingPortalSession::create(
         &client,
-        CreateSetupIntent {
-            customer: Some(customer_id.parse().unwrap()),
-            payment_method_types: Some(vec!["card".to_string()]),
-            ..Default::default()
-        },
+create_session,
     )
     .await
     .map_err(|e| (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Failed to create SetupIntent: {}", e)})),
+        Json(json!({"error": format!("Failed to create Customer Portal session: {}", e)})),
     ))?;
 
-    println!("returning from create_setup_intent");
-    // Return the client secret to the frontend
+    // Return the portal URL to redirect the user
     Ok(Json(json!({
-        "client_secret": setup_intent.client_secret.unwrap(),
-        "message": "SetupIntent created successfully"
+        "url": portal_session.url, 
+        "message": "Redirecting to Stripe Customer Portal"
     })))
 }
+
 
 pub async fn create_checkout_session(
     State(state): State<Arc<AppState>>,
@@ -501,7 +484,7 @@ pub async fn automatic_charge(
     // Fetch the user's auto-topup settings to determine the charge amount
     // Calculate the amount to charge (e.g., convert IQ credits to dollars using IQ_TO_EURO_RATE)
     // user iq can be negative here. we need to add so much iq to it until it's back to the number they have setup themselves(charge_back_to)
-    let charge_back_to = user.charge_back_to.unwrap_or(2100);
+    let charge_back_to = user.charge_back_to.unwrap_or(600);
     println!("User charge_back_to: {}, current IQ: {}", charge_back_to, user.iq);
     
     let charge_amount_iq = charge_back_to - user.iq; 

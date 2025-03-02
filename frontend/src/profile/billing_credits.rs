@@ -1,14 +1,13 @@
 use yew::prelude::*;
 use web_sys::{HtmlInputElement, window};
 use crate::config;
+use serde_json::{Value, json};
 use crate::profile::usage_graph::UsageGraph;
 use gloo_net::http::Request;
 use crate::profile::billing_models::{ // Import from the new file
     AutoTopupSettings, BuyCreditsRequest, ApiResponse, UserProfile, StripeSetupIntentResponse,
     IQ_TO_EURO_RATE, MIN_TOPUP_AMOUNT_DOLLARS, MIN_TOPUP_AMOUNT_IQ, format_timestamp,
 };
-use crate::profile::billing_payments::PaymentMethodButton;
-use serde_json::{Value, json};
 use chrono::Utc;
 use wasm_bindgen_futures::spawn_local;
 use gloo_timers::future::TimeoutFuture;
@@ -337,8 +336,8 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
         }, ())
     };
 
-    // Function to trigger test purchase
-    let test_purchase = {
+    // Function to open Stripe Customer Portal
+    let open_customer_portal = {
         let user_id = user_profile.id;
         let error = error.clone();
         let success = success.clone();
@@ -355,7 +354,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                     .and_then(|storage| storage.get_item("token").ok())
                     .flatten()
                 {
-                    match Request::post(&format!("{}/api/stripe/automatic-charge/{}", config::get_backend_url(), user_id))
+                    match Request::get(&format!("{}/api/stripe/customer-portal/{}", config::get_backend_url(), user_id))
                         .header("Authorization", &format!("Bearer {}", token))
                         .header("Content-Type", "application/json")
                         .send()
@@ -364,14 +363,24 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                         Ok(response) => {
                             if response.ok() {
                                 if let Ok(data) = response.json::<Value>().await {
-                                    if let Some(message) = data.get("message").and_then(|v| v.as_str()) {
-                                        success.set(Some(message.to_string()));
+                                    if let Some(url) = data.get("url").and_then(|v| v.as_str()) {
+                                        // Redirect to Stripe Customer Portal
+                                        web_sys::window()
+                                            .unwrap()
+                                            .location()
+                                            .set_href(url)
+                                            .unwrap_or_else(|e| {
+                                                error.set(Some(format!("Failed to redirect to Stripe Customer Portal: {:?}", e)));
+                                            });
+                                        success.set(Some("Redirecting to Stripe Customer Portal".to_string()));
+                                    } else {
+                                        error.set(Some("No URL in Customer Portal response".to_string()));
                                     }
                                 } else {
-                                    error.set(Some("Failed to parse test purchase response".to_string()));
+                                    error.set(Some("Failed to parse Customer Portal response".to_string()));
                                 }
                             } else {
-                                error.set(Some("Failed to process test purchase".to_string()));
+                                error.set(Some("Failed to create Customer Portal session".to_string()));
                             }
                             // Clear messages after 3 seconds
                             let error_clone = error.clone();
@@ -427,35 +436,40 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                 <div class="iq-balance">
                                     <span class="iq-time">
                                         {if user_profile.iq >= 60 { 
-                                            format!("{} IQ ({} minutes/messages)", user_profile.iq, user_profile.iq / 60)
+                                            format!("{:.2}€  ({} minutes/messages)", user_profile.iq as f32 / 300.0, user_profile.iq / 60)
                                         } else { 
-                                            format!("{} IQ", user_profile.iq)
+                                            format!("{:.2}€ ({} seconds)", (user_profile.iq as f32 / 300.0), user_profile.iq)
                                         }}
                                     </span>
                                 </div>
                                 
                                 <div class="auto-topup-container">
-                                    <button 
-                                        class="auto-topup-button"
-                                        onclick={{
-                                            let show_modal = show_auto_topup_modal.clone();
-                                            Callback::from(move |_| show_modal.set(!*show_modal))
-                                        }}
-                                    >
-                                        {"Automatic Top-up"}
-                                    </button>
-                                    <button 
-                                        class="buy-credits-button"
-                                        onclick={toggle_buy_credits_modal.clone()}
-                                    >
-                                        {"Buy Credits"}
-                                    </button>
-                                    <button 
-                                        class="test-purchase-button"
-                                        onclick={test_purchase.clone()}
-                                    >
-                                        {"Test 5 EUR Purchase"}
-                                    </button>
+                                    if user_profile.stripe_payment_method_id.is_some() {
+                                        <button 
+                                            class="auto-topup-button"
+                                            onclick={{
+                                                let show_modal = show_auto_topup_modal.clone();
+                                                Callback::from(move |_| show_modal.set(!*show_modal))
+                                            }}
+                                        >
+                                            {"Automatic Top-up"}
+                                        </button>
+                                    }
+                                        <button 
+                                            class="buy-credits-button"
+                                            onclick={toggle_buy_credits_modal.clone()}
+                                        >
+                                            {"Buy Credits"}
+                                        </button>
+
+                                    if user_profile.stripe_payment_method_id.is_some() {
+                                        <button 
+                                            class="customer-portal-button"
+                                            onclick={open_customer_portal.clone()}
+                                        >
+                                            {"Manage Payments"}
+                                        </button>
+                                    }
                                     {
                                         if *show_auto_topup_modal {
                                             html! {
@@ -589,7 +603,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                             id="credits-amount"
                                                             type="number" 
                                                             step="0.01"
-                                                            min="5"
+                                                            min="3"
                                                             class="amount-input"
                                                             value={format!("{:.2}", *buy_credits_amount)}
                                                             onchange={{
@@ -601,7 +615,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                                         // Enforce minimum of $5
                                                                         let final_dollars = dollars.max(MIN_TOPUP_AMOUNT_DOLLARS);
                                                                         if dollars < MIN_TOPUP_AMOUNT_DOLLARS {
-                                                                            error.set(Some("Minimum amount is $5".to_string()));
+                                                                            error.set(Some("Minimum amount is $3".to_string()));
                                                                             // Clear error after 3 seconds
                                                                             let error_clone = error.clone();
                                                                             spawn_local(async move {
@@ -699,7 +713,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                 }
 
                 <div class="billing-info">
-                    <PaymentMethodButton user_id={user_profile.id} /> 
+                    //<PaymentMethodButton user_id={user_profile.id} /> 
                 </div>
                 <UsageGraph user_id={user_profile.id} />
             </div>
