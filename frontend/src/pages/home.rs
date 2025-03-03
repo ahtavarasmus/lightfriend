@@ -343,6 +343,7 @@ pub fn Home() -> Html {
                             <h4>{"Tools"}</h4>
                             <ul>
                                 <li>{"Perplexity AI search"}</li>
+                                <li>{"Send info to you by sms during voice calls"}</li>
                             </ul>
                             <h4>{"Methods"}</h4>
                             <ul>

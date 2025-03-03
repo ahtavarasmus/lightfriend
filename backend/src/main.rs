@@ -163,8 +163,9 @@ async fn main() {
     let twilio_routes = Router::new()
         .route("/api/sms/server", post(twilio_sms::handle_incoming_sms));
     let elevenlabs_routes = Router::new()
-        .route("/api/call/perplexity", post(elevenlabs::handle_perplexity_tool_call))
         .route("/api/call/assistant", post(elevenlabs::fetch_assistant))
+        .route("/api/call/perplexity", post(elevenlabs::handle_perplexity_tool_call))
+        .route("/api/call/sms", post(elevenlabs::handle_send_sms_tool_call))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 
     // Create router with CORS
