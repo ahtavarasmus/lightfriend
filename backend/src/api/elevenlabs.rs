@@ -238,6 +238,104 @@ pub async fn fetch_assistant(
 }
 
 
+pub async fn handle_send_sms_tool_call(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    Json(payload): Json<PhoneCallPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Received SMS send request with message: {}", payload.message);
+    
+    // Get user_id from query params
+    let user_id_str = match params.get("user_id") {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing user_id query parameter"
+                }))
+            ));
+        }
+    };
+
+    // Convert String to i32
+    let user_id: i32 = match user_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Invalid user_id format, must be an integer"
+                }))
+            ));
+        }
+    };
+
+    // Fetch user from user_repository
+    let user = match state.user_repository.find_by_id(user_id) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": "User not found"
+                }))
+            ));
+        }
+        Err(e) => {
+            error!("Error fetching user: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to fetch user"
+                }))
+            ));
+        }
+    };
+
+
+    // Get conversation for the user
+    let conversation = match state.user_conversations.get_conversation(&user, user.preferred_number.clone().unwrap()).await {
+        Ok(conv) => conv,
+        Err(e) => {
+            error!("Failed to get conversation: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to get or create conversation"
+                }))
+            ));
+        }
+    };
+
+    // Send the message using Twilio
+    match crate::api::twilio_utils::send_conversation_message(
+        &conversation.conversation_sid,
+        &conversation.twilio_number,
+        &payload.message
+    ).await {
+        Ok(message_sid) => {
+            println!("Successfully sent SMS with SID: {}", message_sid);
+            Ok(Json(json!({
+                "status": "success",
+                "message_sid": message_sid,
+                "conversation_sid": conversation.conversation_sid
+            })))
+        }
+        Err(e) => {
+            error!("Failed to send SMS: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to send message",
+                    "details": e.to_string()
+                }))
+            ))
+        }
+    }
+}
+
+
 
 
 pub async fn handle_perplexity_tool_call(
