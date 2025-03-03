@@ -111,15 +111,14 @@ pub fn terms_and_conditions() -> Html {
 
             <section>
                 <h2>{"3. Billing, Payments, and Refund Policy"}</h2>
-                <h3>{"Usage-Based Billing and No Refunds Policy"}</h3>
+                <h3>{"Prepaid Credits and No Refunds Policy"}</h3>
                 <ul>
-                    <li>{"The Service operates on a usage-based billing model where charges are calculated based on your monthly usage of calling and texting features."}</li>
-                    <li>{"Usage is measured and billed monthly based on actual consumption of the Service's features."}</li>
-                    <li>{"You will be automatically billed on a monthly basis for the services consumed."}</li>
-                    <li>{"Due to the nature of our service and its operational costs, we do not offer refunds. You are only charged for the services you actually use."}</li>
-                    <li>{"Detailed usage information and billing history can be accessed through your account profile billing section."}</li>
+                    <li>{"The Service operates on a prepaid credit model where you purchase credits in advance to use for calling and texting features."}</li>
+                    <li>{"Usage is deducted from your credit balance based on your actual consumption of the Service's features."}</li>
+                    <li>{"You can optionally enable automatic top-up to add more credits to your account when your balance runs low, ensuring uninterrupted service."}</li>
+                    <li>{"Due to the nature of our service and its operational costs, we do not offer refunds. Credits purchased are non-refundable and can only be used for services consumed."}</li>
+                    <li>{"Detailed usage information and credit history can be accessed through your account profile billing section."}</li>
                 </ul>
-
                 <h3>{"AI Assistant Services"}</h3>
                 <ul>
                     <li>{"The Service provides AI-powered assistance based on the information you provide during registration and subsequent interactions."}</li>

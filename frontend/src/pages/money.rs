@@ -110,8 +110,9 @@ pub fn pricing() -> Html {
                 <div class="faq-grid">
                     <div class="faq-item">
                         <h3>{"How does billing work?"}</h3>
-                        <p>{"You'll be billed monthly based on your actual usage of voice calls and SMS messages. No minimum fees or hidden charges."}</p>
+                        <p>{"You’ll purchase credits in advance to use for voice calls and SMS messages. You can optionally enable automatic top-up to recharge your account with additional credits whenever your balance runs low, ensuring uninterrupted service. No minimum fees or hidden charges."}</p>
                     </div>
+                    
                     <div class="faq-item">
                         <h3>{"Are there any hidden fees?"}</h3>
                         <p>{"No hidden fees. You only pay for the calls and messages you make. All features are included at no extra cost."}</p>
