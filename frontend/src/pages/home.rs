@@ -2,9 +2,11 @@ use yew::prelude::*;
 use yew_router::prelude::*;
 use crate::Route;
 use crate::config;
-use web_sys::window;
+use web_sys::{window, HtmlInputElement};
 use gloo_net::http::Request;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use wasm_bindgen_futures::spawn_local;
 
 const PHONE_NUMBERS: &[(&str, &str)] = &[
     ("us", "+18153684737"),
@@ -19,6 +21,7 @@ struct UserProfile {
     verified: bool,
     time_to_delete: bool,
     preferred_number: Option<String>,
+    notify: bool,
 }
 
 pub fn is_logged_in() -> bool {
@@ -364,7 +367,70 @@ pub fn Home() -> Html {
                                 {"Have a feature in mind? Email your suggestions to "}
                                 <a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>
                             </p>
+
                         </div>
+
+                        <div class="notification-settings">
+                                {
+                                    if let Some(profile) = (*profile_data).as_ref() {
+                                        html! {
+                                            <>
+                                                <div class="notify-toggle">
+                                                    <span>{"Notifications"}</span>
+                                                    <span class="toggle-status">
+                                                        {if profile.notify {"Active"} else {"Inactive"}}
+                                                    </span>
+                                                    <label class="switch">
+                                                        <input 
+                                                            type="checkbox" 
+                                                            checked={profile.notify}
+                                                            onchange={{
+                                                                let user_id = profile.id;
+                                                                let profile_data = profile_data.clone();
+                                                                Callback::from(move |e: Event| {
+                                                                    let input: HtmlInputElement = e.target_unchecked_into();
+                                                                    let notify = input.checked();
+                                                                    let profile_data = profile_data.clone();
+                                                                    
+                                                                    if let Some(token) = window()
+                                                                        .and_then(|w| w.local_storage().ok())
+                                                                        .flatten()
+                                                                        .and_then(|storage| storage.get_item("token").ok())
+                                                                        .flatten()
+                                                                    {
+                                                                        spawn_local(async move {
+                                                                            let _ = Request::post(&format!("{}/api/profile/update-notify/{}", config::get_backend_url(), user_id))
+                                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                                .header("Content-Type", "application/json")
+                                                                                .json(&json!({"notify": notify}))
+                                                                                .expect("Failed to serialize notify request")
+                                                                                .send()
+                                                                                .await;
+
+                                                                            // Update local state after successful API call
+                                                                            if let Some(mut current_profile) = (*profile_data).clone() {
+                                                                                current_profile.notify = notify;
+                                                                                profile_data.set(Some(current_profile));
+                                                                            }
+                                                                        });
+                                                                    }
+                                                                })
+                                                            }}
+                                                        />
+                                                        <span class="slider round"></span>
+                                                    </label>
+                                                </div>
+                                                <p class="notification-description">
+                                                    {"Receive notifications about new feature updates."}
+                                                </p>
+                                            </>
+                                        }
+                                    } else {
+                                        html! {}
+                                    }
+                                }
+                            </div>
+
                         <footer class="dashboard-footer">
                             <div class="development-links">
                                 <p>{"Follow development progress at "}

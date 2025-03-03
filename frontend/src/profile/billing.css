@@ -67,6 +67,27 @@
     font-size: 1rem;
 }
 
+.notification-settings {
+    margin: 20px 0;
+    padding: 15px;
+    border-radius: 8px;
+    background-color: #f5f5f5;
+}
+
+.notify-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.notification-description {
+    color: #666;
+    font-size: 0.9em;
+    margin-top: 5px;
+}
+
+
 /* Switch Styling (matches image’s turquoise-blue toggle) */
 .switch {
     position: relative;
