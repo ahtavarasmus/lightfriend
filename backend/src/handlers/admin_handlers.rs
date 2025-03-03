@@ -241,6 +241,9 @@ async fn process_broadcast_messages(
                 continue;
             }
         };
+        if !user.notify {
+            continue;
+        }
 
         let conversation_result = state
             .user_conversations
