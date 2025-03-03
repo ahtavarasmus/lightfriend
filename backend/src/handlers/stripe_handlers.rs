@@ -29,16 +29,17 @@ use std::sync::Arc;
 pub struct BuyCreditsRequest {
     pub amount_dollars: f32,
 }
-
 pub async fn create_customer_portal_session(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(user_id): Path<i32>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    println!("Starting create_customer_portal_session for user_id: {}", user_id);
     // Initialize Stripe client
     let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY")
         .expect("STRIPE_SECRET_KEY must be set in environment");
     let client = Client::new(stripe_secret_key);
+    println!("Stripe client initialized");
 
     // Extract token from Authorization header
     let auth_header = headers
@@ -53,6 +54,7 @@ pub async fn create_customer_portal_session(
             Json(json!({"error": "No authorization token provided"})),
         )),
     };
+    println!("Token extracted successfully");
 
     // Decode and validate JWT token (assuming Claims and other imports are defined)
     let _claims = match decode::<Claims>(
@@ -70,6 +72,7 @@ pub async fn create_customer_portal_session(
             Json(json!({"error": "Invalid token"})),
         )),
     };
+    println!("JWT token validated successfully");
 
     // Get Stripe customer ID
     let customer_id = state
@@ -83,6 +86,7 @@ pub async fn create_customer_portal_session(
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "No Stripe customer ID found for user"})),
         ))?;
+    println!("Found Stripe customer ID: {}", customer_id);
 
     // Create a Billing Portal Session
     // Create a Billing Portal Session
@@ -94,15 +98,20 @@ pub async fn create_customer_portal_session(
         std::env::var("DOMAIN_URL").expect("DOMAIN_URL not set")
     );
     create_session.return_url = Some(&return_url);
+    println!("Creating portal session with return URL: {}", return_url);
+
     let portal_session = BillingPortalSession::create(
         &client,
 create_session,
     )
     .await
-    .map_err(|e| (
+    .map_err(|e| {
+            eprintln!("{}", e);
+        (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": format!("Failed to create Customer Portal session: {}", e)})),
-    ))?;
+    )})?;
+    println!("Portal session created successfully with URL: {}", portal_session.url);
 
     // Return the portal URL to redirect the user
     Ok(Json(json!({
