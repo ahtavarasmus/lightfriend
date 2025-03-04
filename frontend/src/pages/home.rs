@@ -354,7 +354,11 @@ pub fn Home() -> Html {
                                 <li>{"Voice calling"}</li>
                                 <li>{"Text messaging"}</li>
                             </ul>
-                            
+                            <h4>{"Tips"}</h4>
+                            <ul>
+                                <li>{"You can ask multiple questions in a single SMS to save money. Note that answers will be less detailed due to SMS character limits. Example: 'did sam altman tweet today and whats the weather?' -> 'Sam Altman hasn't tweeted today. Last tweet was on March 3, a cryptic \"!!!\" image suggesting a major AI development. Weather in Tampere: partly cloudy, 0°C, 82% humidity, wind at 4 m/s.'"}</li>
+                                <li>{"Start your message with 'forget' to make the assistant forget previous conversation context and start fresh. Note that this only applies to that one message - the next message will again remember previous context."}</li>
+                            </ul>
                             <h3>{"Coming Soon"}</h3>
                             <ul>
                                 <li>{"Email and calendar integration"}</li>

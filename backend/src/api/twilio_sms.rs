@@ -209,7 +209,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: format!("You are a friendly and helpful AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Be direct and natural in your answers. Since users are using SMS, keep responses clear and brief. Avoid suggesting actions requiring smartphones or internet. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages. Use simple language and focus on the most important information first. This is what the user wants to you to know: {}. When you use tools make sure to add relevant info about the user to the tool messages so they can act accordingly.", Utc::now().format("%Y-%m-%d"), user_info),
+        content: format!("You are a friendly and helpful AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Be direct and natural in your answers. Since users are using SMS, keep responses clear and brief. Avoid suggesting actions requiring smartphones or internet. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages. Use simple language and focus on the most important information first. This is what the user wants to you to know: {}. When you use tools make sure to add relevant info about the user to the tool call so they can act accordingly.", Utc::now().format("%Y-%m-%d"), user_info),
     }];
     
     // Process the message body to remove "forget" if it exists at the start
@@ -254,6 +254,24 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         }),
     );
 
+    let mut weather_properties = HashMap::new();
+    weather_properties.insert(
+        "location".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Location of the place where we want to search the weather.".to_string()),
+            ..Default::default()
+        }),
+    );
+    weather_properties.insert(
+        "units".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Units that the weather should be returned as. Should be either 'metric' or 'imperial'".to_string()),
+            ..Default::default()
+        }),
+    );
+
     // Define tools
     let tools = vec![chat_completion::Tool {
             r#type: chat_completion::ToolType::Function,
@@ -267,6 +285,19 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                 },
             },
         },
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: String::from("get_weather"),
+                description: Some(String::from("Used to get the current weather if user asks for it. If user doesn't give a specific location you should assume they are at home(Do NOT put location as 'home' though, you have to find it from user's info section above along with more information about the user.")),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(weather_properties),
+                    required: Some(vec![String::from("location"), String::from("units")]),
+                },
+            },
+        },
+
     ];
 
     let api_key = match env::var("OPENROUTER_API_KEY") {
@@ -344,6 +375,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
 
     println!("Processing model response with finish reason: {:?}", result.choices[0].finish_reason);
     let mut fail = false;
+    let mut tool_answers: HashMap<String, String> = HashMap::new(); // tool_call id and answer
     let final_response = match result.choices[0].finish_reason {
         None | Some(chat_completion::FinishReason::stop) => {
             println!("Model provided direct response (no tool calls needed)");
@@ -357,6 +389,11 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
             #[derive(Deserialize, Serialize)]
             struct PerplexityQuestion {
                 query: String,
+            }
+            #[derive(Deserialize, Serialize)]
+            struct WeatherQuestion {
+                location: String,
+                units: String,
             }
             
             let tool_calls = match result.choices[0].message.tool_calls.as_ref() {
@@ -375,9 +412,9 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                 }
             };
 
-            let mut perplexity_answer = String::new();
             for tool_call in tool_calls {
-                println!("Processing tool call: {:?}", tool_call);
+                let tool_call_id = tool_call.id.clone();
+                println!("Processing tool call: {:?} with id: {:?}", tool_call, tool_call_id);
                 let name = match &tool_call.function.name {
                     Some(n) => {
                         println!("Tool call function name: {}", n);
@@ -411,64 +448,91 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                         Ok(answer) => {
                             println!("Successfully received Perplexity answer");
                             println!("Perplexity response: {}", answer);
-                            perplexity_answer = answer;
-                            break; // Use the first successful perplexity answer
+                            tool_answers.insert(tool_call_id, answer);
                         }
                         Err(e) => {
                             eprintln!("Failed to get perplexity answer: {}", e);
                             continue;
                         }
                     };
+                } else if name == "get_weather" {
+                    println!("Executing get_weather tool call");
+                    println!("Raw arguments: {}", arguments);
+                    let c: WeatherQuestion = match serde_json::from_str(arguments) {
+                        Ok(q) => q,
+                        Err(e) => {
+                            eprintln!("Failed to parse perplexity question: {}", e);
+                            continue;
+                        }
+                    };
+                    let location= c.location;
+                    let units= c.units;
+                    println!("location for weather: {}", location);
+                    println!("units for weather: {}", units);
+
+                    match crate::api::elevenlabs::get_weather(&location, &units).await {
+                        Ok(answer) => {
+                            println!("Successfully received weather answer");
+                            println!("Weather response: {}", answer);
+                            tool_answers.insert(tool_call_id, answer);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to get weather answer: {}", e);
+                            continue;
+                        }
+                    };
                 }
             }
 
-            // Make a second call to Openrouter with the perplexity answer
-            if !perplexity_answer.is_empty() {
-                let mut follow_up_messages = completion_messages.clone();
-                // Add the assistant's message with tool calls
-                follow_up_messages.push(chat_completion::ChatCompletionMessage {
-                    role: chat_completion::MessageRole::assistant,
-                    content: chat_completion::Content::Text(result.choices[0].message.content.clone().unwrap_or_default()),
-                    name: None,
-                    tool_calls: result.choices[0].message.tool_calls.clone(),
-                    tool_call_id: None,
-                });
-                // Add the tool response
-                if let Some(tool_calls) = &result.choices[0].message.tool_calls {
-                    for tool_call in tool_calls {
-                        follow_up_messages.push(chat_completion::ChatCompletionMessage {
-                            role: chat_completion::MessageRole::tool,
-                            content: chat_completion::Content::Text(perplexity_answer.clone()),
-                            name: None,
-                            tool_calls: None,
-                            tool_call_id: Some(tool_call.id.clone()),
-                        });
-                    }
-                }
 
-                println!("Making follow-up request to model with Perplexity answer");
-                let follow_up_req = chat_completion::ChatCompletionRequest::new(
-                    GPT4_O.to_string(),
-                    follow_up_messages,
-                )
-                .max_tokens(100); // Consistent token limit for follow-up messages
-                println!("Follow-up request created");
-
-                match client.chat_completion(follow_up_req).await {
-                    Ok(follow_up_result) => {
-                        println!("Received follow-up response from model");
-                        let response = follow_up_result.choices[0].message.content.clone().unwrap_or_default();
-                        println!("Final response: {}", response);
-                        response
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to get follow-up completion: {}", e);
-                        format!("Based on my research: {}", perplexity_answer)
-                    }
+            let mut follow_up_messages = completion_messages.clone();
+            // Add the assistant's message with tool calls
+            follow_up_messages.push(chat_completion::ChatCompletionMessage {
+                role: chat_completion::MessageRole::assistant,
+                content: chat_completion::Content::Text(result.choices[0].message.content.clone().unwrap_or_default()),
+                name: None,
+                tool_calls: result.choices[0].message.tool_calls.clone(),
+                tool_call_id: None,
+            });
+            // Add the tool response
+            if let Some(tool_calls) = &result.choices[0].message.tool_calls {
+                for tool_call in tool_calls {
+                    let tool_answer = match tool_answers.get(&tool_call.id) {
+                        Some(ans) => ans.clone(),
+                        None => "".to_string(),
+                    };
+                    follow_up_messages.push(chat_completion::ChatCompletionMessage {
+                        role: chat_completion::MessageRole::tool,
+                        content: chat_completion::Content::Text(tool_answer),
+                        name: None,
+                        tool_calls: None,
+                        tool_call_id: Some(tool_call.id.clone()),
+                    });
                 }
-            } else {
-                fail = true;
-                "I apologize, but I couldn't find the information you requested. (you were not charged for this message)".to_string()
+            }
+
+            println!("Making follow-up request to model with tool call answers");
+            let follow_up_req = chat_completion::ChatCompletionRequest::new(
+                GPT4_O.to_string(),
+                follow_up_messages,
+            )
+            .max_tokens(100); // Consistent token limit for follow-up messages
+            println!("Follow-up request created");
+
+            match client.chat_completion(follow_up_req).await {
+                Ok(follow_up_result) => {
+                    println!("Received follow-up response from model");
+                    let response = follow_up_result.choices[0].message.content.clone().unwrap_or_default();
+                    println!("Final response: {}", response);
+                    response
+                }
+                Err(e) => {
+                    eprintln!("Failed to get follow-up completion: {}", e);
+                    fail = true;
+                    tool_answers.values().next()
+                        .map(|ans| format!("Based on my research: {} (you were not charged for this message)", ans.chars().take(370).collect::<String>()))
+                        .unwrap_or_else(|| "I apologize, but I encountered an error processing your request. (you were not charged for this message)".to_string())
+                }
             }
         }
         Some(chat_completion::FinishReason::length) => {
@@ -549,8 +613,6 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     },
                     Err(e) => eprintln!("Failed to check if user credits is under threshold: {}", e),
                 }
-
-
 
             }
             (
