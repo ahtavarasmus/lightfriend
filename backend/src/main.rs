@@ -119,8 +119,6 @@ pub fn validate_env() {
         .expect("VOICE_SECOND_COST must be set");
     let _ = std::env::var("CHARGE_BACK_THRESHOLD")
         .expect("CHARGE_BACK_THRESHOLD must be set");
-    let _ = std::env::var("OPENWEATHER_API_KEY")
-        .expect("OPENWEATHER_API_KEY must be set");
 
 
 }
