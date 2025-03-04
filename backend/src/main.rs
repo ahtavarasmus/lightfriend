@@ -119,6 +119,9 @@ pub fn validate_env() {
         .expect("VOICE_SECOND_COST must be set");
     let _ = std::env::var("CHARGE_BACK_THRESHOLD")
         .expect("CHARGE_BACK_THRESHOLD must be set");
+    let _ = std::env::var("OPENWEATHER_API_KEY")
+        .expect("OPENWEATHER_API_KEY must be set");
+
 
 }
 
@@ -168,6 +171,7 @@ async fn main() {
         .route("/api/call/assistant", post(elevenlabs::fetch_assistant))
         .route("/api/call/perplexity", post(elevenlabs::handle_perplexity_tool_call))
         .route("/api/call/sms", post(elevenlabs::handle_send_sms_tool_call))
+        .route("/api/call/weather", post(elevenlabs::handle_weather_tool_call))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 
     let elevenlabs_webhook_routes = Router::new()
