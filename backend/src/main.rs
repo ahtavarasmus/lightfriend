@@ -26,6 +26,7 @@ mod api {
     pub mod twilio_sms;
     pub mod twilio_utils;
     pub mod elevenlabs;
+    pub mod elevenlabs_webhook;
     pub mod paddle_webhooks;
     pub mod paddle_utils;
 }
@@ -52,9 +53,10 @@ use handlers::profile_handlers;
 use handlers::billing_handlers;
 use handlers::admin_handlers;
 use handlers::stripe_handlers;
-use api::vapi_endpoints;
+//use api::vapi_endpoints;
 use api::twilio_sms;
 use api::elevenlabs;
+use api::elevenlabs_webhook;
 
 
 
@@ -168,6 +170,12 @@ async fn main() {
         .route("/api/call/sms", post(elevenlabs::handle_send_sms_tool_call))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 
+    let elevenlabs_webhook_routes = Router::new()
+        .route("/api/webhook/elevenlabs", post(elevenlabs_webhook::elevenlabs_webhook))
+        .route_layer(middleware::from_fn(elevenlabs_webhook::validate_elevenlabs_hmac));
+
+
+
     // Create router with CORS
     let app = Router::new()
         .route("/api/health", get(health_check))
@@ -202,6 +210,7 @@ async fn main() {
         */
         .merge(twilio_routes)
         .merge(elevenlabs_routes)
+        .merge(elevenlabs_webhook_routes)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))

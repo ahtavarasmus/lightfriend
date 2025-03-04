@@ -2,227 +2,162 @@ use tokio_cron_scheduler::{JobScheduler, Job};
 use std::sync::Arc;
 use tracing::{info, error};
 use crate::AppState;
-use crate::api::elevenlabs::ElevenLabsResponse;
 
 use std::env;
 
 pub async fn start_scheduler(state: Arc<AppState>) {
     let sched = JobScheduler::new().await.expect("Failed to create scheduler");
-    
-    // Create a job that runs every 30 seconds to check and update database
+        
+
+    // Create a job that runs every 5 seconds to handle ongoing usage logs
     let state_clone = Arc::clone(&state);
-    let job = Job::new_async("*/30 * * * * *", move |_, _| {
+    let usage_monitor_job = Job::new_async("*/5 * * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
-            match check_and_update_database(&state).await {
-                Ok(_) => info!("Successfully ran scheduled task for database updates"),
-                Err(e) => error!("Error in scheduled database update task: {}", e),
+            info!("Running scheduled usage monitor job...");
+            let api_key = env::var("ELEVENLABS_API_KEY").expect("ELEVENLABS_API_KEY must be set");
+            let client = reqwest::Client::new();
+
+            match state.user_repository.get_all_ongoing_usage() {
+                Ok(ongoing_logs) => {
+                    info!("Found {} ongoing usage logs to process", ongoing_logs.len());
+                    for log in ongoing_logs {
+                        info!("Processing usage log for user {} with conversation_id {:?}", log.user_id, log.conversation_id);
+                        let conversation_id = match log.conversation_id {
+                            Some(id) => id,
+                            None => continue,
+                        };
+
+                        // Check conversation status from ElevenLabs
+                        let status_url = format!(
+                            "https://api.elevenlabs.io/v1/convai/conversations/{}",
+                            conversation_id
+                        );
+
+                        let conversation_data = match client
+                            .get(&status_url)
+                            .header("xi-api-key", &api_key)
+                            .send()
+                            .await
+                        {
+                            Ok(response) => {
+                                match response.json::<serde_json::Value>().await {
+                                    Ok(data) => data,
+                                    Err(e) => {
+                                        error!("Failed to parse conversation response: {}", e);
+                                        continue;
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                error!("Failed to fetch conversation status: {}", e);
+                                continue;
+                            }
+                        };
+
+                        // Handle recharge threshold timestamp
+                        if let Some(threshold_timestamp) = log.recharge_threshold_timestamp {
+                            info!("Checking recharge threshold for user {}", log.user_id);
+                            let current_timestamp = chrono::Utc::now().timestamp() as i32;
+                            info!("current: {}", current_timestamp);
+                            info!("threshold: {}", threshold_timestamp);
+                            info!("current_timestamp >= threshold_timestamp: {}", current_timestamp >= threshold_timestamp);
+                            if current_timestamp >= threshold_timestamp {
+                                info!("current over threshold");
+                                match state.user_repository.has_auto_topup_enabled(log.user_id) {
+                                    Ok(true) => {
+                                        info!("has auto top up");
+                                        info!("conversation_data status: {}",conversation_data["status"]);
+                                        info!("conversation_data : {}",conversation_data);
+                                        // Verify call is still active
+                                        if conversation_data["status"] == "processing" {
+                                            println!("Recharging the user back up");
+                                            use axum::extract::{State, Path};
+                                            let state_clone = Arc::clone(&state);
+                                            tokio::spawn(async move {
+                                                let _ = crate::handlers::stripe_handlers::automatic_charge(
+                                                    State(state_clone),
+                                                    Path(log.user_id),
+                                                ).await;
+                                                println!("Recharged the user successfully back up!");
+                                            });
+                                        }
+                                    }
+                                    Ok(false) => {
+                                        info!("User {} does not have auto top-up enabled", log.user_id);
+                                    }
+                                    Err(e) => error!("Failed to check auto top-up status: {}", e),
+                                }
+                            }
+                        }
+
+                        // Handle zero credits timestamp
+                        if let Some(zero_timestamp) = log.zero_credits_timestamp {
+                            info!("Checking zero credits timestamp for user {}", log.user_id);
+                            let current_timestamp = chrono::Utc::now().timestamp() as i32;
+                            if current_timestamp >= zero_timestamp {
+                                // Get final status and delete conversation
+                                let call_duration = conversation_data["metadata"]["call_duration_secs"].as_f64().unwrap_or(0.0) as f32;
+                                let voice_second_cost = env::var("VOICE_SECOND_COST")
+                                    .expect("VOICE_SECOND_COST not set")
+                                    .parse::<f32>()
+                                    .unwrap_or(0.0033);
+                                let credits_used = call_duration * voice_second_cost;
+
+                                // Update usage log with final status
+                                if let Err(e) = state.user_repository.update_usage_log_fields(
+                                    log.user_id,
+                                    &conversation_id,
+                                    "done",
+                                    credits_used,
+                                    true,
+                                    &format!("Call ended due to zero credits. Duration: {}s", call_duration)
+                                ) {
+                                    error!("Failed to update usage log fields: {}", e);
+                                }
+
+                                // Decrease user's credits
+                                if let Err(e) = state.user_repository.decrease_credits(log.user_id, credits_used) {
+                                    error!("Failed to decrease user credits: {}", e);
+                                }
+
+                                if conversation_data["status"] == "processing" {
+                                    info!("deleting conversation");
+                                    // Delete conversation
+                                    let delete_url = format!(
+                                        "https://api.elevenlabs.io/v1/convai/conversations/{}", 
+                                        conversation_id
+                                    );
+                                    
+                                    if let Err(e) = client
+                                        .delete(&delete_url)
+                                        .header("xi-api-key", &api_key)
+                                        .send()
+                                        .await
+                                    {
+                                        error!("Failed to delete conversation: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => error!("Failed to fetch ongoing usage logs: {}", e),
             }
         })
-    }).expect("Failed to create job");
+    }).expect("Failed to create usage monitor job");
 
-    sched.add(job).await.expect("Failed to add job to scheduler");
+    sched.add(usage_monitor_job).await.expect("Failed to add usage monitor job to scheduler");
     
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");
+
+    // TODO we should add another scheduled call that just checks if there are items that are 'done' or not found in the elevenlabs
+    // but are still 'ongoing' in our db. we don't want to be accidentally charging users.
+    // and if that happens make error visible
+
 }
 
 
-async fn check_and_update_database(state: &Arc<AppState>) -> Result<(), Box<dyn std::error::Error>> {
 
-
-    let api_key = env::var("ELEVENLABS_API_KEY")
-        .expect("ELEVENLABS_API_KEY must be set");
-    
-    let client = reqwest::Client::new();
-
-    // First, fetch all conversations from ElevenLabs
-    let conversations_url = "https://api.elevenlabs.io/v1/convai/conversations";
-    
-    info!("Fetching all conversations from ElevenLabs API");
-    let conversations_response = client
-        .get(conversations_url)
-        .header("xi-api-key", &api_key)
-        .send()
-        .await?;
-
-    let conversations_text = conversations_response.text().await?;
-    info!("Received conversations response: {}", conversations_text);
-
-    // Parse the response with the correct structure
-    let response: serde_json::Value = serde_json::from_str(&conversations_text)?;
-    
-    // Get the conversations array
-    let conversations = response["conversations"]
-        .as_array()
-        .unwrap_or(&Vec::new())
-        .to_owned();
-
-    // Now process each conversation
-    for conversation in conversations {
-        println!("Starting to go through conversations");
-        let conversation_id = conversation["conversation_id"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string();
-        // Make API request for the conversation
-        let url = format!(
-            "https://api.elevenlabs.io/v1/convai/conversations/{}", 
-            conversation_id
-        );
-
-        info!("Fetching status from ElevenLabs API for conversation: {}", conversation_id);
-        match client
-            .get(&url)
-            .header("xi-api-key", &api_key)
-            .send()
-            .await
-        {
-            Ok(response) => {
-                match response.text().await {
-                    Ok(text) => {
-                        info!("Received conversation details: {}", text);
-                        match serde_json::from_str::<ElevenLabsResponse>(&text) {
-                            Ok(conversation_details) => {
-
-                                // Handle conversations based on user_id presence and status
-                                match conversation_details.conversation_initiation_client_data.dynamic_variables.user_id {
-                                    Some(user_id_str) => {
-                                        if let Ok(user_id) = user_id_str.parse::<i32>() {
-                                            // Only process if the call status is 'done'
-                                            if conversation_details.status == "done" {
-                                                info!("Call status == done => DECREASE CREDITS + DELETE");
-                                                // Decrease user's credits based on call duration
-                                                
-                                                let voice_second_cost = std::env::var("VOICE_SECOND_COST")
-                                                    .expect("VOICE_SECOND_COST not set")
-                                                    .parse::<f32>()
-                                                    .unwrap_or(0.0033);
-                                                let credits_used = conversation_details.metadata.call_duration_secs as f32 * voice_second_cost;
-                                                let success = match conversation_details.analysis {
-                                                    Some(ref analysis) => match analysis.call_successful.as_str() {
-                                                        "success" => true,
-                                                        "failure" => false,
-                                                        _ => false,
-                                                    },
-                                                    None => false,
-                                                };
-                                                let summary = conversation_details.analysis
-                                                    .as_ref()
-                                                    .map(|analysis| analysis.transcript_summary.to_string())
-                                                    .or(Some(String::from("")));
-                                                
-                                                // First log the usage
-                                                if let Err(e) = state.user_repository.log_usage(
-                                                    user_id,
-                                                    "call",
-                                                    credits_used,
-                                                    success, 
-                                                    summary,
-                                                ) {
-                                                    error!("Failed to log usage: {}", e);
-                                                }
-
-                                                // Then decrease the credits 
-                                                if let Err(e) = state.user_repository.decrease_credits(user_id, credits_used) {
-                                                    error!("Failed to decrease user credits: {}", e);
-                                                } else { 
-                                                    info!("Successfully decreased credits for user {} by {}", user_id, credits_used);
-
-                                                    match state.user_repository.is_credits_under_threshold(user_id) {
-                                                        Ok(is_under) => {
-                                                            if is_under {
-                                                                info!("User {} credits is under threshold, attempting automatic charge", user_id);
-                                                                // Get user information
-                                                                match state.user_repository.find_by_id(user_id) {
-                                                                    Ok(Some(user)) => {
-                                                                        if user.charge_when_under {
-                                                                            use axum::extract::{State, Path};
-                                                                            let state_clone = Arc::clone(&state);
-                                                                            tokio::spawn(async move {
-                                                                                let _ = crate::handlers::stripe_handlers::automatic_charge(
-                                                                                    State(state_clone),
-                                                                                    Path(user.id),
-                                                                                ).await;
-                                                                                info!("Recharged the user successfully back up!");
-                                                                            });                                                                            
-                                                                            info!("recharged the user successfully back up!");
-                                                                        }
-                                                                    },
-                                                                    Ok(None) => error!("User {} not found for automatic charge", user_id),
-                                                                    Err(e) => error!("Failed to get user for automatic charge: {}", e),
-                                                                }
-                                                            }
-                                                        },
-                                                        Err(e) => error!("Failed to check if user credits is under threshold: {}", e),
-                                                    }
-                                                                                                       
-                                                    // Delete the conversation from ElevenLabs
-                                                    let delete_url = format!(
-                                                        "https://api.elevenlabs.io/v1/convai/conversations/{}", 
-                                                        conversation_id
-                                                    );
-                                                    
-                                                    match client
-                                                        .delete(&delete_url)
-                                                        .header("xi-api-key", &api_key)
-                                                        .send()
-                                                        .await
-                                                    {
-                                                        Ok(_) => info!("Successfully deleted conversation {} from ElevenLabs", conversation_id),
-                                                        Err(e) => error!("Failed to delete conversation from ElevenLabs: {}", e),
-                                                    }
-                                                }
-                                            }
-                                        } else {
-                                            info!("Invalid user_id format found, deleting conversation {}", conversation_id);
-                                            // Delete invalid conversation
-                                            let delete_url = format!(
-                                                "https://api.elevenlabs.io/v1/convai/conversations/{}", 
-                                                conversation_id
-                                            );
-                                            if let Err(e) = client
-                                                .delete(&delete_url)
-                                                .header("xi-api-key", &api_key)
-                                                .send()
-                                                .await
-                                            {
-                                                error!("Failed to delete invalid conversation: {}", e);
-                                            }
-                                        }
-                                    }
-                                    None => {
-                                        info!("No user_id found, deleting conversation {}", conversation_id);
-                                        // Delete conversation without user_id
-                                        let delete_url = format!(
-                                            "https://api.elevenlabs.io/v1/convai/conversations/{}", 
-                                            conversation_id
-                                        );
-                                        if let Err(e) = client
-                                            .delete(&delete_url)
-                                            .header("xi-api-key", &api_key)
-                                            .send()
-                                            .await
-                                        {
-                                            error!("Failed to delete conversation without user_id: {}", e);
-                                        }
-
-                                    }
-
-                                }
-                            }
-                            Err(e) => error!("Failed to parse conversation details: {}", e),
-                        }
-                    }
-                    Err(e) => error!("Failed to get response text: {}", e),
-                }
-            }
-            Err(e) => {
-                error!("Failed to fetch conversation details: {}", e);
-            }
-        }
-    }
-
-    Ok(())
-}
 

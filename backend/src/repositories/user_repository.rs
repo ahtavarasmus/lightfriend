@@ -233,8 +233,8 @@ impl UserRepository {
         Ok(())
     }
 
-    // log the usage of either call or sms
-    pub fn log_usage(&self, user_id: i32, activity_type: &str, credits: f32, success: bool, possible_summary: Option<String>) -> Result<(), DieselError> {
+    // log the usage. activity_type either 'call' or 'sms'
+    pub fn log_usage(&self, user_id: i32, activity_type: &str, credits: Option<f32>, success: Option<bool>, possible_summary: Option<String>, conversation_id: Option<String>, status: Option<String>, recharge_threshold_timestamp: Option<i32>, zero_credits_timestamp: Option<i32>) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         let user = users::table
@@ -259,6 +259,10 @@ impl UserRepository {
             created_at: current_time,
             success,
             summary,
+            conversation_id,
+            status,
+            recharge_threshold_timestamp,
+            zero_credits_timestamp,
         };
 
         diesel::insert_into(usage_logs::table)
@@ -270,15 +274,62 @@ impl UserRepository {
     // Increase user's credits by a specified amount
     pub fn increase_credits(&self, user_id: i32, amount: f32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
+
         let user = users::table
             .find(user_id)
             .first::<User>(&mut conn)?;
         
+
         let new_credits = user.credits + amount;
         
         diesel::update(users::table.find(user_id))
             .set(users::credits.eq(new_credits))
             .execute(&mut conn)?;
+
+        // get the user again with updated credits
+        let user = users::table
+            .find(user_id)
+            .first::<User>(&mut conn)?;
+
+
+        // get any ongoing usage log for this user
+        let ongoing_log = usage_logs::table
+            .filter(usage_logs::user_id.eq(user_id))
+            .filter(usage_logs::status.eq("ongoing"))
+            .first::<crate::models::user_models::UsageLog>(&mut conn)
+            .optional()?;
+        
+        // If there's an ongoing log, update its timestamps
+        if let Some(log) = ongoing_log {
+            if let Some(conversation_id) = log.conversation_id {
+
+                let charge_back_threshold= std::env::var("CHARGE_BACK_THRESHOLD")
+                    .expect("CHARGE_BACK_THRESHOLD not set")
+                    .parse::<f32>()
+                    .unwrap_or(2.00);
+                let voice_second_cost = std::env::var("VOICE_SECOND_COST")
+                    .expect("VOICE_SECOND_COST not set")
+                    .parse::<f32>()
+                    .unwrap_or(0.0033);
+
+                let user_current_credits_to_threshold = user.credits - charge_back_threshold;
+
+                let seconds_to_threshold = (user_current_credits_to_threshold / voice_second_cost) as i32;
+                let recharge_threshold_timestamp: i32 = (chrono::Utc::now().timestamp() as i32) + seconds_to_threshold as i32;
+
+                let seconds_to_zero_credits= (user.credits / voice_second_cost) as i32;
+                let zero_credits_timestamp: i32 = (chrono::Utc::now().timestamp() as i32) + seconds_to_zero_credits as i32;
+
+                diesel::update(usage_logs::table)
+                    .filter(usage_logs::conversation_id.eq(conversation_id))
+                    .set((
+                        usage_logs::recharge_threshold_timestamp.eq(recharge_threshold_timestamp),
+                        usage_logs::zero_credits_timestamp.eq(zero_credits_timestamp), 
+                    ))
+                    .execute(&mut conn)?;
+            }
+        }
+
         Ok(())
     }
 
@@ -296,6 +347,8 @@ impl UserRepository {
         
         Ok(user.credits < charge_back_threshold)
     }
+
+    // 
 
     // Update user's notify preference
     pub fn update_notify(&self, user_id: i32, notify: bool) -> Result<(), DieselError> {
@@ -355,11 +408,13 @@ impl UserRepository {
             .filter(created_at.ge(from_timestamp))
             .select((created_at, credits))
             .order_by(created_at.asc())
-            .load::<(i32, f32)>(&mut conn)?
+            .load::<(i32, Option<f32>)>(&mut conn)?
             .into_iter()
-            .map(|(timestamp, credit_amount)| UsageDataPoint {
-                timestamp,
-                credits: credit_amount,
+            .filter_map(|(timestamp, credit_amount)| {
+                credit_amount.map(|credit_value| UsageDataPoint {
+                    timestamp,
+                    credits: credit_value,
+                })
             })
             .collect();
 
@@ -424,6 +479,32 @@ impl UserRepository {
         Ok(user)
     }
 
+    // Fetch the ongoing usage log for a user
+    pub fn get_ongoing_usage(&self, user_id: i32) -> Result<Option<crate::models::user_models::UsageLog>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let ongoing_log = usage_logs::table
+            .filter(usage_logs::user_id.eq(user_id))
+            .filter(usage_logs::status.eq("ongoing"))
+            .first::<crate::models::user_models::UsageLog>(&mut conn)
+            .optional()?;
+        Ok(ongoing_log)
+    }
+
+    pub fn update_usage_log_fields(&self, user_id: i32, conversation_id: &str, status: &str, credits: f32, success: bool, summary: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(usage_logs::table)
+            .filter(usage_logs::user_id.eq(user_id))
+            .filter(usage_logs::conversation_id.eq(conversation_id))
+            .set((
+                usage_logs::status.eq(status),
+                usage_logs::credits.eq(credits),
+                usage_logs::success.eq(success),
+                usage_logs::summary.eq(summary),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
     pub fn set_stripe_checkout_session_id(&self, user_id: i32, session_id: &str) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table.find(user_id))
@@ -441,5 +522,33 @@ impl UserRepository {
         Ok(session_id)
     }
 
+    pub fn get_all_ongoing_usage(&self) -> Result<Vec<crate::models::user_models::UsageLog>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let ongoing_logs = usage_logs::table
+            .filter(usage_logs::status.eq("ongoing"))
+            .load::<crate::models::user_models::UsageLog>(&mut conn)?;
+        Ok(ongoing_logs)
+    }
+
+    pub fn update_usage_log_timestamps(&self, conversation_id: &str, recharge_threshold_timestamp: Option<i32>, zero_credits_timestamp: Option<i32>) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(usage_logs::table)
+            .filter(usage_logs::conversation_id.eq(conversation_id))
+            .set((
+                usage_logs::recharge_threshold_timestamp.eq(recharge_threshold_timestamp),
+                usage_logs::zero_credits_timestamp.eq(zero_credits_timestamp),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn has_auto_topup_enabled(&self, user_id: i32) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let charge_when_under = users::table
+            .find(user_id)
+            .select(users::charge_when_under)
+            .first::<bool>(&mut conn)?;
+        Ok(charge_when_under)
+    }
 
 }

@@ -561,21 +561,11 @@ pub async fn automatic_charge(
         ))?;
     println!("Stripe payment method ID found: {}", payment_method_id);
 
-    // Fetch the user's auto-topup settings to determine the charge amount
     let charge_back_to = user.charge_back_to.unwrap_or(5.00);
     println!("User charge_back_to: {}, current credits: {}", charge_back_to, user.credits);
-
-    let charge_amount = charge_back_to - user.credits; 
-    if charge_amount < 0.00 {
-        println!("User credits already over the charge back to amount, no charge needed");
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": format!("user credits already over the charge back to amount")})),
-        ));
-    }
     
-    let charge_amount_cents = (charge_amount * 100.0).round() as i64; // Convert to cents for Stripe
-    println!("Charging credits (€{})", charge_amount);
+    let charge_amount_cents = (charge_back_to * 100.0).round() as i64; // Convert to cents for Stripe
+    println!("Charging credits (€{})", charge_back_to);
 
     // Create a PaymentIntent for the off-session charge
     println!("Creating payment intent");
@@ -604,7 +594,7 @@ pub async fn automatic_charge(
         // Update user's credits 
         state
             .user_repository
-            .increase_credits(user_id, charge_amount) 
+            .increase_credits(user_id, charge_back_to) 
             .map_err(|e| {
                 println!("Failed to update user credits: {}", e);
                 (
@@ -616,7 +606,7 @@ pub async fn automatic_charge(
         println!("User credits updated successfully, returning success response");
         Ok(Json(json!({
             "message": "Automatic charge successful, credits updated",
-            "amount": charge_amount,
+            "amount": charge_back_to,
         })))
     } else {
         println!("Payment intent failed or requires action, status: {:?}", payment_intent.status);
