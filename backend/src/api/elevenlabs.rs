@@ -398,7 +398,7 @@ pub async fn handle_weather_tool_call(
     }
 }
 
-async fn get_weather(location: &str, units: &str) -> Result<String, Box<dyn Error>> {
+pub async fn get_weather(location: &str, units: &str) -> Result<String, Box<dyn Error>> {
 
     let client = reqwest::Client::new();
     
