@@ -69,16 +69,17 @@ pub async fn validate_elevenlabs_hmac(
     request: Request<Body>,
     next: middleware::Next,
 ) -> Result<Response, StatusCode> {
-    println!("\n=== Starting ElevenLabs HMAC Validation ===");
+    tracing::info!("\n=== Starting ElevenLabs HMAC Validation ===");
+
 
     // Get the webhook secret from environment
     let secret = match std::env::var("ELEVENLABS_WEBHOOK_SECRET") {
         Ok(key) => {
-            println!("✅ Successfully retrieved ELEVENLABS_WEBHOOK_SECRET");
+            tracing::info!("✅ Successfully retrieved ELEVENLABS_WEBHOOK_SECRET");
             key
         },
         Err(e) => {
-            println!("❌ Failed to get ELEVENLABS_WEBHOOK_SECRET: {}", e);
+            tracing::info!("❌ Failed to get ELEVENLABS_WEBHOOK_SECRET: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -87,7 +88,7 @@ pub async fn validate_elevenlabs_hmac(
     let signature_header = match headers.get("ElevenLabs-Signature") {
         Some(header) => header,
         None => {
-            println!("❌ No ElevenLabs-Signature header found");
+            tracing::info!("❌ No ElevenLabs-Signature header found");
             return Err(StatusCode::UNAUTHORIZED);
         }
     };
@@ -95,7 +96,7 @@ pub async fn validate_elevenlabs_hmac(
     let signature_str = match signature_header.to_str() {
         Ok(s) => s,
         Err(e) => {
-            println!("❌ Error converting signature header to string: {}", e);
+            tracing::info!("❌ Error converting signature header to string: {}", e);
             return Err(StatusCode::UNAUTHORIZED);
         }
     };
@@ -120,7 +121,7 @@ pub async fn validate_elevenlabs_hmac(
     let tolerance = 30 * 60 * 1000; // 30 minutes in milliseconds
     
     if now - (timestamp_num * 1000) > tolerance {
-        println!("❌ Request timestamp expired");
+        tracing::info!("❌ Request timestamp expired");
         return Err(StatusCode::FORBIDDEN);
     }
 
@@ -142,11 +143,11 @@ pub async fn validate_elevenlabs_hmac(
 
     // Verify signature
     if signature != &expected_hash {
-        println!("❌ HMAC signature validation failed");
+        tracing::info!("❌ HMAC signature validation failed");
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    println!("✅ HMAC validation successful");
+    tracing::info!("✅ HMAC validation successful");
     
     // Reconstruct request and pass to next handler
     let request = Request::from_parts(parts, Body::from(body_bytes));
