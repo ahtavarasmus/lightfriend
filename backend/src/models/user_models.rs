@@ -63,22 +63,30 @@ pub struct NewSubscription {
 pub struct UsageLog {
     pub id: Option<i32>,
     pub user_id: i32,
-    pub activity_type: String, // text or sms
-    pub credits: f32, // the amount of credits used
+    pub conversation_id: Option<String>, // elevenlabs call id
+    pub status: Option<String>, // call is either 'ongoing' or 'done'
+    pub activity_type: String, // sms or call
+    pub credits: Option<f32>, // the amount of credits used
     pub created_at: i32, // int timestamp utc epoch
-    pub success: bool, // if call was successful judged by ai
+    pub success: Option<bool>, // if call was successful judged by ai
     pub summary: Option<String>, // if call was not successful store it if user gives permission
+    pub recharge_threshold_timestamp: Option<i32>, // timestamp when credits go below recharge threshold
+    pub zero_credits_timestamp: Option<i32>, // timestamp when credits reach zero
 }
 
 #[derive(Insertable)]
 #[diesel(table_name = usage_logs)]
 pub struct NewUsageLog {
     pub user_id: i32,
+    pub conversation_id: Option<String>,
+    pub status: Option<String>,
     pub activity_type: String,
-    pub credits: f32,
+    pub credits: Option<f32>,
     pub created_at: i32,
-    pub success: bool,
+    pub success: Option<bool>,
     pub summary: Option<String>,
+    pub recharge_threshold_timestamp: Option<i32>,
+    pub zero_credits_timestamp: Option<i32>,
 }
 
 #[derive(Queryable, Selectable, Insertable)]

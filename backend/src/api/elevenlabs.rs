@@ -3,44 +3,16 @@ use axum::{
     extract::State,
     response::Response,
     http::{StatusCode, Request, HeaderMap},
-    body::Body
+    body::{Body, to_bytes}
 };
+use tracing::error;
+use std::error::Error;
 use axum::middleware;
 use std::sync::Arc;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-
-
-#[derive(Deserialize)]
-pub struct ElevenLabsResponse {
-    pub status: String,
-    pub metadata: CallMetaData,
-    pub analysis: Option<Analysis>,
-    pub conversation_initiation_client_data: CallInitiationData,
-}
-
-#[derive(Deserialize)]
-pub struct Analysis {
-    pub call_successful: String, // success, failure, unknown
-    pub transcript_summary: String,
-}
-
-#[derive(Deserialize)]
-pub struct CallMetaData {
-    pub call_duration_secs: i32,
-}
-
-#[derive(Deserialize)]
-pub struct CallInitiationData {
-    pub dynamic_variables: DynVariables,
-}
-
-#[derive(Deserialize)]
-pub struct DynVariables {
-    pub user_id: Option<String>,
-}
 
 
 
@@ -75,10 +47,6 @@ pub struct AgentConfig {
 }
 
 
-
-
-use std::error::Error;
-use tracing::error;
 
 
 pub async fn validate_elevenlabs_secret(
@@ -211,6 +179,42 @@ pub async fn fetch_assistant(
             dynamic_variables.insert("name".to_string(), json!(nickname));
             dynamic_variables.insert("user_info".to_string(), json!(user_info));
             dynamic_variables.insert("user_id".to_string(), json!(user.id));
+
+            let charge_back_threshold= std::env::var("CHARGE_BACK_THRESHOLD")
+                .expect("CHARGE_BACK_THRESHOLD not set")
+                .parse::<f32>()
+                .unwrap_or(2.00);
+            let voice_second_cost = std::env::var("VOICE_SECOND_COST")
+                .expect("VOICE_SECOND_COST not set")
+                .parse::<f32>()
+                .unwrap_or(0.0033);
+
+            let user_current_credits_to_threshold = user.credits - charge_back_threshold;
+            let seconds_to_threshold = (user_current_credits_to_threshold / voice_second_cost) as i32;
+            println!("SEconds_to_threshold: {}", seconds_to_threshold);
+            // following just so it doesn't go negative although i don't think it matters
+            let recharge_threshold_timestamp: i32 = (chrono::Utc::now().timestamp() as i32) + seconds_to_threshold;
+
+            let seconds_to_zero_credits= (user.credits / voice_second_cost) as i32;
+            println!("Seconds to zero credits: {}", seconds_to_zero_credits);
+            let zero_credits_timestamp: i32 = (chrono::Utc::now().timestamp() as i32) + seconds_to_zero_credits as i32;
+
+            // log usage and start call
+            if let Err(e) = state.user_repository.log_usage(
+                user.id,
+                "call",
+                None,
+                None,
+                None,
+                Some(call_sid),
+                Some("ongoing".to_string()),
+                Some(recharge_threshold_timestamp),
+                Some(zero_credits_timestamp),
+            ) {
+                eprintln!("Failed to log call usage: {}", e);
+                // Continue execution even if logging fails
+            }
+
         },
         Ok(None) => {
             println!("No user found for number: {}", caller_number);

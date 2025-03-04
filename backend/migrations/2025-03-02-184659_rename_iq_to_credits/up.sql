@@ -32,7 +32,7 @@ SELECT
     verified,
     iq as credits,
     notify_credits as notify,
-    info,
+    "" AS info,  -- Use an empty string as a default if info doesn't exist
     preferred_number,
     debug_logging_permission,
     charge_when_under,

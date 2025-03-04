@@ -164,28 +164,6 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         }
     };
 
-    match state.user_repository.is_credits_under_threshold(user.id) {
-        Ok(is_under) => {
-            if is_under {
-                println!("User {} credits is under threshold, attempting automatic charge", user.id);
-                // Get user information
-                if user.charge_when_under {
-                    use axum::extract::{State, Path};
-                    let state_clone = Arc::clone(&state);
-                    tokio::spawn(async move {
-                        let _ = crate::handlers::stripe_handlers::automatic_charge(
-                            State(state_clone),
-                            Path(user.id),
-                        ).await;
-                        println!("Recharged the user successfully back up!");
-                    });
-                    println!("recharged the user successfully back up!");
-                }
-            }
-        },
-        Err(e) => eprintln!("Failed to check if user credits is under threshold: {}", e),
-    }
-
     // Check if user has enough credits 
     let message_credits_cost = std::env::var("MESSAGE_COST")
         .expect("MESSAGE_COST not set")
@@ -538,13 +516,42 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                 if let Err(e) = state.user_repository.log_usage(
                     user.id,
                     "sms",
-                    message_credits_cost,  // credits points used
-                    true, // Success
+                    Some(message_credits_cost),  // credits points used
+                    Some(true), // Success
+                    None,
+                    None,
+                    None,
+                    None,
                     None,
                 ) {
                     eprintln!("Failed to log SMS usage: {}", e);
                     // Continue execution even if logging fails
                 }
+                        
+                match state.user_repository.is_credits_under_threshold(user.id) {
+                    Ok(is_under) => {
+                        if is_under {
+                            println!("User {} credits is under threshold, attempting automatic charge", user.id);
+                            // Get user information
+                            if user.charge_when_under {
+                                use axum::extract::{State, Path};
+                                let state_clone = Arc::clone(&state);
+                                tokio::spawn(async move {
+                                    let _ = crate::handlers::stripe_handlers::automatic_charge(
+                                        State(state_clone),
+                                        Path(user.id),
+                                    ).await;
+                                    println!("Recharged the user successfully back up!");
+                                });
+                                println!("recharged the user successfully back up!");
+                            }
+                        }
+                    },
+                    Err(e) => eprintln!("Failed to check if user credits is under threshold: {}", e),
+                }
+
+
+
             }
             (
                 StatusCode::OK,
