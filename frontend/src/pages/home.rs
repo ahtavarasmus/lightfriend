@@ -82,6 +82,31 @@ pub fn landing() -> Html {
                         <h3>{"Perplexity Search"}</h3>
                         <p>{"Get instant answers and information via SMS or voice call."}</p>
                     </div>
+
+                    <div class="feature-item highlight">
+                        <i class="music-icon"></i>
+                        <h3>{"Shazam Integration"}</h3>
+                        <p>{"Identify any song playing around you with a simple call. Get the song details via SMS instantly."}</p>
+                    </div>
+                </div>
+            </section>
+
+            // New Shazam Showcase Section
+            <section class="shazam-showcase">
+                <h2>{"Discover Music Anywhere"}</h2>
+                <div class="showcase-content">
+                    <div class="showcase-text">
+                        <h3>{"How It Works:"}</h3>
+                        <ol>
+                            <li>{"Text 'identify song' to your lightfriend number"}</li>
+                            <li>{"Receive a call from lightfriend"}</li>
+                            <li>{"Play the music you want to identify"}</li>
+                            <li>{"Get song details via SMS instantly"}</li>
+                        </ol>
+                        <p class="showcase-highlight">
+                            {"Perfect for dumbphone users who want to identify songs without a smartphone!"}
+                        </p>
+                    </div>
                 </div>
             </section>
 
