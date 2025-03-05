@@ -341,63 +341,6 @@ pub fn Home() -> Html {
                             <br/>
                             <br/>
                         </p>
-                        {
-                            if let Some(profile) = (*profile_data).as_ref() {
-                                html! {
-                                    <div class="call-section">
-                                        <button 
-                                            class="start-call-btn"
-                                            onclick={{
-                                                let user_id = profile.id.to_string();
-                                                Callback::from(move |_| {
-                                                    let user_id = user_id.clone();
-                                                    if let Some(token) = window()
-                                                        .and_then(|w| w.local_storage().ok())
-                                                        .flatten()
-                                                        .and_then(|storage| storage.get_item("token").ok())
-                                                        .flatten()
-                                                    {
-                                                        wasm_bindgen_futures::spawn_local(async move {
-                                                            let response = Request::post(&format!("{}/api/start-call/{}", config::get_backend_url(), user_id))
-                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                .send()
-                                                                .await;
-                                                            
-                                                        match response {
-                                                            Ok(resp) => {
-                                                                if resp.status() == 200 {
-                                                                    // You could show a success message here
-                                                                    if let Some(window) = window() {
-                                                                            let _ = window.alert_with_message("Call initiated! You should receive a call shortly.");
-                                                                        }
-                                                                    } else {
-                                                                        if let Some(window) = window() {
-                                                                            let _ = window.alert_with_message("Failed to initiate call. Please try again.");
-                                                                        }
-                                                                    }
-                                                                },
-                                                                Err(_) => {
-                                                                    if let Some(window) = window() {
-                                                                        let _ = window.alert_with_message("Failed to initiate call. Please try again.");
-                                                                    }
-                                                                }
-                                                            }
-                                                        });
-                                                    }
-                                                })
-                                            }}
-                                        >
-                                            {"Start Song Recognition Call"}
-                                        </button>
-                                        <p class="call-instruction">
-                                            {"Click to start a call for song recognition. When you answer, play the song you want to identify."}
-                                        </p>
-                                    </div>
-                                }
-                            } else {
-                                html! {}
-                            }
-                        }
 
                         <div class="feature-status">
                             <h3>{"Currently Available"}</h3>
