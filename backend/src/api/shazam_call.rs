@@ -17,6 +17,7 @@ use crate::repositories::user_repository::UserRepository;
 use crate::repositories::user_conversations::UserConversations;
 use hound::{WavWriter, WavSpec};
 use std::io::Cursor;
+use tracing::{info, error};
 
 pub type CallSessions = Arc<Mutex<HashMap<String, broadcast::Sender<Vec<u8>>>>>;
 pub type UserCallMap = Arc<Mutex<HashMap<String, String>>>; // callSid -> user_id
@@ -65,17 +66,28 @@ pub async fn start_call_for_user(
     let server_url = std::env::var("SERVER_URL").expect("SERVER_URL must be set");
     let twiml_url = format!("{}/api/twiml", server_url);
 
+
+
+    // Log all parameters for debugging
+    info!("Initiating call with:");
+    info!("Account SID: {}", account_sid);
+    info!("From number: {}", from_number);
+    info!("To number: {}", to_number);
+    info!("TwiML URL: {}", twiml_url);
+    info!("TWILIO_SHAZAM_SERVER_URL: {}", std::env::var("TWILIO_SHAZAM_SERVER_URL").unwrap_or_default());
+
+
     let _call = OutboundCall::new(from_number.as_str(), &to_number, twiml_url.as_str());
     match twilio_client.make_call(_call).await {
         Ok(response) => {
             let mut user_calls_lock = state.user_calls.lock().await;
             let call_sid = response.sid.to_string();
             user_calls_lock.insert(call_sid.clone(), user_id.clone());
-            println!("Call initiated for user {}: {}", user_id, call_sid);
+            info!("Call initiated for user {}: {}", user_id, call_sid);
             format!("Call initiated for user {}: {}", user_id, call_sid)
         }
         Err(e) => {
-            println!("Error initiating call for user {}: {:?}", user_id, e);
+            info!("Error initiating call for user {}: {:?}", user_id, e);
             format!("Error initiating call: {:?}", e)
         }
     }
