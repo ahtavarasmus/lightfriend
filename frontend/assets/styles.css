@@ -847,25 +847,6 @@ button[type="submit"].loading::after {
     }
 }
 
-.development-links {
-    margin-top: 2rem;
-    font-size: 0.9rem;
-    color: #666;
-}
-
-.development-links p {
-    margin: 0.5rem 0;
-}
-
-.development-links a {
-    color: #007bff;
-    text-decoration: none;
-}
-
-.development-links a:hover {
-    text-decoration: underline;
-}
-
 .iq-button {
     background: linear-gradient(45deg, #FFD700, #FFA500);
     color: #000;
@@ -1135,11 +1116,7 @@ button[type="submit"].loading::after {
     letter-spacing: 2px;
 }
 
-.instruction-text {
-    color: #999;
-    font-size: 0.9rem;
-    margin-top: 1rem;
-}
+
 
 .logout-button {
     background: linear-gradient(45deg, #1E90FF, #4169E1);
