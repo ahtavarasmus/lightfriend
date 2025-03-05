@@ -378,7 +378,7 @@ pub async fn register(
         notify: true,
         debug_logging_permission: false,
         verified: false,
-        credits: 2.00,
+        credits: 1.00,
         charge_when_under: false,
     };
 
