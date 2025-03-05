@@ -3,7 +3,6 @@ use std::env;
 use std::error::Error;
 use std::sync::Arc;
 use crate::AppState;
-use crate::api::twilio_utils::send_conversation_message;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use axum::{
@@ -106,7 +105,7 @@ pub async fn send_shazam_answer_to_user(
         .get_conversation(&user, sender_number.to_string())
         .await?;
 
-    send_conversation_outmessage(
+    crate::api::twilio_utils::send_conversation_message(
         &conversation.conversation_sid,
         &sender_number,
         message,
@@ -624,7 +623,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
     };
 
     // Send the final response to the conversation
-    match send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number,&final_response).await {
+    match crate::api::twilio_utils::send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number,&final_response).await {
         Ok(_) => {
             if !fail {
                 // Deduct credits for the message
