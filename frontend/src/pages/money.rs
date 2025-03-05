@@ -95,11 +95,13 @@ pub fn pricing() -> Html {
                     </div>
                     <ul>
                         <li>{"Smart AI Assistant"}</li>
-                        <li>{"Calendar Integration"}</li>
-                        <li>{"WhatsApp Integration"}</li>
-                        <li>{"Telegram Integration"}</li>
-                        <li>{"Email Access"}</li>
                         <li>{"Perplexity Search"}</li>
+                        <li>{"Weather"}</li>
+                        <li>{"Shazam"}</li>
+                        <li>{"Calendar Integration(coming)"}</li>
+                        <li>{"WhatsApp Integration(coming)"}</li>
+                        <li>{"Telegram Integration(coming"}</li>
+                        <li>{"Email Access(coming)"}</li>
                         <li>{"24/7 Availability"}</li>
                     </ul>
                 </div>
