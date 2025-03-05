@@ -253,7 +253,7 @@ async fn process_broadcast_messages(
 
         match conversation_result {
             Ok(conversation) => {
-                match crate::api::twilio_sms::send_conversation_outmessage(
+                match crate::api::twilio_utils::send_conversation_message(
                     &conversation.conversation_sid,
                     &sender_number,
                     &message,
