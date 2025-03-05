@@ -77,7 +77,7 @@ pub fn pricing() -> Html {
                     <div class="card-header">
                         <h3>{"SMS Messages"}</h3>
                         <div class="price">
-                            <span class="amount">{"€0.20"}</span>
+                            <span class="amount">{"€0.15"}</span>
                             <span class="period">{"/message"}</span>
                         </div>
                     </div>
