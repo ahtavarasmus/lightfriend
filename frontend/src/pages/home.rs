@@ -8,11 +8,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 
-const PHONE_NUMBERS: &[(&str, &str)] = &[
-    ("us", "+18153684737"),
-    ("fin", "+358454901522"),
-    ("nl", "+3197006520696"),
-    ("cz", "+420910921902 (no sms)"),
+const PHONE_NUMBERS: &[(&str, &str, Option<&str>)] = &[
+    ("us", "+18153684737", None),
+    ("fin", "+358454901522", None),
+    ("nl", "+3197006520696", None),
+    ("cz", "+420910921902", Some("(no sms)")),
 ];
 
 #[derive(Deserialize, Clone)]
@@ -297,16 +297,21 @@ pub fn Home() -> Html {
                             
                             if *is_expanded {
                                 <div class="phone-display">
-                                    { PHONE_NUMBERS.iter().map(|(country, number)| {
-                                        let number = number.to_string();
+                                    { PHONE_NUMBERS.iter().map(|(country, number, note)| {
+                                        let number_clean = number.to_string();  // Store clean number for API use
+                                        let display_number = if let Some(note_text) = note {
+                                            format!("{} {}", number, note_text)
+                                        } else {
+                                            number.to_string()
+                                        };
                                         let is_selected = if let Some(profile) = (*profile_data).as_ref() {
-                                            profile.preferred_number.as_ref().map_or(false, |pref| pref == &number)
+                                            profile.preferred_number.as_ref().map_or(false, |pref| pref == &number_clean)
                                         } else {
                                             false
                                         };
                                         
                                         let onclick = {
-                                            let number = number.clone();
+                                            let number = number_clean.clone();
                                             let profile_data = profile_data.clone();
                                             let is_expanded = is_expanded.clone();
                                             
@@ -349,7 +354,7 @@ pub fn Home() -> Html {
                                             >
                                                 <div class="number-info">
                                                     <span class="country">{country}</span>
-                                                    <span class="number">{number}</span>
+                                                    <span class="number">{display_number}</span>
                                                     if is_selected {
                                                         <span class="selected-indicator">{"✓"}</span>
                                                     }
@@ -359,6 +364,7 @@ pub fn Home() -> Html {
                                     }).collect::<Html>() }
                                 </div>
                             }
+                            
                         </div>
                         
                         <p class="instruction-text">
