@@ -351,7 +351,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
                 name: String::from("use_shazam"),
-                description: Some(String::from("Shazam tool identifies the song and the artist from audio clip. This tool gives the user a call which when answered can listen to the song audio and sends the song name to user as sms. This returns a shazam listener for the user.")),
+                description: Some(String::from("Shazam tool identifies the song and the artist from audio clip. This tool gives the user a call which when answered can listen to the song audio and sends the song name to user as sms. This returns a shazam listener for the user. If user asks to use shazam, it means you have to call this tool.")),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
                     properties: Some(shazam_properties),
