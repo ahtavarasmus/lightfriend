@@ -351,12 +351,16 @@ pub async fn handle_shazam_tool_call(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Received shazam request with message");
+    tracing::info!("Received shazam request with params: {:?}", params);
     
     // Get user_id from query params
     let user_id_str = match params.get("user_id") {
-        Some(id) => id,
+        Some(id) => {
+            tracing::debug!("Found user_id in params: {}", id);
+            id
+        },
         None => {
+            tracing::error!("Missing user_id in query parameters");
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(json!({
@@ -368,8 +372,12 @@ pub async fn handle_shazam_tool_call(
 
     // Convert String to i32
     let user_id: i32 = match user_id_str.parse() {
-        Ok(id) => id,
-        Err(_) => {
+        Ok(id) => {
+            tracing::debug!("Successfully parsed user_id to integer: {}", id);
+            id
+        },
+        Err(e) => {
+            tracing::error!("Failed to parse user_id '{}' to integer: {}", user_id_str, e);
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(json!({
@@ -383,13 +391,17 @@ pub async fn handle_shazam_tool_call(
     let state_clone = Arc::clone(&state);
     let user_id_string = user_id.to_string();
     
+    tracing::info!("Spawning new task for Shazam call for user_id: {}", user_id);
     tokio::spawn(async move {
+        tracing::debug!("Starting Shazam call for user_id: {}", user_id_string);
         crate::api::shazam_call::start_call_for_user(
             axum::extract::Path(user_id_string),
             axum::extract::State(state_clone),
         ).await;
+        tracing::debug!("Completed Shazam call task for user_id: {}", user_id);
     });
 
+    tracing::info!("Successfully initiated Shazam call for user_id: {}", user_id);
     Ok(Json(json!({
         "status": "success",
         "message": "Shazam call initiated",
