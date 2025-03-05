@@ -56,37 +56,37 @@ pub fn landing() -> Html {
             // Features Section
             <section class="features">
                 <h2>{"Essential Tools, Minimal Distractions"}</h2>
-                <p>{"Access everything you need through your dumbphone, while staying focused and present."}</p>
+                <p>{"Access everything you need with sms and calling."}</p>
                 
                 <div class="features-grid">
                     <div class="feature-item">
                         <i class="calendar-icon"></i>
                         <h3>{"Calendar Access"}</h3>
-                        <p>{"Check and manage your schedule through simple voice calls or text messages."}</p>
+                        <p>{"Check and manage your schedule."}</p>
                     </div>
                     
                     <div class="feature-item">
                         <i class="email-icon"></i>
                         <h3>{"Email Integration"}</h3>
-                        <p>{"Stay on top of important emails without the constant notifications."}</p>
+                        <p>{"Stay on top of important emails."}</p>
                     </div>
 
                     <div class="feature-item">
                         <i class="message-icon"></i>
                         <h3>{"Smart Messaging"}</h3>
-                        <p>{"Access your messages across platforms through your dumbphone."}</p>
+                        <p>{"Access your messages across platforms."}</p>
                     </div>
 
                     <div class="feature-item">
                         <i class="search-icon"></i>
                         <h3>{"Perplexity Search"}</h3>
-                        <p>{"Get instant answers and information via SMS or voice call."}</p>
+                        <p>{"Get instant answers and information."}</p>
                     </div>
 
                     <div class="feature-item highlight">
                         <i class="music-icon"></i>
                         <h3>{"Shazam Integration"}</h3>
-                        <p>{"Identify any song playing around you with a simple call. Get the song details via SMS instantly."}</p>
+                        <p>{"Identify any song playing around you."}</p>
                     </div>
                 </div>
             </section>
