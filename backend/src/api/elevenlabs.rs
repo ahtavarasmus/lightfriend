@@ -347,7 +347,55 @@ pub async fn handle_send_sms_tool_call(
 }
 
 
+pub async fn handle_shazam_tool_call(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Received shazam request with message");
+    
+    // Get user_id from query params
+    let user_id_str = match params.get("user_id") {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing user_id query parameter"
+                }))
+            ));
+        }
+    };
 
+    // Convert String to i32
+    let user_id: i32 = match user_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Invalid user_id format, must be an integer"
+                }))
+            ));
+        }
+    };
+
+    // Spawn a new thread to handle the Shazam call
+    let state_clone = Arc::clone(&state);
+    let user_id_string = user_id.to_string();
+    
+    tokio::spawn(async move {
+        crate::api::shazam_call::start_call_for_user(
+            axum::extract::Path(user_id_string),
+            axum::extract::State(state_clone),
+        ).await;
+    });
+
+    Ok(Json(json!({
+        "status": "success",
+        "message": "Shazam call initiated",
+        "user_id": user_id
+    })))
+}
 
 pub async fn handle_perplexity_tool_call(
     State(_state): State<Arc<AppState>>,

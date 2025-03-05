@@ -4,6 +4,8 @@ use axum::{
     Router,
     middleware
 };
+use tokio::sync::Mutex;
+use std::collections::HashMap;
 use diesel::prelude::*;
 use diesel::r2d2::{self, ConnectionManager};
 use tower_http::cors::{CorsLayer, Any};
@@ -27,8 +29,7 @@ mod api {
     pub mod twilio_utils;
     pub mod elevenlabs;
     pub mod elevenlabs_webhook;
-    pub mod paddle_webhooks;
-    pub mod paddle_utils;
+    pub mod shazam_call;
 }
 
 
@@ -57,6 +58,7 @@ use handlers::stripe_handlers;
 use api::twilio_sms;
 use api::elevenlabs;
 use api::elevenlabs_webhook;
+use api::shazam_call;
 
 
 
@@ -71,6 +73,8 @@ pub struct AppState {
     db_pool: DbPool,
     user_repository: Arc<UserRepository>,
     user_conversations: Arc<UserConversations>,
+    sessions: shazam_call::CallSessions,
+    user_calls: shazam_call::UserCallMap,
 }
 
 pub fn validate_env() {
@@ -119,6 +123,16 @@ pub fn validate_env() {
         .expect("VOICE_SECOND_COST must be set");
     let _ = std::env::var("CHARGE_BACK_THRESHOLD")
         .expect("CHARGE_BACK_THRESHOLD must be set");
+    let _ = std::env::var("TWILIO_ACCOUNT_SID")
+        .expect("TWILIO_ACCOUNT_SID must be set");
+    let _ = std::env::var("TWILIO_AUTH_TOKEN")
+        .expect("TWILIO_AUTH_TOKEN must be set");
+    let _ = std::env::var("SHAZAM_PHONE_NUMBER")
+        .expect("SHAZAM_PHONE_NUMBER must be set");
+    let _ = std::env::var("SHAZAM_API_KEY")
+        .expect("SHAZAM_API_KEY must be set");
+    let _ = std::env::var("SERVER_URL")
+        .expect("SERVER_URL must be set");
 
 
 }
@@ -153,9 +167,13 @@ async fn main() {
 
     let state = Arc::new(AppState {
         db_pool: pool,
-        user_repository,
-        user_conversations,
+        user_repository: user_repository.clone(),
+        user_conversations: user_conversations.clone(),
+        sessions: Arc::new(Mutex::new(HashMap::new())),
+        user_calls: Arc::new(Mutex::new(HashMap::new())),
     });
+
+
 
     // keep the vapi around if they become cracked at some point
     /*
@@ -170,6 +188,7 @@ async fn main() {
         .route("/api/call/perplexity", post(elevenlabs::handle_perplexity_tool_call))
         .route("/api/call/sms", post(elevenlabs::handle_send_sms_tool_call))
         .route("/api/call/weather", post(elevenlabs::handle_weather_tool_call))
+        .route("/api/call/shazam", get(elevenlabs::handle_shazam_tool_call))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 
     let elevenlabs_webhook_routes = Router::new()
@@ -204,7 +223,13 @@ async fn main() {
         .route("/api/stripe/checkout-session/{user_id}", post(stripe_handlers::create_checkout_session))
         .route("/api/stripe/webhook", post(stripe_handlers::stripe_webhook))
         .route("/api/stripe/automatic-charge/{user_id}", post(stripe_handlers::automatic_charge))
-        .route("/api/stripe/customer-portal/{user_id}", get(stripe_handlers::create_customer_portal_session)) // New route
+        .route("/api/stripe/customer-portal/{user_id}", get(stripe_handlers::create_customer_portal_session))
+        // Shazam routes
+        .route("/api/start-call/{user_id}", post(shazam_call::start_call_for_user))
+        .route("/api/twiml", get(shazam_call::twiml_handler).post(shazam_call::twiml_handler))
+        .route("/api/stream", get(shazam_call::stream_handler))
+        .route("/api/listen/{call_sid}", get(shazam_call::listen_handler))
+
 
 
         /*
@@ -231,10 +256,22 @@ async fn main() {
                 .expose_headers([axum::http::header::CONTENT_TYPE])
         )
         .with_state(state.clone());
+    // Spawn the scheduler
+    let state_for_scheduler = state.clone();
     // Start the scheduler
-    let state_for_scheduler = state;
     tokio::spawn(async move {
         jobs::scheduler::start_scheduler(state_for_scheduler).await;
+    });
+
+    // Spawn the Shazam audio processing task
+    let shazam_state = crate::api::shazam_call::ShazamState {
+        sessions: state.sessions.clone(),
+        user_calls: state.user_calls.clone(),
+        user_repository: state.user_repository.clone(),
+        user_conversations: state.user_conversations.clone(),
+    };
+    tokio::spawn(async move {
+        crate::api::shazam_call::process_audio_with_shazam(Arc::new(shazam_state)).await;
     });
 
     use tokio::net::TcpListener;

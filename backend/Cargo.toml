@@ -5,7 +5,8 @@ edition = "2021"
 
 [dependencies]
 tokio-cron-scheduler = "0.9"
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
+futures = "0.3"
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -18,9 +19,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing = "0.1"
 bcrypt = "0.10"
 jsonwebtoken = "8.1"
-twilio = "0.1"
+twilio = "1.1"
 rand = "0.8"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["multipart", "json"] }
+hound = "3.5"
 base64 = "0.21"
 rusqlite = { version = "0.31.0", features = ["bundled"] }  # Auto-compiles SQLite
 sentry = "0.36.0"
