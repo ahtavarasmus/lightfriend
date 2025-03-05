@@ -83,28 +83,50 @@ struct TwilioResponse {
     message: String,
 }
 
-
 pub async fn send_shazam_answer_to_user(
     state: Arc<crate::shazam_call::ShazamState>,
     user_id: i32,
     message: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    tracing::info!("Starting send_shazam_answer_to_user for user_id: {}", user_id);
+    tracing::info!("Message to send: {}", message);
+
     let user = match state.user_repository.find_by_id(user_id) {
-        Ok(Some(user)) => user,
-        Ok(None) => return Err("User not found".into()),
-        Err(e) => return Err(Box::new(e)),
+        Ok(Some(user)) => {
+            tracing::info!("Found user with phone number: {}", user.phone_number);
+            user
+        },
+        Ok(None) => {
+            tracing::info!("User not found with id: {}", user_id);
+            return Err("User not found".into());
+        },
+        Err(e) => {
+            eprintln!("Database error while finding user {}: {}", user_id, e);
+            return Err(Box::new(e));
+        },
     };
 
+    tracing::info!("Determining sender number for user {}", user_id);
     let sender_number = match user.preferred_number.clone() {
-        Some(number) => number,
-        None => std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"),
+        Some(number) => {
+            tracing::info!("Using user's preferred number: {}", number);
+            number
+        },
+        None => {
+            let number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set");
+            tracing::info!("Using default SHAZAM_PHONE_NUMBER: {}", number);
+            number
+        },
     };
 
+    tracing::info!("Getting conversation for user {} with sender number {}", user_id, sender_number);
     let conversation = state
         .user_conversations
         .get_conversation(&user, sender_number.to_string())
         .await?;
+    tracing::info!("Retrieved conversation with SID: {}", conversation.conversation_sid);
 
+    tracing::info!("Sending message to conversation {}", conversation.conversation_sid);
     crate::api::twilio_utils::send_conversation_message(
         &conversation.conversation_sid,
         &sender_number,
@@ -112,14 +134,13 @@ pub async fn send_shazam_answer_to_user(
     )
     .await
     .map_err(|e| {
-        eprintln!("Failed to send message to {}: {}", user.phone_number, e);
+        eprintln!("Failed to send message to {} (conversation {}): {}", user.phone_number, conversation.conversation_sid, e);
         e
     })?;
 
-    println!("Successfully sent message to {}", user.phone_number);
+    tracing::info!("Successfully sent Shazam answer to user {} at {}", user_id, user.phone_number);
     Ok(())
 }
-
 
 
 
