@@ -22,15 +22,11 @@ use tracing::{info, error};
 pub type CallSessions = Arc<Mutex<HashMap<String, broadcast::Sender<Vec<u8>>>>>;
 pub type UserCallMap = Arc<Mutex<HashMap<String, String>>>; // callSid -> user_id
 
-use std::time::Instant;
-
 pub struct ShazamState {
     pub sessions: CallSessions,
     pub user_calls: UserCallMap,
     pub user_repository: Arc<UserRepository>,
     pub user_conversations: Arc<UserConversations>,
-    pub attempt_counters: Arc<Mutex<HashMap<String, u32>>>,
-    pub start_times: Arc<Mutex<HashMap<String, Instant>>>,
 }
 
 impl ShazamState {
@@ -40,8 +36,6 @@ impl ShazamState {
             user_calls: Arc::new(Mutex::new(HashMap::new())),
             user_repository,
             user_conversations,
-            attempt_counters: Arc::new(Mutex::new(HashMap::new())),
-            start_times: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -141,12 +135,6 @@ pub async fn handle_stream(mut socket: WebSocket, sessions: CallSessions) {
                         call_sid = json["start"]["callSid"].as_str().unwrap_or("").to_string();
                         let mut sessions_lock = sessions.lock().await;
                         sessions_lock.insert(call_sid.clone(), tx.clone());
-                        
-                        // Initialize attempt counter and start time for new call
-                        let mut attempt_counters = state.attempt_counters.lock().await;
-                        attempt_counters.insert(call_sid.clone(), 0);
-                        let mut start_times = state.start_times.lock().await;
-                        start_times.insert(call_sid.clone(), Instant::now());
                         let server_url = std::env::var("TWILIO_SHAZAM_SERVER_URL").expect("TWILIO_SHAZAM_SERVER_URL must be set");
                         println!("Call started: {}. Listen at ws://{}/api/listen/{}", call_sid, server_url, call_sid);
                         println!("Waiting for audio data...");
@@ -207,8 +195,6 @@ pub async fn process_audio_with_shazam(state: Arc<ShazamState>) {
     let http_client = HttpClient::new();
     let account_sid = std::env::var("TWILIO_ACCOUNT_SID").expect("TWILIO_ACCOUNT_SID must be set");
     let auth_token = std::env::var("TWILIO_AUTH_TOKEN").expect("TWILIO_AUTH_TOKEN must be set");
-    let twilio_client = twilio::Client::new(&account_sid, &auth_token);
-
 
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
@@ -256,33 +242,11 @@ pub async fn process_audio_with_shazam(state: Arc<ShazamState>) {
 
                     // if song name is not unknown we should end the call when we send the message
 
-                    // Update attempt counter
-                    let attempts = {
-                        let mut attempt_counters = state.attempt_counters.lock().await;
-                        let count = attempt_counters.entry(call_sid.clone()).or_insert(0);
-                        *count += 1;
-                        *count
-                    };
-                    
-                    // Check if we should continue processing
-                    let should_end_call = {
-                        let start_times = state.start_times.lock().await;
-                        attempts >= 4 || start_times.get(call_sid)
-                            .map_or(false, |start| start.elapsed().as_secs() >= 90)
-                    };
-                    
-                    if !to_number.is_empty() {
-                        let is_successful_identification = !song_name.starts_with("Error") && 
-                            !song_name.starts_with("Failed") && 
-                            !song_name.contains("Unknown song");
-                            
-                        if is_successful_identification || should_end_call {
-                            println!("\n=== Song Identification Status ===");
-                            if is_successful_identification {
-                                println!("Successfully identified: {}", song_name);
-                            } else {
-                                println!("Ending call after {} attempts", attempts);
-                            }
+                    if !to_number.is_empty() && !song_name.starts_with("Error") && 
+                       !song_name.starts_with("Failed") && !song_name.contains("Unknown song") {
+                        println!("\n=== Song Identification Success ===");
+                        println!("Successfully identified: {}", song_name);
+                        
                         
                         // Find user by phone number
                         match state.user_repository.find_by_phone_number(&to_number) {
@@ -298,22 +262,6 @@ pub async fn process_audio_with_shazam(state: Arc<ShazamState>) {
                                     }
                                     Err(e) => {
                                         eprintln!("Failed to send Shazam result to user {}: {}", user.id, e);
-                                    }
-                                }
-                                
-                                // End the call if we successfully identified the song or reached limits
-                                if is_successful_identification || should_end_call {
-                                    if let Err(e) = twilio_client.end_call(&call_sid).await {
-                                        eprintln!("Failed to end call {}: {:?}", call_sid, e);
-                                    } else {
-                                        println!("Successfully ended call {}", call_sid);
-                                        // Clean up all call-related state
-                                        let mut attempt_counters = state.attempt_counters.lock().await;
-                                        attempt_counters.remove(&call_sid);
-                                        let mut start_times = state.start_times.lock().await;
-                                        start_times.remove(&call_sid);
-                                        let mut sessions_lock = state.sessions.lock().await;
-                                        sessions_lock.remove(&call_sid);
                                     }
                                 }
                             }
