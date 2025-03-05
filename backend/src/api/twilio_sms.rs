@@ -85,6 +85,45 @@ struct TwilioResponse {
 }
 
 
+pub async fn send_shazam_answer_to_user(
+    state: Arc<crate::shazam_call::ShazamState>,
+    user_id: i32,
+    message: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let user = match state.user_repository.find_by_id(user_id) {
+        Ok(Some(user)) => user,
+        Ok(None) => return Err("User not found".into()),
+        Err(e) => return Err(Box::new(e)),
+    };
+
+    let sender_number = match user.preferred_number.clone() {
+        Some(number) => number,
+        None => std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"),
+    };
+
+    let conversation = state
+        .user_conversations
+        .get_conversation(&user, sender_number.to_string())
+        .await?;
+
+    send_conversation_outmessage(
+        &conversation.conversation_sid,
+        &sender_number,
+        message,
+    )
+    .await
+    .map_err(|e| {
+        eprintln!("Failed to send message to {}: {}", user.phone_number, e);
+        e
+    })?;
+
+    println!("Successfully sent message to {}", user.phone_number);
+    Ok(())
+}
+
+
+
+
 pub async fn send_conversation_outmessage(
     conversation_sid: &str,
     from_number: &str,
@@ -209,7 +248,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: format!("You are a friendly and helpful AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Be direct and natural in your answers. Since users are using SMS, keep responses clear and brief. Avoid suggesting actions requiring smartphones or internet. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages. Use simple language and focus on the most important information first. This is what the user wants to you to know: {}. When you use tools make sure to add relevant info about the user to the tool call so they can act accordingly.", Utc::now().format("%Y-%m-%d"), user_info),
+        content: format!("You are a friendly and helpful AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Be direct and natural in your answers. Since users are using SMS, keep responses clear and brief. Avoid suggesting actions requiring smartphones or internet. Do not ask for confirmation to use tools. If there is even slightest hint that they could be helpful, use them immediately. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages. Use simple language and focus on the most important information first. This is what the user wants to you to know: {}. When you use tools make sure to add relevant info about the user to the tool call so they can act accordingly.", Utc::now().format("%Y-%m-%d"), user_info),
     }];
     
     // Process the message body to remove "forget" if it exists at the start
@@ -272,6 +311,17 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         }),
     );
 
+
+    let mut shazam_properties = HashMap::new();
+    shazam_properties.insert(
+        "param".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("can be anything, won't get used anyways".to_string()),
+            ..Default::default()
+        }),
+    );
+
     // Define tools
     let tools = vec![chat_completion::Tool {
             r#type: chat_completion::ToolType::Function,
@@ -294,6 +344,18 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     schema_type: types::JSONSchemaType::Object,
                     properties: Some(weather_properties),
                     required: Some(vec![String::from("location"), String::from("units")]),
+                },
+            },
+        },
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: String::from("use_shazam"),
+                description: Some(String::from("Shazam tool identifies the song and the artist from audio clip. This tool gives the user a call which when answered can listen to the song audio and sends the song name to user as sms. This returns a shazam listener for the user.")),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(shazam_properties),
+                    required: None,
                 },
             },
         },
@@ -481,6 +543,18 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                             continue;
                         }
                     };
+                } else if name == "use_shazam" {
+                    println!("Executing use_shazam tool call");
+                    let user_id = user.id;
+                    let state_clone = state.clone();
+                    tokio::spawn(async move {
+                        crate::api::shazam_call::start_call_for_user(
+                            axum::extract::Path(user_id.to_string()),
+                            axum::extract::State(state_clone),
+                        ).await;
+                    });
+                    tool_answers.insert(tool_call_id, "Shazam initiated. Lightfriend should be calling you now. Song name will be texted to you. Say this in the final response.".to_string());
+
                 }
             }
 

@@ -341,6 +341,64 @@ pub fn Home() -> Html {
                             <br/>
                             <br/>
                         </p>
+                        {
+                            if let Some(profile) = (*profile_data).as_ref() {
+                                html! {
+                                    <div class="call-section">
+                                        <button 
+                                            class="start-call-btn"
+                                            onclick={{
+                                                let user_id = profile.id.to_string();
+                                                Callback::from(move |_| {
+                                                    let user_id = user_id.clone();
+                                                    if let Some(token) = window()
+                                                        .and_then(|w| w.local_storage().ok())
+                                                        .flatten()
+                                                        .and_then(|storage| storage.get_item("token").ok())
+                                                        .flatten()
+                                                    {
+                                                        wasm_bindgen_futures::spawn_local(async move {
+                                                            let response = Request::post(&format!("{}/api/start-call/{}", config::get_backend_url(), user_id))
+                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                .send()
+                                                                .await;
+                                                            
+                                                        match response {
+                                                            Ok(resp) => {
+                                                                if resp.status() == 200 {
+                                                                    // You could show a success message here
+                                                                    if let Some(window) = window() {
+                                                                            let _ = window.alert_with_message("Call initiated! You should receive a call shortly.");
+                                                                        }
+                                                                    } else {
+                                                                        if let Some(window) = window() {
+                                                                            let _ = window.alert_with_message("Failed to initiate call. Please try again.");
+                                                                        }
+                                                                    }
+                                                                },
+                                                                Err(_) => {
+                                                                    if let Some(window) = window() {
+                                                                        let _ = window.alert_with_message("Failed to initiate call. Please try again.");
+                                                                    }
+                                                                }
+                                                            }
+                                                        });
+                                                    }
+                                                })
+                                            }}
+                                        >
+                                            {"Start Song Recognition Call"}
+                                        </button>
+                                        <p class="call-instruction">
+                                            {"Click to start a call for song recognition. When you answer, play the song you want to identify."}
+                                        </p>
+                                    </div>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
+
                         <div class="feature-status">
                             <h3>{"Currently Available"}</h3>
                             <h4>{"Tools"}</h4>
@@ -348,16 +406,19 @@ pub fn Home() -> Html {
                                 <li>{"Perplexity AI search"}</li>
                                 <li>{"Dedicated Weather search"}</li>
                                 <li>{"Send info to you by sms during voice calls"}</li>
+                                <li>{"Shazam song recognition - Get a call, play the song, receive the song info via SMS"}</li>
                             </ul>
                             <h4>{"Methods"}</h4>
                             <ul>
                                 <li>{"Voice calling"}</li>
                                 <li>{"Text messaging"}</li>
                             </ul>
+
                             <h4>{"Tips"}</h4>
                             <ul>
                                 <li>{"You can ask multiple questions in a single SMS to save money. Note that answers will be less detailed due to SMS character limits. Example: 'did sam altman tweet today and whats the weather?' -> 'Sam Altman hasn't tweeted today. Last tweet was on March 3, a cryptic \"!!!\" image suggesting a major AI development. Weather in Tampere: partly cloudy, 0°C, 82% humidity, wind at 4 m/s.'"}</li>
                                 <li>{"Start your message with 'forget' to make the assistant forget previous conversation context and start fresh. Note that this only applies to that one message - the next message will again remember previous context."}</li>
+                                <li>{"For Shazam song recognition, ask the assistant to use shazam or identify a song. Then assistant will make a call to you and it will listen to audio. Once recognized the song name will be texted to you and you can close the call."}</li>
                             </ul>
                             <h3>{"Coming Soon"}</h3>
                             <ul>
