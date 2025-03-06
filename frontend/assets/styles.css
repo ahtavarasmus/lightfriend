@@ -48,15 +48,6 @@ body {
 }
 
 
-.landing-page {
-    position: relative;
-    min-height: 100vh;
-    background-color: #1a1a1a;
-    color: #ffffff;
-    font-family: system-ui, -apple-system, sans-serif;
-    margin: 0 auto;
-}
-
 .top-nav {
     position: fixed;
     top: 0;
