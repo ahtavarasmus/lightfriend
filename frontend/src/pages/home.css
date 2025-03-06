@@ -219,6 +219,122 @@
     }
 }
 
+.landing-page {
+    position: relative;
+    min-height: 100vh;
+    background-color: #1a1a1a;
+    color: #ffffff;
+    font-family: system-ui, -apple-system, sans-serif;
+    margin: 0 auto;
+    width: 100%;
+    overflow-x: hidden;
+    box-sizing: border-box;
+}
+
+.hero h1 {
+    font-size: 4.5rem;
+    line-height: 1.1;
+    margin-bottom: 1.5rem;
+    background: linear-gradient(
+        45deg,
+        #fff,
+        rgba(126, 178, 255, 0.8)
+    );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 700;
+    max-width: 900px;
+    position: relative;
+    width: 100%;
+    box-sizing: border-box;
+    word-wrap: break-word;
+}
+
+@media (max-width: 768px) {
+    .landing-page {
+        padding: 0;
+    }
+
+    .hero {
+        padding: 2rem 1rem;
+        padding-top: 100px;
+    }
+    
+    .hero h1 {
+        font-size: 2rem;
+        padding: 0 1rem;
+    }
+
+    .hero-subtitle {
+        font-size: 1rem;
+        padding: 0 1rem;
+    }
+
+    .features {
+        padding: 3rem 1rem;
+    }
+    
+    .features h2 {
+        font-size: 1.75rem;
+        padding: 0 1rem;
+    }
+
+    .features-grid {
+        padding: 1rem;
+        margin-top: 2rem;
+    }
+
+    .how-it-works {
+        padding: 3rem 1rem;
+    }
+
+    .how-it-works h2 {
+        font-size: 1.75rem;
+    }
+
+    .steps-grid {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+        padding: 0 1rem;
+    }
+
+    .shazam-showcase {
+        padding: 3rem 1rem;
+    }
+
+    .shazam-showcase h2 {
+        font-size: 1.75rem;
+    }
+
+    .showcase-text {
+        padding: 1.5rem;
+    }
+
+    .footer-cta {
+        padding: 3rem 1rem;
+    }
+
+    .footer-cta h2 {
+        font-size: 2rem;
+    }
+
+    .footer-cta .subtitle {
+        font-size: 1rem;
+    }
+
+    .footer-content {
+        padding: 0 1rem;
+    }
+
+    .feature-item {
+        padding: 1.5rem;
+    }
+
+    .development-links {
+        padding: 0 1rem;
+    }
+}
+
 
 
 .footer-cta {
@@ -237,6 +353,8 @@
     max-width: 800px;
     margin: 0 auto;
     padding: 0 2rem;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .footer-cta h2 {
@@ -365,11 +483,13 @@
 
 .features-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
     gap: 2rem;
     text-align: center;
     margin-top: 4rem;
     padding: 2rem;
+    max-width: 100%;
+    overflow-x: hidden;
 }
 
 .feature-item {
