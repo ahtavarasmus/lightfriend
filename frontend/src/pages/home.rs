@@ -380,12 +380,12 @@ pub fn Home() -> Html {
                                 <li>{"Perplexity AI search"}</li>
                                 <li>{"Dedicated Weather search"}</li>
                                 <li>{"Send info to you by sms during voice calls"}</li>
-                                <li>{"Shazam song recognition - Get a call, play the song, receive the song info via SMS"}</li>
+                                <li>{"Shazam song recognition - Get a call, play the song, receive the song info via SMS(not working in US yet, see below methods)"}</li>
                             </ul>
                             <h4>{"Methods"}</h4>
                             <ul>
                                 <li>{"Voice calling"}</li>
-                                <li>{"Text messaging"}</li>
+                                <li>{"Text messaging(not working on US yet unfortunately, applying for registration currently)"}</li>
                             </ul>
 
                             <h4>{"Tips"}</h4>
