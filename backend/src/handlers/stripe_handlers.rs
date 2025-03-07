@@ -95,7 +95,7 @@ pub async fn create_customer_portal_session(
     // Store the formatted URL in a variable first
     let return_url = format!(
         "{}/profile",
-        std::env::var("DOMAIN_URL").expect("DOMAIN_URL not set")
+        std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set")
     );
     create_session.return_url = Some(&return_url);
     println!("Creating portal session with return URL: {}", return_url);
@@ -236,7 +236,7 @@ pub async fn create_checkout_session(
 
     println!("Processing payment of {} EUR ({} cents)", amount_dollars, amount_cents);
 
-    let domain_url = std::env::var("DOMAIN_URL").expect("DOMAIN_URL not set");
+    let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
     println!("Using domain: {}", domain_url);
     
     // Create a Checkout Session with payment method attachment

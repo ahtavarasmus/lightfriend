@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
-use twilio::{OutboundCall, Client, OutboundMessage};
+use twilio::{OutboundCall, Client, OutboundMessage, TwiMLRequest};
 use reqwest::Client as HttpClient;
 use base64::{Engine as _, engine::general_purpose};
 use serde_json::{Value, from_str};
@@ -43,6 +43,7 @@ impl ShazamState {
 
 
 // Handler to start a call for a userwhisper
+
 pub async fn start_call_for_user(
     Path(user_id): Path<String>,
     axum::extract::State(state): axum::extract::State<Arc<crate::AppState>>,
@@ -57,34 +58,50 @@ pub async fn start_call_for_user(
     };
 
     let to_number = user.phone_number;
-
     if to_number.is_empty() {
         return "User not found".to_string();
     }
 
-    let twilio_client = Client::new(&account_sid, &auth_token);
     let server_url = std::env::var("SERVER_URL").expect("SERVER_URL must be set");
     let twiml_url = format!("{}/api/twiml", server_url);
 
+    // Create HTTP client
+    let http_client = HttpClient::new();
 
+    // Twilio API endpoint
+    let url = format!(
+        "https://api.twilio.com/2010-04-01/Accounts/{}/Calls.json",
+        account_sid
+    );
 
-    // Log all parameters for debugging
-    info!("Initiating call with:");
-    info!("Account SID: {}", account_sid);
-    info!("From number: {}", from_number);
-    info!("To number: {}", to_number);
-    info!("TwiML URL: {}", twiml_url);
-    info!("TWILIO_SHAZAM_SERVER_URL: {}", std::env::var("TWILIO_SHAZAM_SERVER_URL").unwrap_or_default());
+    // Form data for the POST request
+    let params = [
+        ("To", to_number.as_str()),
+        ("From", from_number.as_str()),
+        ("Url", twiml_url.as_str()),
+    ];
 
+    // Make the request with Basic Auth
+    let response = http_client
+        .post(&url)
+        .basic_auth(&account_sid, Some(&auth_token))
+        .form(&params)
+        .send()
+        .await;
 
-    let _call = OutboundCall::new(from_number.as_str(), &to_number, twiml_url.as_str());
-    match twilio_client.make_call(_call).await {
-        Ok(response) => {
+    match response {
+        Ok(resp) if resp.status().is_success() => {
+            let json: Value = resp.json().await.unwrap_or_default();
+            let call_sid = json["sid"].as_str().unwrap_or("").to_string();
             let mut user_calls_lock = state.user_calls.lock().await;
-            let call_sid = response.sid.to_string();
             user_calls_lock.insert(call_sid.clone(), user_id.clone());
             info!("Call initiated for user {}: {}", user_id, call_sid);
             format!("Call initiated for user {}: {}", user_id, call_sid)
+        }
+        Ok(resp) => {
+            let error_text = resp.text().await.unwrap_or_default();
+            info!("Error initiating call for user {}: {}", user_id, error_text);
+            format!("Error initiating call: {}", error_text)
         }
         Err(e) => {
             info!("Error initiating call for user {}: {:?}", user_id, e);
@@ -93,6 +110,7 @@ pub async fn start_call_for_user(
     }
 }
 
+
 // TwiML to stream audio
 pub async fn twiml_handler() -> impl IntoResponse {
     let server_url = std::env::var("TWILIO_SHAZAM_SERVER_URL").expect("TWILIO_SHAZAM_SERVER_URL must be set");
@@ -100,11 +118,11 @@ pub async fn twiml_handler() -> impl IntoResponse {
     let clean_server_url = server_url.trim_end_matches('/');
     let twiml = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
                 <Response>
-                    <Say>Hello! I'm listening to your audio.</Say>
-                    <Start>
-                        <Stream url="wss://{}/api/stream" track="inbound_track"/>
-                    </Start>
-                    <Pause length="60"/>
+                <Say>Hello! I'm listening to your audio. Please play the song you want to identify.</Say>
+                <Start>
+                    <Stream url="wss://{}/api/stream" track="inbound_track"/>
+                </Start>
+                <Pause length="60"/>
                 </Response>"#, clean_server_url);
     axum::http::Response::builder()
         .header("Content-Type", "application/xml")
@@ -212,7 +230,6 @@ pub async fn process_audio_with_shazam(state: Arc<ShazamState>) {
                     audio_buffer.extend(audio_data);
                     packets_received += 1;
                 }
-                // Add a small delay to prevent tight looping
                 tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
             }
 
@@ -221,7 +238,6 @@ pub async fn process_audio_with_shazam(state: Arc<ShazamState>) {
                 println!("Received {} packets, total {} bytes of audio for call {}", 
                     packets_received, audio_buffer.len(), call_sid);
                 
-                // Increase minimum buffer size to 5KB for better recognition
                 if audio_buffer.len() > 5120 {
                     let song_name = identify_with_shazam(&http_client, &audio_buffer).await;
                     println!("\n=== Shazam Result ===");
@@ -240,23 +256,52 @@ pub async fn process_audio_with_shazam(state: Arc<ShazamState>) {
                         }
                     };
 
-                    // if song name is not unknown we should end the call when we send the message
-
                     if !to_number.is_empty() && !song_name.starts_with("Error") && 
                        !song_name.starts_with("Failed") && !song_name.contains("Unknown song") {
                         println!("\n=== Song Identification Success ===");
                         println!("Successfully identified: {}", song_name);
-                        
-                        
+
+                        // Update the call with TwiML using reqwest
+                        let url = format!(
+                            "https://api.twilio.com/2010-04-01/Accounts/{}/Calls/{}.json",
+                            account_sid, call_sid
+                        );
+                        let twiml = format!(
+                            r#"<?xml version="1.0" encoding="UTF-8"?>
+                            <Response>
+                                <Say>I identified the song! It's {}</Say>
+                                <Hangup/>
+                            </Response>"#,
+                            song_name
+                        );
+
+                        let params = [("Twiml", twiml.as_str())];
+
+                        let response = http_client
+                            .post(&url)
+                            .basic_auth(&account_sid, Some(&auth_token))
+                            .form(¶ms)
+                            .send()
+                            .await;
+
+                        match response {
+                            Ok(resp) if resp.status().is_success() => {
+                                info!("Successfully updated call {} with song name: {}", call_sid, song_name);
+                            }
+                            Ok(resp) => {
+                                let error_text = resp.text().await.unwrap_or_default();
+                                error!("Failed to update call {}: {}", call_sid, error_text);
+                            }
+                            Err(e) => {
+                                error!("Error updating call {}: {:?}", call_sid, e);
+                            }
+                        }
+
                         // Find user by phone number
                         match state.user_repository.find_by_phone_number(&to_number) {
                             Ok(Some(user)) => {
-                                // Send the Shazam result via SMS
-                                match crate::api::twilio_sms::send_shazam_answer_to_user(
-                                    state.clone(),
-                                    user.id,
-                                    &song_name,
-                                ).await {
+                                // Send the Shazam result via SMS (assuming this function exists)
+                                match crate::api::twilio_sms::send_shazam_answer_to_user(state.clone(), user.id, &song_name).await {
                                     Ok(_) => {
                                         println!("Successfully sent Shazam result to user {}: {}", user.id, song_name);
                                     }
@@ -278,7 +323,6 @@ pub async fn process_audio_with_shazam(state: Arc<ShazamState>) {
         }
     }
 }
-
 
 use std::env;
 

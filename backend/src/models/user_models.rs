@@ -4,6 +4,7 @@ use crate::schema::users;
 use crate::schema::conversations;
 use crate::schema::usage_logs;
 use crate::schema::subscriptions;
+use crate::schema::calendar_connection;
 
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -114,4 +115,27 @@ pub struct NewConversation {
     pub twilio_number: String,
     pub user_number: String,
 }
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = calendar_connection)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct CalendarConnection {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub name: String,
+    pub description: String,
+    pub provider: String,
+    pub encrypted_access_token: String,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = calendar_connection)]
+pub struct NewCalendarConnection {
+    pub user_id: i32,
+    pub name: String,
+    pub description: String,
+    pub provider: String,
+    pub encrypted_access_token: String,
+}
+
 
