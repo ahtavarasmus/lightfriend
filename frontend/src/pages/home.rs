@@ -92,20 +92,19 @@ pub fn landing() -> Html {
                 </div>
             </section>
 
-            // New Shazam Showcase Section
             <section class="shazam-showcase">
-                <h2>{"Discover Music Anywhere"}</h2>
+                <h2>{"Identify Any Song, Anywhere"}</h2>
                 <div class="showcase-content">
                     <div class="showcase-text">
-                        <h3>{"How It Works:"}</h3>
+                        <h3>{"Simple Song Recognition:"}</h3>
                         <ol>
-                            <li>{"Text 'identify song' to your lightfriend number"}</li>
-                            <li>{"Receive a call from lightfriend"}</li>
-                            <li>{"Play the music you want to identify"}</li>
-                            <li>{"AI tells the song details once identied"}</li>
+                            <li>{"Text or call lightfriend saying 'What song is this?'"}</li>
+                            <li>{"lightfriend calls you back ready to listen"}</li>
+                            <li>{"Hold your phone near the music"}</li>
+                            <li>{"lightfriend tells you the song name and sends details by text"}</li>
                         </ol>
                         <p class="showcase-highlight">
-                            {"Perfect for dumbphone users who want to identify songs without a smartphone!"}
+                            {"No app needed - just your basic phone and the music you want to identify!"}
                         </p>
                     </div>
                 </div>
