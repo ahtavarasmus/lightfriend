@@ -102,7 +102,7 @@ pub fn landing() -> Html {
                             <li>{"Text 'identify song' to your lightfriend number"}</li>
                             <li>{"Receive a call from lightfriend"}</li>
                             <li>{"Play the music you want to identify"}</li>
-                            <li>{"Get song details via SMS instantly"}</li>
+                            <li>{"AI tells the song details once identied"}</li>
                         </ol>
                         <p class="showcase-highlight">
                             {"Perfect for dumbphone users who want to identify songs without a smartphone!"}
@@ -375,8 +375,10 @@ pub fn Home() -> Html {
                         </p>
 
                         <div>
+                            /*
                             <h2>{"Connect your calendar"}</h2>
                             <GoogleCalendarConnect user_id={profile.id} />
+                            */
                         </div>
 
                         <div class="feature-status">
@@ -386,12 +388,12 @@ pub fn Home() -> Html {
                                 <li>{"Perplexity AI search"}</li>
                                 <li>{"Dedicated Weather search"}</li>
                                 <li>{"Send info to you by sms during voice calls"}</li>
-                                <li>{"Shazam song recognition - Get a call, play the song, receive the song info via SMS(not working in US yet, see below methods)"}</li>
+                                <li>{"Shazam song recognition - Get a call, play the song, AI tells the song name and also sends it to you by sms."}</li>
                             </ul>
                             <h4>{"Methods"}</h4>
                             <ul>
                                 <li>{"Voice calling"}</li>
-                                <li>{"Text messaging(not working on US yet unfortunately, applying for registration currently)"}</li>
+                                <li>{"Text messaging(not working in the US or chech republic)"}</li>
                             </ul>
 
                             <h4>{"Tips"}</h4>
