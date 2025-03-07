@@ -236,7 +236,6 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
- "twilio",
  "url",
  "urlencoding",
  "uuid 1.14.0",
@@ -256,12 +255,6 @@ dependencies = [
  "rustc-demangle",
  "windows-targets 0.52.6",
 ]
-
-[[package]]
-name = "base64"
-version = "0.12.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3441f0f7b02788e948e47f457ca01f1d7e6d92c693bc132c22b087d3141c03ff"
 
 [[package]]
 name = "base64"
@@ -939,30 +932,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ba4ff7128dee98c7dc9794b6a411377e1404dba1c97deb8d1a55297bd25d8af"
 dependencies = [
  "hashbrown 0.14.5",
-]
-
-[[package]]
-name = "headers"
-version = "0.3.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06683b93020a07e3dbcf5f8c0f6d40080d725bea7936fc01ad345c01b97dc270"
-dependencies = [
- "base64 0.21.7",
- "bytes",
- "headers-core",
- "http 0.2.12",
- "httpdate",
- "mime",
- "sha1",
-]
-
-[[package]]
-name = "headers-core"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7f66481bfee273957b1f20485a4ff3362987f85b2c236580d81b4eb7a326429"
-dependencies = [
- "http 0.2.12",
 ]
 
 [[package]]
@@ -3087,24 +3056,6 @@ dependencies = [
  "sha1",
  "thiserror 2.0.11",
  "utf-8",
-]
-
-[[package]]
-name = "twilio"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a350a72da1fca4e3e699b1eeb130b7be12467f297ddb81dfba5fde9027f8f2d"
-dependencies = [
- "base64 0.12.3",
- "headers",
- "hmac",
- "hyper 0.14.32",
- "hyper-tls 0.5.0",
- "mime",
- "serde",
- "serde_json",
- "sha1",
- "url",
 ]
 
 [[package]]

@@ -9,7 +9,6 @@ use std::collections::HashMap;
 
 use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
-use twilio::{OutboundCall, Client, OutboundMessage, TwiMLRequest};
 use reqwest::Client as HttpClient;
 use base64::{Engine as _, engine::general_purpose};
 use serde_json::{Value, from_str};
