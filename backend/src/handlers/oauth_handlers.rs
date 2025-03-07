@@ -23,6 +23,8 @@ pub struct AuthParams {
     state: String,
 }
 
+/*
+
 pub async fn fetch_auth_params() -> impl IntoResponse {
     let client = Client::new();
     let api_key = std::env::var("COMPOSIO_API_KEY").expect("COMPOSIO_API_KEY must be set");
@@ -94,9 +96,4 @@ fn encrypt_token(token: &str) -> Result<String, String> {
     // This is just a placeholder - you should use proper encryption!
     Ok(base64::encode(token))
 }
-
-pub fn router() -> Router<Arc<AppState>> {
-    Router::new()
-        .route("/auth-params", get(fetch_auth_params))
-        .route("/callback", get(oauth_callback))
-}
+*/
