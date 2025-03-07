@@ -199,10 +199,12 @@ async fn main() {
     let elevenlabs_webhook_routes = Router::new()
         .route("/api/webhook/elevenlabs", post(elevenlabs_webhook::elevenlabs_webhook))
         .route_layer(middleware::from_fn(elevenlabs_webhook::validate_elevenlabs_hmac));
+    /*
 
     let oauth_handler_routes= Router::new()
         .route("/auth-params", get(oauth_handlers::fetch_auth_params))
         .route("/initiate-connection", post(oauth_handlers::initiate_connection));
+    */
 
 
     // Create router with CORS
@@ -242,11 +244,11 @@ async fn main() {
 
         /*
         .merge(vapi_routes)
+        .merge(oauth_handler_routes)
         */
         .merge(twilio_routes)
         .merge(elevenlabs_routes)
         .merge(elevenlabs_webhook_routes)
-        .merge(oauth_handler_routes)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
