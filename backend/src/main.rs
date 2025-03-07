@@ -21,6 +21,7 @@ mod handlers {
     pub mod billing_handlers;
     pub mod admin_handlers;
     pub mod stripe_handlers;
+    pub mod oauth_handlers;
 }
 mod api {
     pub mod vapi_endpoints;
@@ -54,6 +55,7 @@ use handlers::profile_handlers;
 use handlers::billing_handlers;
 use handlers::admin_handlers;
 use handlers::stripe_handlers;
+use handlers::oauth_handlers;
 //use api::vapi_endpoints;
 use api::twilio_sms;
 use api::elevenlabs;
@@ -104,8 +106,8 @@ pub fn validate_env() {
         .expect("TWILIO_AUTH_TOKEN must be set");
     let _ = std::env::var("ENVIRONMENT") // for dev its 'development' and for prod anything else
         .expect("ENVIRONMENT must be set");
-    let _ = std::env::var("DOMAIN_URL") // frontend url
-        .expect("DOMAIN_URL must be set");
+    let _ = std::env::var("FRONTEND_URL") // frontend url
+        .expect("FRONTEND_URL must be set");
     let _ = std::env::var("OPENROUTER_API_KEY") 
         .expect("OPENROUTER_API_KEY must be set");
     let _ = std::env::var("STRIPE_CREDITS_PRODUCT_ID")
@@ -133,7 +135,10 @@ pub fn validate_env() {
         .expect("SHAZAM_API_KEY must be set");
     let _ = std::env::var("SERVER_URL")
         .expect("SERVER_URL must be set");
-
+    let _ = std::env::var("ENCRYPTION_KEY")
+        .expect("ENCRYPTION_KEY must be set");
+    let _ = std::env::var("COMPOSIO_API_KEY")
+        .expect("COMPOSIO_API_KEY must be set");
 
 }
 
@@ -195,6 +200,9 @@ async fn main() {
         .route("/api/webhook/elevenlabs", post(elevenlabs_webhook::elevenlabs_webhook))
         .route_layer(middleware::from_fn(elevenlabs_webhook::validate_elevenlabs_hmac));
 
+    let oauth_handler_routes= Router::new()
+        .route("/auth-params", get(oauth_handlers::fetch_auth_params))
+        .route("/initiate-connection", post(oauth_handlers::initiate_connection));
 
 
     // Create router with CORS
@@ -238,6 +246,7 @@ async fn main() {
         .merge(twilio_routes)
         .merge(elevenlabs_routes)
         .merge(elevenlabs_webhook_routes)
+        .merge(oauth_handler_routes)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))

@@ -1,4 +1,5 @@
 use yew::prelude::*;
+use crate::auth::oauth_flow::GoogleCalendarConnect;
 use yew_router::prelude::*;
 use crate::Route;
 use crate::config;
@@ -372,6 +373,11 @@ pub fn Home() -> Html {
                             <br/>
                             <br/>
                         </p>
+
+                        <div>
+                            <h2>{"Connect your calendar"}</h2>
+                            <GoogleCalendarConnect user_id={profile.id} />
+                        </div>
 
                         <div class="feature-status">
                             <h3>{"Currently Available"}</h3>

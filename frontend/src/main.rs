@@ -21,6 +21,7 @@ mod pages {
 mod auth {
     pub mod verify;
     pub mod signup;
+    pub mod oauth_flow;
 }
 mod admin {
     pub mod dashboard;
