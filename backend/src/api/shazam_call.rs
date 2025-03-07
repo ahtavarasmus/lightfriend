@@ -208,6 +208,7 @@ pub async fn handle_listen(mut socket: WebSocket, sessions: CallSessions, call_s
 }
 
 // Process audio with Shazam and send SMS
+
 pub async fn process_audio_with_shazam(state: Arc<ShazamState>) {
     let http_client = HttpClient::new();
     let account_sid = std::env::var("TWILIO_ACCOUNT_SID").expect("TWILIO_ACCOUNT_SID must be set");
@@ -220,7 +221,6 @@ pub async fn process_audio_with_shazam(state: Arc<ShazamState>) {
             let mut rx = tx.subscribe();
             let mut audio_buffer = Vec::new();
 
-            // Increase the collection time to 10 seconds to get more audio data
             let end_time = tokio::time::Instant::now() + tokio::time::Duration::from_secs(10);
             let mut packets_received = 0;
             
@@ -279,7 +279,7 @@ pub async fn process_audio_with_shazam(state: Arc<ShazamState>) {
                         let response = http_client
                             .post(&url)
                             .basic_auth(&account_sid, Some(&auth_token))
-                            .form(¶ms)
+                            .form(&params) // Fixed: Replaced ¶ms with &params
                             .send()
                             .await;
 
@@ -296,11 +296,9 @@ pub async fn process_audio_with_shazam(state: Arc<ShazamState>) {
                             }
                         }
 
-                        // Find user by phone number
                         match state.user_repository.find_by_phone_number(&to_number) {
                             Ok(Some(user)) => {
-                                // Send the Shazam result via SMS (assuming this function exists)
-                                match crate::api::twilio_sms::send_shazam_answer_to_user(state.clone(), user.id, &song_name).await {
+                                match send_shazam_answer_to_user(&http_client, user.id, &to_number, &song_name).await {
                                     Ok(_) => {
                                         println!("Successfully sent Shazam result to user {}: {}", user.id, song_name);
                                     }
