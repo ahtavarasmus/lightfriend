@@ -22,6 +22,11 @@ mod handlers {
     pub mod admin_handlers;
     pub mod stripe_handlers;
     pub mod oauth_handlers;
+    pub mod composio_auth;
+}
+
+mod utils {
+    pub mod encryption;
 }
 mod api {
     pub mod vapi_endpoints;
@@ -199,12 +204,11 @@ async fn main() {
     let elevenlabs_webhook_routes = Router::new()
         .route("/api/webhook/elevenlabs", post(elevenlabs_webhook::elevenlabs_webhook))
         .route_layer(middleware::from_fn(elevenlabs_webhook::validate_elevenlabs_hmac));
-    /*
 
-    let oauth_handler_routes= Router::new()
-        .route("/auth-params", get(oauth_handlers::fetch_auth_params))
-        .route("/initiate-connection", post(oauth_handlers::initiate_connection));
-    */
+    let composio_routes= Router::new()
+        .route("/api/composio/integration", post(composio_auth::get_integration_handler))
+        .route("/api/composio/connection", post(composio_auth::initiate_connection_handler));
+
 
 
     // Create router with CORS
@@ -244,8 +248,8 @@ async fn main() {
 
         /*
         .merge(vapi_routes)
-        .merge(oauth_handler_routes)
         */
+        .merge(composio_routes)
         .merge(twilio_routes)
         .merge(elevenlabs_routes)
         .merge(elevenlabs_webhook_routes)
