@@ -19,7 +19,7 @@ use oauth2::{
     EndpointSet,
     EndpointNotSet,
 };
-use tower_http::cors::{CorsLayer, Any};
+use tower_http::cors::{CorsLayer, Any, AllowOrigin};
 use tower_http::trace::{TraceLayer, DefaultMakeSpan, DefaultOnResponse};
 use tracing::Level;
 use std::sync::Arc;
@@ -149,8 +149,9 @@ async fn main() {
     println!("Redirect URI: {}/api/auth/google/callback", server_url_oauth);
 
     let session_store = MemoryStore::default();
+    let is_prod = std::env::var("ENVIRONMENT") != Ok("development".to_string());
     let session_layer = SessionManagerLayer::new(session_store.clone())
-        .with_secure(false) // Set to true in production with HTTPS
+        .with_secure(is_prod)
         .with_same_site(tower_sessions::cookie::SameSite::Lax);
 
     let state = Arc::new(AppState {
@@ -218,7 +219,7 @@ async fn main() {
         .layer(
             CorsLayer::new()
                 .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::OPTIONS, axum::http::Method::DELETE])
-                .allow_origin(Any) // Restrict in production
+                .allow_origin(AllowOrigin::exact(std::env::var("FRONTEND_URL").expect("FRONTEND_URL must be set").parse().expect("Invalid FRONTEND_URL"))) // Restrict in production
                 .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION])
                 .expose_headers([axum::http::header::CONTENT_TYPE])
         )
