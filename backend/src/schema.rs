@@ -1,17 +1,6 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
-    calendar_connection (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        name -> Text,
-        description -> Text,
-        provider -> Text,
-        encrypted_access_token -> Text,
-    }
-}
-
-diesel::table! {
     conversations (id) {
         id -> Integer,
         user_id -> Integer,
@@ -25,6 +14,19 @@ diesel::table! {
 }
 
 diesel::table! {
+    google_calendar (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        encrypted_access_token -> Text,
+        encrypted_refresh_token -> Text,
+        status -> Text,
+        last_update -> Integer,
+        created_on -> Integer,
+        description -> Text,
+    }
+}
+
+diesel::table! {
     subscriptions (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -34,6 +36,19 @@ diesel::table! {
         status -> Text,
         next_bill_date -> Integer,
         is_scheduled_to_cancel -> Nullable<Bool>,
+    }
+}
+
+diesel::table! {
+    unipile_connection (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        account_type -> Text,
+        account_id -> Text,
+        status -> Text,
+        last_update -> Integer,
+        created_on -> Integer,
+        description -> Text,
     }
 }
 
@@ -75,14 +90,14 @@ diesel::table! {
     }
 }
 
-diesel::joinable!(calendar_connection -> users (user_id));
 diesel::joinable!(conversations -> users (user_id));
 diesel::joinable!(subscriptions -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
-    calendar_connection,
     conversations,
+    google_calendar,
     subscriptions,
+    unipile_connection,
     usage_logs,
     users,
 );

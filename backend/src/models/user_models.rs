@@ -4,7 +4,8 @@ use crate::schema::users;
 use crate::schema::conversations;
 use crate::schema::usage_logs;
 use crate::schema::subscriptions;
-use crate::schema::calendar_connection;
+use crate::schema::unipile_connection;
+use crate::schema::google_calendar;
 
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -116,26 +117,56 @@ pub struct NewConversation {
     pub user_number: String,
 }
 
+// unipile connection, turned out to be disgustingly expensive wtf 5e/month FOR ONE CONNECTION WTF FOR ONE USER
 #[derive(Queryable, Selectable, Insertable)]
-#[diesel(table_name = calendar_connection)]
+#[diesel(table_name = unipile_connection)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct CalendarConnection {
+pub struct UnipileConnection {
     pub id: Option<i32>,
     pub user_id: i32,
-    pub name: String,
+    pub account_type: String, // LINKEDIN, GMAIL, WHATSAPP,..
+    pub account_id: String,
+    pub status: String, // OK, CREDENTIALS, 
+    pub last_update: i32,
+    pub created_on: i32,
     pub description: String,
-    pub provider: String,
-    pub encrypted_access_token: String,
 }
 
 #[derive(Insertable)]
-#[diesel(table_name = calendar_connection)]
-pub struct NewCalendarConnection {
+#[diesel(table_name = unipile_connection)]
+pub struct NewUnipileConnection {
     pub user_id: i32,
-    pub name: String,
+    pub account_type: String,
+    pub account_id: String,
+    pub status: String,
+    pub last_update: i32,
+    pub created_on: i32,
     pub description: String,
-    pub provider: String,
-    pub encrypted_access_token: String,
 }
 
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = google_calendar)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct GoogleCalendar{
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub encrypted_access_token: String,
+    pub encrypted_refresh_token: String,
+    pub status: String, 
+    pub last_update: i32,
+    pub created_on: i32,
+    pub description: String,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = google_calendar)]
+pub struct NewGoogleCalendar{
+    pub user_id: i32,
+    pub encrypted_access_token: String,
+    pub encrypted_refresh_token: String,
+    pub status: String,
+    pub last_update: i32,
+    pub created_on: i32,
+    pub description: String,
+}
 
