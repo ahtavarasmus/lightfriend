@@ -19,6 +19,7 @@ mod pages {
     pub mod termsprivacy;
 }
 mod auth {
+    pub mod connect;
     pub mod verify;
     pub mod signup;
     pub mod oauth_flow;

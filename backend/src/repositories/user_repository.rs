@@ -11,9 +11,9 @@ pub struct UsageDataPoint {
 }
 
 use crate::{
-    models::user_models::{User, NewUsageLog},
+    models::user_models::{User, NewUsageLog, NewUnipileConnection},
     handlers::auth_dtos::NewUser,
-    schema::{users, usage_logs},
+    schema::{users, usage_logs, unipile_connection},
     DbPool,
 };
 
@@ -549,6 +549,15 @@ impl UserRepository {
             .select(users::charge_when_under)
             .first::<bool>(&mut conn)?;
         Ok(charge_when_under)
+    }
+
+    pub fn create_unipile_connection(&self, new_connection: &NewUnipileConnection) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        diesel::insert_into(unipile_connection::table)
+            .values(new_connection)
+            .execute(&mut conn)?;
+        Ok(())
     }
 
 }

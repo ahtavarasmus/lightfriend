@@ -1,5 +1,5 @@
 use yew::prelude::*;
-use crate::auth::oauth_flow::GoogleCalendarConnect;
+use crate::auth::connect::Connect;
 use yew_router::prelude::*;
 use crate::Route;
 use crate::config;
@@ -373,11 +373,17 @@ pub fn Home() -> Html {
                             <br/>
                         </p>
 
-                        <div>
-                            /*
-                            <h2>{"Connect your calendar"}</h2>
-                            <GoogleCalendarConnect user_id={profile.id} />
-                            */
+                        <div class="calendar-section">
+                            <h2>{"Connect a Service"}</h2>
+                            {
+                                if let Some(profile) = (*profile_data).as_ref() {
+                                    html! {
+                                        <Connect user_id={profile.id} />
+                                    }
+                                } else {
+                                    html! {}
+                                }
+                            }
                         </div>
 
                         <div class="feature-status">
