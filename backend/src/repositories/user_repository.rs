@@ -3,7 +3,6 @@ use serde::Serialize;
 use diesel::result::Error as DieselError;
 use std::error::Error;
 use rand;
-
 #[derive(Serialize, PartialEq)]
 pub struct UsageDataPoint {
     pub timestamp: i32,
@@ -11,7 +10,7 @@ pub struct UsageDataPoint {
 }
 
 use crate::{
-    models::user_models::{User, NewUsageLog, NewUnipileConnection},
+    models::user_models::{User, NewUsageLog, NewUnipileConnection, NewGoogleCalendar},
     handlers::auth_dtos::NewUser,
     schema::{users, usage_logs, unipile_connection},
     DbPool,
@@ -560,4 +559,184 @@ impl UserRepository {
         Ok(())
     }
 
+    pub fn has_active_google_calendar(&self, user_id: i32) -> Result<bool, DieselError> {
+        use crate::schema::google_calendar;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let connection = google_calendar::table
+            .filter(google_calendar::user_id.eq(user_id))
+            .filter(google_calendar::status.eq("active"))
+            .first::<crate::models::user_models::GoogleCalendar>(&mut conn)
+            .optional()?;
+
+        Ok(connection.is_some())
+    }
+
+    pub fn get_google_calendar_tokens(&self, user_id: i32) -> Result<Option<(String, String)>, DieselError> {
+        use crate::schema::google_calendar;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let connection = google_calendar::table
+            .filter(google_calendar::user_id.eq(user_id))
+            .filter(google_calendar::status.eq("active"))
+            .first::<crate::models::user_models::GoogleCalendar>(&mut conn)
+            .optional()?;
+
+        if let Some(connection) = connection {
+            // Get encryption key from environment
+            let encryption_key = match std::env::var("ENCRYPTION_KEY") {
+                Ok(key) => key,
+                Err(_) => {
+                    tracing::error!("ENCRYPTION_KEY not set in environment");
+                    return Err(DieselError::RollbackTransaction);
+                }
+            };
+
+            use magic_crypt::MagicCryptTrait;
+            let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
+
+            // Log the encrypted tokens for debugging
+            tracing::debug!(
+                "Attempting to decrypt tokens - Access token length: {}, Refresh token length: {}", 
+                connection.encrypted_access_token.len(),
+                connection.encrypted_refresh_token.len()
+            );
+
+            // Decrypt access token
+            let access_token = match cipher.decrypt_base64_to_string(&connection.encrypted_access_token) {
+                Ok(token) => {
+                    tracing::debug!("Successfully decrypted access token");
+                    token
+                },
+                Err(e) => {
+                    tracing::error!("Failed to decrypt access token: {:?}", e);
+                    return Err(DieselError::RollbackTransaction);
+                }
+            };
+
+            // Decrypt refresh token
+            let refresh_token = match cipher.decrypt_base64_to_string(&connection.encrypted_refresh_token) {
+                Ok(token) => {
+                    tracing::debug!("Successfully decrypted refresh token");
+                    token
+                },
+                Err(e) => {
+                    tracing::error!("Failed to decrypt refresh token: {:?}", e);
+                    return Err(DieselError::RollbackTransaction);
+                }
+            };
+
+            tracing::debug!("Successfully decrypted both calendar tokens for user {}", user_id);
+            Ok(Some((access_token, refresh_token)))
+        } else {
+            tracing::debug!("No active calendar connection found for user {}", user_id);
+            Ok(None)
+        }
+    }
+
+    pub fn update_google_calendar_access_token(
+        &self,
+        user_id: i32,
+        new_access_token: &str,
+        expires_in: i32,
+    ) -> Result<(), DieselError> {
+        use crate::schema::google_calendar;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Get encryption key from environment
+        let encryption_key = std::env::var("ENCRYPTION_KEY")
+            .expect("ENCRYPTION_KEY must be set");
+
+        use magic_crypt::MagicCryptTrait;
+        let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
+
+        // Encrypt new access token
+        let encrypted_access_token = cipher.encrypt_str_to_base64(new_access_token);
+
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        diesel::update(google_calendar::table)
+            .filter(google_calendar::user_id.eq(user_id))
+            .filter(google_calendar::status.eq("active"))
+            .set((
+                google_calendar::encrypted_access_token.eq(encrypted_access_token),
+                google_calendar::expires_in.eq(expires_in),
+                google_calendar::last_update.eq(current_time),
+            ))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn delete_google_calendar_connection(&self, user_id: i32) -> Result<(), DieselError> {
+        use crate::schema::google_calendar;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::delete(google_calendar::table)
+            .filter(google_calendar::user_id.eq(user_id))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+    pub fn create_google_calendar_connection(
+        &self,
+        user_id: i32,
+        access_token: &str,
+        refresh_token: Option<&str>,
+        expires_in: i32,
+    ) -> Result<(), DieselError> {
+        use crate::schema::google_calendar;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        println!("Creating google calendar connection for user: {}", user_id);
+        println!("Got refresh token: {:?}", refresh_token);
+
+        // Get encryption key from environment
+        let encryption_key = std::env::var("ENCRYPTION_KEY")
+            .expect("ENCRYPTION_KEY must be set");
+
+        use magic_crypt::MagicCryptTrait;
+        // Create encryption cipher
+        let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
+
+        // Encrypt tokens
+        let encrypted_access_token = cipher.encrypt_str_to_base64(access_token);
+        let encrypted_refresh_token = refresh_token
+            .map(|token| cipher.encrypt_str_to_base64(token))
+            .unwrap_or_default();
+
+        println!("Encrypted refresh token: {}", encrypted_refresh_token);
+
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        let new_connection = NewGoogleCalendar {
+            user_id,
+            encrypted_access_token,
+            encrypted_refresh_token,
+            expires_in,
+            status: "active".to_string(),
+            last_update: current_time,
+            created_on: current_time,
+            description: "Google Calendar Connection".to_string(),
+        };
+
+        // First, delete any existing connections for this user
+        diesel::delete(google_calendar::table)
+            .filter(google_calendar::user_id.eq(user_id))
+            .execute(&mut conn)?;
+
+        // Then insert the new connection
+        diesel::insert_into(google_calendar::table)
+            .values(&new_connection)
+            .execute(&mut conn)?;
+
+        println!("Successfully created google calendar connection");
+        Ok(())
+    }
 }

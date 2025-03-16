@@ -156,6 +156,7 @@ pub struct GoogleCalendar{
     pub last_update: i32,
     pub created_on: i32,
     pub description: String,
+    pub expires_in: i32, // for access token
 }
 
 #[derive(Insertable)]
@@ -168,5 +169,6 @@ pub struct NewGoogleCalendar{
     pub last_update: i32,
     pub created_on: i32,
     pub description: String,
+    pub expires_in: i32,
 }
 

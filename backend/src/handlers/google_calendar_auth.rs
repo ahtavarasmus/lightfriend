@@ -96,6 +96,7 @@ pub async fn google_login(
     record.data.insert("session_key".to_string(), json!(session_key.clone()));
     record.data.insert("pkce_verifier".to_string(), json!(pkce_verifier.secret().to_string()));
     record.data.insert("csrf_token".to_string(), json!(csrf_token.secret().to_string()));
+    record.data.insert("user_id".to_string(), json!(claims.sub));
 
     tracing::info!("Storing session record with ID: {}", record.id.0);
     if let Err(e) = state.session_store.create(&mut record).await {
@@ -111,6 +112,8 @@ pub async fn google_login(
         .oauth_client
         .authorize_url(|| CsrfToken::new(state_token.clone()))
         .add_scope(Scope::new("https://www.googleapis.com/auth/calendar.events".to_string()))
+        .add_extra_param("access_type", "offline") // Add this to request offline access
+        .add_extra_param("prompt", "consent") // Optional: forces consent screen to ensure refresh token is issued
         .set_pkce_challenge(pkce_challenge)
         .url();
 
@@ -119,6 +122,168 @@ pub async fn google_login(
     Ok(Json(json!({
         "auth_url": auth_url.to_string(),
         "message": "OAuth flow initiated successfully"
+    })))
+}
+
+pub async fn delete_google_calendar_connection(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    tracing::info!("Received request to delete Google Calendar connection");
+
+    // Extract and validate JWT token
+    let auth_header = headers.get("Authorization")
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| header.strip_prefix("Bearer "));
+    
+    let token = match auth_header {
+        Some(token) => token,
+        None => {
+            tracing::error!("No authorization token provided");
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "No authorization token provided"}))
+            ));
+        },
+    };
+
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+            .expect("JWT_SECRET_KEY must be set in environment")
+            .as_bytes()),
+        &Validation::new(Algorithm::HS256)
+    ) {
+        Ok(token_data) => token_data.claims,
+        Err(e) => {
+            tracing::error!("Invalid token: {}", e);
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "Invalid token"}))
+            ));
+        },
+    };
+
+    // Delete the connection
+    match state.user_repository.delete_google_calendar_connection(claims.sub) {
+        Ok(_) => {
+            tracing::info!("Successfully deleted Google Calendar connection for user {}", claims.sub);
+            Ok(Json(json!({
+                "message": "Google Calendar connection deleted successfully"
+            })))
+        },
+        Err(e) => {
+            tracing::error!("Failed to delete Google Calendar connection: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to delete calendar connection"}))
+            ))
+        }
+    }
+}
+
+pub async fn refresh_google_token(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    tracing::info!("Received request to refresh Google Calendar token");
+
+    // Extract and validate JWT token
+    let auth_header = headers.get("Authorization")
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| header.strip_prefix("Bearer "));
+    
+    let token = match auth_header {
+        Some(token) => token,
+        None => {
+            tracing::error!("No authorization token provided");
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "No authorization token provided"}))
+            ));
+        },
+    };
+
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+            .expect("JWT_SECRET_KEY must be set in environment")
+            .as_bytes()),
+        &Validation::new(Algorithm::HS256)
+    ) {
+        Ok(token_data) => token_data.claims,
+        Err(e) => {
+            tracing::error!("Invalid token: {}", e);
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "Invalid token"}))
+            ));
+        },
+    };
+
+    // Get the stored tokens
+    let tokens = match state.user_repository.get_google_calendar_tokens(claims.sub) {
+        Ok(Some(tokens)) => tokens,
+        Ok(None) => {
+            tracing::error!("No Google Calendar connection found for user {}", claims.sub);
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "No Google Calendar connection found"}))
+            ));
+        },
+        Err(e) => {
+            tracing::error!("Database error while fetching tokens: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Internal server error"}))
+            ));
+        },
+    };
+
+    let (_, refresh_token) = tokens;
+
+    // Create HTTP client
+    let http_client = reqwest::ClientBuilder::new()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("Client should build");
+
+    // Refresh the token
+    let token_result = state
+        .oauth_client
+        .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token))
+        .request_async(&http_client)
+        .await
+        .map_err(|e| {
+            tracing::error!("Token refresh failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Token refresh failed: {}", e)}))
+            )
+        })?;
+
+    let new_access_token = token_result.access_token().secret();
+    let expires_in = token_result.expires_in()
+        .unwrap_or_default()
+        .as_secs() as i32;
+
+    // Update the access token in the database
+    if let Err(e) = state.user_repository.update_google_calendar_access_token(
+        claims.sub,
+        new_access_token,
+        expires_in,
+    ) {
+        tracing::error!("Failed to update access token: {}", e);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to update access token"}))
+        ));
+    }
+
+    tracing::info!("Successfully refreshed Google Calendar token for user {}", claims.sub);
+    Ok(Json(json!({
+        "message": "Token refreshed successfully",
+        "expires_in": expires_in
     })))
 }
 
@@ -233,14 +398,44 @@ pub async fn google_callback(
             )
         })?;
 
+
+    let access_token = token_result.access_token().secret();
+    let refresh_token = token_result.refresh_token().map(|rt| rt.secret());
+    let expires_in = token_result.expires_in()
+        .unwrap_or_default()
+        .as_secs() as i32;
+
+    // Extract user_id from claims stored in session before deleting the session
+    let user_id = record.data.get("user_id")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| {
+            tracing::error!("User ID not found in session");
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "User ID not found in session"}))
+            )
+        })? as i32;
+
     tracing::info!("Token exchange successful, cleaning up session");
     if let Err(e) = state.session_store.delete(&session_id).await {
         tracing::error!("Failed to delete session record: {}", e);
     }
 
-    let _access_token = token_result.access_token().secret();
-    let _refresh_token = token_result.refresh_token().map(|rt| rt.secret().to_string());
-    let _expires_in = token_result.expires_in().unwrap_or_default().as_secs();
+    // Store the connection in the database
+    if let Err(e) = state.user_repository.create_google_calendar_connection(
+        user_id,
+        access_token,
+        refresh_token.as_ref().map(|s| s.as_str()),
+        expires_in,
+    ) {
+        tracing::error!("Failed to store Google Calendar connection: {}", e);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to store calendar connection"}))
+        ));
+    }
+
+    tracing::info!("Successfully stored Google Calendar connection for user {}", user_id);
 
     let frontend_url = std::env::var("FRONTEND_URL")
         .expect("FRONTEND_URL must be set");
