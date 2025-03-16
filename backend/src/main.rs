@@ -36,6 +36,7 @@ mod handlers {
     pub mod composio_auth;
     pub mod unipile_auth;
     pub mod google_calendar_auth;
+    pub mod google_calendar;
 }
 
 mod utils {
@@ -75,6 +76,7 @@ use handlers::oauth_handlers;
 use handlers::composio_auth;
 use handlers::unipile_auth;
 use handlers::google_calendar_auth;
+use handlers::google_calendar;
 use api::twilio_sms;
 use api::elevenlabs;
 use api::elevenlabs_webhook;
@@ -172,13 +174,16 @@ async fn main() {
         .route("/api/call/sms", post(elevenlabs::handle_send_sms_tool_call))
         .route("/api/call/weather", post(elevenlabs::handle_weather_tool_call))
         .route("/api/call/shazam", get(elevenlabs::handle_shazam_tool_call))
+        .route("/api/call/calendar", get(elevenlabs::handle_calendar_tool_call))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
     let elevenlabs_webhook_routes = Router::new()
         .route("/api/webhook/elevenlabs", post(elevenlabs_webhook::elevenlabs_webhook))
         .route_layer(middleware::from_fn(elevenlabs_webhook::validate_elevenlabs_hmac));
     let google_calendar_routes = Router::new()
         .route("/api/auth/google/login", get(google_calendar_auth::google_login))
-        .route("/api/auth/google/callback", get(google_calendar_auth::google_callback));
+        .route("/api/auth/google/callback", get(google_calendar_auth::google_callback))
+        .route("/api/auth/google/connection", delete(google_calendar_auth::delete_google_calendar_connection))
+        .route("/api/auth/google/status", get(google_calendar::google_calendar_status));
 
     let app = Router::new()
         .route("/api/health", get(health_check))

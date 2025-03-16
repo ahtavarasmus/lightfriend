@@ -434,6 +434,187 @@ pub async fn handle_perplexity_tool_call(
     }
 }
 
+pub async fn handle_calendar_tool_call(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> Json<serde_json::Value> {
+    println!("Starting calendar tool call with params: {:?}", params);
+    
+    // Extract required parameters from query
+    let user_id_str = match params.get("user_id") {
+        Some(id) => {
+            println!("Found user_id: {}", id);
+            tracing::info!("Received calendar request for user: {}", id);
+            id
+        },
+        None => {
+            println!("Missing user_id parameter");
+            return Json(json!({
+                "error": "Missing user_id parameter"
+            }));
+        }
+    };
+
+    let start = match params.get("start") {
+        Some(start) => {
+            println!("Found start time: {}", start);
+            start
+        },
+        None => {
+            println!("Missing start parameter");
+            return Json(json!({
+                "error": "Missing start parameter"
+            }));
+        }
+    };
+
+    let end = match params.get("end") {
+        Some(end) => {
+            println!("Found end time: {}", end);
+            end
+        },
+        None => {
+            println!("Missing end parameter");
+            return Json(json!({
+                "error": "Missing end parameter"
+            }));
+        }
+    };
+
+    // Parse user_id from string to i32
+    let user_id = match user_id_str.parse::<i32>() {
+        Ok(id) => {
+            println!("Successfully parsed user_id to integer: {}", id);
+            id
+        },
+        Err(_) => {
+            println!("Failed to parse user_id: {}", user_id_str);
+            return Json(json!({
+                "error": "Invalid user ID format"
+            }));
+        }
+    };
+
+    // Check if user has active Google Calendar connection
+    println!("Checking if user has active Google Calendar connection");
+    match state.user_repository.has_active_google_calendar(user_id) {
+        Ok(has_connection) => {
+            if !has_connection {
+                println!("User does not have active Google Calendar connection");
+                return Json(json!({
+                    "error": "No active Google Calendar connection found"
+                }));
+            }
+            println!("User has active Google Calendar connection");
+        },
+        Err(e) => {
+            println!("Error checking calendar connection status: {}", e);
+            tracing::error!("Failed to check calendar connection status: {}", e);
+            return Json(json!({
+                "error": "Failed to check calendar connection status",
+                "details": e.to_string()
+            }));
+        }
+    }
+
+    // Parse start and end times
+    println!("Parsing datetime strings");
+    let parse_datetime = |datetime_str: &str| {
+        chrono::DateTime::parse_from_rfc3339(datetime_str)
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .map_err(|_| "Invalid datetime format")
+    };
+
+    let start_time = match parse_datetime(start) {
+        Ok(time) => {
+            println!("Successfully parsed start time: {}", time);
+            time
+        },
+        Err(e) => {
+            println!("Failed to parse start time: {}", e);
+            return Json(json!({
+                "error": format!("Invalid start time: {}", e)
+            }));
+        }
+    };
+
+    let end_time = match parse_datetime(end) {
+        Ok(time) => {
+            println!("Successfully parsed end time: {}", time);
+            time
+        },
+        Err(e) => {
+            println!("Failed to parse end time: {}", e);
+            return Json(json!({
+                "error": format!("Invalid end time: {}", e)
+            }));
+        }
+    };
+
+    let timeframe = crate::handlers::google_calendar::TimeframeQuery {
+        start: start_time,
+        end: end_time,
+    };
+
+    // Fetch calendar events
+    println!("Fetching calendar events");
+    match crate::handlers::google_calendar::fetch_calendar_events(&state, user_id, timeframe).await {
+        Ok(events) => {
+            println!("Successfully fetched {} events", events.len());
+            // Format events into a more readable response
+            let formatted_events: Vec<serde_json::Value> = events.into_iter()
+                .map(|event| {
+                    let start_time = event.start.date_time
+                        .map(|dt| dt.to_rfc3339())
+                        .or(event.start.date);
+                    
+                    let end_time = event.end.date_time
+                        .map(|dt| dt.to_rfc3339())
+                        .or(event.end.date);
+
+                    let summary = event.summary.unwrap_or_else(|| "No title".to_string());
+                    println!("Formatting event: {}", summary);
+
+                    json!({
+                        "summary": summary,
+                        "start": start_time,
+                        "end": end_time,
+                        "status": event.status.unwrap_or_else(|| "confirmed".to_string())
+                    })
+                })
+                .collect();
+
+            println!("Returning {} formatted events", formatted_events.len());
+            Json(json!({
+                "events": formatted_events
+            }))
+        },
+        Err(e) => {
+            let error_message = match e {
+                crate::handlers::google_calendar::CalendarError::NoConnection => {
+                    println!("Error: No Google Calendar connection found");
+                    "No Google Calendar connection found".to_string()
+                },
+                crate::handlers::google_calendar::CalendarError::TokenError(msg) => {
+                    println!("Error: Token error - {}", msg);
+                    format!("Token error: {}", msg)
+                },
+                crate::handlers::google_calendar::CalendarError::ApiError(msg) => {
+                    println!("Error: API error - {}", msg);
+                    format!("API error: {}", msg)
+                },
+                crate::handlers::google_calendar::CalendarError::ParseError(msg) => {
+                    println!("Error: Parse error - {}", msg);
+                    format!("Parse error: {}", msg)
+                },
+            };
+
+            Json(json!({
+                "error": error_message
+            }))
+        }
+    }
+}
 
 pub async fn handle_weather_tool_call(
     State(_state): State<Arc<AppState>>,

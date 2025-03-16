@@ -23,6 +23,7 @@ diesel::table! {
         last_update -> Integer,
         created_on -> Integer,
         description -> Text,
+        expires_in -> Integer,
     }
 }
 
