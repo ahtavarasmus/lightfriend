@@ -342,6 +342,26 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         }),
     );
 
+    let mut calendar_properties = HashMap::new();
+    calendar_properties.insert(
+        "start".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Start time from which we start fetching the events. Should be in format: '2024-03-16T00:00:00Z'".to_string()),
+            ..Default::default()
+        }),
+    );
+    calendar_properties.insert(
+        "end".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("End time for which we end fetching the events from. Should be in format: '2024-03-16T00:00:00Z'".to_string()),
+            ..Default::default()
+        }),
+    );
+
+
+
     // Define tools
     let tools = vec![chat_completion::Tool {
             r#type: chat_completion::ToolType::Function,
@@ -376,6 +396,18 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     schema_type: types::JSONSchemaType::Object,
                     properties: Some(shazam_properties),
                     required: None,
+                },
+            },
+        },
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: String::from("calendar"),
+                description: Some(String::from("Calendar tool fetches the user's calendar events for the specific time frame. If the user doesn't give the specific time frame assume for today and tomorrow to be the time range.")),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(calendar_properties),
+                    required: Some(vec![String::from("start"), String::from("end")]),
                 },
             },
         },
@@ -477,6 +509,11 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                 location: String,
                 units: String,
             }
+            #[derive(Deserialize, Serialize)]
+            struct CalendarTimeFrame {
+                start: String,
+                end: String,
+            }
             
             let tool_calls = match result.choices[0].message.tool_calls.as_ref() {
                 Some(calls) => {
@@ -543,7 +580,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     let c: WeatherQuestion = match serde_json::from_str(arguments) {
                         Ok(q) => q,
                         Err(e) => {
-                            eprintln!("Failed to parse perplexity question: {}", e);
+                            eprintln!("Failed to parse calendar question: {}", e);
                             continue;
                         }
                     };
@@ -575,6 +612,85 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     });
                     tool_answers.insert(tool_call_id, "Shazam initiated. Lightfriend should be calling you now. Song name will be texted to you. Say this in the final response.".to_string());
 
+                } else if name == "calendar" {
+                    println!("Executing calendar tool call");
+                    println!("Raw arguments: {}", arguments);
+                    let c: CalendarTimeFrame = match serde_json::from_str(arguments) {
+                        Ok(q) => q,
+                        Err(e) => {
+                            eprintln!("Failed to parse calendar question: {}", e);
+                            continue;
+                        }
+                    };
+                    // Parse the start and end times into DateTime<Utc>
+                    let start_time = match chrono::DateTime::parse_from_rfc3339(&c.start) {
+                        Ok(dt) => dt.with_timezone(&chrono::Utc),
+                        Err(e) => {
+                            eprintln!("Failed to parse start time: {}", e);
+                            continue;
+                        }
+                    };
+                    
+                    let end_time = match chrono::DateTime::parse_from_rfc3339(&c.end) {
+                        Ok(dt) => dt.with_timezone(&chrono::Utc),
+                        Err(e) => {
+                            eprintln!("Failed to parse end time: {}", e);
+                            continue;
+                        }
+                    };
+
+                    let timeframe = crate::handlers::google_calendar::TimeframeQuery {
+                        start: start_time,
+                        end: end_time,
+                    };
+                    println!("starting time: {}", start_time);
+                    println!("endint time: {}", end_time);
+
+                    match crate::handlers::google_calendar::fetch_calendar_events(&state, user.id, timeframe).await {
+                        Ok(events) => {
+                            println!("Successfully fetched {} calendar events", events.len());
+                            
+                            // Format events into a readable response
+                            let mut formatted_response = String::new();
+                            
+                            if events.is_empty() {
+                                formatted_response = "No events found for this time period.".to_string();
+                            } else {
+                                for (i, event) in events.iter().enumerate() {
+                                    let summary = event.summary.as_deref().unwrap_or("Untitled Event");
+                                    
+                                    let start_time = event.start.date_time
+                                        .map(|dt| dt.format("%I:%M %p").to_string())
+                                        .or_else(|| event.start.date.as_ref().map(|d| "All day".to_string()))
+                                        .unwrap_or_else(|| "Unknown time".to_string());
+                                        
+                                    let start_date = event.start.date_time
+                                        .map(|dt| dt.format("%b %d").to_string())
+                                        .or_else(|| event.start.date.as_ref().map(|d| d.to_string()))
+                                        .unwrap_or_else(|| "Unknown date".to_string());
+
+                                    if i == 0 {
+                                        formatted_response.push_str(&format!("{}. {} on {} at {}", i + 1, summary, start_date, start_time));
+                                    } else {
+                                        formatted_response.push_str(&format!(", {}. {} on {} at {}", i + 1, summary, start_date, start_time));
+                                    }
+                                }
+                            }
+                            
+                            tool_answers.insert(tool_call_id, formatted_response);
+                        }
+                        Err(e) => {
+                            let error_message = match e {
+                                crate::handlers::google_calendar::CalendarError::NoConnection => 
+                                    "You need to connect your Google Calendar first. Visit the website to connect.",
+                                crate::handlers::google_calendar::CalendarError::TokenError(_) => 
+                                    "Your calendar connection needs to be renewed. Please reconnect on the website.",
+                                _ => "Failed to fetch calendar events. Please try again later.",
+                            };
+                            tool_answers.insert(tool_call_id, error_message.to_string());
+                            eprintln!("Failed to fetch calendar events: {:?}", e);
+                        }
+                    }
                 }
             }
 
