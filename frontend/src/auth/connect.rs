@@ -16,6 +16,38 @@ pub struct ConnectProps {
 pub fn connect(props: &ConnectProps) -> Html {
     let error = use_state(|| None::<String>);
     let connecting = use_state(|| false);
+    let is_connected = use_state(|| false);
+
+    // Check connection status on component mount
+    {
+        let is_connected = is_connected.clone();
+        use_effect_with_deps(
+            move |_| {
+                if let Some(window) = web_sys::window() {
+                    if let Ok(Some(storage)) = window.local_storage() {
+                        if let Ok(Some(token)) = storage.get_item("token") {
+                            spawn_local(async move {
+                                let request = Request::get(&format!("{}/api/auth/google/status", config::get_backend_url()))
+                                    .header("Authorization", &format!("Bearer {}", token))
+                                    .send()
+                                    .await;
+
+                                if let Ok(response) = request {
+                                    if let Ok(data) = response.json::<serde_json::Value>().await {
+                                        if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                            is_connected.set(connected);
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+                || ()
+            },
+            (),
+        );
+    }
 
     // Check token on component mount
     use_effect_with_deps(
@@ -133,24 +165,95 @@ pub fn connect(props: &ConnectProps) -> Html {
         })
     };
 
-    html! {
-        <div class="connect">
-            <button 
-                onclick={onclick} 
-                disabled={*connecting}
-                class="connect-button"
-            >
-                if *connecting {
-                    {"Connecting to Google Calendar..."}
-                } else {
-                    {"Connect Google Calendar"}
+    let onclick_delete = {
+        let is_connected = is_connected.clone();
+        let error = error.clone();
+        Callback::from(move |_| {
+            let is_connected = is_connected.clone();
+            let error = error.clone();
+
+            if let Some(window) = web_sys::window() {
+                if let Ok(Some(storage)) = window.local_storage() {
+                    if let Ok(Some(token)) = storage.get_item("token") {
+                        spawn_local(async move {
+                            let request = Request::delete(&format!("{}/api/auth/google/connection", config::get_backend_url()))
+                                .header("Authorization", &format!("Bearer {}", token))
+                                .send()
+                                .await;
+
+                            match request {
+                                Ok(response) => {
+                                    if response.ok() {
+                                        is_connected.set(false);
+                                    } else {
+                                        if let Ok(error_data) = response.json::<serde_json::Value>().await {
+                                            if let Some(error_msg) = error_data.get("error").and_then(|e| e.as_str()) {
+                                                error.set(Some(error_msg.to_string()));
+                                            } else {
+                                                error.set(Some(format!("Failed to delete connection: {}", response.status())));
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error.set(Some(format!("Network error: {}", e)));
+                                }
+                            }
+                        });
+                    }
                 }
-            </button>
-            if let Some(err) = (*error).as_ref() {
-                <div class="error-message">
-                    {err}
+            }
+        })
+    };
+
+            html! {
+                <div class="connect">
+                    if *is_connected {
+                        <div class="calendar-controls">
+                            <button 
+                                onclick={onclick.clone()} 
+                                class="connect-button connected"
+                            >
+                                {"Connected to Google Calendar ✓"}
+                            </button>
+                            <button 
+                                onclick={onclick_delete}
+                                class="disconnect-button"
+                            >
+                                {"Disconnect"}
+                            </button>
+                        </div>
+                    } else {
+                        <button 
+                            onclick={onclick.clone()} 
+                            class="connect-button"
+                        >
+                            if *connecting {
+                                {"Connecting to Google Calendar..."}
+                            } else {
+                                {"Connect Google Calendar"}
+                            }
+                        </button>
+                    }
+                    <button 
+                        onclick={onclick} 
+                        /*disabled={*connecting || *is_connected}*/
+                        class={classes!("connect-button", if *is_connected { "connected" } else { "" })}
+                    >
+                        if *connecting {
+                            {"Connecting to Google Calendar..."}
+                        } else if *is_connected {
+                            {"Connected to Google Calendar ✓"}
+                        } else {
+                            {"Connect Google Calendar"}
+                        }
+                    </button>
+                    if let Some(err) = (*error).as_ref() {
+                        <div class="error-message">
+                            {err}
+                        </div>
+                    }
                 </div>
             }
-        </div>
-    }
+
 }
