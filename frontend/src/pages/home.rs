@@ -374,7 +374,6 @@ pub fn Home() -> Html {
                         </p>
 
                         <div class="calendar-section">
-                            <h2>{"Connect a Service"}</h2>
                             {
                                 if let Some(profile) = (*profile_data).as_ref() {
                                     html! {

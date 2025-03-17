@@ -41,6 +41,7 @@ mod handlers {
 
 mod utils {
     pub mod encryption;
+    pub mod tool_exec;
 }
 mod api {
     pub mod vapi_endpoints;

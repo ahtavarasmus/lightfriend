@@ -111,6 +111,150 @@ pub enum CalendarError {
     ApiError(String),
     ParseError(String),
 }
+pub async fn handle_calendar_fetching(
+    state: &AppState,
+    user_id: i32,
+    start: &str,
+    end: &str,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Starting calendar tool call for user: {}", user_id);
+    
+    // Parse start and end times
+    println!("Parsing datetime strings");
+    let parse_datetime = |datetime_str: &str| {
+        chrono::DateTime::parse_from_rfc3339(datetime_str)
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .map_err(|_| "Invalid datetime format")
+    };
+
+    let start_time = match parse_datetime(start) {
+        Ok(time) => {
+            println!("Successfully parsed start time: {}", time);
+            time
+        },
+        Err(e) => {
+            println!("Failed to parse start time: {}", e);
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": format!("Invalid start time: {}", e)
+                }))
+            ));
+        }
+    };
+
+    let end_time = match parse_datetime(end) {
+        Ok(time) => {
+            println!("Successfully parsed end time: {}", time);
+            time
+        },
+        Err(e) => {
+            println!("Failed to parse end time: {}", e);
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": format!("Invalid end time: {}", e)
+                }))
+            ));
+        }
+    };
+
+    // Check if user has active Google Calendar connection
+    println!("Checking if user has active Google Calendar connection");
+    match state.user_repository.has_active_google_calendar(user_id) {
+        Ok(has_connection) => {
+            if !has_connection {
+                println!("User does not have active Google Calendar connection");
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": "No active Google Calendar connection found"
+                    }))
+                ));
+            }
+            println!("User has active Google Calendar connection");
+        },
+        Err(e) => {
+            println!("Error checking calendar connection status: {}", e);
+            tracing::error!("Failed to check calendar connection status: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to check calendar connection status",
+                    "details": e.to_string()
+                }))
+            ));
+        }
+    }
+
+    let timeframe = TimeframeQuery {
+        start: start_time,
+        end: end_time,
+    };
+
+    // Fetch calendar events
+    println!("Fetching calendar events");
+    match fetch_calendar_events(state, user_id, timeframe).await {
+        Ok(events) => {
+            println!("Successfully fetched {} events", events.len());
+            // Format events into a more readable response
+            let formatted_events: Vec<serde_json::Value> = events.into_iter()
+                .map(|event| {
+                    let start_time = event.start.date_time
+                        .map(|dt| dt.to_rfc3339())
+                        .or(event.start.date);
+                    
+                    let end_time = event.end.date_time
+                        .map(|dt| dt.to_rfc3339())
+                        .or(event.end.date);
+
+                    let summary = event.summary.unwrap_or_else(|| "No title".to_string());
+                    println!("Formatting event: {}", summary);
+
+                    json!({
+                        "summary": summary,
+                        "start": start_time,
+                        "end": end_time,
+                        "status": event.status.unwrap_or_else(|| "confirmed".to_string())
+                    })
+                })
+                .collect();
+
+            println!("Returning {} formatted events", formatted_events.len());
+            Ok(Json(json!({
+                "events": formatted_events
+            })))
+        },
+        Err(e) => {
+            let error_message = match e {
+                CalendarError::NoConnection => {
+                    println!("Error: No Google Calendar connection found");
+                    "No Google Calendar connection found".to_string()
+                },
+                CalendarError::TokenError(msg) => {
+                    println!("Error: Token error - {}", msg);
+                    format!("Token error: {}", msg)
+                },
+                CalendarError::ApiError(msg) => {
+                    println!("Error: API error - {}", msg);
+                    format!("API error: {}", msg)
+                },
+                CalendarError::ParseError(msg) => {
+                    println!("Error: Parse error - {}", msg);
+                    format!("Parse error: {}", msg)
+                },
+            };
+
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": error_message
+                }))
+            ))
+        }
+    }
+}
+
 pub async fn fetch_calendar_events(
     state: &AppState,
     user_id: i32,

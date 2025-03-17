@@ -13,7 +13,6 @@ use axum::{
 };
 use chrono::Utc;
 
-use crate::api::vapi_endpoints::ask_perplexity;
 
 use openai_api_rs::v1::{
     chat_completion,
@@ -563,7 +562,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     println!("Calling Perplexity API with query: {}", query);
 
                     let sys_prompt = format!("You are assisting an AI text messaging service. The questions you receive are from text messaging conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. When listing multiple points, use simple numbering (1, 2, 3) 5. Focus on the most relevant information that addresses the user's immediate needs. This is what you should know about the user who this information is going to in their own words: {}", user_info);
-                    match ask_perplexity(&query, &sys_prompt).await {
+                    match crate::utils::tool_exec::ask_perplexity(&query, &sys_prompt).await {
                         Ok(answer) => {
                             println!("Successfully received Perplexity answer");
                             println!("Perplexity response: {}", answer);
@@ -589,7 +588,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     println!("location for weather: {}", location);
                     println!("units for weather: {}", units);
 
-                    match crate::api::elevenlabs::get_weather(&location, &units).await {
+                    match crate::utils::tool_exec::get_weather(&location, &units).await {
                         Ok(answer) => {
                             println!("Successfully received weather answer");
                             println!("Weather response: {}", answer);

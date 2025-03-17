@@ -207,47 +207,110 @@ pub fn connect(props: &ConnectProps) -> Html {
     };
 
             html! {
-                <div class="connect">
-                    if *is_connected {
-                        <div class="calendar-controls">
-                            <button 
-                                onclick={onclick.clone()} 
-                                class="connect-button connected"
-                            >
-                                {"Connected to Google Calendar ✓"}
-                            </button>
-                            <button 
-                                onclick={onclick_delete}
-                                class="disconnect-button"
-                            >
-                                {"Disconnect"}
-                            </button>
+                <div class="connect-section">
+                    // Calendar Services
+                    <div class="service-group">
+                        <h3 class="service-group-title">
+                            <i class="fas fa-calendar"></i>
+                            {"Calendar Services"}
+                        </h3>
+                        <div class="service-list">
+                            // Google Calendar
+                            <div class="service-item">
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg" alt="Google Calendar"/>
+                                        {"Google Calendar"}
+                                    </div>
+                                    if *is_connected {
+                                        <span class="service-status">{"Connected ✓"}</span>
+                                    }
+                                </div>
+                                <p class="service-description">
+                                    {"Access and manage your Google Calendar events through SMS or voice calls."}
+                                </p>
+                                if *is_connected {
+                                    <div class="calendar-controls">
+                                        <button 
+                                            onclick={onclick_delete}
+                                            class="disconnect-button"
+                                        >
+                                            {"Disconnect"}
+                                        </button>
+                                    </div>
+                                } else {
+                                    <button 
+                                        onclick={onclick.clone()} 
+                                        class="connect-button"
+                                    >
+                                        if *connecting {
+                                            {"Connecting..."}
+                                        } else {
+                                            {"Connect"}
+                                        }
+                                    </button>
+                                }
+                            </div>
+
+                            // Outlook Calendar (Coming Soon)
+                            <div class="service-item coming-soon">
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        <img src="https://upload.wikimedia.org/wikipedia/commons/d/df/Microsoft_Office_Outlook_%282018%E2%80%93present%29.svg" alt="Outlook Calendar"/>
+                                        {"Outlook Calendar"}
+                                        <span class="coming-soon-tag">{"Coming Soon"}</span>
+                                    </div>
+                                </div>
+                                <p class="service-description">
+                                    {"Manage your Outlook Calendar events through SMS or voice calls."}
+                                </p>
+                                <button class="connect-button" disabled=true>
+                                    {"Connect"}
+                                </button>
+                            </div>
                         </div>
-                    } else {
-                        <button 
-                            onclick={onclick.clone()} 
-                            class="connect-button"
-                        >
-                            if *connecting {
-                                {"Connecting to Google Calendar..."}
-                            } else {
-                                {"Connect Google Calendar"}
-                            }
-                        </button>
-                    }
-                    <button 
-                        onclick={onclick} 
-                        /*disabled={*connecting || *is_connected}*/
-                        class={classes!("connect-button", if *is_connected { "connected" } else { "" })}
-                    >
-                        if *connecting {
-                            {"Connecting to Google Calendar..."}
-                        } else if *is_connected {
-                            {"Connected to Google Calendar ✓"}
-                        } else {
-                            {"Connect Google Calendar"}
-                        }
-                    </button>
+                    </div>
+
+                    // Messaging Services (Coming Soon)
+                    <div class="service-group">
+                        <h3 class="service-group-title">
+                            <i class="fas fa-comments"></i>
+                            {"Messaging Services"}
+                            <span class="coming-soon-tag">{"Coming Soon"}</span>
+                        </h3>
+                        <div class="service-list">
+                            <div class="service-item coming-soon">
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" alt="Telegram"/>
+                                        {"Telegram"}
+                                    </div>
+                                </div>
+                                <p class="service-description">
+                                    {"Send and receive Telegram messages through SMS or voice calls."}
+                                </p>
+                                <button class="connect-button" disabled=true>
+                                    {"Connect"}
+                                </button>
+                            </div>
+
+                            <div class="service-item coming-soon">
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp"/>
+                                        {"WhatsApp"}
+                                    </div>
+                                </div>
+                                <p class="service-description">
+                                    {"Send and receive WhatsApp messages through SMS or voice calls."}
+                                </p>
+                                <button class="connect-button" disabled=true>
+                                    {"Connect"}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                     if let Some(err) = (*error).as_ref() {
                         <div class="error-message">
                             {err}

@@ -1,0 +1,166 @@
+.connect-section {
+    margin-top: 2rem;
+    padding: 2rem;
+    background: rgba(30, 144, 255, 0.05);
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    border-radius: 12px;
+}
+
+.service-group {
+    margin-bottom: 2rem;
+}
+
+.service-group:last-child {
+    margin-bottom: 0;
+}
+
+.service-group-title {
+    color: #7EB2FF;
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.service-group-title i {
+    font-size: 1.1rem;
+}
+
+.service-list {
+    display: grid;
+    gap: 1rem;
+}
+
+.service-item {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    border-radius: 8px;
+    padding: 1.5rem;
+    transition: all 0.3s ease;
+}
+
+.service-item:hover {
+    border-color: rgba(30, 144, 255, 0.4);
+    transform: translateY(-2px);
+}
+
+.service-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+}
+
+.service-name {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: #fff;
+    font-size: 1.1rem;
+}
+
+.service-name img {
+    width: 24px;
+    height: 24px;
+}
+
+.service-status {
+    font-size: 0.9rem;
+    color: #666;
+}
+
+.service-description {
+    color: #999;
+    font-size: 0.9rem;
+    margin-bottom: 1.5rem;
+    line-height: 1.4;
+}
+
+.connect-button {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    justify-content: center;
+}
+
+.connect-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
+}
+
+.connect-button.connected {
+    background: rgba(30, 144, 255, 0.1);
+    border: 1px solid rgba(30, 144, 255, 0.3);
+    color: #1E90FF;
+}
+
+.connect-button.connected:hover {
+    background: rgba(30, 144, 255, 0.15);
+}
+
+.disconnect-button {
+    background: transparent;
+    border: 1px solid rgba(255, 99, 71, 0.3);
+    color: #FF6347;
+    padding: 0.75rem 1.5rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: 0.5rem;
+    width: 100%;
+}
+
+.disconnect-button:hover {
+    background: rgba(255, 99, 71, 0.1);
+    border-color: rgba(255, 99, 71, 0.5);
+}
+
+.coming-soon {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.coming-soon-tag {
+    background: rgba(30, 144, 255, 0.1);
+    color: #1E90FF;
+    font-size: 0.8rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    margin-left: 0.5rem;
+}
+
+.error-message {
+    color: #FF6347;
+    font-size: 0.9rem;
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background: rgba(255, 99, 71, 0.1);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 99, 71, 0.2);
+}
+
+@media (max-width: 768px) {
+    .connect-section {
+        padding: 1.5rem;
+    }
+
+    .service-list {
+        grid-template-columns: 1fr;
+    }
+
+    .service-item {
+        padding: 1rem;
+    }
+}
+

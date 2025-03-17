@@ -140,13 +140,6 @@ body {
     transform: translateY(-2px);
 }
 
-/* Add padding to all main content containers */
-.landing-page,
-.dashboard-container,
-.profile-container,
-.login-container,
-.register-container {
-}
 
 /* Responsive adjustments */
 @media (max-width: 768px) {
@@ -418,42 +411,6 @@ body {
     }
 }
 
-/* auth pages: */
-.gradient-bg {
-    background: #1a1a1a; /* Dark background */
-    background: linear-gradient(
-        to bottom right,
-        rgba(30, 144, 255, 0.05),
-        rgba(0, 0, 0, 0.95)
-    );
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 2rem;
-}
-
-.login-container,
-.register-container {
-    background: rgba(30, 30, 30, 0.7); /* Darker container */
-    border: 1px solid rgba(30, 144, 255, 0.1);
-    border-radius: 16px;
-    padding: 3rem;
-    width: 100%;
-    max-width: 480px;
-    backdrop-filter: blur(10px);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-}
-
-.login-container h1,
-.register-container h1 {
-    font-size: 2rem;
-    margin-bottom: 1.5rem;
-    text-align: center;
-    background: linear-gradient(45deg, #fff, #7EB2FF);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-}
 
 form {
     display: flex;
@@ -517,25 +474,6 @@ button[type="submit"]:hover {
     border-radius: 8px;
     margin-bottom: 1.5rem;
     text-align: center;
-}
-
-.auth-redirect {
-    margin-top: 2rem;
-    text-align: center;
-    color: rgba(255, 255, 255, 0.6); /* Dimmer text */
-    font-size: 0.9rem;
-}
-
-.auth-redirect a {
-    color: #1E90FF;
-    text-decoration: none;
-    transition: color 0.3s ease;
-    margin-left: 0.25rem;
-}
-
-.auth-redirect a:hover {
-    color: #7EB2FF;
-    text-decoration: underline;
 }
 
 /* Loading state remains the same */
@@ -1577,12 +1515,6 @@ button[type="submit"].loading::after {
 }
 
 @media (max-width: 768px) {
-
-    .login-container,
-    .register-container {
-        padding: 2rem;
-        margin: 1rem;
-    }
 
     input,
     button[type="submit"] {
