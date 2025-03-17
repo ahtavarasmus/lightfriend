@@ -216,11 +216,12 @@ pub fn connect(props: &ConnectProps) -> Html {
                         </h3>
                         <div class="service-list">
                             // Google Calendar
-                            <div class="service-item">
+                            <div class="service-item coming-soon">
                                 <div class="service-header">
                                     <div class="service-name">
                                         <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg" alt="Google Calendar"/>
                                         {"Google Calendar"}
+                                        <span class="coming-soon-tag">{"Coming Soon (Beta)"}</span>
                                     </div>
                                     if *is_connected {
                                         <span class="service-status">{"Connected ✓"}</span>
