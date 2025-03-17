@@ -196,6 +196,7 @@ pub mod register {
         let error = use_state(|| None::<String>);
         let success = use_state(|| None::<String>);
         let email_valid = use_state(|| true); // Track email validity
+        let terms_accepted = use_state(|| false); // Track terms acceptance
 
         let onsubmit = {
             let email = email.clone();
@@ -346,7 +347,39 @@ pub mod register {
                             password.set(input.value());
                         }}
                     />
-                    <button type="submit">{"Register"}</button>
+                    <div id="terms-checkbox-container">
+                        <label>
+                            <input
+                                type="checkbox"
+                                checked={*terms_accepted}
+                                onchange={
+                                    let terms_accepted = terms_accepted.clone();
+                                    move |e: Event| {
+                                        let input: HtmlInputElement = e.target_unchecked_into();
+                                        terms_accepted.set(input.checked());
+                                    }
+                                }
+                            />
+                            <span>
+                                {"By signing up you agree to our "}
+                                <a href="/terms" target="_blank" style="color: #007bff; text-decoration: underline;">{"terms of service"}</a>
+                                {" and "}
+                                <a href="/privacy" target="_blank" style="color: #007bff; text-decoration: underline;">{"privacy policy"}</a>
+                                {" and consent to receive automated SMS messages from Lightfriend. Message and data rates may apply. Reply STOP to opt out."}
+                            </span>
+                        </label>
+                    </div>
+                    <button 
+                        type="submit" 
+                        disabled={!*terms_accepted}
+                        style={if !*terms_accepted {
+                            "opacity: 0.5; cursor: not-allowed;"
+                        } else {
+                            ""
+                        }}
+                    >
+                        {"Register"}
+                    </button>
                 </form>
                 <div class="auth-redirect">
                     {"Already have an account? "}

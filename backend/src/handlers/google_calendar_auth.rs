@@ -164,12 +164,62 @@ pub async fn delete_google_calendar_connection(
         },
     };
 
-    // Delete the connection
+    // Get the tokens before deleting them
+    let tokens = match state.user_repository.get_google_calendar_tokens(claims.sub) {
+        Ok(Some(tokens)) => tokens,
+        Ok(None) => {
+            tracing::info!("No tokens found to revoke for user {}", claims.sub);
+            return Ok(Json(json!({
+                "message": "No Google Calendar connection found to delete"
+            })));
+        },
+        Err(e) => {
+            tracing::error!("Failed to fetch tokens for revocation: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to fetch tokens"}))
+            ));
+        }
+    };
+
+    let (access_token, refresh_token) = tokens;
+
+    // Create HTTP client
+    let http_client = reqwest::ClientBuilder::new()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .expect("Client should build");
+
+    // Revoke access token
+    let revoke_result = http_client
+        .post("https://oauth2.googleapis.com/revoke")
+        .query(&[("token", access_token)])
+        .send()
+        .await;
+
+    if let Err(e) = revoke_result {
+        tracing::error!("Failed to revoke access token: {}", e);
+        // Continue with deletion even if revocation fails
+    }
+
+    // Revoke refresh token if it exists
+    let revoke_refresh_result = http_client
+        .post("https://oauth2.googleapis.com/revoke")
+        .query(&[("token", refresh_token)])
+        .send()
+        .await;
+
+    if let Err(e) = revoke_refresh_result {
+        tracing::error!("Failed to revoke refresh token: {}", e);
+        // Continue with deletion even if revocation fails
+    }
+
+    // Delete the connection from our database
     match state.user_repository.delete_google_calendar_connection(claims.sub) {
         Ok(_) => {
             tracing::info!("Successfully deleted Google Calendar connection for user {}", claims.sub);
             Ok(Json(json!({
-                "message": "Google Calendar connection deleted successfully"
+                "message": "Google Calendar connection deleted and permissions revoked successfully"
             })))
         },
         Err(e) => {
@@ -212,8 +262,8 @@ pub async fn refresh_google_token(
         &Validation::new(Algorithm::HS256)
     ) {
         Ok(token_data) => token_data.claims,
-        Err(e) => {
-            tracing::error!("Invalid token: {}", e);
+        Err(_e) => {
+            tracing::error!("Invalid token");
             return Err((
                 StatusCode::UNAUTHORIZED,
                 Json(json!({"error": "Invalid token"}))
@@ -303,7 +353,6 @@ pub async fn google_callback(
     }
     let session_id_str = state_parts[0];
     let state_csrf = state_parts[1];
-    tracing::info!("Parsed session_id: {}, state_csrf: {}", session_id_str, state_csrf);
 
     let session_id = session_id_str.parse::<i128>()
         .map_err(|e| {
@@ -315,7 +364,7 @@ pub async fn google_callback(
         })?;
     let session_id = Id(session_id);
 
-    tracing::info!("Loading session record for session_id: {}", session_id_str);
+    tracing::info!("Loading session record");
     let record = state.session_store.load(&session_id).await
         .map_err(|e| {
             tracing::error!("Session store error loading record: {}", e);
@@ -328,7 +377,7 @@ pub async fn google_callback(
     let record = match record {
         Some(r) => r,
         None => {
-            tracing::error!("Session record missing for session_id: {}", session_id_str);
+            tracing::error!("Session record missing");
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "Session record not found"}))
@@ -339,7 +388,7 @@ pub async fn google_callback(
     let stored_session_key = record.data.get("session_key")
         .and_then(|v| v.as_str().map(String::from))
         .ok_or_else(|| {
-            tracing::error!("Session key missing from session record for session_id: {}", session_id_str);
+            tracing::error!("Session key missing from session record ");
             (
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "Session key missing from session"}))
@@ -349,7 +398,7 @@ pub async fn google_callback(
     let stored_csrf_token = record.data.get("csrf_token")
         .and_then(|v| v.as_str().map(String::from))
         .ok_or_else(|| {
-            tracing::error!("CSRF token missing from session record for session_id: {}", session_id_str);
+            tracing::error!("CSRF token missing from session record");
             (
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "CSRF token missing from session"}))
@@ -357,11 +406,7 @@ pub async fn google_callback(
         })?;
 
     if stored_csrf_token != state_csrf {
-        tracing::error!(
-            "CSRF token mismatch: stored={}, received={}",
-            stored_csrf_token,
-            state_csrf
-        );
+        tracing::error!("CSRF token mismatch");
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "CSRF token mismatch"}))
@@ -371,7 +416,7 @@ pub async fn google_callback(
     let pkce_verifier = record.data.get("pkce_verifier")
         .and_then(|v| v.as_str().map(|s| PkceCodeVerifier::new(s.to_string())))
         .ok_or_else(|| {
-            tracing::error!("PKCE verifier missing from session record for session_id: {}", session_id_str);
+            tracing::error!("PKCE verifier missing from session record"); 
             (
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "PKCE verifier missing from session"}))

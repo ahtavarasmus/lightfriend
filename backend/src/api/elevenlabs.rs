@@ -3,17 +3,15 @@ use axum::{
     extract::State,
     response::Response,
     http::{StatusCode, Request, HeaderMap},
-    body::{Body, to_bytes}
+    body::Body,
 };
 use tracing::error;
-use std::error::Error;
 use axum::middleware;
 use std::sync::Arc;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use reqwest::Error as ReqwestError;
 
 
 
@@ -186,6 +184,21 @@ pub async fn fetch_assistant(
             dynamic_variables.insert("name".to_string(), json!(nickname));
             dynamic_variables.insert("user_info".to_string(), json!(user_info));
             dynamic_variables.insert("user_id".to_string(), json!(user.id));
+
+            // Check Google Calendar availability
+            match state.user_repository.has_active_google_calendar(user.id) {
+                Ok(has_calendar) => {
+                    if has_calendar {
+                        dynamic_variables.insert("google_calendar_status".to_string(), json!("connected"));
+                    } else {
+                        dynamic_variables.insert("google_calendar_status".to_string(), json!("not connected"));
+                    }
+                },
+                Err(e) => {
+                    eprintln!("Error checking Google Calendar status: {}", e);
+                    dynamic_variables.insert("google_calendar_status".to_string(), json!("not connected"));
+                }
+            }
 
             let charge_back_threshold= std::env::var("CHARGE_BACK_THRESHOLD")
                 .expect("CHARGE_BACK_THRESHOLD not set")
@@ -418,7 +431,7 @@ pub async fn handle_perplexity_tool_call(
 
     let system_prompt = "You are assisting an AI voice calling service. The questions you receive are from voice conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read aloud 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. Use natural language sentence structure 5. When listing multiple points, use simple numbering (1, 2, 3) or natural language transitions (First... Second... Finally...) 6. Focus on the most relevant information that addresses the user's immediate needs 7. If specific numbers, dates, or proper names are important, spell them out clearly 8. Format numerical data in a way that's easy to read aloud (e.g., twenty-five percent instead of 25%) Your responses will be incorporated into a voice conversation, so clarity and natural flow are essential.";
     
-    match ask_perplexity(&payload.message, system_prompt).await {
+    match crate::utils::tool_exec::ask_perplexity(&payload.message, system_prompt).await {
         Ok(response) => {
             println!("Perplexity response: {}", response);
             Json(json!({
@@ -442,13 +455,9 @@ pub async fn handle_calendar_tool_call(
     
     // Extract required parameters from query
     let user_id_str = match params.get("user_id") {
-        Some(id) => {
-            println!("Found user_id: {}", id);
-            tracing::info!("Received calendar request for user: {}", id);
-            id
-        },
+        Some(id) => id,
         None => {
-            println!("Missing user_id parameter");
+
             return Json(json!({
                 "error": "Missing user_id parameter"
             }));
@@ -456,12 +465,9 @@ pub async fn handle_calendar_tool_call(
     };
 
     let start = match params.get("start") {
-        Some(start) => {
-            println!("Found start time: {}", start);
-            start
-        },
+        Some(start) => start,
         None => {
-            println!("Missing start parameter");
+
             return Json(json!({
                 "error": "Missing start parameter"
             }));
@@ -469,12 +475,9 @@ pub async fn handle_calendar_tool_call(
     };
 
     let end = match params.get("end") {
-        Some(end) => {
-            println!("Found end time: {}", end);
-            end
-        },
+        Some(end) => end,
         None => {
-            println!("Missing end parameter");
+
             return Json(json!({
                 "error": "Missing end parameter"
             }));
@@ -483,136 +486,19 @@ pub async fn handle_calendar_tool_call(
 
     // Parse user_id from string to i32
     let user_id = match user_id_str.parse::<i32>() {
-        Ok(id) => {
-            println!("Successfully parsed user_id to integer: {}", id);
-            id
-        },
+        Ok(id) => id,
         Err(_) => {
-            println!("Failed to parse user_id: {}", user_id_str);
+
             return Json(json!({
                 "error": "Invalid user ID format"
             }));
         }
     };
 
-    // Check if user has active Google Calendar connection
-    println!("Checking if user has active Google Calendar connection");
-    match state.user_repository.has_active_google_calendar(user_id) {
-        Ok(has_connection) => {
-            if !has_connection {
-                println!("User does not have active Google Calendar connection");
-                return Json(json!({
-                    "error": "No active Google Calendar connection found"
-                }));
-            }
-            println!("User has active Google Calendar connection");
-        },
-        Err(e) => {
-            println!("Error checking calendar connection status: {}", e);
-            tracing::error!("Failed to check calendar connection status: {}", e);
-            return Json(json!({
-                "error": "Failed to check calendar connection status",
-                "details": e.to_string()
-            }));
-        }
-    }
-
-    // Parse start and end times
-    println!("Parsing datetime strings");
-    let parse_datetime = |datetime_str: &str| {
-        chrono::DateTime::parse_from_rfc3339(datetime_str)
-            .map(|dt| dt.with_timezone(&chrono::Utc))
-            .map_err(|_| "Invalid datetime format")
-    };
-
-    let start_time = match parse_datetime(start) {
-        Ok(time) => {
-            println!("Successfully parsed start time: {}", time);
-            time
-        },
-        Err(e) => {
-            println!("Failed to parse start time: {}", e);
-            return Json(json!({
-                "error": format!("Invalid start time: {}", e)
-            }));
-        }
-    };
-
-    let end_time = match parse_datetime(end) {
-        Ok(time) => {
-            println!("Successfully parsed end time: {}", time);
-            time
-        },
-        Err(e) => {
-            println!("Failed to parse end time: {}", e);
-            return Json(json!({
-                "error": format!("Invalid end time: {}", e)
-            }));
-        }
-    };
-
-    let timeframe = crate::handlers::google_calendar::TimeframeQuery {
-        start: start_time,
-        end: end_time,
-    };
-
-    // Fetch calendar events
-    println!("Fetching calendar events");
-    match crate::handlers::google_calendar::fetch_calendar_events(&state, user_id, timeframe).await {
-        Ok(events) => {
-            println!("Successfully fetched {} events", events.len());
-            // Format events into a more readable response
-            let formatted_events: Vec<serde_json::Value> = events.into_iter()
-                .map(|event| {
-                    let start_time = event.start.date_time
-                        .map(|dt| dt.to_rfc3339())
-                        .or(event.start.date);
-                    
-                    let end_time = event.end.date_time
-                        .map(|dt| dt.to_rfc3339())
-                        .or(event.end.date);
-
-                    let summary = event.summary.unwrap_or_else(|| "No title".to_string());
-                    println!("Formatting event: {}", summary);
-
-                    json!({
-                        "summary": summary,
-                        "start": start_time,
-                        "end": end_time,
-                        "status": event.status.unwrap_or_else(|| "confirmed".to_string())
-                    })
-                })
-                .collect();
-
-            println!("Returning {} formatted events", formatted_events.len());
-            Json(json!({
-                "events": formatted_events
-            }))
-        },
-        Err(e) => {
-            let error_message = match e {
-                crate::handlers::google_calendar::CalendarError::NoConnection => {
-                    println!("Error: No Google Calendar connection found");
-                    "No Google Calendar connection found".to_string()
-                },
-                crate::handlers::google_calendar::CalendarError::TokenError(msg) => {
-                    println!("Error: Token error - {}", msg);
-                    format!("Token error: {}", msg)
-                },
-                crate::handlers::google_calendar::CalendarError::ApiError(msg) => {
-                    println!("Error: API error - {}", msg);
-                    format!("API error: {}", msg)
-                },
-                crate::handlers::google_calendar::CalendarError::ParseError(msg) => {
-                    println!("Error: Parse error - {}", msg);
-                    format!("Parse error: {}", msg)
-                },
-            };
-
-            Json(json!({
-                "error": error_message
-            }))
-        }
+    // Call the handler in google_calendar.rs
+    match crate::handlers::google_calendar::handle_calendar_fetching(&state, user_id, start, end).await {
+        Ok(response) => response,
+        Err((_, json_response)) => json_response,
     }
 }
 
@@ -622,7 +508,7 @@ pub async fn handle_weather_tool_call(
 ) -> Json<serde_json::Value> {
     println!("Received weather request for location: {}, using: {}", payload.location, payload.units);
     
-    match get_weather(&payload.location, &payload.units).await {
+    match crate::utils::tool_exec::get_weather(&payload.location, &payload.units).await {
         Ok(weather_info) => {
             println!("Weather response: {}", weather_info);
             Json(json!({
@@ -639,152 +525,4 @@ pub async fn handle_weather_tool_call(
     }
 }
 
-pub async fn get_weather(location: &str, units: &str) -> Result<String, Box<dyn Error>> {
 
-    let client = reqwest::Client::new();
-    
-    // First, get coordinates using Open-Meteo Geocoding API
-    let geocoding_url = format!(
-        "https://geocoding-api.open-meteo.com/v1/search?name={}&count=1&language=en&format=json",
-        urlencoding::encode(location)
-    );
-
-    let geocoding_response: serde_json::Value = client
-        .get(&geocoding_url)
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    let results = geocoding_response["results"].as_array()
-        .ok_or("No results found")?;
-
-    if results.is_empty() {
-        return Err("Location not found".into());
-    }
-
-    let result = &results[0];
-    let lat = result["latitude"].as_f64()
-        .ok_or("Latitude not found")?;
-    let lon = result["longitude"].as_f64()
-        .ok_or("Longitude not found")?;
-    let location_name = result["name"].as_str()
-        .unwrap_or(location);
-
-    println!("Found coordinates for {}: lat={}, lon={}", location_name, lat, lon);
-
-    // Get weather data using coordinates
-    let temperature_unit = match units {
-        "imperial" => "fahrenheit",
-        _ => "celsius"
-    };
-
-    let wind_speed_unit = match units {
-        "imperial" => "mph",
-        _ => "ms"
-    };
-
-    let weather_url = format!(
-        "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&temperature_unit={}&wind_speed_unit={}",
-        lat,
-        lon,
-        temperature_unit,
-        wind_speed_unit
-    );
-
-    let weather_data: serde_json::Value = client
-        .get(&weather_url)
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    let current = weather_data["current"].as_object()
-        .ok_or("No current weather data")?;
-
-    let temp = current["temperature_2m"].as_f64().unwrap_or(0.0);
-    let humidity = current["relative_humidity_2m"].as_f64().unwrap_or(0.0);
-    let wind_speed = current["wind_speed_10m"].as_f64().unwrap_or(0.0);
-    let weather_code = current["weather_code"].as_i64().unwrap_or(0);
-
-    // Convert WMO weather code to description
-    let description = match weather_code {
-        0 => "clear sky",
-        1..=3 => "partly cloudy",
-        45..=48 => "foggy",
-        51..=57 => "drizzling",
-        61..=65 => "raining",
-        71..=77 => "snowing",
-        80..=82 => "rain showers",
-        85..=86 => "snow showers",
-        95 => "thunderstorm",
-        96..=99 => "thunderstorm with hail",
-        _ => "unknown weather"
-    };
-
-
-    let (temp_unit, speed_unit) = match units {
-        "imperial" => ("Fahrenheit", "miles per hour"),
-        _ => ("Celsius", "meters per second")
-    };
-
-    let response = format!(
-        "The weather in {} is {} with a temperature of {} degrees {}. \
-        The humidity is {}% and wind speed is {} {}.",
-        location_name,
-        description,
-        temp.round(),
-        temp_unit,
-        humidity.round(),
-        wind_speed.round(),
-        speed_unit
-    );
-
-    Ok(response)
-}
-
-pub async fn ask_perplexity(message: &str, system_prompt: &str) -> Result<String, Box<dyn Error>> {
-    let api_key = std::env::var("PERPLEXITY_API_KEY").expect("PERPLEXITY_API_KEY must be set");
-    let client = reqwest::Client::new();
-    
-    let payload = json!({
-        "model": "sonar-pro",
-        "messages": [
-                {
-                    "role": "system",
-                    "content": system_prompt, 
-                },
-                {
-                    "role": "user",
-                    "content": message
-                },
-        ]
-    });
-
-    let response = client
-        .post("https://api.perplexity.ai/chat/completions")
-        .header("accept", "application/json")
-        .header("content-type", "application/json")
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(&payload)
-        .send()
-        .await?;
-
-    let response_text = response.text().await?;
-    println!("Raw response: {}", response_text);
-    
-    // Parse the JSON response
-    let response_json: Value = serde_json::from_str(&response_text)?;
-    
-    // Extract the assistant's message content
-    let content = response_json
-        .get("choices")
-        .and_then(|choices| choices.get(0))
-        .and_then(|choice| choice.get("message"))
-        .and_then(|message| message.get("content"))
-        .and_then(|content| content.as_str())
-        .ok_or("Failed to extract message content")?;
-
-    println!("Extracted content: {}", content);
-    Ok(content.to_string())
-}
