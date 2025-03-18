@@ -163,6 +163,7 @@ pub async fn handle_calendar_fetching(
     println!("Checking if user has active Google Calendar connection");
     match state.user_repository.has_active_google_calendar(user_id) {
         Ok(has_connection) => {
+            println!("no errors checking active google calendar connection");
             if !has_connection {
                 println!("User does not have active Google Calendar connection");
                 return Err((
@@ -321,7 +322,7 @@ pub async fn fetch_calendar_events(
 
         println!("Exchanging refresh token...");
         let token_result = state
-            .oauth_client
+            .google_calendar_oauth_client
             .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token))
             .request_async(&http_client)
             .await

@@ -14,6 +14,20 @@ diesel::table! {
 }
 
 diesel::table! {
+    gmail (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        encrypted_access_token -> Text,
+        encrypted_refresh_token -> Text,
+        status -> Text,
+        last_update -> Integer,
+        created_on -> Integer,
+        description -> Text,
+        expires_in -> Integer,
+    }
+}
+
+diesel::table! {
     google_calendar (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -92,10 +106,12 @@ diesel::table! {
 }
 
 diesel::joinable!(conversations -> users (user_id));
+diesel::joinable!(gmail -> users (user_id));
 diesel::joinable!(subscriptions -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     conversations,
+    gmail,
     google_calendar,
     subscriptions,
     unipile_connection,

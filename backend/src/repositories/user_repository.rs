@@ -571,7 +571,6 @@ impl UserRepository {
 
         Ok(connection.is_some())
     }
-
     pub fn get_google_calendar_tokens(&self, user_id: i32) -> Result<Option<(String, String)>, DieselError> {
         use crate::schema::google_calendar;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -681,6 +680,162 @@ impl UserRepository {
 
         Ok(())
     }
+
+    pub fn has_active_gmail(&self, user_id: i32) -> Result<bool, DieselError> {
+        use crate::schema::gmail;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let connection = gmail::table
+            .filter(gmail::user_id.eq(user_id))
+            .filter(gmail::status.eq("active"))
+            .first::<crate::models::user_models::Gmail>(&mut conn)
+            .optional()?;
+
+        Ok(connection.is_some())
+    }
+
+    pub fn get_gmail_tokens(&self, user_id: i32) -> Result<Option<(String, String)>, DieselError> {
+        use crate::schema::gmail;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let connection = gmail::table
+            .filter(gmail::user_id.eq(user_id))
+            .filter(gmail::status.eq("active"))
+            .first::<crate::models::user_models::Gmail>(&mut conn)
+            .optional()?;
+
+        if let Some(connection) = connection {
+            let encryption_key = match std::env::var("ENCRYPTION_KEY") {
+                Ok(key) => key,
+                Err(_) => {
+                    tracing::error!("ENCRYPTION_KEY not set in environment");
+                    return Err(DieselError::RollbackTransaction);
+                }
+            };
+
+            use magic_crypt::MagicCryptTrait;
+            let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
+
+            let access_token = match cipher.decrypt_base64_to_string(&connection.encrypted_access_token) {
+                Ok(token) => token,
+                Err(e) => {
+                    tracing::error!("Failed to decrypt access token: {:?}", e);
+                    return Err(DieselError::RollbackTransaction);
+                }
+            };
+
+            let refresh_token = match cipher.decrypt_base64_to_string(&connection.encrypted_refresh_token) {
+                Ok(token) => token,
+                Err(e) => {
+                    tracing::error!("Failed to decrypt refresh token: {:?}", e);
+                    return Err(DieselError::RollbackTransaction);
+                }
+            };
+
+            Ok(Some((access_token, refresh_token)))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn update_gmail_access_token(
+        &self,
+        user_id: i32,
+        new_access_token: &str,
+        expires_in: i32,
+    ) -> Result<(), DieselError> {
+        use crate::schema::gmail;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let encryption_key = std::env::var("ENCRYPTION_KEY")
+            .expect("ENCRYPTION_KEY must be set");
+
+        use magic_crypt::MagicCryptTrait;
+        let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
+
+        let encrypted_access_token = cipher.encrypt_str_to_base64(new_access_token);
+
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        diesel::update(gmail::table)
+            .filter(gmail::user_id.eq(user_id))
+            .filter(gmail::status.eq("active"))
+            .set((
+                gmail::encrypted_access_token.eq(encrypted_access_token),
+                gmail::expires_in.eq(expires_in),
+                gmail::last_update.eq(current_time),
+            ))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn delete_gmail_connection(&self, user_id: i32) -> Result<(), DieselError> {
+        use crate::schema::gmail;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::delete(gmail::table)
+            .filter(gmail::user_id.eq(user_id))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn create_gmail_connection(
+        &self,
+        user_id: i32,
+        access_token: &str,
+        refresh_token: Option<&str>,
+        expires_in: i32,
+    ) -> Result<(), DieselError> {
+        use crate::schema::gmail;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let encryption_key = std::env::var("ENCRYPTION_KEY")
+            .expect("ENCRYPTION_KEY must be set");
+
+        use magic_crypt::MagicCryptTrait;
+        let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
+
+        let encrypted_access_token = cipher.encrypt_str_to_base64(access_token);
+        let encrypted_refresh_token = refresh_token
+            .map(|token| cipher.encrypt_str_to_base64(token))
+            .unwrap_or_default();
+
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        use crate::models::user_models::NewGmail;
+
+        let new_connection = NewGmail {
+            user_id,
+            encrypted_access_token,
+            encrypted_refresh_token,
+            expires_in,
+            status: "active".to_string(),
+            last_update: current_time,
+            created_on: current_time,
+            description: "Gmail Connection".to_string(),
+        };
+
+        // First, delete any existing connections for this user
+        diesel::delete(gmail::table)
+            .filter(gmail::user_id.eq(user_id))
+            .execute(&mut conn)?;
+
+        // Then insert the new connection
+        diesel::insert_into(gmail::table)
+            .values(&new_connection)
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
     pub fn create_google_calendar_connection(
         &self,
         user_id: i32,
