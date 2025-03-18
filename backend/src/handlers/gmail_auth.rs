@@ -38,11 +38,11 @@ pub struct TokenInfo {
     expires_in: u64,
 }
 
-pub async fn google_login(
+pub async fn gmail_login(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Received request to /api/auth/google/login with headers: {:?}", headers);
+    tracing::info!("Received request to /api/auth/gmail/login with headers: {:?}", headers);
 
     let session_key = Uuid::new_v4().to_string();
     tracing::info!("Generated session key: {}", session_key);
@@ -109,11 +109,12 @@ pub async fn google_login(
 
     let state_token = format!("{}:{}", record.id.0, csrf_token.secret());
     let (auth_url, _) = state
-        .google_calendar_oauth_client
+        .gmail_oauth_client
         .authorize_url(|| CsrfToken::new(state_token.clone()))
-        .add_scope(Scope::new("https://www.googleapis.com/auth/calendar.events".to_string()))
-        .add_extra_param("access_type", "offline") // Add this to request offline access
-        .add_extra_param("prompt", "consent") // Optional: forces consent screen to ensure refresh token is issued
+        .add_scope(Scope::new("https://www.googleapis.com/auth/gmail.readonly".to_string()))
+        .add_scope(Scope::new("https://www.googleapis.com/auth/gmail.send".to_string()))
+        .add_extra_param("access_type", "offline")
+        .add_extra_param("prompt", "consent")
         .set_pkce_challenge(pkce_challenge)
         .url();
 
@@ -125,13 +126,12 @@ pub async fn google_login(
     })))
 }
 
-pub async fn delete_google_calendar_connection(
+pub async fn delete_gmail_connection(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Received request to delete Google Calendar connection");
+    tracing::info!("Received request to delete Gmail connection");
 
-    // Extract and validate JWT token
     let auth_header = headers.get("Authorization")
         .and_then(|header| header.to_str().ok())
         .and_then(|header| header.strip_prefix("Bearer "));
@@ -165,12 +165,12 @@ pub async fn delete_google_calendar_connection(
     };
 
     // Get the tokens before deleting them
-    let tokens = match state.user_repository.get_google_calendar_tokens(claims.sub) {
+    let tokens = match state.user_repository.get_gmail_tokens(claims.sub) {
         Ok(Some(tokens)) => tokens,
         Ok(None) => {
             tracing::info!("No tokens found to revoke for user {}", claims.sub);
             return Ok(Json(json!({
-                "message": "No Google Calendar connection found to delete"
+                "message": "No Gmail connection found to delete"
             })));
         },
         Err(e) => {
@@ -199,7 +199,6 @@ pub async fn delete_google_calendar_connection(
 
     if let Err(e) = revoke_result {
         tracing::error!("Failed to revoke access token: {}", e);
-        // Continue with deletion even if revocation fails
     }
 
     // Revoke refresh token if it exists
@@ -211,34 +210,32 @@ pub async fn delete_google_calendar_connection(
 
     if let Err(e) = revoke_refresh_result {
         tracing::error!("Failed to revoke refresh token: {}", e);
-        // Continue with deletion even if revocation fails
     }
 
     // Delete the connection from our database
-    match state.user_repository.delete_google_calendar_connection(claims.sub) {
+    match state.user_repository.delete_gmail_connection(claims.sub) {
         Ok(_) => {
-            tracing::info!("Successfully deleted Google Calendar connection for user {}", claims.sub);
+            tracing::info!("Successfully deleted Gmail connection for user {}", claims.sub);
             Ok(Json(json!({
-                "message": "Google Calendar connection deleted and permissions revoked successfully"
+                "message": "Gmail connection deleted and permissions revoked successfully"
             })))
         },
         Err(e) => {
-            tracing::error!("Failed to delete Google Calendar connection: {}", e);
+            tracing::error!("Failed to delete Gmail connection: {}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to delete calendar connection"}))
+                Json(json!({"error": "Failed to delete Gmail connection"}))
             ))
         }
     }
 }
 
-pub async fn refresh_google_token(
+pub async fn refresh_gmail_token(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Received request to refresh Google Calendar token");
+    tracing::info!("Received request to refresh Gmail token");
 
-    // Extract and validate JWT token
     let auth_header = headers.get("Authorization")
         .and_then(|header| header.to_str().ok())
         .and_then(|header| header.strip_prefix("Bearer "));
@@ -271,14 +268,13 @@ pub async fn refresh_google_token(
         },
     };
 
-    // Get the stored tokens
-    let tokens = match state.user_repository.get_google_calendar_tokens(claims.sub) {
+    let tokens = match state.user_repository.get_gmail_tokens(claims.sub) {
         Ok(Some(tokens)) => tokens,
         Ok(None) => {
-            tracing::error!("No Google Calendar connection found for user {}", claims.sub);
+            tracing::error!("No Gmail connection found for user {}", claims.sub);
             return Err((
                 StatusCode::NOT_FOUND,
-                Json(json!({"error": "No Google Calendar connection found"}))
+                Json(json!({"error": "No Gmail connection found"}))
             ));
         },
         Err(e) => {
@@ -292,15 +288,13 @@ pub async fn refresh_google_token(
 
     let (_, refresh_token) = tokens;
 
-    // Create HTTP client
     let http_client = reqwest::ClientBuilder::new()
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .expect("Client should build");
 
-    // Refresh the token
     let token_result = state
-        .google_calendar_oauth_client
+        .gmail_oauth_client
         .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token))
         .request_async(&http_client)
         .await
@@ -317,8 +311,7 @@ pub async fn refresh_google_token(
         .unwrap_or_default()
         .as_secs() as i32;
 
-    // Update the access token in the database
-    if let Err(e) = state.user_repository.update_google_calendar_access_token(
+    if let Err(e) = state.user_repository.update_gmail_access_token(
         claims.sub,
         new_access_token,
         expires_in,
@@ -330,14 +323,14 @@ pub async fn refresh_google_token(
         ));
     }
 
-    tracing::info!("Successfully refreshed Google Calendar token for user {}", claims.sub);
+    tracing::info!("Successfully refreshed Gmail token for user {}", claims.sub);
     Ok(Json(json!({
         "message": "Token refreshed successfully",
         "expires_in": expires_in
     })))
 }
 
-pub async fn google_callback(
+pub async fn gmail_callback(
     State(state): State<Arc<AppState>>,
     Query(query): Query<AuthRequest>,
 ) -> Result<Redirect, (StatusCode, Json<serde_json::Value>)> {
@@ -388,7 +381,7 @@ pub async fn google_callback(
     let stored_session_key = record.data.get("session_key")
         .and_then(|v| v.as_str().map(String::from))
         .ok_or_else(|| {
-            tracing::error!("Session key missing from session record ");
+            tracing::error!("Session key missing from session record");
             (
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "Session key missing from session"}))
@@ -416,24 +409,24 @@ pub async fn google_callback(
     let pkce_verifier = record.data.get("pkce_verifier")
         .and_then(|v| v.as_str().map(|s| PkceCodeVerifier::new(s.to_string())))
         .ok_or_else(|| {
-            tracing::error!("PKCE verifier missing from session record"); 
+            tracing::error!("PKCE verifier missing from session record");
             (
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "PKCE verifier missing from session"}))
             )
         })?;
+
     let http_client = reqwest::ClientBuilder::new()
-        // Following redirects opens the client up to SSRF vulnerabilities.
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .expect("Client should build");
 
     tracing::info!("Exchanging code for token");
     let token_result = state
-        .google_calendar_oauth_client
+        .gmail_oauth_client
         .exchange_code(AuthorizationCode::new(query.code))
         .set_pkce_verifier(pkce_verifier)
-        .request_async(&http_client) // Use async client
+        .request_async(&http_client)
         .await
         .map_err(|e| {
             tracing::error!("Token exchange failed: {}", e);
@@ -443,14 +436,12 @@ pub async fn google_callback(
             )
         })?;
 
-
     let access_token = token_result.access_token().secret();
     let refresh_token = token_result.refresh_token().map(|rt| rt.secret());
     let expires_in = token_result.expires_in()
         .unwrap_or_default()
         .as_secs() as i32;
 
-    // Extract user_id from claims stored in session before deleting the session
     let user_id = record.data.get("user_id")
         .and_then(|v| v.as_i64())
         .ok_or_else(|| {
@@ -466,24 +457,24 @@ pub async fn google_callback(
         tracing::error!("Failed to delete session record: {}", e);
     }
 
-    // Store the connection in the database
-    if let Err(e) = state.user_repository.create_google_calendar_connection(
+    if let Err(e) = state.user_repository.create_gmail_connection(
         user_id,
         access_token,
         refresh_token.as_ref().map(|s| s.as_str()),
         expires_in,
     ) {
-        tracing::error!("Failed to store Google Calendar connection: {}", e);
+        tracing::error!("Failed to store Gmail connection: {}", e);
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to store calendar connection"}))
+            Json(json!({"error": "Failed to store Gmail connection"}))
         ));
     }
 
-    tracing::info!("Successfully stored Google Calendar connection for user {}", user_id);
+    tracing::info!("Successfully stored Gmail connection for user {}", user_id);
 
     let frontend_url = std::env::var("FRONTEND_URL")
         .expect("FRONTEND_URL must be set");
     tracing::info!("Redirecting to frontend root: {}", frontend_url);
     Ok(Redirect::to(&frontend_url))
 }
+

@@ -6,6 +6,7 @@ use crate::schema::usage_logs;
 use crate::schema::subscriptions;
 use crate::schema::unipile_connection;
 use crate::schema::google_calendar;
+use crate::schema::gmail;
 
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -172,3 +173,30 @@ pub struct NewGoogleCalendar{
     pub expires_in: i32,
 }
 
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = gmail)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct Gmail {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub encrypted_access_token: String,
+    pub encrypted_refresh_token: String,
+    pub status: String,
+    pub last_update: i32,
+    pub created_on: i32,
+    pub description: String,
+    pub expires_in: i32,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = gmail)]
+pub struct NewGmail {
+    pub user_id: i32,
+    pub encrypted_access_token: String,
+    pub encrypted_refresh_token: String,
+    pub status: String,
+    pub last_update: i32,
+    pub created_on: i32,
+    pub description: String,
+    pub expires_in: i32,
+}

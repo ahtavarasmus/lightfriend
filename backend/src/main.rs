@@ -37,6 +37,8 @@ mod handlers {
     pub mod unipile_auth;
     pub mod google_calendar_auth;
     pub mod google_calendar;
+    pub mod gmail_auth;
+    pub mod gmail;
 }
 
 mod utils {
@@ -78,6 +80,8 @@ use handlers::composio_auth;
 use handlers::unipile_auth;
 use handlers::google_calendar_auth;
 use handlers::google_calendar;
+use handlers::gmail_auth;
+use handlers::gmail;
 use api::twilio_sms;
 use api::elevenlabs;
 use api::elevenlabs_webhook;
@@ -97,7 +101,8 @@ pub struct AppState {
     user_conversations: Arc<UserConversations>,
     sessions: shazam_call::CallSessions,
     user_calls: shazam_call::UserCallMap,
-    oauth_client: GoogleOAuthClient,
+    google_calendar_oauth_client: GoogleOAuthClient,
+    gmail_oauth_client: GoogleOAuthClient,
     session_store: MemoryStore,
 }
 
@@ -143,13 +148,16 @@ async fn main() {
     let client_secret = std::env::var("GOOGLE_CALENDAR_CLIENT_SECRET").expect("GOOGLE_CALENDAR_CLIENT_SECRET must be set");
     let server_url_oauth = std::env::var("SERVER_URL_OAUTH").expect("SERVER_URL_OAUTH must be set");
 
-    let oauth_client = BasicClient::new(ClientId::new(client_id))
+    let google_calendar_oauth_client = BasicClient::new(ClientId::new(client_id.clone()))
+        .set_client_secret(ClientSecret::new(client_secret.clone()))
+        .set_auth_uri(AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).expect("Invalid auth URL"))
+        .set_token_uri(TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).expect("Invalid token URL"))
+        .set_redirect_uri(RedirectUrl::new(format!("{}/api/auth/google/calendar/callback", server_url_oauth)).expect("Invalid redirect URL"));
+    let gmail_oauth_client = BasicClient::new(ClientId::new(client_id))
         .set_client_secret(ClientSecret::new(client_secret))
         .set_auth_uri(AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).expect("Invalid auth URL"))
         .set_token_uri(TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).expect("Invalid token URL"))
-        .set_redirect_uri(RedirectUrl::new(format!("{}/api/auth/google/callback", server_url_oauth)).expect("Invalid redirect URL"));
-
-    println!("Redirect URI: {}/api/auth/google/callback", server_url_oauth);
+        .set_redirect_uri(RedirectUrl::new(format!("{}/api/auth/google/gmail/callback", server_url_oauth)).expect("Invalid redirect URL"));
 
     let session_store = MemoryStore::default();
     let is_prod = std::env::var("ENVIRONMENT") != Ok("development".to_string());
@@ -163,7 +171,8 @@ async fn main() {
         user_conversations: user_conversations.clone(),
         sessions: Arc::new(Mutex::new(HashMap::new())),
         user_calls: Arc::new(Mutex::new(HashMap::new())),
-        oauth_client,
+        google_calendar_oauth_client,
+        gmail_oauth_client,
         session_store: session_store.clone(),
     });
 
@@ -180,11 +189,20 @@ async fn main() {
     let elevenlabs_webhook_routes = Router::new()
         .route("/api/webhook/elevenlabs", post(elevenlabs_webhook::elevenlabs_webhook))
         .route_layer(middleware::from_fn(elevenlabs_webhook::validate_elevenlabs_hmac));
+
     let google_calendar_routes = Router::new()
-        .route("/api/auth/google/login", get(google_calendar_auth::google_login))
-        .route("/api/auth/google/callback", get(google_calendar_auth::google_callback))
-        .route("/api/auth/google/connection", delete(google_calendar_auth::delete_google_calendar_connection))
-        .route("/api/auth/google/status", get(google_calendar::google_calendar_status));
+        .route("/api/auth/google/calendar/login", get(google_calendar_auth::google_login))
+        .route("/api/auth/google/calendar/callback", get(google_calendar_auth::google_callback))
+        .route("/api/auth/google/calendar/connection", delete(google_calendar_auth::delete_google_calendar_connection))
+        .route("/api/auth/google/calendar/status", get(google_calendar::google_calendar_status));
+
+    let gmail_routes= Router::new()
+        .route("/api/auth/google/gmail/login", get(gmail_auth::gmail_login))
+        .route("/api/auth/google/gmail/callback", get(gmail_auth::gmail_callback))
+        .route("/api/auth/google/gmail/refresh", post(gmail_auth::refresh_gmail_token))
+        .route("/api/auth/google/gmail/delete_connection", delete(gmail_auth::delete_gmail_connection))
+        .route("/api/auth/google/gmail/status", get(gmail::gmail_status));
+
 
     let app = Router::new()
         .route("/api/health", get(health_check))
@@ -213,6 +231,7 @@ async fn main() {
         .route("/api/stream", get(shazam_call::stream_handler))
         .route("/api/listen/{call_sid}", get(shazam_call::listen_handler))
         .merge(google_calendar_routes)
+        .merge(gmail_routes)
         .merge(twilio_routes)
         .merge(elevenlabs_routes)
         .merge(elevenlabs_webhook_routes)

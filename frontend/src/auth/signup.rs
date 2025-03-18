@@ -365,7 +365,7 @@ pub mod register {
                                 <a href="/terms" target="_blank" style="color: #007bff; text-decoration: underline;">{"terms of service"}</a>
                                 {" and "}
                                 <a href="/privacy" target="_blank" style="color: #007bff; text-decoration: underline;">{"privacy policy"}</a>
-                                {" and consent to receive automated SMS messages from Lightfriend. Message and data rates may apply. Reply STOP to opt out."}
+                                {" and consent to receive automated SMS messages from Lightfriend. Message and data rates may apply. Message frequency varies. Reply STOP to opt out."}
                             </span>
                         </label>
                     </div>
