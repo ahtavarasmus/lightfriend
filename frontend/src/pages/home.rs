@@ -139,11 +139,11 @@ pub fn landing() -> Html {
                     <p class="subtitle">
                         {"Join the digital minimalism movement without sacrificing essential connectivity."}
                     </p>
-                    <button class="hero-cta">
-                        <Link<Route> to={Route::Register} classes="forward-link">
-                            {"Get Started Now"}
-                        </Link<Route>>
-                    </button>
+                    <Link<Route> to={Route::Register} classes="forward-link">
+                        <button class="hero-cta">
+                                {"Get Started Now"}
+                        </button>
+                    </Link<Route>>
                     <p class="disclaimer">
                         {"No smartphone required. Works with any basic phone."}
                     </p>
