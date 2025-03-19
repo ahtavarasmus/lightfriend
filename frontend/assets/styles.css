@@ -1123,9 +1123,7 @@ button[type="submit"].loading::after {
     color: #7EB2FF;
 }
 
-.forward-link::after {
-    content: '→';
-}
+
 
 .profile-header {
     display: flex;
