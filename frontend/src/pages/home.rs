@@ -47,11 +47,11 @@ pub fn landing() -> Html {
                 <p class="hero-subtitle">
                     {"Use your dumbphone smarter with AI-powered voice and text assistance."}
                 </p>
-                <button class="hero-cta">
-                    <Link<Route> to={Route::Register} classes="forward-link">
-                    {"Get Started"}
-                    </Link<Route>>
-                </button>
+                <Link<Route> to={Route::Register} classes="forward-link">
+                    <button class="hero-cta">
+                        {"Get Started"}
+                    </button>
+                </Link<Route>>
             </section>
 
             // Features Section

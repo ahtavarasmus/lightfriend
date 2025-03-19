@@ -419,6 +419,10 @@
     transition: transform 0.6s;
 }
 
+.hero-cta::after {
+    content: '→';
+}
+
 .hero-cta:hover::before {
     transform: translateX(100%);
 }
