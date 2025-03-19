@@ -359,10 +359,40 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         }),
     );
 
+    let mut gmail_properties = HashMap::new();
+    gmail_properties.insert(
+        "start".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Start time from which we start fetching the emails. Should be in format: '2024-03-16T00:00:00Z'".to_string()),
+            ..Default::default()
+        }),
+    );
+    gmail_properties.insert(
+        "end".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("End time for which we end fetching the emails from. Should be in format: '2024-03-16T00:00:00Z'".to_string()),
+            ..Default::default()
+        }),
+    );
+
 
 
     // Define tools
     let tools = vec![chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: String::from("gmail"),
+                description: Some(String::from("Gmail tool fetches the user's emails for the specific time frame. If the user doesn't give the specific time frame assume for today and tomorrow to be the time range.")),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(gmail_properties),
+                    required: Some(vec![String::from("start"), String::from("end")]),
+                },
+            },
+        },
+        chat_completion::Tool {
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
                 name: String::from("ask_perplexity"),
@@ -611,6 +641,89 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     });
                     tool_answers.insert(tool_call_id, "Shazam initiated. Lightfriend should be calling you now. Song name will be texted to you. Say this in the final response.".to_string());
 
+                } else if name == "gmail" {
+                    println!("Executing gmail tool call");
+                    println!("Raw arguments: {}", arguments);
+                    let c: CalendarTimeFrame = match serde_json::from_str(arguments) {
+                        Ok(q) => q,
+                        Err(e) => {
+                            eprintln!("Failed to parse gmail timeframe: {}", e);
+                            continue;
+                        }
+                    };
+                    // Parse the start and end times into DateTime<Utc>
+                    let start_time = match chrono::DateTime::parse_from_rfc3339(&c.start) {
+                        Ok(dt) => dt.with_timezone(&chrono::Utc),
+                        Err(e) => {
+                            eprintln!("Failed to parse start time: {}", e);
+                            continue;
+                        }
+                    };
+                    
+                    let end_time = match chrono::DateTime::parse_from_rfc3339(&c.end) {
+                        Ok(dt) => dt.with_timezone(&chrono::Utc),
+                        Err(e) => {
+                            eprintln!("Failed to parse end time: {}", e);
+                            continue;
+                        }
+                    };
+
+                    let timeframe = crate::handlers::gmail::TimeframeQuery {
+                        start: start_time,
+                        end: end_time,
+                    };
+                    println!("starting time: {}", start_time);
+                    println!("ending time: {}", end_time);
+
+                    match crate::handlers::gmail::handle_gmail_fetching(&state, user.id, &start_time.to_rfc3339(), &end_time.to_rfc3339()).await {
+                        Ok(response) => {
+                            println!("Successfully fetched Gmail messages");
+                            
+                            // Extract the messages from the response
+                            if let Ok(json_value) = serde_json::from_value::<serde_json::Value>(response.0) {
+                                if let Some(messages) = json_value.get("messages").and_then(|m| m.as_array()) {
+                                    let mut formatted_response = String::new();
+                                    
+                                    if messages.is_empty() {
+                                        formatted_response = "No emails found for this time period.".to_string();
+                                    } else {
+                                        for (i, message) in messages.iter().enumerate().take(5) { // Limit to 5 emails
+                                            let subject = message.get("subject")
+                                                .and_then(|s| s.as_str())
+                                                .unwrap_or("No subject");
+                                            let from = message.get("from")
+                                                .and_then(|f| f.as_str())
+                                                .unwrap_or("Unknown sender");
+                                            let date = message.get("date")
+                                                .and_then(|d| d.as_str())
+                                                .unwrap_or("");
+
+                                            if i == 0 {
+                                                formatted_response.push_str(&format!("{}. {} from {} on {}", i + 1, subject, from, date));
+                                            } else {
+                                                formatted_response.push_str(&format!(", {}. {} from {} on {}", i + 1, subject, from, date));
+                                            }
+                                        }
+                                        
+                                        if messages.len() > 5 {
+                                            formatted_response.push_str(&format!(" (+ {} more emails)", messages.len() - 5));
+                                        }
+                                    }
+                                    
+                                    tool_answers.insert(tool_call_id, formatted_response);
+                                }
+                            }
+                        }
+                        Err((status, json_error)) => {
+                            let error_message = match status {
+                                StatusCode::BAD_REQUEST => "No active Gmail connection found. Visit the website to connect.",
+                                StatusCode::UNAUTHORIZED => "Your Gmail connection needs to be renewed. Please reconnect on the website.",
+                                _ => "Failed to fetch Gmail messages. Please try again later.",
+                            };
+                            tool_answers.insert(tool_call_id, error_message.to_string());
+                            eprintln!("Failed to fetch Gmail messages: {:?}", json_error);
+                        }
+                    }
                 } else if name == "calendar" {
                     println!("Executing calendar tool call");
                     println!("Raw arguments: {}", arguments);

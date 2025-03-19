@@ -1,4 +1,5 @@
 use yew::prelude::*;
+use web_sys::MouseEvent;
 use yew_hooks::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{window, Window, History};
@@ -129,7 +130,7 @@ pub fn connect(props: &ConnectProps) -> Html {
     let onclick_calendar = {
         let connecting = connecting.clone();
         let error = error.clone();
-        Callback::from(move |_| {
+        Callback::from(move |_: MouseEvent| {
             let connecting = connecting.clone();
             let error = error.clone();
 
@@ -203,7 +204,7 @@ pub fn connect(props: &ConnectProps) -> Html {
     let onclick_gmail = {
         let connecting = connecting.clone();
         let error = error.clone();
-        Callback::from(move |_| {
+        Callback::from(move |_: MouseEvent| {
             let connecting = connecting.clone();
             let error = error.clone();
 
@@ -268,7 +269,7 @@ pub fn connect(props: &ConnectProps) -> Html {
     let onclick_delete_gmail = {
         let gmail_connected = gmail_connected.clone();
         let error = error.clone();
-        Callback::from(move |_| {
+        Callback::from(move |_: MouseEvent| {
             let gmail_connected = gmail_connected.clone();
             let error = error.clone();
 
@@ -309,7 +310,7 @@ pub fn connect(props: &ConnectProps) -> Html {
     let onclick_delete_calendar = {
         let calendar_connected = calendar_connected.clone();
         let error = error.clone();
-        Callback::from(move |_| {
+        Callback::from(move |_: MouseEvent| {
             let calendar_connected = calendar_connected.clone();
             let error = error.clone();
 
@@ -357,40 +358,21 @@ pub fn connect(props: &ConnectProps) -> Html {
                         </h3>
                         <div class="service-list">
                             // Google Calendar
-                            <div class="service-item">
+                            <div class="service-item coming-soon">
                                 <div class="service-header">
                                     <div class="service-name">
                                         <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg" alt="Google Calendar"/>
                                         {"Google Calendar"}
+                                        <span class="coming-soon-tag">{"Coming Soon"}</span>
                                     </div>
-                                    if *calendar_connected {
-                                        <span class="service-status">{"Connected ✓"}</span>
-                                    }
+
                                 </div>
                                 <p class="service-description">
                                     {"Access and manage your Google Calendar events through SMS or voice calls."}
                                 </p>
-                                if *calendar_connected {
-                                    <div class="calendar-controls">
-                                        <button 
-                                            onclick={onclick_delete_calendar}
-                                            class="disconnect-button"
-                                        >
-                                            {"Disconnect"}
-                                        </button>
-                                    </div>
-                                } else {
-                                    <button 
-                                        onclick={onclick_calendar.clone()} 
-                                        class="connect-button"
-                                    >
-                                        if *connecting {
-                                            {"Connecting..."}
-                                        } else {
-                                            {"Connect"}
-                                        }
-                                    </button>
-                                }
+                                <button class="connect-button" disabled=true>
+                                    {"Connect"}
+                                </button>
                             </div>
 
                             // Outlook Calendar (Coming Soon)
@@ -420,40 +402,21 @@ pub fn connect(props: &ConnectProps) -> Html {
                         </h3>
                         <div class="service-list">
                             // Gmail
-                            <div class="service-item">
+                            <div class="service-item coming-soon">
                                 <div class="service-header">
                                     <div class="service-name">
                                         <img src="https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg" alt="Gmail"/>
                                         {"Gmail"}
+                                        <span class="coming-soon-tag">{"Coming Soon"}</span>
                                     </div>
-                                    if *gmail_connected {
-                                        <span class="service-status">{"Connected ✓"}</span>
-                                    }
+
                                 </div>
                                 <p class="service-description">
                                     {"Send and receive Gmail messages through SMS or voice calls."}
                                 </p>
-                                if *gmail_connected {
-                                    <div class="calendar-controls">
-                                        <button 
-                                            onclick={onclick_delete_gmail.clone()}
-                                            class="disconnect-button"
-                                        >
-                                            {"Disconnect"}
-                                        </button>
-                                    </div>
-                                } else {
-                                    <button 
-                                        onclick={onclick_gmail.clone()} 
-                                        class="connect-button"
-                                    >
-                                        if *connecting {
-                                            {"Connecting..."}
-                                        } else {
-                                            {"Connect"}
-                                        }
-                                    </button>
-                                }
+                                <button class="connect-button" disabled=true>
+                                    {"Connect"}
+                                </button>
                             </div>
 
                             // Outlook (Coming Soon)

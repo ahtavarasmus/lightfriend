@@ -163,9 +163,9 @@ pub fn landing() -> Html {
                     </a>
                     </p>
                     <div class="legal-links">
-                        <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
+                        <a href="/terms">{"Terms & Conditions"}</a>
                         {" | "}
-                        <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
+                        <a href="/privacy">{"Privacy Policy"}</a>
                     </div>
                 </div>
                 </div>
@@ -495,9 +495,9 @@ pub fn Home() -> Html {
                                     </a>
                                 </p>
                                 <div class="legal-links">
-                                    <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
+                                    <a href="/terms">{"Terms & Conditions"}</a>
                                     {" | "}
-                                    <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
+                                    <a href="/privacy">{"Privacy Policy"}</a>
                                 </div>
                             </div>
                         </footer>
