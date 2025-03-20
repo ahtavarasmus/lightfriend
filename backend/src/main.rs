@@ -267,6 +267,11 @@ async fn main() {
     });
 
     use tokio::net::TcpListener;
-    let listener = TcpListener::bind("127.0.0.1:3000").await.unwrap();
+    let port = match std::env::var("ENVIRONMENT").as_deref() {
+        Ok("staging") => 3010,
+        _ => 3000,
+    };
+    tracing::info!("Starting server on port {}", port);
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", port)).await.unwrap();
     axum::serve(listener, app.into_make_service()).await.unwrap();
 }
