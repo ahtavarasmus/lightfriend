@@ -45,3 +45,5 @@ urlencoding = "2.1.0"
 oauth2 = { version = "5.0", features = ["reqwest"] }
 tower-sessions = { version = "0.12.0", features = ["axum-core"] }
 tower = "0.4"
+mockall = "0.11"
+

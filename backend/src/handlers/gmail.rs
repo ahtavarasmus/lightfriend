@@ -16,11 +16,6 @@ use crate::{
     handlers::auth_dtos::Claims,
 };
 
-#[derive(Debug, Deserialize)]
-pub struct TimeframeQuery {
-    pub start: DateTime<Utc>,
-    pub end: DateTime<Utc>,
-}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct GmailMessage {
@@ -88,6 +83,66 @@ pub enum GmailError {
     ParseError(String),
 }
 
+pub async fn test_gmail_fetch(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    tracing::info!("Starting test Gmail fetch");
+
+    // Extract and validate token
+    let auth_header = headers.get("Authorization")
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| header.strip_prefix("Bearer "));
+
+    let token = match auth_header {
+        Some(token) => token,
+        None => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "No authorization token provided"}))
+        )),
+    };
+
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+            .expect("JWT_SECRET_KEY must be set in environment")
+            .as_bytes()),
+        &Validation::new(Algorithm::HS256)
+    ) {
+        Ok(token_data) => token_data.claims,
+        Err(e) => {
+            tracing::error!("Invalid token: {}", e);
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "Invalid token"}))
+            ));
+        },
+    };
+
+    // Test fetch Gmail messages
+    match fetch_gmail_messages(&state, claims.sub).await {
+        Ok(messages) => {
+            tracing::info!("Successfully fetched {} messages in test", messages.len());
+            Ok(Json(json!({ "success": true, "message_count": messages.len() })))
+        },
+        Err(e) => {
+            let error_message = match e {
+                GmailError::NoConnection => "No Gmail connection found".to_string(),
+                GmailError::TokenError(msg) => msg,
+                GmailError::ApiError(msg) => msg,
+                GmailError::ParseError(msg) => msg,
+            };
+            tracing::error!("Test fetch failed: {}", error_message);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": error_message
+                }))
+            ))
+        }
+    }
+}
+
 pub async fn gmail_status(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -152,51 +207,9 @@ pub async fn gmail_status(
 pub async fn handle_gmail_fetching(
     state: &AppState,
     user_id: i32,
-    start: &str,
-    end: &str,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Starting Gmail tool call for user: {}", user_id);
     
-    // Parse start and end times
-    tracing::info!("Parsing datetime strings");
-    let parse_datetime = |datetime_str: &str| {
-        chrono::DateTime::parse_from_rfc3339(datetime_str)
-            .map(|dt| dt.with_timezone(&chrono::Utc))
-            .map_err(|_| "Invalid datetime format")
-    };
-
-    let start_time = match parse_datetime(start) {
-        Ok(time) => {
-            tracing::info!("Successfully parsed start time: {}", time);
-            time
-        },
-        Err(e) => {
-            tracing::error!("Failed to parse start time: {}", e);
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": format!("Invalid start time: {}", e)
-                }))
-            ));
-        }
-    };
-
-    let end_time = match parse_datetime(end) {
-        Ok(time) => {
-            tracing::info!("Successfully parsed end time: {}", time);
-            time
-        },
-        Err(e) => {
-            tracing::error!("Failed to parse end time: {}", e);
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": format!("Invalid end time: {}", e)
-                }))
-            ));
-        }
-    };
-
     // Check if user has active Gmail connection
     tracing::info!("Checking if user has active Gmail connection");
     match state.user_repository.has_active_gmail(user_id) {
@@ -225,14 +238,10 @@ pub async fn handle_gmail_fetching(
         }
     }
 
-    let timeframe = TimeframeQuery {
-        start: start_time,
-        end: end_time,
-    };
 
     // Fetch Gmail messages
     tracing::info!("Fetching Gmail messages");
-    match fetch_gmail_messages(state, user_id, timeframe).await {
+    match fetch_gmail_messages(state, user_id).await {
         Ok(messages) => {
             tracing::info!("Successfully fetched {} messages", messages.len());
             
@@ -288,13 +297,12 @@ pub async fn handle_gmail_fetching(
     }
 }
 
+
 async fn fetch_gmail_messages(
     state: &AppState,
     user_id: i32,
-    timeframe: TimeframeQuery,
 ) -> Result<Vec<GmailMessage>, GmailError> {
     tracing::info!("Starting to fetch Gmail messages...");
-    tracing::info!("Fetching messages for timeframe: {:?} to {:?}", timeframe.start, timeframe.end);
 
     // Get Gmail tokens
     tracing::info!("Getting Gmail tokens for user_id: {}", user_id);
@@ -318,12 +326,6 @@ async fn fetch_gmail_messages(
     // Create HTTP client for Gmail API
     let client = reqwest::Client::new();
     
-    // Format the query for Gmail API
-    let query = format!("after:{} before:{}",
-        timeframe.start.format("%Y/%m/%d"),
-        timeframe.end.format("%Y/%m/%d")
-    );
-    tracing::info!("Formatted query: {}", query);
 
     // First, get message IDs
     let mut all_messages = Vec::new();
@@ -335,7 +337,7 @@ async fn fetch_gmail_messages(
             .get("https://www.googleapis.com/gmail/v1/users/me/messages")
             .header(AUTHORIZATION, format!("Bearer {}", access_token))
             .header(ACCEPT, "application/json")
-            .query(&[("q", &query)]);
+            .query(&[("maxResults", 10)]);
 
         if let Some(token) = &page_token {
             request = request.query(&[("pageToken", token)]);
@@ -389,7 +391,7 @@ async fn fetch_gmail_messages(
                 .get("https://www.googleapis.com/gmail/v1/users/me/messages")
                 .header(AUTHORIZATION, format!("Bearer {}", new_access_token))
                 .header(ACCEPT, "application/json")
-                .query(&[("q", &query)])
+                .query(&[("maxResults", 10)])
                 .send()
                 .await
                 .map_err(|e| GmailError::ApiError(e.to_string()))?;
