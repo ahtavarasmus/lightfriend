@@ -201,7 +201,8 @@ async fn main() {
         .route("/api/auth/google/gmail/callback", get(gmail_auth::gmail_callback))
         .route("/api/auth/google/gmail/refresh", post(gmail_auth::refresh_gmail_token))
         .route("/api/auth/google/gmail/delete_connection", delete(gmail_auth::delete_gmail_connection))
-        .route("/api/auth/google/gmail/status", get(gmail::gmail_status));
+        .route("/api/auth/google/gmail/status", get(gmail::gmail_status))
+        .route("/api/auth/google/gmail/test_fetch", get(gmail::test_gmail_fetch));
 
 
     let app = Router::new()

@@ -441,6 +441,40 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         >
                                             {"Disconnect"}
                                         </button>
+                                        <button
+                                            onclick={{
+                                                let error = error.clone();
+                                                Callback::from(move |_| {
+                                                    let error = error.clone();
+                                                    if let Some(window) = web_sys::window() {
+                                                        if let Ok(Some(storage)) = window.local_storage() {
+                                                            if let Ok(Some(token)) = storage.get_item("token") {
+                                                                spawn_local(async move {
+                                                                    let request = Request::get(&format!("{}/api/auth/google/gmail/test_fetch", config::get_backend_url()))
+                                                                        .header("Authorization", &format!("Bearer {}", token))
+                                                                        .send()
+                                                                        .await;
+
+                                                                    match request {
+                                                                        Ok(response) => {
+                                                                            if !response.ok() {
+                                                                                error.set(Some("Failed to test Gmail fetch".to_string()));
+                                                                            }
+                                                                        }
+                                                                        Err(e) => {
+                                                                            error.set(Some(format!("Network error: {}", e)));
+                                                                        }
+                                                                    }
+                                                                });
+                                                            }
+                                                        }
+                                                    }
+                                                })
+                                            }}
+                                            class="test-button"
+                                        >
+                                            {"Test Fetch"}
+                                        </button>
                                     </div>
                                 } else {
                                     <button 

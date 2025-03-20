@@ -668,14 +668,8 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                         }
                     };
 
-                    let timeframe = crate::handlers::gmail::TimeframeQuery {
-                        start: start_time,
-                        end: end_time,
-                    };
-                    println!("starting time: {}", start_time);
-                    println!("ending time: {}", end_time);
 
-                    match crate::handlers::gmail::handle_gmail_fetching(&state, user.id, &start_time.to_rfc3339(), &end_time.to_rfc3339()).await {
+                    match crate::handlers::gmail::handle_gmail_fetching(&state, user.id).await {
                         Ok(response) => {
                             println!("Successfully fetched Gmail messages");
                             
