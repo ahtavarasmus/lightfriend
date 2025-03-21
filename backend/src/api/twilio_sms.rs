@@ -640,8 +640,13 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                             axum::extract::State(state_clone),
                         ).await;
                     });
-                    tool_answers.insert(tool_call_id, "Shazam initiated. Lightfriend should be calling you now. Song name will be texted to you. Say this in the final response.".to_string());
-
+                    // Return early without sending any SMS response
+                    return (
+                        StatusCode::OK,
+                        axum::Json(TwilioResponse {
+                            message: "Shazam call initiated".to_string(),
+                        })
+                    );
                 } else if name == "gmail" {
                     println!("Executing gmail tool call");
                     println!("Raw arguments: {}", arguments);
