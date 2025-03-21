@@ -365,14 +365,40 @@ pub async fn delete_user(
         ));
     }
 
-    println!("Deleting the user");
-    // Delete the user
-    match state.user_repository.delete_user(user_id) {
-        Ok(_) => Ok(Json(json!({"message": "User deleted successfully"}))),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to delete user: {}", e)}))
-        )),
+    tracing::info!("Attempting to delete user {}", user_id);
+    
+    // First verify the user exists
+    match state.user_repository.find_by_id(user_id) {
+        Ok(Some(_)) => {
+            // User exists, proceed with deletion
+            match state.user_repository.delete_user(user_id) {
+                Ok(_) => {
+                    tracing::info!("Successfully deleted user {}", user_id);
+                    Ok(Json(json!({"message": "User deleted successfully"})))
+                },
+                Err(e) => {
+                    tracing::error!("Failed to delete user {}: {}", user_id, e);
+                    Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Failed to delete user: {}", e)}))
+                    ))
+                }
+            }
+        },
+        Ok(None) => {
+            tracing::warn!("Attempted to delete non-existent user {}", user_id);
+            Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"}))
+            ))
+        },
+        Err(e) => {
+            tracing::error!("Database error while checking user {}: {}", user_id, e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)}))
+            ))
+        }
     }
 }
 

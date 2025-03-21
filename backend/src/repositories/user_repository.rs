@@ -202,10 +202,33 @@ impl UserRepository {
 
     // Delete a user
     pub fn delete_user(&self, user_id: i32) -> Result<(), DieselError> {
+        use crate::schema::{usage_logs, conversations, google_calendar, gmail, unipile_connection};
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::delete(users::table.find(user_id))
-            .execute(&mut conn)?;
-        Ok(())
+        
+        // Start transaction
+        conn.transaction(|conn| {
+            // Delete related records first
+            diesel::delete(usage_logs::table.filter(usage_logs::user_id.eq(user_id)))
+                .execute(conn)?;
+            
+            diesel::delete(conversations::table.filter(conversations::user_id.eq(user_id)))
+                .execute(conn)?;
+            
+            diesel::delete(google_calendar::table.filter(google_calendar::user_id.eq(user_id)))
+                .execute(conn)?;
+            
+            diesel::delete(gmail::table.filter(gmail::user_id.eq(user_id)))
+                .execute(conn)?;
+            
+            diesel::delete(unipile_connection::table.filter(unipile_connection::user_id.eq(user_id)))
+                .execute(conn)?;
+
+            // Finally delete the user
+            diesel::delete(users::table.find(user_id))
+                .execute(conn)?;
+            
+            Ok(())
+        })
     }
 
     // Update user's (credits)
