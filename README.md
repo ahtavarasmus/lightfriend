@@ -2,3 +2,4 @@
 
 
 This project is licensed under the GNU Affero General Public License v3. See the LICENSE file for details.
+"Lightfriend" is a brand owned by Rasmus Ähtävä. The code is licensed under AGPLv3, but the name "Lightfriend" and any associated branding are not included in this license.
