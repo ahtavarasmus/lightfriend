@@ -111,6 +111,63 @@ pub enum CalendarError {
     ApiError(String),
     ParseError(String),
 }
+pub async fn handle_calendar_fetching_route(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Extract and validate token
+    let auth_header = headers.get("Authorization")
+        .and_then(|header| header.to_str().ok())
+        .and_then(|header| header.strip_prefix("Bearer "));
+
+    let token = match auth_header {
+        Some(token) => token,
+        None => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "No authorization token provided"}))
+        )),
+    };
+
+    // Decode and validate JWT token
+    let claims = match decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+            .expect("JWT_SECRET_KEY must be set in environment")
+            .as_bytes()),
+        &Validation::new(Algorithm::HS256)
+    ) {
+        Ok(token_data) => token_data.claims,
+        Err(e) => {
+            tracing::error!("Invalid token: {}", e);
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "Invalid token"}))
+            ));
+        },
+    };
+
+    // Extract start and end times from query parameters
+    let start = match params.get("start") {
+        Some(s) => s,
+        None => return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Missing start parameter"}))
+        )),
+    };
+
+    let end = match params.get("end") {
+        Some(e) => e,
+        None => return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Missing end parameter"}))
+        )),
+    };
+
+    // Call the existing handler function
+    handle_calendar_fetching(&state, claims.sub, start, end).await
+}
+
 pub async fn handle_calendar_fetching(
     state: &AppState,
     user_id: i32,

@@ -7,6 +7,7 @@ use wasm_bindgen::JsValue;
 use crate::config;
 use gloo_net::http::Request;
 use web_sys::UrlSearchParams;
+use web_sys::js_sys::Date;
 
 #[derive(Properties, PartialEq)]
 pub struct ConnectProps {
@@ -380,6 +381,76 @@ let onclick_delete_calendar = {
                                             >
                                                 {"Disconnect"}
                                             </button>
+                                            {
+                                                if props.user_id == 1 {
+                                                    let onclick_test = {
+                                                        let error = error.clone();
+                                                        Callback::from(move |_: MouseEvent| {
+                                                            let error = error.clone();
+                                                            if let Some(window) = web_sys::window() {
+                                                                if let Ok(Some(storage)) = window.local_storage() {
+                                                                    if let Ok(Some(token)) = storage.get_item("token") {
+                                                                        // Get today's start and end times in RFC3339 format
+                                                        let now = Date::new_0();
+                                                        let today_start = Date::new_0();
+                                                        let today_end = Date::new_0();
+                                                                        today_start.set_hours(0);
+                                                                        today_start.set_minutes(0);
+                                                                        today_start.set_seconds(0);
+                                                                        today_start.set_milliseconds(0);
+                                                                        
+                                                                        today_end.set_hours(23);
+                                                                        today_end.set_minutes(59);
+                                                                        today_end.set_seconds(59);
+                                                                        today_end.set_milliseconds(999);
+                                                                        
+                                                                        let start_time = today_start.to_iso_string().as_string().unwrap();
+                                                                        let end_time = today_end.to_iso_string().as_string().unwrap();
+                                                                        
+                                                                        spawn_local(async move {
+                                                                            let url = format!(
+                                                                                "{}/api/calendar/events?start={}&end={}", 
+                                                                                config::get_backend_url(),
+                                                                                start_time,
+                                                                                end_time
+                                                                            );
+                                                                            
+                                                                            match Request::get(&url)
+                                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                                .send()
+                                                                                .await {
+                                                                                Ok(response) => {
+                                                                                    if response.status() == 200 {
+                                                                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                                                            web_sys::console::log_1(&format!("Calendar events: {:?}", data).into());
+                                                                                            // You could also show this in the UI instead of just console
+                                                                                        }
+                                                                                    } else {
+                                                                                        error.set(Some("Failed to fetch calendar events".to_string()));
+                                                                                    }
+                                                                                }
+                                                                                Err(e) => {
+                                                                                    error.set(Some(format!("Network error: {}", e)));
+                                                                                }
+                                                                            }
+                                                                        });
+                                                                    }
+                                                                }
+                                                            }
+                                                        })
+                                                    };
+                                                    html! {
+                                                        <button 
+                                                            onclick={onclick_test}
+                                                            class="test-button"
+                                                        >
+                                                            {"Test Calendar"}
+                                                        </button>
+                                                    }
+                                                } else {
+                                                    html! {}
+                                                }
+                                            }
                                         </div>
                                     } else {
                                         <button 
@@ -506,6 +577,21 @@ let onclick_delete_calendar = {
                             {err}
                         </div>
                     }
+                    <style>
+                        {".test-button {
+                            background-color: #4CAF50;
+                            color: white;
+                            padding: 8px 16px;
+                            border: none;
+                            border-radius: 4px;
+                            cursor: pointer;
+                            margin-left: 10px;
+                            font-size: 14px;
+                        }
+                        .test-button:hover {
+                            background-color: #45a049;
+                        }"}
+                    </style>
                 </div>
             }
 
