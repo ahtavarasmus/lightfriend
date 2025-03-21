@@ -117,7 +117,7 @@ pub async fn twiml_handler() -> impl IntoResponse {
     let clean_server_url = server_url.trim_end_matches('/');
     let twiml = format!(r#"<?xml version="1.0" encoding="UTF-8"?>
                 <Response>
-                <Say>Hello! I'm listening to your audio. Please play the song you want to identify.</Say>
+                <Say>I'm listening.</Say>
                 <Start>
                     <Stream url="wss://{}/api/stream" track="inbound_track"/>
                 </Start>
@@ -260,41 +260,6 @@ pub async fn process_audio_with_shazam(state: Arc<ShazamState>) {
                         println!("\n=== Song Identification Success ===");
                         println!("Successfully identified: {}", song_name);
 
-                        // Update the call with TwiML using reqwest
-                        let url = format!(
-                            "https://api.twilio.com/2010-04-01/Accounts/{}/Calls/{}.json",
-                            account_sid, call_sid
-                        );
-                        let twiml = format!(
-                            r#"<?xml version="1.0" encoding="UTF-8"?>
-                            <Response>
-                                <Say>I identified the song! It's {}</Say>
-                                <Hangup/>
-                            </Response>"#,
-                            song_name
-                        );
-
-                        let params = [("Twiml", twiml.as_str())];
-
-                        let response = http_client
-                            .post(&url)
-                            .basic_auth(&account_sid, Some(&auth_token))
-                            .form(&params) // Fixed: Replaced ¶ms with &params
-                            .send()
-                            .await;
-
-                        match response {
-                            Ok(resp) if resp.status().is_success() => {
-                                info!("Successfully updated call {} with song name: {}", call_sid, song_name);
-                            }
-                            Ok(resp) => {
-                                let error_text = resp.text().await.unwrap_or_default();
-                                error!("Failed to update call {}: {}", call_sid, error_text);
-                            }
-                            Err(e) => {
-                                error!("Error updating call {}: {:?}", call_sid, e);
-                            }
-                        }
 
                         match state.user_repository.find_by_phone_number(&to_number) {
                             Ok(Some(user)) => {
