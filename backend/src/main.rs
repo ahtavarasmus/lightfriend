@@ -44,6 +44,7 @@ mod handlers {
 mod utils {
     pub mod encryption;
     pub mod tool_exec;
+    pub mod usage;
 }
 mod api {
     pub mod vapi_endpoints;
@@ -113,9 +114,10 @@ pub fn validate_env() {
         "NLD_PHONE", "CHZ_PHONE", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN",
         "ENVIRONMENT", "FRONTEND_URL", "OPENROUTER_API_KEY", "STRIPE_CREDITS_PRODUCT_ID",
         "STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET",
-        "MESSAGE_COST", "VOICE_SECOND_COST", "CHARGE_BACK_THRESHOLD", "SHAZAM_PHONE_NUMBER",
-        "SHAZAM_EUROPE_PHONE_NUMBER","SHAZAM_API_KEY", "SERVER_URL", "ENCRYPTION_KEY", "COMPOSIO_API_KEY",
-        "GOOGLE_CALENDAR_CLIENT_ID", "GOOGLE_CALENDAR_CLIENT_SECRET",
+        "MESSAGE_COST", "MESSAGE_COST_US", "VOICE_SECOND_COST", "CHARGE_BACK_THRESHOLD", 
+        "SHAZAM_PHONE_NUMBER", "SHAZAM_EUROPE_PHONE_NUMBER","SHAZAM_API_KEY", "SERVER_URL", 
+        "ENCRYPTION_KEY", "COMPOSIO_API_KEY", "GOOGLE_CALENDAR_CLIENT_ID", 
+        "GOOGLE_CALENDAR_CLIENT_SECRET",
     ];
     for var in required_vars.iter() {
         std::env::var(var).expect(&format!("{} must be set", var));

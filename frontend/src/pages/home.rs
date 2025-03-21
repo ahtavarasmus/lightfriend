@@ -49,7 +49,7 @@ pub fn landing() -> Html {
                 </p>
                 <Link<Route> to={Route::Register} classes="forward-link">
                     <button class="hero-cta">
-                        {"Get Started"}
+                        {"Try Now with Free Credits"}
                     </button>
                 </Link<Route>>
             </section>
@@ -98,10 +98,10 @@ pub fn landing() -> Html {
                     <div class="showcase-text">
                         <h3>{"Simple Song Recognition:"}</h3>
                         <ol>
-                            <li>{"Text or call lightfriend saying 'What song is this?'"}</li>
+                            <li>{"Text or call lightfriend saying 'What song is this?' or simply 'shazam'"}</li>
                             <li>{"lightfriend calls you back ready to listen"}</li>
                             <li>{"Hold your phone near the music"}</li>
-                            <li>{"lightfriend tells you the song name and sends details by text"}</li>
+                            <li>{"lightfriend sends you the song details by text"}</li>
                         </ol>
                         <p class="showcase-highlight">
                             {"No app needed - just your basic phone and the music you want to identify!"}
@@ -141,7 +141,8 @@ pub fn landing() -> Html {
                     </p>
                     <Link<Route> to={Route::Register} classes="forward-link">
                         <button class="hero-cta">
-                                {"Get Started Now"}
+                                {"Start Now with Free Credits"}
+
                         </button>
                     </Link<Route>>
                     <p class="disclaimer">
@@ -392,12 +393,12 @@ pub fn Home() -> Html {
                                 <li>{"Perplexity AI search"}</li>
                                 <li>{"Dedicated Weather search"}</li>
                                 <li>{"Send info to you by sms during voice calls"}</li>
-                                <li>{"Shazam song recognition - Get a call, play the song, AI tells the song name and also sends it to you by sms."}</li>
+                                <li>{"Shazam song recognition - Get a call, play the song, AI sends it to you by sms."}</li>
                             </ul>
                             <h4>{"Methods"}</h4>
                             <ul>
                                 <li>{"Voice calling"}</li>
-                                <li>{"Text messaging(not working in the US or chech republic)"}</li>
+                                <li>{"Text messaging"}</li>
                             </ul>
 
                             <h4>{"Tips"}</h4>
