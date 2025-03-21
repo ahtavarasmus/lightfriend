@@ -49,7 +49,26 @@ pub struct ConversationInitiationClientDataWebhook {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct DynamicVariablesWebhook {
+    #[serde(deserialize_with = "deserialize_user_id")]
     pub user_id: Option<String>,  // Using Option since it might not always be present
+}
+
+// Add this function at the module level (outside of any struct)
+fn deserialize_user_id<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    
+    // This will accept either a number or a string
+    let value = serde_json::Value::deserialize(deserializer)?;
+    
+    match value {
+        serde_json::Value::String(s) => Ok(Some(s)),
+        serde_json::Value::Number(n) => Ok(Some(n.to_string())),
+        serde_json::Value::Null => Ok(None),
+        _ => Err(D::Error::custom("user_id must be a string or number")),
+    }
 }
 
 
@@ -158,9 +177,27 @@ pub async fn validate_elevenlabs_hmac(
 
 pub async fn elevenlabs_webhook(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<WebhookPayload>,
+    request: axum::extract::Json<serde_json::Value>,
 ) -> Result<Json<Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Received ElevenLabs webhook: {:?}", payload);
+    // Log the raw payload first
+    tracing::info!("Received raw webhook payload: {}", request.0);
+    
+    // Try to parse the payload
+    let payload: WebhookPayload = match serde_json::from_value(request.0) {
+        Ok(payload) => payload,
+        Err(e) => {
+            tracing::error!("Failed to parse webhook payload: {}", e);
+            return Err((
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(json!({
+                    "error": "Invalid payload format",
+                    "details": e.to_string()
+                }))
+            ));
+        }
+    };
+
+    tracing::info!("Successfully parsed webhook payload: {:?}", payload);
     println!("Type: {}", payload.type_field);
     let conversation_id = payload.data.conversation_id;
     println!("Conversation ID: {}", conversation_id);
