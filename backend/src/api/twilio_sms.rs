@@ -10,6 +10,7 @@ use axum::{
     response::IntoResponse,
     extract::State,
     http::StatusCode,
+    Json,
 };
 use chrono::Utc;
 
@@ -728,73 +729,24 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                             continue;
                         }
                     };
-                    // Parse the start and end times into DateTime<Utc>
-                    let start_time = match chrono::DateTime::parse_from_rfc3339(&c.start) {
-                        Ok(dt) => dt.with_timezone(&chrono::Utc),
-                        Err(e) => {
-                            eprintln!("Failed to parse start time: {}", e);
-                            continue;
-                        }
-                    };
-                    
-                    let end_time = match chrono::DateTime::parse_from_rfc3339(&c.end) {
-                        Ok(dt) => dt.with_timezone(&chrono::Utc),
-                        Err(e) => {
-                            eprintln!("Failed to parse end time: {}", e);
-                            continue;
-                        }
-                    };
 
-                    let timeframe = crate::handlers::google_calendar::TimeframeQuery {
-                        start: start_time,
-                        end: end_time,
-                    };
-                    println!("starting time: {}", start_time);
-                    println!("endint time: {}", end_time);
-
-                    match crate::handlers::google_calendar::fetch_calendar_events(&state, user.id, timeframe).await {
-                        Ok(events) => {
-                            println!("Successfully fetched {} calendar events", events.len());
-                            
-                            // Format events into a readable response
-                            let mut formatted_response = String::new();
-                            
-                            if events.is_empty() {
-                                formatted_response = "No events found for this time period.".to_string();
+                    match crate::handlers::google_calendar::handle_calendar_fetching(&state, user.id, &c.start, &c.end).await {
+                        Ok(Json(response)) => {
+                            if let Some(events) = response.get("events") {
+                                tool_answers.insert(tool_call_id, format!("Here are your calendar events: {}", events.to_string()));
                             } else {
-                                for (i, event) in events.iter().enumerate() {
-                                    let summary = event.summary.as_deref().unwrap_or("Untitled Event");
-                                    
-                                    let start_time = event.start.date_time
-                                        .map(|dt| dt.format("%I:%M %p").to_string())
-                                        .or_else(|| event.start.date.as_ref().map(|d| "All day".to_string()))
-                                        .unwrap_or_else(|| "Unknown time".to_string());
-                                        
-                                    let start_date = event.start.date_time
-                                        .map(|dt| dt.format("%b %d").to_string())
-                                        .or_else(|| event.start.date.as_ref().map(|d| d.to_string()))
-                                        .unwrap_or_else(|| "Unknown date".to_string());
-
-                                    if i == 0 {
-                                        formatted_response.push_str(&format!("{}. {} on {} at {}", i + 1, summary, start_date, start_time));
-                                    } else {
-                                        formatted_response.push_str(&format!(", {}. {} on {} at {}", i + 1, summary, start_date, start_time));
-                                    }
-                                }
+                                tool_answers.insert(tool_call_id, "No events found for this time period.".to_string());
                             }
-                            
-                            tool_answers.insert(tool_call_id, formatted_response);
+
                         }
-                        Err(e) => {
-                            let error_message = match e {
-                                crate::handlers::google_calendar::CalendarError::NoConnection => 
-                                    "You need to connect your Google Calendar first. Visit the website to connect.",
-                                crate::handlers::google_calendar::CalendarError::TokenError(_) => 
-                                    "Your calendar connection needs to be renewed. Please reconnect on the website.",
+                        Err((status, json_error)) => {
+                            let error_message = match status {
+                                StatusCode::BAD_REQUEST => "No active Google Calendar connection found. Visit the website to connect.",
+                                StatusCode::UNAUTHORIZED => "Your calendar connection needs to be renewed. Please reconnect on the website.",
                                 _ => "Failed to fetch calendar events. Please try again later.",
                             };
                             tool_answers.insert(tool_call_id, error_message.to_string());
-                            eprintln!("Failed to fetch calendar events: {:?}", e);
+                            eprintln!("Failed to fetch calendar events: {:?}", json_error);
                         }
                     }
                 }
