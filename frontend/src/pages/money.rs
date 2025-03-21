@@ -76,9 +76,17 @@ pub fn pricing() -> Html {
                 <div class="pricing-card main">
                     <div class="card-header">
                         <h3>{"SMS Messages"}</h3>
-                        <div class="price">
-                            <span class="amount">{"€0.15"}</span>
-                            <span class="period">{"/message"}</span>
+                        <div class="price-container">
+                            <div class="price us-price">
+                                <span class="region">{"US/Canada: "}</span>
+                                <span class="amount">{"€0.10"}</span>
+                                <span class="period">{"/message"}</span>
+                            </div>
+                            <div class="price other-price">
+                                <span class="region">{"Other regions: "}</span>
+                                <span class="amount">{"€0.15"}</span>
+                                <span class="period">{"/message"}</span>
+                            </div>
                         </div>
                     </div>
                     <ul>
@@ -116,8 +124,8 @@ pub fn pricing() -> Html {
                     </div>
                     
                     <div class="faq-item">
-                        <h3>{"Are there any hidden fees?"}</h3>
-                        <p>{"No hidden fees. You only pay for the calls and messages you make. All features are included at no extra cost."}</p>
+                        <h3>{"What counts as a message or call?"}</h3>
+                        <p>{"You are charged for all messages and calls you initiate. For example texting 'shazam' to lightfriend, you will only be charged for the 'shazam' message and not the listening call."}</p>
                     </div>
                     <div class="faq-item">
                         <h3>{"What about refunds?"}</h3>
