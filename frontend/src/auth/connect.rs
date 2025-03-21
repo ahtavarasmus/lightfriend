@@ -1,4 +1,5 @@
 use yew::prelude::*;
+use web_sys::MouseEvent;
 use yew_hooks::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{window, Window, History};
@@ -126,10 +127,10 @@ pub fn connect(props: &ConnectProps) -> Html {
         (),
     );
 
-    let onclick_calendar = {
+let onclick_calendar = {
         let connecting = connecting.clone();
         let error = error.clone();
-        Callback::from(move |_| {
+        Callback::from(move |_: MouseEvent| {
             let connecting = connecting.clone();
             let error = error.clone();
 
@@ -200,10 +201,10 @@ pub fn connect(props: &ConnectProps) -> Html {
         })
     };
 
-    let onclick_gmail = {
+let onclick_gmail = {
         let connecting = connecting.clone();
         let error = error.clone();
-        Callback::from(move |_| {
+        Callback::from(move |_: MouseEvent| {
             let connecting = connecting.clone();
             let error = error.clone();
 
@@ -265,10 +266,10 @@ pub fn connect(props: &ConnectProps) -> Html {
         })
     };
 
-    let onclick_delete_gmail = {
+let onclick_delete_gmail = {
         let gmail_connected = gmail_connected.clone();
         let error = error.clone();
-        Callback::from(move |_| {
+        Callback::from(move |_: MouseEvent| {
             let gmail_connected = gmail_connected.clone();
             let error = error.clone();
 
@@ -306,10 +307,10 @@ pub fn connect(props: &ConnectProps) -> Html {
         })
     };
 
-    let onclick_delete_calendar = {
+let onclick_delete_calendar = {
         let calendar_connected = calendar_connected.clone();
         let error = error.clone();
-        Callback::from(move |_| {
+        Callback::from(move |_: MouseEvent| {
             let calendar_connected = calendar_connected.clone();
             let error = error.clone();
 
@@ -370,26 +371,30 @@ pub fn connect(props: &ConnectProps) -> Html {
                                 <p class="service-description">
                                     {"Access and manage your Google Calendar events through SMS or voice calls."}
                                 </p>
-                                if *calendar_connected {
-                                    <div class="calendar-controls">
+                                if props.user_id == 1 || props.user_id == 45 {
+                                    if *calendar_connected {
+                                        <div class="calendar-controls">
+                                            <button 
+                                                onclick={onclick_delete_calendar}
+                                                class="disconnect-button"
+                                            >
+                                                {"Disconnect"}
+                                            </button>
+                                        </div>
+                                    } else {
                                         <button 
-                                            onclick={onclick_delete_calendar}
-                                            class="disconnect-button"
+                                            onclick={onclick_calendar.clone()} 
+                                            class="connect-button"
                                         >
-                                            {"Disconnect"}
+                                            if *connecting {
+                                                {"Connecting..."}
+                                            } else {
+                                                {"Connect"}
+                                            }
                                         </button>
-                                    </div>
+                                    }
                                 } else {
-                                    <button 
-                                        onclick={onclick_calendar.clone()} 
-                                        class="connect-button"
-                                    >
-                                        if *connecting {
-                                            {"Connecting..."}
-                                        } else {
-                                            {"Connect"}
-                                        }
-                                    </button>
+                                    <p class="service-unavailable">{"This service is not available for your account."}</p>
                                 }
                             </div>
 
@@ -419,75 +424,22 @@ pub fn connect(props: &ConnectProps) -> Html {
                             {"Email Services"}
                         </h3>
                         <div class="service-list">
-                            // Gmail
-                            <div class="service-item">
+                            // Gmail (Coming Soon)
+                            <div class="service-item coming-soon">
                                 <div class="service-header">
                                     <div class="service-name">
                                         <img src="https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg" alt="Gmail"/>
                                         {"Gmail"}
+                                        <span class="coming-soon-tag">{"Coming Soon"}</span>
                                     </div>
-                                    if *gmail_connected {
-                                        <span class="service-status">{"Connected ✓"}</span>
-                                    }
+
                                 </div>
                                 <p class="service-description">
                                     {"Send and receive Gmail messages through SMS or voice calls."}
                                 </p>
-                                if *gmail_connected {
-                                    <div class="calendar-controls">
-                                        <button 
-                                            onclick={onclick_delete_gmail.clone()}
-                                            class="disconnect-button"
-                                        >
-                                            {"Disconnect"}
-                                        </button>
-                                        <button
-                                            onclick={{
-                                                let error = error.clone();
-                                                Callback::from(move |_| {
-                                                    let error = error.clone();
-                                                    if let Some(window) = web_sys::window() {
-                                                        if let Ok(Some(storage)) = window.local_storage() {
-                                                            if let Ok(Some(token)) = storage.get_item("token") {
-                                                                spawn_local(async move {
-                                                                    let request = Request::get(&format!("{}/api/auth/google/gmail/test_fetch", config::get_backend_url()))
-                                                                        .header("Authorization", &format!("Bearer {}", token))
-                                                                        .send()
-                                                                        .await;
-
-                                                                    match request {
-                                                                        Ok(response) => {
-                                                                            if !response.ok() {
-                                                                                error.set(Some("Failed to test Gmail fetch".to_string()));
-                                                                            }
-                                                                        }
-                                                                        Err(e) => {
-                                                                            error.set(Some(format!("Network error: {}", e)));
-                                                                        }
-                                                                    }
-                                                                });
-                                                            }
-                                                        }
-                                                    }
-                                                })
-                                            }}
-                                            class="test-button"
-                                        >
-                                            {"Test Fetch"}
-                                        </button>
-                                    </div>
-                                } else {
-                                    <button 
-                                        onclick={onclick_gmail.clone()} 
-                                        class="connect-button"
-                                    >
-                                        if *connecting {
-                                            {"Connecting..."}
-                                        } else {
-                                            {"Connect"}
-                                        }
-                                    </button>
-                                }
+                                <button class="connect-button" disabled=true>
+                                    {"Connect"}
+                                </button>
                             </div>
 
                             // Outlook (Coming Soon)
