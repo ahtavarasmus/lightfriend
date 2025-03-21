@@ -106,6 +106,17 @@ pub fn landing() -> Html {
                         <p class="showcase-highlight">
                             {"No app needed - just your basic phone and the music you want to identify!"}
                         </p>
+                        <div class="video-demo">
+                            <p>{"Watch it in action:"}</p>
+                            <a 
+                                href="https://youtube.com/shorts/4ZYnhtm9dkk" 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                class="demo-link"
+                            >
+                                {"▶️ See Shazam Demo"}
+                            </a>
+                        </div>
                     </div>
                 </div>
             </section>
