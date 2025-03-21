@@ -10,7 +10,7 @@ use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 
 const PHONE_NUMBERS: &[(&str, &str, Option<&str>)] = &[
-    ("us", "+18153684737", Some("(no sms yet)")),
+    ("us", "+18153684737", None),
     ("fin", "+358454901522", None),
     ("nl", "+3197006520696", None),
     ("cz", "+420910921902", Some("(no sms)")),

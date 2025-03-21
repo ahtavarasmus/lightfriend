@@ -49,8 +49,7 @@ pub async fn start_call_for_user(
 ) -> impl IntoResponse {
     let account_sid = std::env::var("TWILIO_ACCOUNT_SID").expect("TWILIO_ACCOUNT_SID must be set");
     let auth_token = std::env::var("TWILIO_AUTH_TOKEN").expect("TWILIO_AUTH_TOKEN must be set");
-    let from_number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER must be set");
-
+    
     let user = match state.user_repository.find_by_id(user_id.parse().unwrap()) {
         Ok(Some(user)) => user,
         _ => return "User not found".to_string(),
@@ -60,6 +59,13 @@ pub async fn start_call_for_user(
     if to_number.is_empty() {
         return "User not found".to_string();
     }
+
+    // Choose the appropriate from number based on the destination
+    let from_number = if to_number.starts_with("+1") {
+        std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER must be set")
+    } else {
+        std::env::var("SHAZAM_EUROPE_PHONE_NUMBER").expect("SHAZAM_EUROPE_PHONE_NUMBER must be set")
+    };
 
     let server_url = std::env::var("SERVER_URL").expect("SERVER_URL must be set");
     let twiml_url = format!("{}/api/twiml", server_url);
