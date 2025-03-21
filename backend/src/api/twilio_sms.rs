@@ -88,6 +88,7 @@ pub async fn send_shazam_answer_to_user(
     user_id: i32,
     message: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    
     tracing::info!("Starting send_shazam_answer_to_user for user_id: {}", user_id);
     tracing::info!("Message to send: {}", message);
 
@@ -104,6 +105,17 @@ pub async fn send_shazam_answer_to_user(
             eprintln!("Database error while finding user {}: {}", user_id, e);
             return Err(Box::new(e));
         },
+    };
+    let message_credits_cost = if user.phone_number.starts_with("+1") {
+        std::env::var("MESSAGE_COST_US")
+            .unwrap_or_else(|_| std::env::var("MESSAGE_COST").expect("MESSAGE_COST not set"))
+            .parse::<f32>()
+            .unwrap_or(0.10)
+    } else {
+        std::env::var("MESSAGE_COST")
+            .expect("MESSAGE_COST not set")
+            .parse::<f32>()
+            .unwrap_or(0.15)
     };
 
     tracing::info!("Determining sender number for user {}", user_id);
@@ -139,6 +151,51 @@ pub async fn send_shazam_answer_to_user(
     })?;
 
     tracing::info!("Successfully sent Shazam answer to user {} at {}", user_id, user.phone_number);
+
+    // Deduct credits for the message
+    if let Err(e) = state.user_repository
+        .update_user_credits(user.id, user.credits - message_credits_cost) {
+        eprintln!("Failed to update user credits after Shazam message: {}", e);
+        return Err("Failed to process credits points".into());
+    }
+
+    // Log the SMS usage
+    if let Err(e) = state.user_repository.log_usage(
+        user.id,
+        "sms",
+        Some(message_credits_cost),
+        Some(true),
+        Some("shazam".to_string()),
+        None,
+        None,
+        None,
+        None,
+    ) {
+        eprintln!("Failed to log Shazam SMS usage: {}", e);
+        // Continue execution even if logging fails
+    }
+
+    /* TODO have to make this whole charging thing in a separate function at some point
+    // Check if credits are under threshold and handle automatic charging
+    match state.user_repository.is_credits_under_threshold(user.id) {
+        Ok(is_under) => {
+            if is_under && user.charge_when_under {
+                println!("User {} credits is under threshold after Shazam message, attempting automatic charge", user.id);
+                use axum::extract::{State, Path};
+                let state_clone = Arc::clone(&state);
+                tokio::spawn(async move {
+                    let _ = crate::handlers::stripe_handlers::automatic_charge(
+                        State(state_clone),
+                        Path(user.id),
+                    ).await;
+                });
+                println!("Initiated automatic recharge for user after Shazam message");
+            }
+        },
+        Err(e) => eprintln!("Failed to check if user credits is under threshold after Shazam message: {}", e),
+    }
+    */
+
     Ok(())
 }
 
@@ -223,7 +280,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         }
     };
 
-    // Check if user has enough credits 
+    // Check if user has enough credits
     let message_credits_cost = std::env::var("MESSAGE_COST")
         .expect("MESSAGE_COST not set")
         .parse::<f32>()
@@ -632,6 +689,26 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     };
                 } else if name == "use_shazam" {
                     println!("Executing use_shazam tool call");
+                    // Check if credits are under threshold and handle automatic charging
+                    // this is because if user only uses shazam they won't be recharged since the 
+                    // shazam message sending function does not do this yet(TODO)
+                    match state.user_repository.is_credits_under_threshold(user.id) {
+                        Ok(is_under) => {
+                            if is_under && user.charge_when_under {
+                                println!("User {} credits is under threshold after Shazam message, attempting automatic charge", user.id);
+                                use axum::extract::{State, Path};
+                                let state_clone = Arc::clone(&state);
+                                tokio::spawn(async move {
+                                    let _ = crate::handlers::stripe_handlers::automatic_charge(
+                                        State(state_clone),
+                                        Path(user.id),
+                                    ).await;
+                                });
+                                println!("Initiated automatic recharge for user after Shazam message");
+                            }
+                        },
+                        Err(e) => eprintln!("Failed to check if user credits is under threshold after Shazam message: {}", e),
+                    }
                     let user_id = user.id;
                     let state_clone = state.clone();
                     tokio::spawn(async move {
@@ -827,10 +904,17 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         Ok(_) => {
             if !fail {
                 // Deduct credits for the message
-                let message_credits_cost = std::env::var("MESSAGE_COST")
-                    .expect("MESSAGE_COST not set")
-                    .parse::<f32>()
-                    .unwrap_or(0.20);
+                let message_credits_cost = if user.phone_number.starts_with("+1") {
+                    std::env::var("MESSAGE_COST_US")
+                        .unwrap_or_else(|_| std::env::var("MESSAGE_COST").expect("MESSAGE_COST not set"))
+                        .parse::<f32>()
+                        .unwrap_or(0.10)
+                } else {
+                    std::env::var("MESSAGE_COST")
+                        .expect("MESSAGE_COST not set")
+                        .parse::<f32>()
+                        .unwrap_or(0.15)
+                };                
 
                 if let Err(e) = state.user_repository
                     .update_user_credits(user.id, user.credits - message_credits_cost) {
@@ -844,18 +928,13 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     );
                 }
 
-                let message_credits_cost = std::env::var("MESSAGE_COST")
-                    .expect("MESSAGE_COST not set")
-                    .parse::<f32>()
-                    .unwrap_or(0.20);
-
                 // Log the SMS usage
                 if let Err(e) = state.user_repository.log_usage(
                     user.id,
                     "sms",
                     Some(message_credits_cost),  // credits points used
                     Some(true), // Success
-                    None,
+                    Some("normal sms response".to_string()),
                     None,
                     None,
                     None,
