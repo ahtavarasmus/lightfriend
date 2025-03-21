@@ -17,6 +17,7 @@ pub fn privacy_policy() -> Html {
                     <li>{"Phone number (for service access and user identification)"}</li>
                     <li>{"Email address (for account recovery and identification)"}</li>
                     <li>{"User-provided profile information (for AI assistant personalization)"}</li>
+                    <li>{"Access tokens used to access the integrations you setup"}</li>
                 </ul>
             </section>
 
@@ -37,6 +38,7 @@ pub fn privacy_policy() -> Html {
                     <li>{"Password hashing for secure storage"}</li>
                     <li>{"HTTPS encryption for all data transmission"}</li>
                     <li>{"Protected API endpoints with secret keys"}</li>
+                    <li>{"Access tokens and other sensitive data are encrypted at rest"}</li>
                     <li>{"Segregated user data access"}</li>
                 </ul>
             </section>
@@ -62,7 +64,19 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"6. Data Retention"}</h2>
+                <h2>{"6. Google Calendar Integration and OAuth"}</h2>
+                <p>{"Lightfriend integrates with Google Calendar to allow you to manage your calendar via SMS or voice call commands. To provide this functionality, we use Google OAuth with the following details:"}</p>
+                <ul>
+                    <li>{"Data We Access: We request access to your Google Calendar data only when you authorize it through OAuth."}</li>
+                    <li>{"Tokens We Store: Upon your authorization, we store an access token and a refresh token in our secure database. These tokens enable Lightfriend to access your Google Calendar on your behalf when you use our SMS or voice call features. We encrypt these tokens to protect your data."}</li>
+                    <li>{"What We Don't Store: We do not store any additional Google account data, such as your calendar events, email, or personal details—only the encrypted tokens necessary for calendar access are retained."}</li>
+                    <li>{"Usage: The stored tokens are used exclusively to authenticate and access your Google Calendar when you request actions (e.g., checking or updating your schedule)."}</li>
+                    <li>{"Sharing: We do not share these tokens or your Google user data with third parties, except as required by law or to facilitate the Google API services you've authorized."}</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>{"7. Data Retention"}</h2>
                 <p>{"We retain your data until:"}</p>
                 <ul>
                     <li>{"You request account deletion"}</li>
@@ -72,7 +86,7 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"7. Contact Information"}</h2>
+                <h2>{"8. Contact Information"}</h2>
                 <p>{"For privacy-related inquiries or to exercise your data rights, contact:"}</p>
                 <p>{"Email: rasmus@ahtava.com"}</p>
                 <p>{"Location: Tampere, Finland"}</p>

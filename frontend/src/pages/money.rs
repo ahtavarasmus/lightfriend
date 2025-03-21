@@ -68,7 +68,7 @@ pub fn pricing() -> Html {
                     <ul>
                         <li>{"High-quality AI assistant voice calls"}</li>
                         <li>{"All the tools available"}</li>
-                        <li>{"No logging, fully private"}</li>
+                        // TODO remove until i can give choice for this <li>{"No logging, fully private"}</li>
                         <li>{"24/7 availability"}</li>
                     </ul>
                 </div>
@@ -92,7 +92,7 @@ pub fn pricing() -> Html {
                     <ul>
                         <li>{"AI assistant chat responses"}</li>
                         <li>{"All the tools available"}</li>
-                        <li>{"Message history, only on your device locally"}</li>
+                        // TODO remove until i can give choice for this <li>{"Message history, only on your device locally"}</li>
                         <li>{"24/7 availability"}</li>
                     </ul>
                 </div>
