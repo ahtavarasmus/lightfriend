@@ -54,43 +54,79 @@ pub fn landing() -> Html {
                 </Link<Route>>
             </section>
 
-            // Features Section
+            // Problem Section: User Challenges
+            <section class="problems">
+                <h2>{"Are You Facing These Challenges?"}</h2>
+                <div class="challenges-grid">
+                    <div class="challenge-item smartphone-addict">
+                        <h3>{"Smartphone Addict"}</h3>
+                        <p>{"Tired of endless scrolling and feeling overwhelmed by notifications?"}</p>
+                    </div>
+                    <div class="challenge-item dumbphone-basic">
+                        <h3>{"Basic Dumbphone User"}</h3>
+                        <p>{"Worried about missing important messages or updates because your dumbphone lacks app access?"}</p>
+                    </div>
+                </div>
+            </section>
+
+            // Transformation Section: Lightfriend’s Benefits
+            <section class="transformation">
+                <h2>{"Lightfriend Helps You Stay in the Loop, Simply"}</h2>
+                <p>{"See how Lightfriend lets you access messages and key information on your dumbphone, keeping you connected when you need it — without turning it into a smartphone."}</p>
+                <div class="benefits-grid">
+                    <div class="benefit-item">
+                        <h3>{"For Smartphone Addicts"}</h3>
+                        <p>{"Break free from scrolling addiction and switch to a dumbphone with Lightfriend’s minimal, on-demand tools."}</p>
+                    </div>
+                    <div class="benefit-item">
+                        <h3>{"For Basic Dumbphone Users"}</h3>
+                        <p>{"Check important messages and updates via voice or text when needed, staying informed without constant flow of endless algorithms."}</p>
+                    </div>
+                    <div class="benefit-item">
+                        <h3>{"For Lightfriend Users"}</h3>
+                        <p>{"Enjoy a simple, distraction-free life while staying connected to essentials with Lightfriend’s AI assistance."}</p>
+                    </div>
+                </div>
+            </section>
+
+            // Features Section: Practical Tools
             <section class="features">
                 <h2>{"Essential Tools, Minimal Distractions"}</h2>
-                <p>{"Access everything you need with sms and calling."}</p>
-                
+                <p>{"Access what you need with Lightfriend’s AI-powered voice calls and SMS, keeping your dumbphone simple but functional."}</p>
                 <div class="features-grid">
                     <div class="feature-item">
                         <i class="calendar-icon"></i>
                         <h3>{"Calendar Access"}</h3>
-                        <p>{"Check and manage your schedule."}</p>
+                        <p>{"Check and manage your schedule when needed."}</p>
                     </div>
-                    
                     <div class="feature-item">
                         <i class="email-icon"></i>
-                        <h3>{"Email Integration"}</h3>
-                        <p>{"Stay on top of important emails."}</p>
+                        <h3>{"Email Access"}</h3>
+                        <p>{"Check and manage important emails via voice or text when needed."}</p>
                     </div>
-
                     <div class="feature-item">
                         <i class="message-icon"></i>
                         <h3>{"Smart Messaging"}</h3>
-                        <p>{"Access your messages across platforms."}</p>
+                        <p>{"Access key messages across platforms like Telegram and WhatsApp."}</p>
                     </div>
-
                     <div class="feature-item">
                         <i class="search-icon"></i>
-                        <h3>{"Perplexity Search"}</h3>
-                        <p>{"Get instant answers and information."}</p>
+                        <h3>{"Real-Time Internet Search"}</h3>
+                        <p>{"Ask questions or search the web via voice or text for quick answers from Perplexity."}</p>
                     </div>
-
+                    <div class="feature-item">
+                        <i class="weather-icon"></i>
+                        <h3>{"Weather Updates"}</h3>
+                        <p>{"Get current weather info for your location with a simple call or text."}</p>
+                    </div>
                     <div class="feature-item highlight">
                         <i class="music-icon"></i>
                         <h3>{"Shazam Integration"}</h3>
-                        <p>{"Identify any song playing around you."}</p>
+                        <p>{"Identify songs with a simple call."}</p>
                     </div>
                 </div>
             </section>
+
 
             <section class="shazam-showcase">
                 <h2>{"Identify Any Song, Anywhere"}</h2>
@@ -99,9 +135,9 @@ pub fn landing() -> Html {
                         <h3>{"Simple Song Recognition:"}</h3>
                         <ol>
                             <li>{"Text or call lightfriend saying 'What song is this?' or simply 'shazam'"}</li>
-                            <li>{"lightfriend calls you back ready to listen"}</li>
+                            <li>{"Lightfriend calls you back ready to listen"}</li>
                             <li>{"Hold your phone near the music"}</li>
-                            <li>{"lightfriend sends you the song details by text"}</li>
+                            <li>{"Lightfriend sends you the song details by text"}</li>
                         </ol>
                         <p class="showcase-highlight">
                             {"No app needed - just your basic phone and the music you want to identify!"}
@@ -146,9 +182,9 @@ pub fn landing() -> Html {
 
             <section class="footer-cta">
                 <div class="footer-content">
-                    <h2>{"Ready to Reclaim Your Focus?"}</h2>
+                    <h2>{"Ready to Simplify and Stay Connected?"}</h2>
                     <p class="subtitle">
-                        {"Join the digital minimalism movement without sacrificing essential connectivity."}
+                        {"Join the digital minimalism movement with Lightfriend — stay informed without endless distractions."}
                     </p>
                     <Link<Route> to={Route::Register} classes="forward-link">
                         <button class="hero-cta">
