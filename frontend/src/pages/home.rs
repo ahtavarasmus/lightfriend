@@ -43,9 +43,9 @@ pub fn landing() -> Html {
         <div class="landing-page">
             // Hero Section
             <section class="hero">
-                <h1>{"Smart Tools for Dumbphones"}</h1>
+                <h1>{"Stay Connected, Stay Simple with Lightfriend"}</h1>
                 <p class="hero-subtitle">
-                    {"Use your dumbphone smarter with AI-powered voice and text assistance."}
+                    {"Use your dumbphone smarter with AI-powered voice and text assistance—check messages and essential info when you need it, without endless scrolling or distractions."}
                 </p>
                 <Link<Route> to={Route::Register} classes="forward-link">
                     <button class="hero-cta">
