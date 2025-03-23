@@ -200,6 +200,7 @@ pub async fn fetch_assistant(
             dynamic_variables.insert("user_info".to_string(), json!(user_info));
             dynamic_variables.insert("user_id".to_string(), json!(user.id));
 
+            /*
             // Get timezone from user info or default to UTC
             let timezone_str = match user.timezone {
                 Some(ref tz) => tz.as_str(),
@@ -227,6 +228,7 @@ pub async fn fetch_assistant(
                 "offset": offset
             }));
 
+            */
             // Check Google Calendar availability
             match state.user_repository.has_active_google_calendar(user.id) {
                 Ok(has_calendar) => {
