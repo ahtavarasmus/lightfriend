@@ -67,9 +67,10 @@ impl UserRepository {
 
     // Check if a email exists
     pub fn email_exists(&self, search_email: &str) -> Result<bool, DieselError> {
+        use diesel::dsl::lower;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let existing_user: Option<User> = users::table
-            .filter(users::email.eq(search_email))
+            .filter(lower(users::email).eq(lower(search_email)))
             .first::<User>(&mut conn)
             .optional()?;
         Ok(existing_user.is_some())
@@ -104,9 +105,10 @@ impl UserRepository {
 
     // Find a user by email
     pub fn find_by_email(&self, search_email: &str) -> Result<Option<User>, DieselError> {
+        use diesel::dsl::lower;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let user = users::table
-            .filter(users::email.eq(search_email))
+            .filter(lower(users::email).eq(lower(search_email)))
             .first::<User>(&mut conn)
             .optional()?;
         Ok(user)
