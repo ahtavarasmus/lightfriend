@@ -242,6 +242,22 @@ pub async fn handle_incoming_sms(
     println!("Received SMS from: {} to: {}", payload.from, payload.to);
     println!("Message: {}", payload.body);
 
+    // Check for STOP command
+    if payload.body.trim().to_uppercase() == "STOP" {
+        if let Ok(Some(user)) = state.user_repository.find_by_phone_number(&payload.from) {
+            if let Err(e) = state.user_repository.update_notify(user.id, false) {
+                eprintln!("Failed to update notify status: {}", e);
+            } else {
+                return (
+                    StatusCode::OK,
+                    axum::Json(TwilioResponse {
+                        message: "You have been unsubscribed from notifications.".to_string(),
+                    })
+                );
+            }
+        }
+    }
+
     // Spawn a background task to handle the processing
     tokio::spawn(async move {
         let result = process_sms(state.clone(), payload.clone()).await;
