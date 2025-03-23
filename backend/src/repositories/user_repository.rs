@@ -3,6 +3,11 @@ use serde::Serialize;
 use diesel::result::Error as DieselError;
 use std::error::Error;
 use rand;
+
+// Define the lower SQL function
+sql_function! {
+    fn lower(x: Text) -> Text;
+}
 #[derive(Serialize, PartialEq)]
 pub struct UsageDataPoint {
     pub timestamp: i32,
@@ -67,7 +72,6 @@ impl UserRepository {
 
     // Check if a email exists
     pub fn email_exists(&self, search_email: &str) -> Result<bool, DieselError> {
-        use diesel::dsl::lower;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let existing_user: Option<User> = users::table
             .filter(lower(users::email).eq(lower(search_email)))
@@ -105,7 +109,6 @@ impl UserRepository {
 
     // Find a user by email
     pub fn find_by_email(&self, search_email: &str) -> Result<Option<User>, DieselError> {
-        use diesel::dsl::lower;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let user = users::table
             .filter(lower(users::email).eq(lower(search_email)))
