@@ -43,7 +43,7 @@ pub fn landing() -> Html {
         <div class="landing-page">
             // Hero Section
             <section class="hero">
-                <h1>{"Stay Connected, Stay Simple with Lightfriend"}</h1>
+                <h1>{"Stay Connected with lightfriend"}</h1>
                 <p class="hero-subtitle">
                     {"Use your dumbphone smarter with AI-powered voice and text assistance—check messages and essential info when you need it, without endless scrolling or distractions."}
                 </p>
@@ -60,31 +60,27 @@ pub fn landing() -> Html {
                 <div class="challenges-grid">
                     <div class="challenge-item smartphone-addict">
                         <h3>{"Smartphone Addict"}</h3>
-                        <p>{"Tired of endless scrolling and feeling overwhelmed by notifications?"}</p>
+                        <p>{"Tired of endless scrolling and feeling overwhelmed by notifications? Spending hours watching endless feeds and regretting it after?"}</p>
                     </div>
                     <div class="challenge-item dumbphone-basic">
                         <h3>{"Basic Dumbphone User"}</h3>
-                        <p>{"Worried about missing important messages or updates because your dumbphone lacks app access?"}</p>
+                        <p>{"Worried about missing important messages or updates because your dumbphone lacks app access? Standing alone at the meeting spot when your friends changed plans last minute on Telegram? Picking up a new package from postal office, but the code was sent to your email?"}</p>
                     </div>
                 </div>
             </section>
 
             // Transformation Section: Lightfriend’s Benefits
             <section class="transformation">
-                <h2>{"Lightfriend Helps You Stay in the Loop, Simply"}</h2>
-                <p>{"See how Lightfriend lets you access messages and key information on your dumbphone, keeping you connected when you need it — without turning it into a smartphone."}</p>
+                <h2>{"lightfriend Helps You Stay in the Loop, Simply"}</h2>
+                <p>{"See how lightfriend lets you access messages and key information on your dumbphone, keeping you connected when you need it — without turning it into a smartphone."}</p>
                 <div class="benefits-grid">
                     <div class="benefit-item">
                         <h3>{"For Smartphone Addicts"}</h3>
-                        <p>{"Break free from scrolling addiction and switch to a dumbphone with Lightfriend’s minimal, on-demand tools."}</p>
+                        <p>{"Break free from scrolling addiction and switch to a dumbphone with lightfriend’s minimal, on-demand tools. With lightfriend you can give up the algorithms while still staying connected when you need."}</p>
                     </div>
                     <div class="benefit-item">
                         <h3>{"For Basic Dumbphone Users"}</h3>
-                        <p>{"Check important messages and updates via voice or text when needed, staying informed without constant flow of endless algorithms."}</p>
-                    </div>
-                    <div class="benefit-item">
-                        <h3>{"For Lightfriend Users"}</h3>
-                        <p>{"Enjoy a simple, distraction-free life while staying connected to essentials with Lightfriend’s AI assistance."}</p>
+                        <p>{"Enjoy the simple, distraction-free life with lightfriend’s AI assistance when it matters. Access your email, calendar, messaging apps or just search internet answers when needed through natural voice calling or sms interface. Don't worry, it's not too convenient ;) - just enough to get the job done."}</p>
                     </div>
                 </div>
             </section>
@@ -92,7 +88,7 @@ pub fn landing() -> Html {
             // Features Section: Practical Tools
             <section class="features">
                 <h2>{"Essential Tools, Minimal Distractions"}</h2>
-                <p>{"Access what you need with Lightfriend’s AI-powered voice calls and SMS, keeping your dumbphone simple but functional."}</p>
+                <p>{"Access what you need with lightfriend’s AI-powered voice calls and SMS, keeping your dumbphone simple but functional."}</p>
                 <div class="features-grid">
                     <div class="feature-item">
                         <i class="calendar-icon"></i>
@@ -135,9 +131,9 @@ pub fn landing() -> Html {
                         <h3>{"Simple Song Recognition:"}</h3>
                         <ol>
                             <li>{"Text or call lightfriend saying 'What song is this?' or simply 'shazam'"}</li>
-                            <li>{"Lightfriend calls you back ready to listen"}</li>
+                            <li>{"lightfriend calls you back ready to listen"}</li>
                             <li>{"Hold your phone near the music"}</li>
-                            <li>{"Lightfriend sends you the song details by text"}</li>
+                            <li>{"lightfriend sends you the song details by text"}</li>
                         </ol>
                         <p class="showcase-highlight">
                             {"No app needed - just your basic phone and the music you want to identify!"}
@@ -184,7 +180,7 @@ pub fn landing() -> Html {
                 <div class="footer-content">
                     <h2>{"Ready to Simplify and Stay Connected?"}</h2>
                     <p class="subtitle">
-                        {"Join the digital minimalism movement with Lightfriend — stay informed without endless distractions."}
+                        {"Join the digital minimalism movement with lightfriend — stay informed without endless distractions."}
                     </p>
                     <Link<Route> to={Route::Register} classes="forward-link">
                         <button class="hero-cta">
