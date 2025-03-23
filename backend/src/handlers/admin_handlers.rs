@@ -134,10 +134,11 @@ async fn process_broadcast_messages(
 
         match conversation_result {
             Ok(conversation) => {
+                let message_with_stop = format!("{}\n\nTo stop receiving updates about new features, reply \"STOP\".", message);
                 match crate::api::twilio_utils::send_conversation_message(
                     &conversation.conversation_sid,
                     &sender_number,
-                    &message,
+                    &message_with_stop,
                 )
                 .await
                 .map_err(|e| BroadcastError::MessageSendError(e.to_string()))
