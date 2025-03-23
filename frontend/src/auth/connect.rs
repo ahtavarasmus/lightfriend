@@ -372,100 +372,99 @@ let onclick_delete_calendar = {
                                 <p class="service-description">
                                     {"Access and manage your Google Calendar events through SMS or voice calls."}
                                 </p>
-                                if props.user_id == 1 || props.user_id == 45 {
-                                    if *calendar_connected {
-                                        <div class="calendar-controls">
-                                            <button 
-                                                onclick={onclick_delete_calendar}
-                                                class="disconnect-button"
-                                            >
-                                                {"Disconnect"}
-                                            </button>
-                                            {
-                                                if props.user_id == 1 {
-                                                    let onclick_test = {
+                                if *calendar_connected {
+                                    <div class="calendar-controls">
+                                        <button 
+                                            onclick={onclick_delete_calendar}
+                                            class="disconnect-button"
+                                        >
+                                            {"Disconnect"}
+                                        </button>
+                                        {
+                                            if props.user_id == 1 {
+                                                let onclick_test = {
+                                                    let error = error.clone();
+                                                    Callback::from(move |_: MouseEvent| {
                                                         let error = error.clone();
-                                                        Callback::from(move |_: MouseEvent| {
-                                                            let error = error.clone();
-                                                            if let Some(window) = web_sys::window() {
-                                                                if let Ok(Some(storage)) = window.local_storage() {
-                                                                    if let Ok(Some(token)) = storage.get_item("token") {
-                                                                        // Get today's start and end times in RFC3339 format
-                                                        let now = Date::new_0();
-                                                        let today_start = Date::new_0();
-                                                        let today_end = Date::new_0();
-                                                                        today_start.set_hours(0);
-                                                                        today_start.set_minutes(0);
-                                                                        today_start.set_seconds(0);
-                                                                        today_start.set_milliseconds(0);
+                                                        if let Some(window) = web_sys::window() {
+                                                            if let Ok(Some(storage)) = window.local_storage() {
+                                                                if let Ok(Some(token)) = storage.get_item("token") {
+                                                                    // Get today's start and end times in RFC3339 format
+                                                                    let now = Date::new_0();
+                                                                    let today_start = Date::new_0();
+                                                                    let today_end = Date::new_0();
+                                                                    today_start.set_hours(0);
+                                                                    today_start.set_minutes(0);
+                                                                    today_start.set_seconds(0);
+                                                                    today_start.set_milliseconds(0);
+                                                                    
+                                                                    today_end.set_hours(23);
+                                                                    today_end.set_minutes(59);
+                                                                    today_end.set_seconds(59);
+                                                                    today_end.set_milliseconds(999);
+                                                                    
+                                                                    let start_time = today_start.to_iso_string().as_string().unwrap();
+                                                                    let end_time = today_end.to_iso_string().as_string().unwrap();
+                                                                    
+                                                                    spawn_local(async move {
+                                                                        let url = format!(
+                                                                            "{}/api/calendar/events?start={}&end={}", 
+                                                                            config::get_backend_url(),
+                                                                            start_time,
+                                                                            end_time
+                                                                        );
                                                                         
-                                                                        today_end.set_hours(23);
-                                                                        today_end.set_minutes(59);
-                                                                        today_end.set_seconds(59);
-                                                                        today_end.set_milliseconds(999);
-                                                                        
-                                                                        let start_time = today_start.to_iso_string().as_string().unwrap();
-                                                                        let end_time = today_end.to_iso_string().as_string().unwrap();
-                                                                        
-                                                                        spawn_local(async move {
-                                                                            let url = format!(
-                                                                                "{}/api/calendar/events?start={}&end={}", 
-                                                                                config::get_backend_url(),
-                                                                                start_time,
-                                                                                end_time
-                                                                            );
-                                                                            
-                                                                            match Request::get(&url)
-                                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                                .send()
-                                                                                .await {
-                                                                                Ok(response) => {
-                                                                                    if response.status() == 200 {
-                                                                                        if let Ok(data) = response.json::<serde_json::Value>().await {
-                                                                                            web_sys::console::log_1(&format!("Calendar events: {:?}", data).into());
-                                                                                            // You could also show this in the UI instead of just console
-                                                                                        }
-                                                                                    } else {
-                                                                                        error.set(Some("Failed to fetch calendar events".to_string()));
+                                                                        match Request::get(&url)
+                                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                                            .send()
+                                                                            .await {
+                                                                            Ok(response) => {
+                                                                                if response.status() == 200 {
+                                                                                    if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                                                        web_sys::console::log_1(&format!("Calendar events: {:?}", data).into());
+                                                                                        // You could also show this in the UI instead of just console
                                                                                     }
-                                                                                }
-                                                                                Err(e) => {
-                                                                                    error.set(Some(format!("Network error: {}", e)));
+                                                                                } else {
+                                                                                    error.set(Some("Failed to fetch calendar events".to_string()));
                                                                                 }
                                                                             }
-                                                                        });
-                                                                    }
+                                                                            Err(e) => {
+                                                                                error.set(Some(format!("Network error: {}", e)));
+                                                                            }
+                                                                        }
+                                                                    });
                                                                 }
                                                             }
-                                                        })
-                                                    };
-                                                    html! {
-                                                        <button 
-                                                            onclick={onclick_test}
-                                                            class="test-button"
-                                                        >
-                                                            {"Test Calendar"}
-                                                        </button>
-                                                    }
-                                                } else {
-                                                    html! {}
+                                                        }
+                                                    })
+                                                };
+                                                html! {
+                                                /*
+                                                    <button 
+                                                        onclick={onclick_test}
+                                                        class="test-button"
+                                                    >
+                                                        {"Test Calendar"}
+                                                    </button>
+                                                */
                                                 }
-                                            }
-                                        </div>
-                                    } else {
-                                        <button 
-                                            onclick={onclick_calendar.clone()} 
-                                            class="connect-button"
-                                        >
-                                            if *connecting {
-                                                {"Connecting..."}
+
                                             } else {
-                                                {"Connect"}
+                                                html! {}
                                             }
-                                        </button>
-                                    }
+                                        }
+                                    </div>
                                 } else {
-                                    <p class="service-unavailable">{"This service is not available for your account."}</p>
+                                    <button 
+                                        onclick={onclick_calendar.clone()} 
+                                        class="connect-button"
+                                    >
+                                        if *connecting {
+                                            {"Connecting..."}
+                                        } else {
+                                            {"Connect"}
+                                        }
+                                    </button>
                                 }
                             </div>
 
