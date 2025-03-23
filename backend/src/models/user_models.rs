@@ -8,7 +8,6 @@ use crate::schema::unipile_connection;
 use crate::schema::google_calendar;
 use crate::schema::gmail;
 
-
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = users)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -30,6 +29,7 @@ pub struct User {
     pub stripe_customer_id: Option<String>,
     pub stripe_payment_method_id: Option<String>,
     pub stripe_checkout_session_id: Option<String>,
+    pub timezone: Option<String>,
 }
 
 #[derive(Queryable, Selectable, Insertable)]

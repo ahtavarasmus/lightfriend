@@ -18,6 +18,7 @@ pub struct UpdateProfileRequest {
     phone_number: String,
     nickname: String,
     info: String,
+    timezone: String,
 }
 
 #[derive(Serialize)]
@@ -183,7 +184,22 @@ pub async fn update_profile(
     }
 
     // Update user profile in database
-    match state.user_repository.update_profile(auth_user.user_id, &update_req.email, &update_req.phone_number, &update_req.nickname, &update_req.info) {
+    // Validate timezone
+    if !chrono_tz::TZ_VARIANTS.iter().any(|tz| tz.name() == update_req.timezone) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid timezone" }))
+        ));
+    }
+
+    match state.user_repository.update_profile(
+        auth_user.user_id,
+        &update_req.email,
+        &update_req.phone_number,
+        &update_req.nickname,
+        &update_req.info,
+        &update_req.timezone
+    ) {
         Ok(_) => (),
         Err(DieselError::RollbackTransaction) => {
             return Err((
