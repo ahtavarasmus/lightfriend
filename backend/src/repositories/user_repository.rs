@@ -1,4 +1,5 @@
 use diesel::prelude::*;
+use diesel::sql_types::Text;
 use serde::Serialize;
 use diesel::result::Error as DieselError;
 use std::error::Error;
