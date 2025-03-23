@@ -1,20 +1,17 @@
 use std::sync::Arc;
+use crate::handlers::auth_middleware::AuthUser;
 use axum::{
-    extract::{State, Query},
+    extract::State,
     response::Json,
-    http::{StatusCode, HeaderMap},
+    http::StatusCode,
 };
-use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use serde_json::json;
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use oauth2::TokenResponse;
 use reqwest::header::{AUTHORIZATION, ACCEPT};
 
-use crate::{
-    AppState,
-    handlers::auth_dtos::Claims,
-};
+use crate::AppState;
 
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -85,42 +82,13 @@ pub enum GmailError {
 
 pub async fn test_gmail_fetch(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Starting test Gmail fetch");
 
-    // Extract and validate token
-    let auth_header = headers.get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
-
-    let token = match auth_header {
-        Some(token) => token,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "No authorization token provided"}))
-        )),
-    };
-
-    let claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-            .expect("JWT_SECRET_KEY must be set in environment")
-            .as_bytes()),
-        &Validation::new(Algorithm::HS256)
-    ) {
-        Ok(token_data) => token_data.claims,
-        Err(e) => {
-            tracing::error!("Invalid token: {}", e);
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "Invalid token"}))
-            ));
-        },
-    };
 
     // Test fetch Gmail messages
-    match fetch_gmail_messages(&state, claims.sub).await {
+    match fetch_gmail_messages(&state, auth_user.user_id).await {
         Ok(messages) => {
             tracing::info!("Successfully fetched {} messages in test", messages.len());
             Ok(Json(json!({ "success": true, "message_count": messages.len() })))
@@ -145,50 +113,17 @@ pub async fn test_gmail_fetch(
 
 pub async fn gmail_status(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Checking Gmail connection status");
 
-    // Extract and validate token
-    let auth_header = headers.get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
-
-    let token = match auth_header {
-        Some(token) => token,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "No authorization token provided"}))
-        )),
-    };
-
-    let claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-            .expect("JWT_SECRET_KEY must be set in environment")
-            .as_bytes()),
-        &Validation::new(Algorithm::HS256)
-    ) {
-        Ok(token_data) => {
-            tracing::info!("JWT token decoded successfully");
-            token_data.claims
-        },
-        Err(e) => {
-            tracing::error!("Invalid token: {}", e);
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "Invalid token"}))
-            ));
-        },
-    };
-
     // Check if user has active Gmail connection
-    match state.user_repository.has_active_gmail(claims.sub) {
+    match state.user_repository.has_active_gmail(auth_user.user_id) {
         Ok(has_connection) => {
-            tracing::info!("Successfully checked Gmail connection status for user {}: {}", claims.sub, has_connection);
+            tracing::info!("Successfully checked Gmail connection status for user {}: {}", auth_user.user_id, has_connection);
             Ok(Json(json!({
                 "connected": has_connection,
-                "user_id": claims.sub
+                "user_id": auth_user.user_id,
             })))
         },
         Err(e) => {

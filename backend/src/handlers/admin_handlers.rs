@@ -2,10 +2,9 @@ use std::sync::Arc;
 use axum::{
     Json,
     extract::State,
-    http::{StatusCode, HeaderMap}
+    http::StatusCode,
 };
 use serde_json::json;
-use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -13,55 +12,13 @@ pub struct BroadcastMessageRequest {
     message: String,
 }
 
-use crate::{
-    handlers::auth_dtos::Claims,
-    AppState
-};
+use crate::AppState;
 
 
 pub async fn verify_user(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
     axum::extract::Path(user_id): axum::extract::Path<i32>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Extract and validate token
-    let auth_header = headers.get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
-
-    let token = match auth_header {
-        Some(token) => token,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "No authorization token provided"}))
-        )),
-    };
-
-    // Decode JWT token
-    let claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-            .expect("JWT_SECRET_KEY must be set in environment")
-            .as_bytes()),
-        &Validation::new(Algorithm::HS256)
-    ) {
-        Ok(token_data) => token_data.claims,
-        Err(_) => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "Invalid token"}))
-        )),
-    };
-
-    // Check if user is an admin
-    if !state.user_repository.is_admin(claims.sub).map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Database error: {}", e)}))
-    ))? {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "Only admins can verify users"}))
-        ));
-    }
 
     // Verify the user
     state.user_repository.verify_user(user_id).map_err(|e| (
@@ -78,48 +35,9 @@ pub async fn verify_user(
 
 pub async fn update_preferred_number_admin(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
     axum::extract::Path(user_id): axum::extract::Path<i32>,
     Json(preferred_number): Json<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Extract and validate token
-    let auth_header = headers.get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
-
-    let token = match auth_header {
-        Some(token) => token,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "No authorization token provided"}))
-        )),
-    };
-
-    // Decode JWT token
-    let claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-            .expect("JWT_SECRET_KEY must be set in environment")
-            .as_bytes()),
-        &Validation::new(Algorithm::HS256)
-    ) {
-        Ok(token_data) => token_data.claims,
-        Err(_) => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "Invalid token"}))
-        )),
-    };
-
-    // Check if user is an admin
-    if !state.user_repository.is_admin(claims.sub).map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Database error: {}", e)}))
-    ))? {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "Only admins can update preferred numbers"}))
-        ));
-    }
 
     // Get allowed numbers from environment
     let allowed_numbers = vec![
@@ -150,45 +68,8 @@ pub async fn update_preferred_number_admin(
 
 pub async fn broadcast_message(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
     Json(request): Json<BroadcastMessageRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Authentication code remains unchanged
-    let auth_header = headers.get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
-
-    let token = match auth_header {
-        Some(token) => token,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "No authorization token provided"}))
-        )),
-    };
-
-    let claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-            .expect("JWT_SECRET_KEY must be set in environment")
-            .as_bytes()),
-        &Validation::new(Algorithm::HS256)
-    ) {
-        Ok(token_data) => token_data.claims,
-        Err(_) => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "Invalid token"}))
-        )),
-    };
-
-    if !state.user_repository.is_admin(claims.sub).map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Database error: {}", e)}))
-    ))? {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "Only admins can broadcast messages"}))
-        ));
-    }
 
     let users = state.user_repository.get_all_users().map_err(|e| (
         StatusCode::INTERNAL_SERVER_ERROR,
@@ -293,47 +174,9 @@ async fn process_broadcast_messages(
 
 pub async fn set_preferred_number_default(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
     axum::extract::Path(user_id): axum::extract::Path<i32>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Extract token from Authorization header
-    let auth_header = headers.get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
-
-    let token = match auth_header {
-        Some(token) => token,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "No authorization token provided"}))
-        )),
-    };
-
-    // Decode and validate JWT token
-    let claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-                    .expect("JWT_SECRET_KEY must be set in environment")
-                    .as_bytes()),
-        &Validation::new(Algorithm::HS256)
-    ) {
-        Ok(token_data) => token_data.claims,
-        Err(_) => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "Invalid token"}))
-        )),
-    };
-
-    // Check if the user is admin
-    if !state.user_repository.is_admin(claims.sub).map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Database error: {}", e)}))
-    ))? {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "Only admins can set preferred numbers"}))
-        ));
-    }
+    
 
     // Get the user's phone number
     let user = state.user_repository.find_by_id(user_id)

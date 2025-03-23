@@ -1,20 +1,17 @@
 use std::sync::Arc;
+use crate::handlers::auth_middleware::AuthUser;
 use axum::{
     extract::{State, Query},
     response::Json,
-    http::{StatusCode, HeaderMap},
+    http::StatusCode,
 };
-use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use serde_json::json;
 use serde::{Deserialize, Serialize};
 use oauth2::TokenResponse;
 use reqwest::header::{AUTHORIZATION, ACCEPT};
 use chrono::{DateTime, Utc};
 
-use crate::{
-    AppState,
-    handlers::auth_dtos::Claims,
-};
+use crate::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct TimeframeQuery {
@@ -46,49 +43,17 @@ struct CalendarResponse {
 
 pub async fn google_calendar_status(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Checking Google Calendar connection status");
 
-    // Extract and validate token
-    let auth_header = headers.get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
-
-    let token = match auth_header {
-        Some(token) => token,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "No authorization token provided"}))
-        )),
-    };
-    let claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-            .expect("JWT_SECRET_KEY must be set in environment")
-            .as_bytes()),
-        &Validation::new(Algorithm::HS256)
-    ) {
-        Ok(token_data) => {
-            tracing::info!("JWT token decoded successfully");
-            token_data.claims
-        },
-        Err(e) => {
-            tracing::error!("Invalid token: {}", e);
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "Invalid token"}))
-            ));
-        },
-    };
-
     // Check if user has active Google Calendar connection
-    match state.user_repository.has_active_google_calendar(claims.sub) {
+    match state.user_repository.has_active_google_calendar(auth_user.user_id) {
         Ok(has_connection) => {
-            tracing::info!("Successfully checked calendar connection status for user {}: {}", claims.sub, has_connection);
+            tracing::info!("Successfully checked calendar connection status for user {}: {}", auth_user.user_id, has_connection);
             Ok(Json(json!({
                 "connected": has_connection,
-                "user_id": claims.sub
+                "user_id": auth_user.user_id,
             })))
         },
         Err(e) => {
@@ -113,39 +78,9 @@ pub enum CalendarError {
 }
 pub async fn handle_calendar_fetching_route(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    auth_user: AuthUser,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Extract and validate token
-    let auth_header = headers.get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
-
-    let token = match auth_header {
-        Some(token) => token,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "No authorization token provided"}))
-        )),
-    };
-
-    // Decode and validate JWT token
-    let claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-            .expect("JWT_SECRET_KEY must be set in environment")
-            .as_bytes()),
-        &Validation::new(Algorithm::HS256)
-    ) {
-        Ok(token_data) => token_data.claims,
-        Err(e) => {
-            tracing::error!("Invalid token: {}", e);
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "Invalid token"}))
-            ));
-        },
-    };
 
     // Extract start and end times from query parameters
     let start = match params.get("start") {
@@ -165,7 +100,7 @@ pub async fn handle_calendar_fetching_route(
     };
 
     // Call the existing handler function
-    handle_calendar_fetching(&state, claims.sub, start, end).await
+    handle_calendar_fetching(&state, auth_user.user_id, start, end).await
 }
 
 pub async fn handle_calendar_fetching(
