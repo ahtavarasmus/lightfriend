@@ -1,13 +1,12 @@
 use std::sync::Arc;
+use crate::handlers::auth_middleware::AuthUser;
 use axum::{
     extract::{Query, State},
-    response::{IntoResponse, Json, Redirect},
-    http::{StatusCode, HeaderMap},
+    response::{Json, Redirect},
+    http::StatusCode,
 };
-use tower_sessions::{MemoryStore, session_store::SessionStore, session::{Id, Record}};
-use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+use tower_sessions::{session_store::SessionStore, session::{Id, Record}};
 use oauth2::{
-    basic::BasicClient,
     PkceCodeVerifier,
     AuthorizationCode,
     CsrfToken,
@@ -20,10 +19,7 @@ use serde_json::json;
 use uuid::Uuid;
 use time::OffsetDateTime;
 
-use crate::{
-    AppState,
-    handlers::auth_dtos::Claims,
-};
+use crate::AppState;
 
 #[derive(Deserialize)]
 pub struct AuthRequest {
@@ -40,50 +36,13 @@ pub struct TokenInfo {
 
 pub async fn gmail_login(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Received request to /api/auth/gmail/login with headers: {:?}", headers);
+    tracing::info!("Received request to /api/auth/gmail/login");
 
     let session_key = Uuid::new_v4().to_string();
     tracing::info!("Generated session key: {}", session_key);
 
-    let auth_header = headers.get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
-    
-    let token = match auth_header {
-        Some(token) => {
-            tracing::info!("Found Authorization header with token: {}", token);
-            token
-        },
-        None => {
-            tracing::error!("No authorization token provided in headers: {:?}", headers);
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "No authorization token provided"}))
-            ));
-        },
-    };
-
-    let claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-            .expect("JWT_SECRET_KEY must be set in environment")
-            .as_bytes()),
-        &Validation::new(Algorithm::HS256)
-    ) {
-        Ok(token_data) => {
-            tracing::info!("JWT token decoded successfully");
-            token_data.claims
-        },
-        Err(e) => {
-            tracing::error!("Invalid token: {}", e);
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "Invalid token"}))
-            ));
-        },
-    };
 
     let csrf_token = CsrfToken::new_random();
     let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
@@ -96,7 +55,7 @@ pub async fn gmail_login(
     record.data.insert("session_key".to_string(), json!(session_key.clone()));
     record.data.insert("pkce_verifier".to_string(), json!(pkce_verifier.secret().to_string()));
     record.data.insert("csrf_token".to_string(), json!(csrf_token.secret().to_string()));
-    record.data.insert("user_id".to_string(), json!(claims.sub));
+    record.data.insert("user_id".to_string(), json!(auth_user.user_id));
 
     tracing::info!("Storing session record with ID: {}", record.id.0);
     if let Err(e) = state.session_store.create(&mut record).await {
@@ -128,47 +87,15 @@ pub async fn gmail_login(
 
 pub async fn delete_gmail_connection(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Received request to delete Gmail connection");
 
-    let auth_header = headers.get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
-    
-    let token = match auth_header {
-        Some(token) => token,
-        None => {
-            tracing::error!("No authorization token provided");
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "No authorization token provided"}))
-            ));
-        },
-    };
-
-    let claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-            .expect("JWT_SECRET_KEY must be set in environment")
-            .as_bytes()),
-        &Validation::new(Algorithm::HS256)
-    ) {
-        Ok(token_data) => token_data.claims,
-        Err(e) => {
-            tracing::error!("Invalid token: {}", e);
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "Invalid token"}))
-            ));
-        },
-    };
-
     // Get the tokens before deleting them
-    let tokens = match state.user_repository.get_gmail_tokens(claims.sub) {
+    let tokens = match state.user_repository.get_gmail_tokens(auth_user.user_id) {
         Ok(Some(tokens)) => tokens,
         Ok(None) => {
-            tracing::info!("No tokens found to revoke for user {}", claims.sub);
+            tracing::info!("No tokens found to revoke for user {}", auth_user.user_id);
             return Ok(Json(json!({
                 "message": "No Gmail connection found to delete"
             })));
@@ -213,9 +140,9 @@ pub async fn delete_gmail_connection(
     }
 
     // Delete the connection from our database
-    match state.user_repository.delete_gmail_connection(claims.sub) {
+    match state.user_repository.delete_gmail_connection(auth_user.user_id) {
         Ok(_) => {
-            tracing::info!("Successfully deleted Gmail connection for user {}", claims.sub);
+            tracing::info!("Successfully deleted Gmail connection for user {}", auth_user.user_id);
             Ok(Json(json!({
                 "message": "Gmail connection deleted and permissions revoked successfully"
             })))
@@ -232,46 +159,14 @@ pub async fn delete_gmail_connection(
 
 pub async fn refresh_gmail_token(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Received request to refresh Gmail token");
 
-    let auth_header = headers.get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
-    
-    let token = match auth_header {
-        Some(token) => token,
-        None => {
-            tracing::error!("No authorization token provided");
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "No authorization token provided"}))
-            ));
-        },
-    };
-
-    let claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-            .expect("JWT_SECRET_KEY must be set in environment")
-            .as_bytes()),
-        &Validation::new(Algorithm::HS256)
-    ) {
-        Ok(token_data) => token_data.claims,
-        Err(_e) => {
-            tracing::error!("Invalid token");
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(json!({"error": "Invalid token"}))
-            ));
-        },
-    };
-
-    let tokens = match state.user_repository.get_gmail_tokens(claims.sub) {
+    let tokens = match state.user_repository.get_gmail_tokens(auth_user.user_id) {
         Ok(Some(tokens)) => tokens,
         Ok(None) => {
-            tracing::error!("No Gmail connection found for user {}", claims.sub);
+            tracing::error!("No Gmail connection found for user {}", auth_user.user_id);
             return Err((
                 StatusCode::NOT_FOUND,
                 Json(json!({"error": "No Gmail connection found"}))
@@ -312,7 +207,7 @@ pub async fn refresh_gmail_token(
         .as_secs() as i32;
 
     if let Err(e) = state.user_repository.update_gmail_access_token(
-        claims.sub,
+        auth_user.user_id,
         new_access_token,
         expires_in,
     ) {
@@ -323,7 +218,7 @@ pub async fn refresh_gmail_token(
         ));
     }
 
-    tracing::info!("Successfully refreshed Gmail token for user {}", claims.sub);
+    tracing::info!("Successfully refreshed Gmail token for user {}", auth_user.user_id);
     Ok(Json(json!({
         "message": "Token refreshed successfully",
         "expires_in": expires_in

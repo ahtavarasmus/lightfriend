@@ -9,8 +9,7 @@ use stripe::{
     BillingPortalSession,
     CreateBillingPortalSession,
 };
-use crate::handlers::auth_dtos::Claims;
-use jsonwebtoken::{DecodingKey, Validation, Algorithm, decode};
+
 use serde::{Deserialize, Serialize};
 
 use axum::{
@@ -20,6 +19,7 @@ use axum::{
     body::Bytes,
     Json,
 };
+use crate::handlers::auth_middleware::AuthUser;
 use crate::AppState;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -31,47 +31,25 @@ pub struct BuyCreditsRequest {
 }
 pub async fn create_customer_portal_session(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    auth_user: AuthUser,
     Path(user_id): Path<i32>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     println!("Starting create_customer_portal_session for user_id: {}", user_id);
+
+    // Check if user is accessing their own data or is an admin
+    if auth_user.user_id != user_id && !auth_user.is_admin {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Access denied"})),
+        ));
+    }
+
     // Initialize Stripe client
     let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY")
         .expect("STRIPE_SECRET_KEY must be set in environment");
     let client = Client::new(stripe_secret_key);
     println!("Stripe client initialized");
 
-    // Extract token from Authorization header
-    let auth_header = headers
-        .get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
-
-    let token = match auth_header {
-        Some(token) => token,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "No authorization token provided"})),
-        )),
-    };
-    println!("Token extracted successfully");
-
-    // Decode and validate JWT token (assuming Claims and other imports are defined)
-    let _claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(
-            std::env::var("JWT_SECRET_KEY")
-                .expect("JWT_SECRET_KEY must be set in environment")
-                .as_bytes(),
-        ),
-        &Validation::new(Algorithm::HS256),
-    ) {
-        Ok(token_data) => token_data.claims,
-        Err(_) => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "Invalid token"})),
-        )),
-    };
     println!("JWT token validated successfully");
 
     // Get Stripe customer ID
@@ -124,42 +102,20 @@ create_session,
 
 pub async fn create_checkout_session(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    auth_user: AuthUser,
     Path(user_id): Path<i32>,
     Json(payload): Json<BuyCreditsRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     println!("Starting create_checkout_session for user_id: {}", user_id);
-    // Extract token from Authorization header
-    let auth_header = headers
-        .get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
 
-    let token = match auth_header {
-        Some(token) => token,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "No authorization token provided"})),
-        )),
-    };
 
-    println!("Token extracted successfully");
-    // Decode and validate JWT token
-    let _claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(
-            std::env::var("JWT_SECRET_KEY")
-                .expect("JWT_SECRET_KEY must be set in environment")
-                .as_bytes(),
-        ),
-        &Validation::new(Algorithm::HS256),
-    ) {
-        Ok(token_data) => token_data.claims,
-        Err(_) => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "Invalid token"})),
-        )),
-    };
+    // Check if user is accessing their own data or is an admin
+    if auth_user.user_id != user_id && !auth_user.is_admin {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Access denied"})),
+        ));
+    }
 
     println!("JWT token validated successfully");
     // Fetch user from the database

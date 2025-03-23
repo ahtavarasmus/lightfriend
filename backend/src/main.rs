@@ -39,6 +39,7 @@ mod handlers {
     pub mod google_calendar;
     pub mod gmail_auth;
     pub mod gmail;
+    pub mod auth_middleware;
 }
 
 mod utils {
@@ -179,7 +180,9 @@ async fn main() {
     });
 
     let twilio_routes = Router::new()
-        .route("/api/sms/server", post(twilio_sms::handle_incoming_sms));
+        .route("/api/sms/server", post(twilio_sms::handle_incoming_sms))
+        .route_layer(middleware::from_fn(api::twilio_utils::validate_twilio_signature));
+
     let elevenlabs_routes = Router::new()
         .route("/api/call/assistant", post(elevenlabs::fetch_assistant))
         .route("/api/call/perplexity", post(elevenlabs::handle_perplexity_tool_call))
@@ -188,58 +191,75 @@ async fn main() {
         .route("/api/call/shazam", get(elevenlabs::handle_shazam_tool_call))
         .route("/api/call/calendar", get(elevenlabs::handle_calendar_tool_call))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
+
     let elevenlabs_webhook_routes = Router::new()
         .route("/api/webhook/elevenlabs", post(elevenlabs_webhook::elevenlabs_webhook))
         .route_layer(middleware::from_fn(elevenlabs_webhook::validate_elevenlabs_hmac));
 
-    let google_calendar_routes = Router::new()
-        .route("/api/auth/google/calendar/login", get(google_calendar_auth::google_login))
+    let auth_built_in_webhook_routes = Router::new()
+        .route("/api/stripe/webhook", post(stripe_handlers::stripe_webhook))
         .route("/api/auth/google/calendar/callback", get(google_calendar_auth::google_callback))
-        .route("/api/auth/google/calendar/connection", delete(google_calendar_auth::delete_google_calendar_connection))
-        .route("/api/auth/google/calendar/status", get(google_calendar::google_calendar_status))
-        .route("/api/calendar/events", get(google_calendar::handle_calendar_fetching_route));
-
-    let gmail_routes= Router::new()
-        .route("/api/auth/google/gmail/login", get(gmail_auth::gmail_login))
-        .route("/api/auth/google/gmail/callback", get(gmail_auth::gmail_callback))
-        .route("/api/auth/google/gmail/refresh", post(gmail_auth::refresh_gmail_token))
-        .route("/api/auth/google/gmail/delete_connection", delete(gmail_auth::delete_gmail_connection))
-        .route("/api/auth/google/gmail/status", get(gmail::gmail_status))
-        .route("/api/auth/google/gmail/test_fetch", get(gmail::test_gmail_fetch));
+        .route("/api/auth/google/gmail/callback", get(gmail_auth::gmail_callback));
 
 
-    let app = Router::new()
+    // Public routes that don't need authentication
+    let public_routes = Router::new()
         .route("/api/health", get(health_check))
         .route("/api/login", post(auth_handlers::login))
-        .route("/api/register", post(auth_handlers::register))
+        .route("/api/register", post(auth_handlers::register));
+
+    // Admin routes that need admin authentication
+    let admin_routes = Router::new()
         .route("/api/admin/users", get(auth_handlers::get_users))
         .route("/api/admin/verify/{user_id}", post(admin_handlers::verify_user))
         .route("/api/admin/preferred-number/{user_id}", post(admin_handlers::update_preferred_number_admin))
         .route("/api/admin/broadcast", post(admin_handlers::broadcast_message))
         .route("/api/admin/set-preferred-number-default/{user_id}", post(admin_handlers::set_preferred_number_default))
+        .route("/api/billing/reset-credits/{user_id}", post(billing_handlers::reset_credits))
+        .route_layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::require_admin));
+
+    // Protected routes that need user authentication
+    let protected_routes = Router::new()
         .route("/api/profile/delete/{user_id}", delete(profile_handlers::delete_user))
         .route("/api/profile/update", post(profile_handlers::update_profile))
         .route("/api/profile/preferred-number", post(profile_handlers::update_preferred_number))
         .route("/api/profile", get(profile_handlers::get_profile))
         .route("/api/profile/update-notify/{user_id}", post(profile_handlers::update_notify))
+
         .route("/api/billing/increase-credits/{user_id}", post(billing_handlers::increase_credits))
         .route("/api/billing/usage", post(billing_handlers::get_usage_data))
         .route("/api/billing/update-auto-topup/{user_id}", post(billing_handlers::update_topup))
-        .route("/api/billing/reset-credits/{user_id}", post(billing_handlers::reset_credits))
+
         .route("/api/stripe/checkout-session/{user_id}", post(stripe_handlers::create_checkout_session))
-        .route("/api/stripe/webhook", post(stripe_handlers::stripe_webhook))
-        .route("/api/stripe/automatic-charge/{user_id}", post(stripe_handlers::automatic_charge))
+        // TODO can use this on the topping up credits if user already has bought some before
+        // .route("/api/stripe/automatic-charge/{user_id}", post(stripe_handlers::automatic_charge))
         .route("/api/stripe/customer-portal/{user_id}", get(stripe_handlers::create_customer_portal_session))
-        .route("/api/start-call/{user_id}", post(shazam_call::start_call_for_user))
+
+        .route("/api/auth/google/calendar/login", get(google_calendar_auth::google_login))
+        .route("/api/auth/google/calendar/connection", delete(google_calendar_auth::delete_google_calendar_connection))
+        .route("/api/auth/google/calendar/status", get(google_calendar::google_calendar_status))
+        .route("/api/calendar/events", get(google_calendar::handle_calendar_fetching_route))
+
+        .route("/api/auth/google/gmail/login", get(gmail_auth::gmail_login))
+        .route("/api/auth/google/gmail/delete_connection", delete(gmail_auth::delete_gmail_connection))
+        .route("/api/auth/google/gmail/refresh", post(gmail_auth::refresh_gmail_token))
+        .route("/api/auth/google/gmail/test_fetch", get(gmail::test_gmail_fetch))
+        .route("/api/auth/google/gmail/status", get(gmail::gmail_status))
+
+        .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
+
+    let app = Router::new()
+        .merge(public_routes)
+        .merge(admin_routes)
+        .merge(protected_routes)
+        .merge(auth_built_in_webhook_routes)
         .route("/api/twiml", get(shazam_call::twiml_handler).post(shazam_call::twiml_handler))
         .route("/api/stream", get(shazam_call::stream_handler))
         .route("/api/listen/{call_sid}", get(shazam_call::listen_handler))
-        .merge(google_calendar_routes)
-        .merge(gmail_routes)
         .merge(twilio_routes)
         .merge(elevenlabs_routes)
         .merge(elevenlabs_webhook_routes)
-        .layer(session_layer) // Apply the session layer here
+        .layer(session_layer)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(DefaultMakeSpan::new().level(Level::INFO))

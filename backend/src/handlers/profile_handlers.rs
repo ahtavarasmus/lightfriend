@@ -3,17 +3,13 @@ use diesel::result::Error as DieselError;
 use axum::{
     Json,
     extract::State,
-    http::{StatusCode, HeaderMap}
+    http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
 use axum::extract::Path;
 use serde_json::json;
-use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 
-use crate::{
-    AppState,
-    handlers::auth_dtos::Claims,
-};
+use crate::AppState;
 
 
 #[derive(Deserialize)]
@@ -51,40 +47,15 @@ pub struct ProfileResponse {
     stripe_payment_method_id: Option<String>,
 }
 
+use crate::handlers::auth_middleware::AuthUser;
+
 pub async fn get_profile(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    auth_user: AuthUser,
 ) -> Result<Json<ProfileResponse>, (StatusCode, Json<serde_json::Value>)> {
-    // Extract and validate token
-    let auth_header = headers.get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
-
-    let token = match auth_header {
-        Some(token) => token,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "No authorization token provided"}))
-        )),
-    };
-
-    // Decode JWT token
-    let claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-            .expect("JWT_SECRET_KEY must be set in environment")
-            .as_bytes()),
-        &Validation::new(Algorithm::HS256)
-    ) {
-        Ok(token_data) => token_data.claims,
-        Err(_) => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "Invalid token"}))
-        )),
-    };
 
     // Get user profile from database
-    let user = state.user_repository.find_by_id(claims.sub).map_err(|e| (
+    let user = state.user_repository.find_by_id(auth_user.user_id).map_err(|e| (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": format!("Database error: {}", e)}))
     ))?;
@@ -136,36 +107,10 @@ pub struct PreferredNumberRequest {
 
 pub async fn update_preferred_number(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    auth_user: AuthUser,
     Json(request): Json<PreferredNumberRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Extract and validate token
-    let auth_header = headers.get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
 
-    let token = match auth_header {
-        Some(token) => token,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "No authorization token provided"}))
-        )),
-    };
-
-    // Decode JWT token
-    let claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-            .expect("JWT_SECRET_KEY must be set in environment")
-            .as_bytes()),
-        &Validation::new(Algorithm::HS256)
-    ) {
-        Ok(token_data) => token_data.claims,
-        Err(_) => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "Invalid token"}))
-        )),
-    };
     let allowed_numbers = vec![
         std::env::var("USA_PHONE").expect("USA_PHONE must be set in environment"),
         std::env::var("FIN_PHONE").expect("FIN_PHONE must be set in environment"),
@@ -181,7 +126,7 @@ pub async fn update_preferred_number(
     }
 
     // Update preferred number
-    state.user_repository.update_preferred_number(claims.sub, &request.preferred_number)
+    state.user_repository.update_preferred_number(auth_user.user_id, &request.preferred_number)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)}))
@@ -197,43 +142,13 @@ pub async fn update_preferred_number(
 
 pub async fn update_notify(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    auth_user: AuthUser,
     Path(user_id): Path<i32>,
     Json(request): Json<NotifyCreditsRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Extract and validate token
-    let auth_header = headers.get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
-
-    let token = match auth_header {
-        Some(token) => token,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "No authorization token provided"}))
-        )),
-    };
-
-    // Decode JWT token
-    let claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-            .expect("JWT_SECRET_KEY must be set in environment")
-            .as_bytes()),
-        &Validation::new(Algorithm::HS256)
-    ) {
-        Ok(token_data) => token_data.claims,
-        Err(_) => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "Invalid token"}))
-        )),
-    };
 
     // Check if user is modifying their own settings or is an admin
-    if claims.sub != user_id && !state.user_repository.is_admin(claims.sub).map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Database error: {}", e)}))
-    ))? {
+    if auth_user.user_id != user_id && !auth_user.is_admin {
         return Err((
             StatusCode::FORBIDDEN,
             Json(json!({"error": "You can only modify your own settings unless you're an admin"}))
@@ -254,36 +169,10 @@ pub async fn update_notify(
 
 pub async fn update_profile(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    auth_user: AuthUser,
     Json(update_req): Json<UpdateProfileRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Extract and validate token
-    let auth_header = headers.get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
 
-    let token = match auth_header {
-        Some(token) => token,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "No authorization token provided"}))
-        )),
-    };
-
-    // Decode JWT token
-    let claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-            .expect("JWT_SECRET_KEY must be set in environment")
-            .as_bytes()),
-        &Validation::new(Algorithm::HS256)
-    ) {
-        Ok(token_data) => token_data.claims,
-        Err(_) => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "Invalid token"}))
-        )),
-    };
 
     // Validate phone number format
     if !update_req.phone_number.starts_with('+') {
@@ -294,7 +183,7 @@ pub async fn update_profile(
     }
 
     // Update user profile in database
-    match state.user_repository.update_profile(claims.sub, &update_req.email, &update_req.phone_number, &update_req.nickname, &update_req.info) {
+    match state.user_repository.update_profile(auth_user.user_id, &update_req.email, &update_req.phone_number, &update_req.nickname, &update_req.info) {
         Ok(_) => (),
         Err(DieselError::RollbackTransaction) => {
             return Err((
@@ -323,39 +212,12 @@ pub async fn update_profile(
 
 pub async fn delete_user(
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
+    auth_user: AuthUser,
     axum::extract::Path(user_id): axum::extract::Path<i32>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Extract token from Authorization header
-    let auth_header = headers.get("Authorization")
-        .and_then(|header| header.to_str().ok())
-        .and_then(|header| header.strip_prefix("Bearer "));
-
-    let token = match auth_header {
-        Some(token) => token,
-        None => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "No authorization token provided"}))
-        )),
-    };
-
-    // Decode and validate JWT token
-    let claims = match decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
-                    .expect("JWT_SECRET_KEY must be set in environment")
-                    .as_bytes()),
-        &Validation::new(Algorithm::HS256)
-    ) {
-        Ok(token_data) => token_data.claims,
-        Err(_) => return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(json!({"error": "Invalid token"}))
-        )),
-    };
 
     // Check if the user is deleting their own account or is an admin
-    if claims.sub != user_id && !state.user_repository.is_admin(claims.sub).map_err(|e| (
+    if auth_user.user_id != user_id && !state.user_repository.is_admin(auth_user.user_id).map_err(|e| (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": format!("Database error: {}", e)}))
     ))? {

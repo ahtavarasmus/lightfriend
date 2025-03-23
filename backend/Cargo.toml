@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 time = "0.3"
+sha1 = "0.10"
 tokio-cron-scheduler = "0.9"
 axum = { version = "0.8", features = ["ws"] }
 futures = "0.3"
@@ -46,4 +47,3 @@ oauth2 = { version = "5.0", features = ["reqwest"] }
 tower-sessions = { version = "0.12.0", features = ["axum-core"] }
 tower = "0.4"
 mockall = "0.11"
-

@@ -3,6 +3,18 @@ use serde::Deserialize;
 use std::env;
 use crate::models::user_models::User;
 use std::error::Error;
+use axum::{
+    http::{Request, StatusCode},
+    middleware,
+    response::Response,
+    body::{Body, to_bytes},
+};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use hmac::{Hmac, Mac};
+use sha1::Sha1;
+use std::collections::BTreeMap;
+use url::form_urlencoded;
+use tracing;
 
 #[derive(Deserialize)]
 pub struct MessageResponse {
@@ -145,6 +157,118 @@ pub async fn create_twilio_conversation_for_participant(user: &User, proxy_addre
     Ok((conversation.sid, conversation.chat_service_sid))
 }
 
+
+pub async fn validate_twilio_signature(
+    request: Request<Body>,
+    next: middleware::Next,
+) -> Result<Response, StatusCode> {
+    tracing::info!("\n=== Starting Twilio Signature Validation ===");
+
+    // Get the Twilio signature from headers
+    let signature = match request.headers().get("X-Twilio-Signature") {
+        Some(header) => match header.to_str() {
+            Ok(s) => {
+                tracing::info!("✅ Successfully retrieved X-Twilio-Signature");
+                s.to_string()
+            },
+            Err(e) => {
+                tracing::info!("❌ Error converting X-Twilio-Signature to string: {}", e);
+                return Err(StatusCode::UNAUTHORIZED);
+            }
+        },
+        None => {
+            tracing::info!("❌ No X-Twilio-Signature header found");
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    };
+
+    // Get the Twilio auth token
+    let auth_token = match std::env::var("TWILIO_AUTH_TOKEN") {
+        Ok(token) => {
+            tracing::info!("✅ Successfully retrieved TWILIO_AUTH_TOKEN");
+            token
+        },
+        Err(e) => {
+            tracing::info!("❌ Failed to get TWILIO_AUTH_TOKEN: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    // Get the server URL
+    let url = match std::env::var("SERVER_URL") {
+        Ok(url) => {
+            tracing::info!("✅ Successfully retrieved SERVER_URL");
+            url + "/api/sms/server"
+        },
+        Err(e) => {
+            tracing::info!("❌ Failed to get SERVER_URL: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    // Get request body for validation
+    let (parts, body) = request.into_parts();
+    let body_bytes = match to_bytes(body, 1024 * 1024).await {  // 1MB limit
+        Ok(bytes) => {
+            tracing::info!("✅ Successfully read request body");
+            bytes
+        },
+        Err(e) => {
+            tracing::info!("❌ Failed to read request body: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    // Convert body to string and parse form data
+    let params_str = match String::from_utf8(body_bytes.to_vec()) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::info!("❌ Failed to convert body to UTF-8: {}", e);
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+
+    // Parse form parameters into a sorted map
+    let params: BTreeMap<String, String> = form_urlencoded::parse(params_str.as_bytes())
+        .into_owned()
+        .collect();
+
+    // Build the string to sign
+    let mut string_to_sign = url;
+    for (key, value) in params.iter() {
+        string_to_sign.push_str(key);
+        string_to_sign.push_str(value);
+    }
+
+    tracing::info!("Built string to sign");
+
+    // Create HMAC-SHA1
+    let mut mac = match Hmac::<Sha1>::new_from_slice(auth_token.as_bytes()) {
+        Ok(mac) => mac,
+        Err(e) => {
+            tracing::info!("❌ Failed to create HMAC: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    mac.update(string_to_sign.as_bytes());
+
+    // Get the result and encode as base64
+    let result = BASE64.encode(mac.finalize().into_bytes());
+
+    // Compare signatures
+    if result != signature {
+        tracing::info!("❌ Signature validation failed");
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    tracing::info!("✅ Signature validation successful");
+
+    // Rebuild request and pass to next handler
+    let request = Request::from_parts(parts, Body::from(params_str));
+
+    Ok(next.run(request).await)
+}
 
 pub async fn send_conversation_message(
     conversation_sid: &str, 
