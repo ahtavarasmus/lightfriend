@@ -7,6 +7,7 @@ use gloo_net::http::Request;
 use serde::Serialize;
 use wasm_bindgen_futures::spawn_local;
 use crate::profile::billing_models::UserProfile;
+use chrono_tz::TZ_VARIANTS;
 
 const MAX_NICKNAME_LENGTH: usize = 30;
 const MAX_INFO_LENGTH: usize = 500;
@@ -17,6 +18,7 @@ struct UpdateProfileRequest {
     phone_number: String,
     nickname: String,
     info: String,
+    timezone: String,
 }
 
 #[derive(Properties, PartialEq, Clone)]
@@ -33,6 +35,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let phone_number = use_state(|| user_profile.phone_number.clone());
     let nickname = use_state(|| user_profile.nickname.clone().unwrap_or_default());
     let info = use_state(|| user_profile.info.clone().unwrap_or_default());
+    let timezone = use_state(|| user_profile.timezone.clone().unwrap_or_else(|| String::from("Europe/Helsinki")));
     let error = use_state(|| None::<String>);
     let success = use_state(|| None::<String>);
     let is_editing = use_state(|| false);
@@ -91,6 +94,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                             phone_number: phone,
                             nickname: nick,
                             info: user_info,
+                            timezone: (*timezone).clone(),
                         })
                         .expect("Failed to build request")
                         .send()
@@ -275,6 +279,48 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                         html! {
                             <span class="field-value">
                                 {user_profile.info.clone().unwrap_or("I'm from finland, always use Celsious and metric system, etc...".to_string())}
+                            </span>
+                        }
+                    }
+                }
+            </div>
+
+            <div class="profile-field">
+                <div class="field-label-group">
+                    <span class="field-label">{"Timezone"}</span>
+                    <div class="tooltip">
+                        <span class="tooltip-icon">{"?"}</span>
+                        <span class="tooltip-text">
+                            {"Choose your timezone. This helps the AI assistant provide time-sensitive responses and schedule events in your local time."}
+                        </span>
+                    </div>
+                </div>
+                {
+                    if *is_editing {
+                        html! {
+                            <select
+                                class="profile-input"
+                                value={(*timezone).clone()}
+                                onchange={let timezone = timezone.clone(); move |e: Event| {
+                                    let select: HtmlInputElement = e.target_unchecked_into();
+                                    timezone.set(select.value());
+                                }}
+                            >
+                                {
+                                    TZ_VARIANTS.iter().map(|tz| {
+                                        html! {
+                                            <option value={tz.name()} selected={tz.name() == (*timezone)}>
+                                                {tz.name()}
+                                            </option>
+                                        }
+                                    }).collect::<Html>()
+                                }
+                            </select>
+                        }
+                    } else {
+                        html! {
+                            <span class="field-value">
+                                {user_profile.timezone.clone().unwrap_or_else(|| String::from("Europe/Helsinki"))}
                             </span>
                         }
                     }

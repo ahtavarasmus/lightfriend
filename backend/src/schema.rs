@@ -1,6 +1,18 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    bridges (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        bridge_type -> Text,
+        status -> Text,
+        room_id -> Nullable<Text>,
+        data -> Nullable<Text>,
+        created_at -> Nullable<Integer>,
+    }
+}
+
+diesel::table! {
     conversations (id) {
         id -> Integer,
         user_id -> Integer,
@@ -102,14 +114,19 @@ diesel::table! {
         stripe_customer_id -> Nullable<Text>,
         stripe_payment_method_id -> Nullable<Text>,
         stripe_checkout_session_id -> Nullable<Text>,
+        matrix_username -> Nullable<Text>,
+        encrypted_matrix_access_token -> Nullable<Text>,
+        timezone -> Nullable<Text>,
     }
 }
 
+diesel::joinable!(bridges -> users (user_id));
 diesel::joinable!(conversations -> users (user_id));
 diesel::joinable!(gmail -> users (user_id));
 diesel::joinable!(subscriptions -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    bridges,
     conversations,
     gmail,
     google_calendar,

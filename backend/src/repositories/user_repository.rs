@@ -140,7 +140,7 @@ impl UserRepository {
         Ok(user)
     }
     // Update user's profile
-    pub fn update_profile(&self, user_id: i32, email: &str, phone_number: &str, nickname: &str, info: &str) -> Result<(), DieselError> {
+    pub fn update_profile(&self, user_id: i32, email: &str, phone_number: &str, nickname: &str, info: &str, timezone: &str) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // Check if phone number exists for a different user
@@ -172,6 +172,7 @@ impl UserRepository {
                 users::phone_number.eq(phone_number),
                 users::nickname.eq(nickname),
                 users::info.eq(info),
+                users::info.eq(timezone),
             ))
             .execute(&mut conn)?;
         Ok(())
