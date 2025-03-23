@@ -338,10 +338,33 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         Some(info) => info,
         None => "".to_string()
     };
+
+    // Get timezone from user info or default to UTC
+    let timezone_str = match user.timezone {
+        Some(ref tz) => tz.as_str(),
+        None => "UTC",
+    };
+
+    // Get timezone offset using jiff
+    let (hours, minutes) = match crate::api::elevenlabs::get_offset_with_jiff(timezone_str) {
+        Ok((h, m)) => (h, m),
+        Err(_) => {
+            println!("Failed to get timezone offset for {}, defaulting to UTC", timezone_str);
+            (0, 0) // UTC default
+        }
+    };
+
+    // Format offset string (e.g., "+02:00" or "-05:30")
+    let offset = format!("{}{:02}:{:02}", 
+        if hours >= 0 { "+" } else { "-" },
+        hours.abs(),
+        minutes.abs()
+    );
+
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: format!("You are a friendly and helpful AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Be direct and natural in your answers. Since users are using SMS, keep responses clear and brief. Avoid suggesting actions requiring smartphones or internet. Do not ask for confirmation to use tools. If there is even slightest hint that they could be helpful, use them immediately. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages. Use simple language and focus on the most important information first. This is what the user wants to you to know: {}. When you use tools make sure to add relevant info about the user to the tool call so they can act accordingly.", Utc::now().format("%Y-%m-%d"), user_info),
+        content: format!("You are a friendly and helpful AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Be direct and natural in your answers. Since users are using SMS, keep responses clear and brief. Avoid suggesting actions requiring smartphones or internet. Do not ask for confirmation to use tools. If there is even slightest hint that they could be helpful, use them immediately. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages. Use simple language and focus on the most important information first. This is what the user wants to you to know: {}. The user's timezone is {} with offset {}. When using tools that require time information (like calendar or gmail): 1. Always use RFC3339/ISO8601 format (e.g. '2024-03-23T14:30:00Z') 2. If no specific time is mentioned, use the current time for start and 24 hours ahead for end 3. Always consider the user's timezone when interpreting time-related requests 4. For 'today' queries, use 00:00 of current day as start and 23:59 as end in user's timezone 5. For 'tomorrow' queries, use 00:00 to 23:59 of next day in user's timezone. When you use tools make sure to add relevant info about the user to the tool call so they can act accordingly.", Utc::now().format("%Y-%m-%d"), user_info, timezone_str, offset),
     }];
     
     // Process the message body to remove "forget" if it exists at the start
