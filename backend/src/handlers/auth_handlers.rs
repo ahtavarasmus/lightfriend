@@ -78,9 +78,11 @@ pub async fn login(
     State(state): State<Arc<AppState>>,
     Json(login_req): Json<LoginRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    println!("Login attempt for email: {}", login_req.email); // Debug log
+    // Normalize email to lowercase
+    let normalized_email = login_req.email.to_lowercase();
+    println!("Login attempt for email: {}", normalized_email); // Debug log
 
-    let user = match state.user_repository.find_by_email(&login_req.email) {
+    let user = match state.user_repository.find_by_email(&normalized_email) {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((
@@ -193,11 +195,13 @@ pub async fn register(
     Json(reg_req): Json<RegisterRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     
-    println!("Registration attempt for email: {}", reg_req.email);
+    // Normalize email to lowercase
+    let normalized_email = reg_req.email.to_lowercase();
+    println!("Registration attempt for email: {}", normalized_email);
 
     // Check if email exists
     println!("Checking if email exists...");
-    if state.user_repository.email_exists(&reg_req.email).map_err(|e| {
+    if state.user_repository.email_exists(&normalized_email).map_err(|e| {
         println!("Database error while checking email: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR, 
@@ -262,7 +266,7 @@ pub async fn register(
     let reg_r = reg_req.clone();
 
     let new_user = NewUser {
-        email: reg_r.email,
+        email: reg_r.email.to_lowercase(),
         password_hash,
         phone_number: reg_r.phone_number,
         time_to_live: five_minutes_from_now,
