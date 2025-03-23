@@ -6,6 +6,11 @@ use axum::{
     http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize)]
+pub struct TimezoneUpdateRequest {
+    timezone: String,
+}
 use axum::extract::Path;
 use serde_json::json;
 
@@ -19,6 +24,7 @@ pub struct UpdateProfileRequest {
     nickname: String,
     info: String,
     timezone: String,
+    timezone_auto: bool,
 }
 
 #[derive(Serialize)]
@@ -46,6 +52,8 @@ pub struct ProfileResponse {
     charge_when_under: bool,
     charge_back_to: Option<f32>,
     stripe_payment_method_id: Option<String>,
+    timezone: Option<String>,
+    timezone_auto: Option<bool>,
 }
 
 use crate::handlers::auth_middleware::AuthUser;
@@ -86,6 +94,8 @@ pub async fn get_profile(
                 charge_when_under: user.charge_when_under,
                 charge_back_to: user.charge_back_to,
                 stripe_payment_method_id: user.stripe_payment_method_id,
+                timezone: user.timezone,
+                timezone_auto: user.timezone_auto,
             }))
         }
         None => Err((
@@ -168,6 +178,26 @@ pub async fn update_notify(
     })))
 }
 
+pub async fn update_timezone(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<TimezoneUpdateRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+
+    match state.user_repository.update_timezone(
+        auth_user.user_id,
+        &request.timezone,
+    ) {
+        Ok(_) => Ok(Json(json!({
+            "message": "Timezone updated successfully"
+        }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        )),
+    }
+}
+
 pub async fn update_profile(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -183,14 +213,7 @@ pub async fn update_profile(
         ));
     }
 
-    // Update user profile in database
-    // Validate timezone
-    if !chrono_tz::TZ_VARIANTS.iter().any(|tz| tz.name() == update_req.timezone) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Invalid timezone" }))
-        ));
-    }
+
 
     match state.user_repository.update_profile(
         auth_user.user_id,
@@ -198,7 +221,8 @@ pub async fn update_profile(
         &update_req.phone_number,
         &update_req.nickname,
         &update_req.info,
-        &update_req.timezone
+        &update_req.timezone,
+        &update_req.timezone_auto,
     ) {
         Ok(_) => (),
         Err(DieselError::RollbackTransaction) => {

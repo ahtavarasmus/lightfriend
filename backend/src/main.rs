@@ -222,6 +222,7 @@ async fn main() {
     let protected_routes = Router::new()
         .route("/api/profile/delete/{user_id}", delete(profile_handlers::delete_user))
         .route("/api/profile/update", post(profile_handlers::update_profile))
+        .route("/api/profile/timezone", post(profile_handlers::update_timezone))
         .route("/api/profile/preferred-number", post(profile_handlers::update_preferred_number))
         .route("/api/profile", get(profile_handlers::get_profile))
         .route("/api/profile/update-notify/{user_id}", post(profile_handlers::update_notify))

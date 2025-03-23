@@ -33,6 +33,7 @@ pub struct User {
     pub matrix_username: Option<String>,
     pub encrypted_matrix_access_token: Option<String>,
     pub timezone: Option<String>,
+    pub timezone_auto: Option<bool>,
 }
 
 #[derive(Queryable, Selectable, Insertable)]

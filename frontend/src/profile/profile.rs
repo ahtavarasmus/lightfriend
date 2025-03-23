@@ -138,7 +138,15 @@ pub fn Profile() -> Html {
                     if let Some(user_profile) = profile_data {
                         match *active_tab {
                             ProfileTab::Settings => html! {
-                                <SettingsPage user_profile={user_profile.clone()} />
+                                <SettingsPage 
+                                    user_profile={user_profile.clone()}
+                                    on_profile_update={{
+                                        let profile = profile.clone();
+                                        Callback::from(move |updated_profile: UserProfile| {
+                                            profile.set(Some(updated_profile));
+                                        })
+                                    }}
+                                />
                             },
                         ProfileTab::Billing => html! {
                             <BillingPage user_profile={user_profile.clone()} />

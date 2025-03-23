@@ -12,6 +12,7 @@ mod profile {
     pub mod profile;
     pub mod settings;
     pub mod usage_graph;
+    pub mod timezone_detector;
 }
 mod pages {
     pub mod home;
