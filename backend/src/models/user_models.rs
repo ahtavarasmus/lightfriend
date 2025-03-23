@@ -7,6 +7,7 @@ use crate::schema::subscriptions;
 use crate::schema::unipile_connection;
 use crate::schema::google_calendar;
 use crate::schema::gmail;
+use crate::schema::bridges;
 
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -30,6 +31,33 @@ pub struct User {
     pub stripe_customer_id: Option<String>,
     pub stripe_payment_method_id: Option<String>,
     pub stripe_checkout_session_id: Option<String>,
+    pub matrix_username: Option<String>,
+    pub encrypted_matrix_access_token: Option<String>,
+}
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = bridges)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct Bridge {
+    pub id: Option<i32>, // Assuming auto-incrementing primary key
+    user_id: i32,
+    bridge_type: String, // whatsapp, telegram
+    status: String, // connected, disconnected
+    room_id: Option<String>,
+    data: Option<String>,
+    created_at: Option<i32>,
+}
+
+
+#[derive(Insertable)]
+#[diesel(table_name = bridges)]
+pub struct NewBridge {
+    pub user_id: i32, 
+    pub bridge_type: String, // whatsapp, telegram
+    pub status: String, // connected, disconnected
+    pub room_id: Option<String>,
+    pub data: Option<String>,
+    pub created_at: Option<i32>,
 }
 
 #[derive(Queryable, Selectable, Insertable)]
