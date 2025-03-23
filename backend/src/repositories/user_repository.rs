@@ -140,7 +140,7 @@ impl UserRepository {
         Ok(user)
     }
     // Update user's profile
-    pub fn update_profile(&self, user_id: i32, email: &str, phone_number: &str, nickname: &str, info: &str, timezone: &str) -> Result<(), DieselError> {
+    pub fn update_profile(&self, user_id: i32, email: &str, phone_number: &str, nickname: &str, info: &str, timezone: &str, timezone_auto: &bool) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // Check if phone number exists for a different user
@@ -172,7 +172,8 @@ impl UserRepository {
                 users::phone_number.eq(phone_number),
                 users::nickname.eq(nickname),
                 users::info.eq(info),
-                users::info.eq(timezone),
+                users::timezone.eq(timezone),
+                users::timezone_auto.eq(timezone_auto),
             ))
             .execute(&mut conn)?;
         Ok(())
@@ -379,6 +380,29 @@ impl UserRepository {
         diesel::update(users::table.find(user_id))
             .set(users::notify.eq(notify))
             .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_timezone(&self, user_id: i32, timezone: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // First fetch the user to check timezone_auto
+        let user = users::table
+            .find(user_id)
+            .first::<User>(&mut conn)?;
+            
+        // Only update if timezone_auto is true
+        match user.timezone_auto {
+            Some(maybe) => {
+                if maybe {
+                    diesel::update(users::table.find(user_id))
+                        .set(users::timezone.eq(timezone.to_string()))
+                        .execute(&mut conn)?;
+                }
+            },
+            None => {},
+        }
+        
         Ok(())
     }
 

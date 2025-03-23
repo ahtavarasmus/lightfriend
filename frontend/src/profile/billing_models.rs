@@ -32,6 +32,8 @@ pub struct UserProfile {
     pub charge_when_under: bool,
     pub charge_back_to: Option<f32>,
     pub stripe_payment_method_id: Option<String>,
+    pub timezone: Option<String>,
+    pub timezone_auto: Option<bool>,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]

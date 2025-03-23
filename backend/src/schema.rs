@@ -117,6 +117,7 @@ diesel::table! {
         matrix_username -> Nullable<Text>,
         encrypted_matrix_access_token -> Nullable<Text>,
         timezone -> Nullable<Text>,
+        timezone_auto -> Nullable<Bool>,
     }
 }
 
