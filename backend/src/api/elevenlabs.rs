@@ -12,6 +12,7 @@ use crate::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use chrono::TimeZone;  // Add this import
 
 
 
@@ -96,6 +97,20 @@ pub async fn validate_elevenlabs_secret(
             Err(StatusCode::UNAUTHORIZED)
         }
     }
+}
+
+use jiff::{Timestamp, ToSpan};
+
+pub fn get_offset_with_jiff(timezone_str: &str) -> Result<(i32, i32), jiff::Error> {
+    let time = Timestamp::now();
+    let zoned = time.in_tz(timezone_str)?;
+    
+    // Get offset information
+    let offset_seconds = zoned.offset().seconds();
+    let hours = offset_seconds / 3600;
+    let minutes = (offset_seconds.abs() % 3600) / 60;
+    
+    Ok((hours, minutes))
 }
 
 
@@ -184,6 +199,33 @@ pub async fn fetch_assistant(
             dynamic_variables.insert("name".to_string(), json!(nickname));
             dynamic_variables.insert("user_info".to_string(), json!(user_info));
             dynamic_variables.insert("user_id".to_string(), json!(user.id));
+
+            // Get timezone from user info or default to UTC
+            let timezone_str = match user.timezone {
+                Some(ref tz) => tz.as_str(),
+                None => "UTC",
+            };
+
+            // Get timezone offset using jiff
+            let (hours, minutes) = match get_offset_with_jiff(timezone_str) {
+                Ok((h, m)) => (h, m),
+                Err(_) => {
+                    println!("Failed to get timezone offset for {}, defaulting to UTC", timezone_str);
+                    (0, 0) // UTC default
+                }
+            };
+
+            // Format offset string (e.g., "+02:00" or "-05:30")
+            let offset = format!("{}{:02}:{:02}", 
+                if hours >= 0 { "+" } else { "-" },
+                hours.abs(),
+                minutes.abs()
+            );
+
+            dynamic_variables.insert("timezone".to_string(), json!({
+                "name": timezone_str,
+                "offset": offset
+            }));
 
             // Check Google Calendar availability
             match state.user_repository.has_active_google_calendar(user.id) {
