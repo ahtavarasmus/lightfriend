@@ -1,18 +1,18 @@
 use std::sync::Arc;
+
 use crate::handlers::auth_middleware::AuthUser;
 use axum::{
     extract::State,
-    response::Json,
     http::StatusCode,
+    response::Json,
 };
-use serde_json::json;
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use oauth2::TokenResponse;
-use reqwest::header::{AUTHORIZATION, ACCEPT};
+use reqwest::header::{ACCEPT, AUTHORIZATION};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use crate::AppState;
-
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct GmailMessage {
@@ -78,35 +78,32 @@ pub enum GmailError {
     TokenError(String),
     ApiError(String),
     ParseError(String),
+    InvalidRefreshToken,
 }
 
 pub async fn test_gmail_fetch(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Starting test Gmail fetch");
+    tracing::info!("Starting test Gmail fetch for user {}", auth_user.user_id);
 
-
-    // Test fetch Gmail messages
-    match fetch_gmail_messages(&state, auth_user.user_id).await {
+    match fetch_gmail_messages(&state, auth_user.user_id, Some(10)).await {
         Ok(messages) => {
-            tracing::info!("Successfully fetched {} messages in test", messages.len());
+            tracing::info!("Fetched {} messages in test", messages.len());
             Ok(Json(json!({ "success": true, "message_count": messages.len() })))
-        },
+        }
         Err(e) => {
-            let error_message = match e {
-                GmailError::NoConnection => "No Gmail connection found".to_string(),
-                GmailError::TokenError(msg) => msg,
-                GmailError::ApiError(msg) => msg,
-                GmailError::ParseError(msg) => msg,
+            let (status, message) = match e {
+                GmailError::NoConnection => (StatusCode::BAD_REQUEST, "No Gmail connection found"),
+                GmailError::TokenError(msg) => (StatusCode::UNAUTHORIZED, &msg),
+                GmailError::InvalidRefreshToken => {
+                    (StatusCode::UNAUTHORIZED, "Refresh token invalid")
+                }
+                GmailError::ApiError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, &msg),
+                GmailError::ParseError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, &msg),
             };
-            tracing::error!("Test fetch failed: {}", error_message);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": error_message
-                }))
-            ))
+            tracing::error!("Test fetch failed: {}", message);
+            Err((status, Json(json!({ "error": message }))))
         }
     }
 }
@@ -115,25 +112,18 @@ pub async fn gmail_status(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Checking Gmail connection status");
+    tracing::info!("Checking Gmail status for user {}", auth_user.user_id);
 
-    // Check if user has active Gmail connection
     match state.user_repository.has_active_gmail(auth_user.user_id) {
-        Ok(has_connection) => {
-            tracing::info!("Successfully checked Gmail connection status for user {}: {}", auth_user.user_id, has_connection);
-            Ok(Json(json!({
-                "connected": has_connection,
-                "user_id": auth_user.user_id,
-            })))
-        },
+        Ok(has_connection) => Ok(Json(json!({
+            "connected": has_connection,
+            "user_id": auth_user.user_id,
+        }))),
         Err(e) => {
-            tracing::error!("Failed to check Gmail connection status: {}", e);
+            tracing::error!("Failed to check Gmail status: {}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": "Failed to check Gmail connection status",
-                    "details": e.to_string()
-                }))
+                Json(json!({ "error": "Failed to check Gmail status", "details": e.to_string() })),
             ))
         }
     }
@@ -143,286 +133,217 @@ pub async fn handle_gmail_fetching(
     state: &AppState,
     user_id: i32,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Starting Gmail tool call for user: {}", user_id);
-    
-    // Check if user has active Gmail connection
-    tracing::info!("Checking if user has active Gmail connection");
-    match state.user_repository.has_active_gmail(user_id) {
-        Ok(has_connection) => {
-            tracing::info!("No errors checking active Gmail connection");
-            if !has_connection {
-                tracing::info!("User does not have active Gmail connection");
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "No active Gmail connection found"
-                    }))
-                ));
-            }
-            tracing::info!("User has active Gmail connection");
-        },
-        Err(e) => {
-            tracing::error!("Error checking Gmail connection status: {}", e);
-            return Err((
+    tracing::info!("Starting Gmail fetch for user {}", user_id);
+
+    if !state
+        .user_repository
+        .has_active_gmail(user_id)
+        .map_err(|e| {
+            tracing::error!("Error checking Gmail connection: {}", e);
+            (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": "Failed to check Gmail connection status",
-                    "details": e.to_string()
-                }))
-            ));
-        }
+                Json(json!({ "error": e.to_string() })),
+            )
+        })?
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "No active Gmail connection" })),
+        ));
     }
 
-
-    // Fetch Gmail messages
-    tracing::info!("Fetching Gmail messages");
-    match fetch_gmail_messages(state, user_id).await {
+    match fetch_gmail_messages(state, user_id, Some(10)).await {
         Ok(messages) => {
-            tracing::info!("Successfully fetched {} messages", messages.len());
-            
-            // Format messages into a more readable response
-            let formatted_messages: Vec<serde_json::Value> = messages.into_iter()
-                .map(|message| {
-                    let subject = message.subject.unwrap_or_else(|| "No subject".to_string());
-                    tracing::info!("Formatting message: {}", subject);
-
+            let formatted_messages: Vec<_> = messages
+                .into_iter()
+                .map(|m| {
                     json!({
-                        "id": message.id,
-                        "thread_id": message.thread_id,
-                        "subject": subject,
-                        "from": message.from.unwrap_or_else(|| "Unknown sender".to_string()),
-                        "date": message.date.map(|dt| dt.to_rfc3339()),
-                        "snippet": message.snippet.unwrap_or_else(|| "No preview available".to_string())
+                        "id": m.id,
+                        "thread_id": m.thread_id,
+                        "subject": m.subject.unwrap_or_else(|| "No subject".to_string()),
+                        "from": m.from.unwrap_or_else(|| "Unknown sender".to_string()),
+                        "date": m.date.map(|dt| dt.to_rfc3339()),
+                        "snippet": m.snippet.unwrap_or_else(|| "No preview".to_string())
                     })
                 })
                 .collect();
 
-            tracing::info!("Returning {} formatted messages", formatted_messages.len());
-            Ok(Json(json!({
-                "messages": formatted_messages
-            })))
-        },
+            tracing::info!("Returning {} messages", formatted_messages.len());
+            Ok(Json(json!({ "messages": formatted_messages })))
+        }
         Err(e) => {
-            let error_message = match e {
-                GmailError::NoConnection => {
-                    tracing::error!("Error: No Gmail connection found");
-                    "No Gmail connection found".to_string()
-                },
-                GmailError::TokenError(msg) => {
-                    tracing::error!("Error: Token error - {}", msg);
-                    format!("Token error: {}", msg)
-                },
-                GmailError::ApiError(msg) => {
-                    tracing::error!("Error: API error - {}", msg);
-                    format!("API error: {}", msg)
-                },
-                GmailError::ParseError(msg) => {
-                    tracing::error!("Error: Parse error - {}", msg);
-                    format!("Parse error: {}", msg)
-                },
+            let (status, message) = match e {
+                GmailError::NoConnection => (StatusCode::BAD_REQUEST, "No Gmail connection"),
+                GmailError::TokenError(msg) => (StatusCode::UNAUTHORIZED, msg.as_str()),
+                GmailError::InvalidRefreshToken => {
+                    (StatusCode::UNAUTHORIZED, "Refresh token invalid")
+                }
+                GmailError::ApiError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.as_str()),
+                GmailError::ParseError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.as_str()),
             };
-
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": error_message
-                }))
-            ))
+            tracing::error!("Fetch failed: {}", message);
+            Err((status, Json(json!({ "error": message }))))
         }
     }
 }
 
-
+/// Fetches Gmail messages with configurable max results.
 async fn fetch_gmail_messages(
     state: &AppState,
     user_id: i32,
+    max_results: Option<u32>,
 ) -> Result<Vec<GmailMessage>, GmailError> {
-    tracing::info!("Starting to fetch Gmail messages...");
+    tracing::info!("Fetching Gmail messages for user {}", user_id);
 
-    // Get Gmail tokens
-    tracing::info!("Getting Gmail tokens for user_id: {}", user_id);
-    let (access_token, refresh_token) = match state.user_repository.get_gmail_tokens(user_id) {
-        Ok(Some((access, refresh))) => {
-            tracing::info!("Successfully retrieved and decrypted tokens");
-            tracing::debug!("Access token length: {}, Refresh token length: {}", 
-                access.len(), refresh.len());
-            (access, refresh)
-        },
-        Ok(None) => {
-            tracing::error!("No active Gmail connection found");
-            return Err(GmailError::NoConnection);
-        },
-        Err(e) => {
-            tracing::error!("Failed to get Gmail tokens: {}", e);
-            return Err(GmailError::TokenError(format!("Failed to decrypt tokens: {}", e)));
-        }
-    };
-
-    // Create HTTP client for Gmail API
     let client = reqwest::Client::new();
-    
-
-    // First, get message IDs
-    let mut all_messages = Vec::new();
+    let mut access_token = get_valid_access_token(state, user_id, &client).await?;
+    let mut all_message_ids = Vec::new();
     let mut page_token: Option<String> = None;
+    let max_retries = 3;
+    let mut retries = 0;
 
+    // Fetch message IDs with pagination
     loop {
-        tracing::info!("Making request to Gmail API for message IDs...");
         let mut request = client
             .get("https://www.googleapis.com/gmail/v1/users/me/messages")
             .header(AUTHORIZATION, format!("Bearer {}", access_token))
-            .header(ACCEPT, "application/json")
-            .query(&[("maxResults", 10)]);
+            .header(ACCEPT, "application/json");
 
+        if let Some(max) = max_results {
+            request = request.query(&[("maxResults", max)]);
+        }
         if let Some(token) = &page_token {
             request = request.query(&[("pageToken", token)]);
         }
 
-        let response = request
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to send request to Gmail API: {}", e);
-                GmailError::ApiError(e.to_string())
-            })?;
+        let response = request.send().await.map_err(|e| {
+            tracing::error!("API request failed: {}", e);
+            GmailError::ApiError(e.to_string())
+        })?;
 
-
-        let status = response.status();
-        tracing::info!("Gmail API Response Status: {}", status);
-
-        if status == StatusCode::UNAUTHORIZED {
-            tracing::info!("Token expired, starting refresh process...");
-            
-            let http_client = reqwest::ClientBuilder::new()
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .expect("Client should build");
-
-            let token_result = state
-                .gmail_oauth_client
-                .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token.clone()))
-                .request_async(&http_client)
-                .await
-                .map_err(|e| GmailError::TokenError(e.to_string()))?;
-
-            let new_access_token = token_result.access_token().secret();
-            let expires_in = token_result.expires_in()
-                .unwrap_or_default()
-                .as_secs() as i32;
-
-            tracing::info!("New token received, expires in {} seconds", expires_in);
-
-            // Update the access token in the database
-            tracing::info!("Updating access token in database...");
-            state.user_repository.update_gmail_access_token(
-                user_id,
-                &new_access_token,
-                expires_in,
-            ).map_err(|e| GmailError::TokenError(e.to_string()))?;
-
-            // Retry the request with new token
-            tracing::info!("Retrying Gmail request with new token...");
-            let retry_response = client
-                .get("https://www.googleapis.com/gmail/v1/users/me/messages")
-                .header(AUTHORIZATION, format!("Bearer {}", new_access_token))
-                .header(ACCEPT, "application/json")
-                .query(&[("maxResults", 10)])
-                .send()
-                .await
-                .map_err(|e| GmailError::ApiError(e.to_string()))?;
-
-            let retry_status = retry_response.status();
-            tracing::info!("Retry response status: {}", retry_status);
-
-            if !retry_status.is_success() {
-                let error_body = retry_response.text().await.unwrap_or_default();
-                tracing::error!("Gmail API Error Response after token refresh: {}", error_body);
+        match response.status() {
+            StatusCode::OK => {
+                let gmail_data: GmailResponse = response.json().await.map_err(|e| {
+                    tracing::error!("Failed to parse response: {}", e);
+                    GmailError::ParseError(e.to_string())
+                })?;
+                if let Some(messages) = gmail_data.messages {
+                    all_message_ids.extend(messages);
+                }
+                page_token = gmail_data.next_page_token;
+                retries = 0; // Reset retries on success
+            }
+            StatusCode::UNAUTHORIZED => {
+                if retries >= max_retries {
+                    return Err(GmailError::TokenError(
+                        "Max token refresh retries exceeded".to_string(),
+                    ));
+                }
+                tracing::info!("Token expired, refreshing (attempt {}/{})", retries + 1, max_retries);
+                access_token = get_valid_access_token(state, user_id, &client).await?;
+                retries += 1;
+                continue;
+            }
+            status => {
+                let error_body = response.text().await.unwrap_or_default();
+                tracing::error!("API error {}: {}", status, error_body);
                 return Err(GmailError::ApiError(format!(
-                    "Failed to fetch messages after token refresh: {}",
-                    retry_status
+                    "Failed with status {}: {}",
+                    status, error_body
                 )));
             }
-
-            let gmail_data: GmailResponse = retry_response.json().await
-                .map_err(|e| GmailError::ParseError(e.to_string()))?;
-
-            if let Some(messages) = gmail_data.messages {
-                all_messages.extend(messages);
-            }
-            page_token = gmail_data.next_page_token;
-
-        } else if !status.is_success() {
-            let error_body = response.text().await.unwrap_or_default();
-            tracing::error!("Gmail API Error Response: {}", error_body);
-            return Err(GmailError::ApiError(format!(
-                "Failed to fetch messages: {}",
-                status
-            )));
-        } else {
-            let gmail_data: GmailResponse = response.json().await
-                .map_err(|e| GmailError::ParseError(e.to_string()))?;
-
-            if let Some(messages) = gmail_data.messages {
-                all_messages.extend(messages);
-            }
-            page_token = gmail_data.next_page_token;
         }
 
-        if page_token.is_none() {
+        if page_token.is_none() || max_results.is_some() && all_message_ids.len() >= max_results.unwrap() as usize {
             break;
         }
     }
 
-    tracing::info!("Retrieved {} message IDs, fetching details...", all_messages.len());
+    tracing::info!("Fetched {} message IDs", all_message_ids.len());
 
-    // Now fetch details for each message
+    // Fetch message details (simplified; consider batching in production)
     let mut detailed_messages = Vec::new();
-    for message_id in all_messages {
-        let detail_url = format!(
-            "https://www.googleapis.com/gmail/v1/users/me/messages/{}",
+    for message_id in all_message_ids {
+        let url = format!(
+            "https://www.googleapis.com/gmail/v1/users/me/messages/{}?fields=id,threadId,snippet,payload(headers),internalDate",
             message_id.id
         );
-
-
         let response = client
-            .get(&detail_url)
+            .get(&url)
             .header(AUTHORIZATION, format!("Bearer {}", access_token))
             .header(ACCEPT, "application/json")
             .send()
             .await
-            .map_err(|e| {
-                tracing::error!("Failed to fetch message detail for {}: {}", message_id.id, e);
-                GmailError::ApiError(e.to_string())
-            })?;
+            .map_err(|e| GmailError::ApiError(e.to_string()))?;
 
-        if !response.status().is_success() {
-            tracing::error!("Failed to fetch message detail for {}: {}", message_id.id, response.status());
+        if response.status() == StatusCode::UNAUTHORIZED {
+            access_token = get_valid_access_token(state, user_id, &client).await?;
+            continue; // Retry with new token in next iteration
+        } else if !response.status().is_success() {
+            tracing::warn!("Skipping message {} due to status {}", message_id.id, response.status());
             continue;
         }
 
-        let message_detail: GmailMessageDetail = response.json().await
-            .map_err(|e| {
-                tracing::error!("Failed to parse message detail for {}: {}", message_id.id, e);
-                GmailError::ParseError(e.to_string())
-            })?;
-
-        let get_header = |name: &str| -> Option<String> {
-            message_detail.payload.headers.iter()
+        let detail: GmailMessageDetail = response.json().await.map_err(|e| GmailError::ParseError(e.to_string()))?;
+        let get_header = |name: &str| {
+            detail
+                .payload
+                .headers
+                .iter()
                 .find(|h| h.name.eq_ignore_ascii_case(name))
                 .map(|h| h.value.clone())
         };
 
         detailed_messages.push(GmailMessage {
-            id: message_detail.id,
-            thread_id: message_detail.thread_id,
+            id: detail.id,
+            thread_id: detail.thread_id,
             subject: get_header("subject"),
             from: get_header("from"),
-            date: Some(message_detail.internal_date),
-            snippet: message_detail.snippet,
+            date: Some(detail.internal_date),
+            snippet: detail.snippet,
         });
     }
 
-    tracing::info!("Successfully retrieved {} detailed messages", detailed_messages.len());
+    tracing::info!("Fetched {} detailed messages", detailed_messages.len());
     Ok(detailed_messages)
 }
 
+/// Retrieves or refreshes an access token.
+async fn get_valid_access_token(
+    state: &AppState,
+    user_id: i32,
+    client: &reqwest::Client,
+) -> Result<String, GmailError> {
+    let (access_token, refresh_token) = state
+        .user_repository
+        .get_gmail_tokens(user_id)
+        .map_err(|e| GmailError::TokenError(e.to_string()))?
+        .ok_or(GmailError::NoConnection)?;
+
+    // Attempt a quick validation request (optional; here we assume refresh on 401)
+    let token_result = state
+        .gmail_oauth_client
+        .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token))
+        .request_async(client)
+        .await;
+
+    match token_result {
+        Ok(token) => {
+            let new_access_token = token.access_token().secret().to_string();
+            let expires_in = token.expires_in().unwrap_or_default().as_secs() as i32;
+            state
+                .user_repository
+                .update_gmail_access_token(user_id, &new_access_token, expires_in)
+                .map_err(|e| GmailError::TokenError(e.to_string()))?;
+            Ok(new_access_token)
+        }
+        Err(e) => {
+            tracing::error!("Refresh token failed: {}", e);
+            state
+                .user_repository
+                .remove_gmail_connection(user_id)
+                .map_err(|e| GmailError::TokenError(e.to_string()))?;
+            Err(GmailError::InvalidRefreshToken)
+        }
+    }
+}
