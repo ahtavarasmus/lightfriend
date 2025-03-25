@@ -29,6 +29,17 @@ pub struct GmailMessage {
     pub is_read: bool,
 }
 
+#[derive(Debug, Serialize)]
+pub struct GmailPreview {
+    pub id: String,
+    pub thread_id: String,
+    pub subject: Option<String>,
+    pub from: Option<String>,
+    pub date: Option<DateTime<Utc>>,
+    pub snippet: Option<String>,
+    pub is_read: bool,
+}
+
 #[derive(Debug, Deserialize)]
 struct GmailResponse {
     pub messages: Option<Vec<GmailMessageId>>,
@@ -131,6 +142,63 @@ pub async fn test_gmail_fetch(
                 GmailError::ParseError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             };
             tracing::error!("Test fetch failed: {}", message);
+            Err((status, Json(json!({ "error": message }))))
+        }
+    }
+}
+
+pub async fn fetch_email_previews(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    tracing::info!("Fetching email previews for user {}", auth_user.user_id);
+
+    if !state
+        .user_repository
+        .has_active_gmail(auth_user.user_id)
+        .map_err(|e| {
+            tracing::error!("Error checking Gmail connection: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": e.to_string() })),
+            )
+        })?
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "No active Gmail connection" })),
+        ));
+    }
+
+    match fetch_gmail_previews(&state, auth_user.user_id, Some(20)).await {
+        Ok(previews) => {
+            let formatted_previews: Vec<_> = previews
+                .into_iter()
+                .map(|p| {
+                    json!({
+                        "id": p.id,
+                        "thread_id": p.thread_id,
+                        "subject": p.subject.unwrap_or_else(|| "No subject".to_string()),
+                        "from": p.from.unwrap_or_else(|| "Unknown sender".to_string()),
+                        "date": p.date.map(|dt| dt.to_rfc3339()),
+                        "snippet": p.snippet.unwrap_or_else(|| "No preview".to_string()),
+                        "is_read": p.is_read
+                    })
+                })
+                .collect();
+
+            tracing::info!("Returning {} email previews", formatted_previews.len());
+            Ok(Json(json!({ "previews": formatted_previews })))
+        }
+        Err(e) => {
+            let (status, message) = match e {
+                GmailError::NoConnection => (StatusCode::BAD_REQUEST, "No Gmail connection found".to_string()),
+                GmailError::TokenError(msg) => (StatusCode::UNAUTHORIZED, msg),
+                GmailError::InvalidRefreshToken => (StatusCode::UNAUTHORIZED, "Refresh token invalid".to_string()),
+                GmailError::ApiError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+                GmailError::ParseError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+            };
+            tracing::error!("Preview fetch failed: {}", message);
             Err((status, Json(json!({ "error": message }))))
         }
     }
@@ -277,6 +345,9 @@ pub async fn handle_gmail_fetching(
                 })
                 .collect();
             // print the emails here 
+            for (i, message) in formatted_messages.iter().enumerate() {
+                tracing::info!("Email {}: {}", i + 1, message);
+            }
 
             tracing::info!("Returning {} messages", formatted_messages.len());
             Ok(Json(json!({ "messages": formatted_messages })))
@@ -298,6 +369,124 @@ pub async fn handle_gmail_fetching(
 }
 
 /// Fetches Gmail messages with configurable max results.
+async fn fetch_gmail_previews(
+    state: &AppState,
+    user_id: i32,
+    max_results: Option<u32>,
+) -> Result<Vec<GmailPreview>, GmailError> {
+    tracing::info!("Fetching Gmail previews for user {} with max_results: {:?}", user_id, max_results);
+
+    let client = reqwest::Client::new();
+    let mut access_token = get_valid_access_token(state, user_id, &client).await?;
+    let mut all_message_ids = Vec::new();
+    let mut page_token: Option<String> = None;
+    let max_retries = 3;
+    let mut retries = 0;
+
+    // Fetch message IDs with pagination
+    loop {
+        let mut request = client
+            .get("https://www.googleapis.com/gmail/v1/users/me/messages")
+            .header(AUTHORIZATION, format!("Bearer {}", access_token))
+            .header(ACCEPT, "application/json");
+
+        if let Some(max) = max_results {
+            request = request.query(&[("maxResults", max)]);
+        }
+        if let Some(token) = &page_token {
+            request = request.query(&[("pageToken", token)]);
+        }
+
+        let response = request.send().await.map_err(|e| {
+            tracing::error!("Gmail API request failed: {}", e);
+            GmailError::ApiError(e.to_string())
+        })?;
+
+        match response.status() {
+            StatusCode::OK => {
+                let gmail_data: GmailResponse = response.json().await.map_err(|e| {
+                    tracing::error!("Failed to parse Gmail response JSON: {}", e);
+                    GmailError::ParseError(e.to_string())
+                })?;
+                if let Some(messages) = gmail_data.messages {
+                    all_message_ids.extend(messages);
+                }
+                page_token = gmail_data.next_page_token;
+                retries = 0;
+            }
+            StatusCode::UNAUTHORIZED => {
+                if retries >= max_retries {
+                    return Err(GmailError::TokenError("Max token refresh retries exceeded".to_string()));
+                }
+                access_token = get_valid_access_token(state, user_id, &client).await?;
+                retries += 1;
+                continue;
+            }
+            status => {
+                let error_body = response.text().await.unwrap_or_default();
+                return Err(GmailError::ApiError(format!("Failed with status {}: {}", status, error_body)));
+            }
+        }
+
+        if page_token.is_none() || max_results.is_some() && all_message_ids.len() >= max_results.unwrap() as usize {
+            break;
+        }
+    }
+
+    tracing::info!("Fetched {} message IDs", all_message_ids.len());
+
+    // Fetch message metadata (simplified version with only essential fields)
+    let mut previews = Vec::new();
+    for message_id in all_message_ids {
+        let url = format!(
+            "https://www.googleapis.com/gmail/v1/users/me/messages/{}?fields=id,threadId,snippet,payload(headers),internalDate,labelIds",
+            message_id.id
+        );
+        let response = client
+            .get(&url)
+            .header(AUTHORIZATION, format!("Bearer {}", access_token))
+            .header(ACCEPT, "application/json")
+            .send()
+            .await
+            .map_err(|e| GmailError::ApiError(e.to_string()))?;
+
+        if response.status() == StatusCode::UNAUTHORIZED {
+            access_token = get_valid_access_token(state, user_id, &client).await?;
+            continue;
+        } else if !response.status().is_success() {
+            tracing::warn!("Skipping message {} due to status {}", message_id.id, response.status());
+            continue;
+        }
+
+        let detail: GmailMessageDetail = response.json().await.map_err(|e| {
+            tracing::error!("Failed to parse message detail JSON: {}", e);
+            GmailError::ParseError(e.to_string())
+        })?;
+
+        let get_header = |name: &str| {
+            detail
+                .payload
+                .headers
+                .iter()
+                .find(|h| h.name.eq_ignore_ascii_case(name))
+                .map(|h| h.value.clone())
+        };
+
+        previews.push(GmailPreview {
+            id: detail.id,
+            thread_id: detail.thread_id,
+            subject: get_header("subject"),
+            from: get_header("from"),
+            date: Some(detail.internal_date),
+            snippet: detail.snippet,
+            is_read: !detail.label_ids.contains(&"UNREAD".to_string()),
+        });
+    }
+
+    tracing::info!("Fetched {} email previews", previews.len());
+    Ok(previews)
+}
+
 async fn fetch_gmail_messages(
     state: &AppState,
     user_id: i32,
