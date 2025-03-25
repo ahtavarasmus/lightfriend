@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+quoted_printable = "0.4"
 time = "0.3"
 sha1 = "0.10"
 tokio-cron-scheduler = "0.9"

@@ -259,6 +259,7 @@ dependencies = [
  "once_cell",
  "openai-api-rs",
  "openssl",
+ "quoted_printable",
  "rand 0.8.5",
  "reqwest",
  "ring 0.17.11",
@@ -2250,6 +2251,12 @@ checksum = "0e4dccaaaf89514f546c693ddc140f729f958c247918a13380cccc6078391acc"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "quoted_printable"
+version = "0.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a3866219251662ec3b26fc217e3e05bf9c4f84325234dfb96bf0bf840889e49"
 
 [[package]]
 name = "r2d2"
