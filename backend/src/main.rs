@@ -246,6 +246,7 @@ async fn main() {
         .route("/api/auth/google/gmail/refresh", post(gmail_auth::refresh_gmail_token))
         .route("/api/auth/google/gmail/test_fetch", get(gmail::test_gmail_fetch))
         .route("/api/auth/google/gmail/status", get(gmail::gmail_status))
+        .route("/api/auth/google/gmail/previews", get(gmail::fetch_email_previews))
 
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
 
