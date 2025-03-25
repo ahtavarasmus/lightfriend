@@ -494,22 +494,94 @@ let onclick_delete_calendar = {
                             {"Email Services"}
                         </h3>
                         <div class="service-list">
-                            // Gmail (Coming Soon)
-                            <div class="service-item coming-soon">
+                            // Gmail
+                            <div class="service-item">
                                 <div class="service-header">
                                     <div class="service-name">
                                         <img src="https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg" alt="Gmail"/>
                                         {"Gmail"}
-                                        <span class="coming-soon-tag">{"Coming Soon"}</span>
+                                        {
+                                            if props.user_id != 1 {
+                                                html! {
+                                                    <span class="coming-soon-tag">{"Coming Soon"}</span>
+                                                }
+                                            } else {
+                                                html! {}
+                                            }
+                                        }
                                     </div>
-
+                                    if *gmail_connected {
+                                        <span class="service-status">{"Connected ✓"}</span>
+                                    }
                                 </div>
                                 <p class="service-description">
                                     {"Send and receive Gmail messages through SMS or voice calls."}
                                 </p>
-                                <button class="connect-button" disabled=true>
-                                    {"Connect"}
-                                </button>
+                                if props.user_id == 1 {
+                                    if *gmail_connected {
+                                        <div class="gmail-controls">
+                                            <button 
+                                                onclick={onclick_delete_gmail}
+                                                class="disconnect-button"
+                                            >
+                                                {"Disconnect"}
+                                            </button>
+                                            <button 
+                                                onclick={
+                                                    let error = error.clone();
+                                                    Callback::from(move |_: MouseEvent| {
+                                                        let error = error.clone();
+                                                        if let Some(window) = web_sys::window() {
+                                                            if let Ok(Some(storage)) = window.local_storage() {
+                                                                if let Ok(Some(token)) = storage.get_item("token") {
+                                                                    spawn_local(async move {
+                                                                        let request = Request::get(&format!("{}/api/auth/google/gmail/test_fetch", config::get_backend_url()))
+                                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                                            .send()
+                                                                            .await;
+
+                                                                        match request {
+                                                                            Ok(response) => {
+                                                                                if response.status() == 200 {
+                                                                                    if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                                                        web_sys::console::log_1(&format!("Gmail test fetch result: {:?}", data).into());
+                                                                                    }
+                                                                                } else {
+                                                                                    error.set(Some("Failed to fetch Gmail messages".to_string()));
+                                                                                }
+                                                                            }
+                                                                            Err(e) => {
+                                                                                error.set(Some(format!("Network error: {}", e)));
+                                                                            }
+                                                                        }
+                                                                    });
+                                                                }
+                                                            }
+                                                        }
+                                                    })
+                                                }
+                                                class="test-button"
+                                            >
+                                                {"Test Gmail"}
+                                            </button>
+                                        </div>
+                                    } else {
+                                        <button 
+                                            onclick={onclick_gmail} 
+                                            class="connect-button"
+                                        >
+                                            if *connecting {
+                                                {"Connecting..."}
+                                            } else {
+                                                {"Connect"}
+                                            }
+                                        </button>
+                                    }
+                                } else {
+                                    <button class="connect-button" disabled=true>
+                                        {"Connect"}
+                                    </button>
+                                }
                             </div>
 
                             // Outlook (Coming Soon)
@@ -577,7 +649,12 @@ let onclick_delete_calendar = {
                         </div>
                     }
                     <style>
-                        {".test-button {
+                        {".gmail-controls {
+                            display: flex;
+                            gap: 10px;
+                            margin-top: 10px;
+                        }
+                        .test-button {
                             background-color: #4CAF50;
                             color: white;
                             padding: 8px 16px;
