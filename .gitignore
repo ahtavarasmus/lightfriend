@@ -1,4 +1,6 @@
 frontend/dist/
+.DS_Store
+frontend/.DS_Store
 frontend/target/
 *.db
 database.db
