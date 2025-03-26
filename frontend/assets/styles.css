@@ -993,10 +993,6 @@ button[type="submit"].loading::after {
     transition: color 0.3s ease;
 }
 
-.legal-links a:hover {
-    color: #7EB2FF;
-}
-
 
 .warning-card {
     background: rgba(255, 193, 7, 0.1);
