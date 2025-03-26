@@ -18,6 +18,7 @@ mod pages {
     pub mod home;
     pub mod money;
     pub mod termsprivacy;
+    pub mod blog;
 }
 mod auth {
     pub mod connect;
@@ -31,6 +32,7 @@ mod admin {
 
 use pages::{
     home::Home,
+    blog::Blog,
     home::is_logged_in,
     termsprivacy::{TermsAndConditions, PrivacyPolicy},
     money::Pricing,
@@ -49,6 +51,8 @@ use admin::dashboard::AdminDashboard;
 
 #[derive(Clone, Routable, PartialEq)]
 pub enum Route {
+    #[at("/the-other-stuff")]
+    Blog,
     #[at("/")]
     Home,
     #[at("/login")]
@@ -72,6 +76,10 @@ pub enum Route {
 
 fn switch(routes: Route) -> Html {
     match routes {
+        Route::Blog => {
+            info!("Rendering Blog page");
+            html! { <Blog /> }
+        },
         Route::Home => {
             info!("Rendering Home page");
             html! { <Home /> }
@@ -137,6 +145,18 @@ pub fn nav(props: &NavProps) -> Html {
                 </Link<Route>>
                 
                 <div class="nav-right">
+                    {
+                        if !*logged_in {
+                            html! {
+                                <Link<Route> to={Route::Blog} classes="nav-link">
+                                    {"The Other Stuff"}
+                                </Link<Route>>
+                            }
+                        } else {
+                            html! {}
+                        }
+
+                    }
                     <Link<Route> to={Route::Pricing} classes="nav-link">
                         {"Pricing"}
                     </Link<Route>>

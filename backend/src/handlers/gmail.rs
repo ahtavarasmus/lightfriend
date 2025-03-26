@@ -71,8 +71,12 @@ struct GmailPayload {
     pub headers: Vec<GmailHeader>,
     pub body: Option<GmailBody>,
     pub parts: Option<Vec<GmailPart>>,
-    #[serde(rename = "mimeType")]
+    #[serde(rename = "mimeType", default = "default_mime_type")]
     pub mime_type: String,
+}
+
+fn default_mime_type() -> String {
+    "text/plain".to_string()
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,7 +88,7 @@ struct GmailBody {
 #[derive(Debug, Deserialize)]
 struct GmailPart {
     pub body: GmailBody,
-    #[serde(rename = "mimeType")]
+    #[serde(rename = "mimeType", default = "default_mime_type")]
     pub mime_type: String,
 }
 
@@ -147,31 +151,133 @@ pub async fn test_gmail_fetch(
     }
 }
 
+pub async fn fetch_single_email(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    message_id: String,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    tracing::info!("Fetching single Gmail message {} for user {}", message_id, auth_user.user_id);
+
+    let client = reqwest::Client::new();
+    let mut access_token = get_valid_access_token(&state, auth_user.user_id, &client).await.map_err(|e| {
+        let (status, message) = match e {
+            GmailError::NoConnection => (StatusCode::BAD_REQUEST, "No Gmail connection found".to_string()),
+            GmailError::TokenError(msg) => (StatusCode::UNAUTHORIZED, msg),
+            GmailError::InvalidRefreshToken => (StatusCode::UNAUTHORIZED, "Refresh token invalid".to_string()),
+            GmailError::ApiError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+            GmailError::ParseError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+        };
+        (status, Json(json!({ "error": message })))
+    })?;
+
+    let url = format!(
+        "https://www.googleapis.com/gmail/v1/users/me/messages/{}?fields=id,threadId,snippet,payload(headers,body,parts,mimeType),internalDate,labelIds",
+        message_id
+    );
+
+    let response = client
+        .get(&url)
+        .header(AUTHORIZATION, format!("Bearer {}", access_token))
+        .header(ACCEPT, "application/json")
+        .send()
+        .await
+        .map_err(|e| {
+            tracing::error!("Gmail API request failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": format!("Failed to fetch email: {}", e) })),
+            )
+        })?;
+
+    if response.status() == StatusCode::NOT_FOUND {
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Email not found" })),
+        ));
+    }
+
+    if !response.status().is_success() {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to fetch email details" })),
+        ));
+    }
+
+    let response_text = response.text().await.map_err(|e| {
+        tracing::error!("Failed to get message detail response text: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to read response" })),
+        )
+    })?;
+
+    let detail: GmailMessageDetail = serde_json::from_str(&response_text).map_err(|e| {
+        tracing::error!("Failed to parse message detail JSON: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to parse email data" })),
+        )
+    })?;
+
+    let get_header = |name: &str| {
+        detail
+            .payload
+            .headers
+            .iter()
+            .find(|h| h.name.eq_ignore_ascii_case(name))
+            .map(|h| h.value.clone())
+    };
+
+    let from_header = get_header("from");
+    let from_email = from_header.as_ref().and_then(|from| {
+        if let Some(start) = from.find('<') {
+            if let Some(end) = from.find('>') {
+                return Some(from[start + 1..end].to_string());
+            }
+        }
+        None
+    });
+
+    let body = extract_email_body(&detail.payload);
+    let is_read = !detail.label_ids.contains(&"UNREAD".to_string());
+
+    let email = GmailMessage {
+        id: detail.id,
+        thread_id: detail.thread_id,
+        subject: get_header("subject"),
+        from: from_header,
+        from_email,
+        date: Some(detail.internal_date),
+        snippet: detail.snippet,
+        body,
+        is_read,
+    };
+
+    Ok(Json(json!({
+        "success": true,
+        "email": {
+            "id": email.id,
+            "thread_id": email.thread_id,
+            "subject": email.subject.unwrap_or_else(|| "No subject".to_string()),
+            "from": email.from.unwrap_or_else(|| "Unknown sender".to_string()),
+            "from_email": email.from_email.unwrap_or_else(|| "unknown@email.com".to_string()),
+            "date": email.date.map(|dt| dt.to_rfc3339()),
+            "snippet": email.snippet.unwrap_or_else(|| "No preview".to_string()),
+            "body": email.body.unwrap_or_else(|| "No content".to_string()),
+            "is_read": email.is_read
+        }
+    })))
+}
+
 pub async fn fetch_email_previews(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Fetching email previews for user {}", auth_user.user_id);
+    tracing::info!("Starting Gmail preview fetch for user {} at {}", auth_user.user_id, chrono::Utc::now());
 
-    if !state
-        .user_repository
-        .has_active_gmail(auth_user.user_id)
-        .map_err(|e| {
-            tracing::error!("Error checking Gmail connection: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": e.to_string() })),
-            )
-        })?
-    {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "No active Gmail connection" })),
-        ));
-    }
-
-    match fetch_gmail_previews(&state, auth_user.user_id, Some(20)).await {
+    match fetch_gmail_previews(&state, auth_user.user_id, Some(10)).await {
         Ok(previews) => {
+            tracing::info!("Fetched {} previews", previews.len());
             let formatted_previews: Vec<_> = previews
                 .into_iter()
                 .map(|p| {
@@ -187,14 +293,15 @@ pub async fn fetch_email_previews(
                 })
                 .collect();
 
-            tracing::info!("Returning {} email previews", formatted_previews.len());
-            Ok(Json(json!({ "previews": formatted_previews })))
+            Ok(Json(json!({ "success": true, "previews": formatted_previews })))
         }
         Err(e) => {
             let (status, message) = match e {
                 GmailError::NoConnection => (StatusCode::BAD_REQUEST, "No Gmail connection found".to_string()),
                 GmailError::TokenError(msg) => (StatusCode::UNAUTHORIZED, msg),
-                GmailError::InvalidRefreshToken => (StatusCode::UNAUTHORIZED, "Refresh token invalid".to_string()),
+                GmailError::InvalidRefreshToken => {
+                    (StatusCode::UNAUTHORIZED, "Refresh token invalid".to_string())
+                }
                 GmailError::ApiError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
                 GmailError::ParseError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
             };
@@ -251,7 +358,68 @@ fn extract_email_body(payload: &GmailPayload) -> Option<String> {
             Some(decoded_str)
         };
 
-        final_content.map(|content| content.replace("\r\n", "\n"))
+        final_content.map(|content| {
+            let mut text = content.replace("\r\n", "\n");
+            
+            // Enhanced HTML cleanup
+            if text.contains("</") { // Check if it's HTML
+                use regex::Regex;
+                
+                // Remove style, script, head sections and their contents
+                let style_re = Regex::new(r"(?s)<style[^>]*>.*?</style>").unwrap();
+                let script_re = Regex::new(r"(?s)<script[^>]*>.*?</script>").unwrap();
+                let head_re = Regex::new(r"(?s)<head[^>]*>.*?</head>").unwrap();
+                let font_face_re = Regex::new(r"(?s)@font-face\s*\{[^}]*\}").unwrap();
+                let css_comment_re = Regex::new(r"(?s)/\*.*?\*/").unwrap();
+                
+                text = style_re.replace_all(&text, "").to_string();
+                text = script_re.replace_all(&text, "").to_string();
+                text = head_re.replace_all(&text, "").to_string();
+                text = font_face_re.replace_all(&text, "").to_string();
+                text = css_comment_re.replace_all(&text, "").to_string();
+
+                // Convert common HTML elements to newlines
+                let block_elements = ["div", "p", "tr", "li", "br", "h1", "h2", "h3", "h4", "h5", "h6"];
+                for element in block_elements.iter() {
+                    let end_tag = format!("</{}>", element);
+                    text = text.replace(&end_tag, "\n");
+                }
+
+                // Handle HTML entities
+                let entities = [
+                    ("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), 
+                    ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"),
+                    ("&ldquo;", "\u{201C}"), ("&rdquo;", "\u{201D}"), ("&rsquo;", "\u{2019}"),
+                    ("&lsquo;", "\u{2018}"), ("&mdash;", "\u{2014}"), ("&ndash;", "\u{2013}"),
+                    ("&hellip;", "\u{2026}")
+                ];
+                for (entity, replacement) in entities.iter() {
+                    text = text.replace(entity, replacement);
+                }
+
+                // Remove all remaining HTML tags
+                let tag_re = Regex::new(r"<[^>]+>").unwrap();
+                text = tag_re.replace_all(&text, "").to_string();
+
+                // Clean up whitespace and newlines
+                let multi_newline_re = Regex::new(r"\n\s*\n\s*\n+").unwrap();
+                let multi_space_re = Regex::new(r"\s+").unwrap();
+                
+                text = multi_newline_re.replace_all(&text, "\n\n").to_string();
+                text = multi_space_re.replace_all(&text, " ").to_string();
+
+                // Clean up lines
+                text = text
+                    .split('\n')
+                    .map(|line| line.trim())
+                    .filter(|line| !line.is_empty())
+                    .collect::<Vec<_>>()
+                    .join("\n");
+            }
+
+            // Final cleanup
+            text.trim().to_string()
+        })
     }
 
     // Get content transfer encoding from headers
@@ -402,12 +570,27 @@ async fn fetch_gmail_previews(
             GmailError::ApiError(e.to_string())
         })?;
 
+        tracing::debug!("Gmail API response status: {}", response.status());
+
         match response.status() {
             StatusCode::OK => {
-                let gmail_data: GmailResponse = response.json().await.map_err(|e| {
-                    tracing::error!("Failed to parse Gmail response JSON: {}", e);
+                let response_text = response.text().await.map_err(|e| {
+                    tracing::error!("Failed to get response text: {}", e);
                     GmailError::ParseError(e.to_string())
                 })?;
+                
+                tracing::debug!("Gmail API response body: {}", response_text);
+                
+                let gmail_data: GmailResponse = serde_json::from_str(&response_text).map_err(|e| {
+                    tracing::error!("Failed to parse Gmail response JSON: {}", e);
+                    tracing::error!("Response body: {}", response_text);
+                    tracing::error!("Error details: {:?}", e);
+                    GmailError::ParseError(format!(
+                        "Failed to parse Gmail response: {}. Response: {}",
+                        e, response_text
+                    ))
+                })?;
+                
                 if let Some(messages) = gmail_data.messages {
                     all_message_ids.extend(messages);
                 }
@@ -416,15 +599,22 @@ async fn fetch_gmail_previews(
             }
             StatusCode::UNAUTHORIZED => {
                 if retries >= max_retries {
-                    return Err(GmailError::TokenError("Max token refresh retries exceeded".to_string()));
+                    return Err(GmailError::TokenError(
+                        "Max token refresh retries exceeded".to_string(),
+                    ));
                 }
+                tracing::info!("Token expired, refreshing (attempt {}/{})", retries + 1, max_retries);
                 access_token = get_valid_access_token(state, user_id, &client).await?;
                 retries += 1;
                 continue;
             }
             status => {
                 let error_body = response.text().await.unwrap_or_default();
-                return Err(GmailError::ApiError(format!("Failed with status {}: {}", status, error_body)));
+                tracing::error!("API error {}: {}", status, error_body);
+                return Err(GmailError::ApiError(format!(
+                    "Failed with status {}: {}",
+                    status, error_body
+                )));
             }
         }
 
@@ -435,7 +625,7 @@ async fn fetch_gmail_previews(
 
     tracing::info!("Fetched {} message IDs", all_message_ids.len());
 
-    // Fetch message metadata (simplified version with only essential fields)
+    // Fetch message metadata
     let mut previews = Vec::new();
     for message_id in all_message_ids {
         let url = format!(
@@ -458,10 +648,24 @@ async fn fetch_gmail_previews(
             continue;
         }
 
-        let detail: GmailMessageDetail = response.json().await.map_err(|e| {
-            tracing::error!("Failed to parse message detail JSON: {}", e);
+        let response_text = response.text().await.map_err(|e| {
+            tracing::error!("Failed to get message detail response text: {}", e);
             GmailError::ParseError(e.to_string())
         })?;
+        
+        let detail: Result<GmailMessageDetail, _> = serde_json::from_str(&response_text);
+        let detail = match detail {
+            Ok(detail) => detail,
+            Err(e) => {
+                tracing::error!("Failed to parse message detail JSON: {}", e);
+                tracing::error!("Response body: {}", response_text);
+                tracing::error!("Error details: {:?}", e);
+                return Err(GmailError::ParseError(format!(
+                    "Failed to parse message detail: {}. Response: {}",
+                    e, response_text
+                )));
+            }
+        };
 
         let get_header = |name: &str| {
             detail
@@ -484,6 +688,21 @@ async fn fetch_gmail_previews(
     }
 
     tracing::info!("Fetched {} email previews", previews.len());
+    
+    // Debug print each preview
+    for (index, preview) in previews.iter().enumerate() {
+        tracing::debug!(
+            "Preview {}: ID: {}, Subject: {:?}, From: {:?}, Date: {:?}, Is Read: {}, Snippet: {:?}",
+            index + 1,
+            preview.id,
+            preview.subject,
+            preview.from,
+            preview.date,
+            preview.is_read,
+            preview.snippet
+        );
+    }
+    
     Ok(previews)
 }
 
@@ -532,9 +751,15 @@ async fn fetch_gmail_messages(
                 tracing::debug!("Gmail API response body: {}", response_text);
                 
                 let gmail_data: GmailResponse = serde_json::from_str(&response_text).map_err(|e| {
-                    tracing::error!("Failed to parse Gmail response JSON: {}\nResponse body: {}", e, response_text);
-                    GmailError::ParseError(e.to_string())
+                    tracing::error!("Failed to parse Gmail response JSON: {}", e);
+                    tracing::error!("Response body: {}", response_text);
+                    tracing::error!("Error details: {:?}", e);
+                    GmailError::ParseError(format!(
+                        "Failed to parse Gmail response: {}. Response: {}",
+                        e, response_text
+                    ))
                 })?;
+                
                 if let Some(messages) = gmail_data.messages {
                     all_message_ids.extend(messages);
                 }
@@ -598,10 +823,19 @@ async fn fetch_gmail_messages(
         })?;
         
         
-        let detail: GmailMessageDetail = serde_json::from_str(&response_text).map_err(|e| {
-            tracing::error!("Failed to parse message detail JSON: {}\nResponse body: {}", e, response_text);
-            GmailError::ParseError(e.to_string())
-        })?;
+        let detail: Result<GmailMessageDetail, _> = serde_json::from_str(&response_text);
+        let detail = match detail {
+            Ok(detail) => detail,
+            Err(e) => {
+                tracing::error!("Failed to parse message detail JSON: {}", e);
+                tracing::error!("Response body: {}", response_text);
+                tracing::error!("Error details: {:?}", e);
+                return Err(GmailError::ParseError(format!(
+                    "Failed to parse message detail: {}. Response: {}",
+                    e, response_text
+                )));
+            }
+        };
         let get_header = |name: &str| {
             detail
                 .payload
