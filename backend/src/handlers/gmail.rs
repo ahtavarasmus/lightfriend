@@ -471,6 +471,73 @@ fn extract_email_body(payload: &GmailPayload) -> Option<String> {
     None
 }
 
+pub async fn filter_important_emails(
+    messages: Vec<GmailMessage>,
+    client: &OpenAIClient,
+) -> Result<Vec<(GmailMessage, String)>, GmailError> {
+    let mut important_messages = Vec::new();
+
+    for message in messages {
+        // Prepare the content for analysis
+        let email_content = json!({
+            "subject": message.subject.clone().unwrap_or_default(),
+            "body": message.body.clone().unwrap_or_default(),
+            "from": message.from.clone().unwrap_or_default(),
+            "snippet": message.snippet.clone().unwrap_or_default(),
+        }).to_string();
+
+        // Create the system message for email importance evaluation
+        let system_message = chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::system,
+            content: chat_completion::Content::Text(
+                "Act as an email filter. Analyze the email content to determine if it's important. \
+                Important emails are: (1) those containing two-factor authentication codes, or \
+                (2) those with urgent information requiring immediate action. \
+                Analyze the full content holistically without relying on specific keywords. \
+                Ignore promotional, casual, or irrelevant emails. \
+                Respond with either 'IMPORTANT: <reason>' or 'NOT_IMPORTANT'. \
+                Keep the reason brief and clear.".to_string()
+            ),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        };
+
+        // Create the user message containing the email content
+        let user_message = chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::user,
+            content: chat_completion::Content::Text(email_content),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        };
+
+        // Make the API request
+        let req = chat_completion::ChatCompletionRequest::new(
+            GPT4_O.to_string(),
+            vec![system_message, user_message],
+        )
+        .max_tokens(100);
+
+        match client.chat_completion(req).await {
+            Ok(result) => {
+                if let Some(content) = result.choices[0].message.content.clone() {
+                    if content.starts_with("IMPORTANT:") {
+                        let reason = content.replace("IMPORTANT:", "").trim().to_string();
+                        important_messages.push((message, reason));
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to analyze email importance: {}", e);
+                continue;
+            }
+        }
+    }
+
+    Ok(important_messages)
+}
+
 pub async fn handle_gmail_fetching(
     state: &AppState,
     user_id: i32,
@@ -494,31 +561,81 @@ pub async fn handle_gmail_fetching(
         ));
     }
 
-    match fetch_gmail_messages(state, user_id, Some(1)).await {
-        Ok(messages) => {
-            let formatted_messages: Vec<_> = messages
-                .into_iter()
-                .map(|m| {
-                    json!({
-                        "id": m.id,
-                        "thread_id": m.thread_id,
-                        "subject": m.subject.unwrap_or_else(|| "No subject".to_string()),
-                        "from": m.from.unwrap_or_else(|| "Unknown sender".to_string()),
-                        "from_email": m.from_email.unwrap_or_else(|| "unknown@email.com".to_string()),
-                        "date": m.date.map(|dt| dt.to_rfc3339()),
-                        "snippet": m.snippet.unwrap_or_else(|| "No preview".to_string()),
-                        "body": m.body.unwrap_or_else(|| "No content".to_string()),
-                        "is_read": m.is_read
-                    })
-                })
-                .collect();
-            // print the emails here 
-            for (i, message) in formatted_messages.iter().enumerate() {
-                tracing::info!("Email {}: {}", i + 1, message);
-            }
+    let api_key = match env::var("OPENROUTER_API_KEY") {
+        Ok(key) => key,
+        Err(_) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "Server configuration error" }))
+            ));
+        }
+    };
 
-            tracing::info!("Returning {} messages", formatted_messages.len());
-            Ok(Json(json!({ "messages": formatted_messages })))
+    let client = match OpenAIClient::builder()
+        .with_endpoint("https://openrouter.ai/api/v1")
+        .with_api_key(api_key)
+        .build() {
+            Ok(client) => client,
+            Err(e) => {
+                eprintln!("Failed to build OpenAI client: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "Failed to initialize AI service" }))
+                ));
+            }
+        };
+
+    match fetch_gmail_messages(state, user_id, Some(10)).await {
+        Ok(messages) => {
+            match filter_important_emails(messages, &client).await {
+                Ok(important_messages) => {
+                    if important_messages.is_empty() {
+                        return Ok(Json(json!({
+                            "message": "No important emails found",
+                            "emails": []
+                        })));
+                    }
+
+                    let formatted_messages: Vec<_> = important_messages
+                        .into_iter()
+                        .map(|(m, reason)| {
+                            json!({
+                                "id": m.id,
+                                "thread_id": m.thread_id,
+                                "subject": m.subject.unwrap_or_else(|| "No subject".to_string()),
+                                "from": m.from.unwrap_or_else(|| "Unknown sender".to_string()),
+                                "from_email": m.from_email.unwrap_or_else(|| "unknown@email.com".to_string()),
+                                "date": m.date.map(|dt| dt.to_rfc3339()),
+                                "snippet": m.snippet.unwrap_or_else(|| "No preview".to_string()),
+                                "body": m.body.unwrap_or_else(|| "No content".to_string()),
+                                "is_read": m.is_read,
+                                "importance_reason": reason
+                            })
+                        })
+                        .collect();
+
+                    // print the emails here 
+                    for (i, message) in formatted_messages.iter().enumerate() {
+                        tracing::info!("Email {}: {}", i + 1, message);
+                    }
+
+                    tracing::info!("Returning {} messages", formatted_messages.len());
+                    Ok(Json(json!({ "messages": formatted_messages })))
+                }
+                Err(e) => {
+                    let (status, message) = match e {
+                        GmailError::NoConnection => (StatusCode::BAD_REQUEST, "No Gmail connection found".to_string()),
+                        GmailError::TokenError(msg) => (StatusCode::UNAUTHORIZED, msg),
+                        GmailError::InvalidRefreshToken => {
+                            (StatusCode::UNAUTHORIZED, "Refresh token invalid".to_string())
+                        }
+                        GmailError::ApiError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+                        GmailError::ParseError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+                    };
+                    tracing::error!("Fetch failed: {}", message);
+                    Err((status, Json(json!({ "error": message }))))
+                }
+            }
         }
         Err(e) => {
             let (status, message) = match e {
@@ -537,7 +654,7 @@ pub async fn handle_gmail_fetching(
 }
 
 /// Fetches Gmail messages with configurable max results.
-async fn fetch_gmail_previews(
+pub async fn fetch_gmail_previews(
     state: &AppState,
     user_id: i32,
     max_results: Option<u32>,

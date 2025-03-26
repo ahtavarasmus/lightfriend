@@ -1,12 +1,102 @@
 use tokio_cron_scheduler::{JobScheduler, Job};
+use axum::{
+    http::StatusCode,
+};
 use std::sync::Arc;
 use tracing::{info, error};
 use crate::AppState;
+use crate::handlers::gmail;
 
 use std::env;
 
 pub async fn start_scheduler(state: Arc<AppState>) {
     let sched = JobScheduler::new().await.expect("Failed to create scheduler");
+
+    // Create a job that runs every minute to fetch Gmail previews
+    let state_clone = Arc::clone(&state);
+    let gmail_monitor_job = Job::new_async("0 * * * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            info!("Running scheduled Gmail preview fetch job...");
+            
+            // Get users with active Gmail connections
+            match state.user_repository.get_active_gmail_connection_users() {
+                Ok(user_ids) => {
+                    for user_id in user_ids {
+                        info!("Fetching Gmail previews for user {}", user_id);
+                        match crate::gmail::fetch_gmail_previews(&state, user_id, Some(10)).await {
+                            Ok(messages) => {
+                                info!("Successfully fetched {} Gmail messages for user {}", messages.len(), user_id);
+                                
+                                // Filter unread messages
+                                let unread_messages: Vec<_> = messages.into_iter()
+                                    .filter(|msg| !msg.is_read)
+                                    .collect();
+                                
+                                if !unread_messages.is_empty() {
+                                    info!("Found {} unread messages", unread_messages.len());
+                                    let api_key = match env::var("OPENROUTER_API_KEY") {
+                                    Ok(key) => key,
+                                    Err(_) => {
+                                        eprintln!("OPENROUTER_API_KEY not set");
+                                        return (
+                                            StatusCode::INTERNAL_SERVER_ERROR,
+                                            axum::Json(TwilioResponse {
+                                                message: "Server configuration error".to_string(),
+                                            })
+                                        );
+                                    }
+                                };
+
+                                let client = match OpenAIClient::builder()
+                                    .with_endpoint("https://openrouter.ai/api/v1")
+                                    .with_api_key(api_key)
+                                    .build() {
+                                        Ok(client) => client,
+                                        Err(e) => {
+                                            eprintln!("Failed to build OpenAI client: {}", e);
+                                            return (
+                                                StatusCode::INTERNAL_SERVER_ERROR,
+                                                axum::Json(TwilioResponse {
+                                                    message: "Failed to initialize AI service".to_string(),
+                                                })
+                                            );
+                                        }
+                                    };
+
+                                    // Filter important emails
+                                    match gmail::filter_important_emails(unread_messages, &client).await {
+                                        Ok(important_messages) => {
+                                            for (message, reason) in important_messages {
+                                                info!(
+                                                    "Important unread email found - From: {:?}, Subject: {:?}, Reason: {}",
+                                                    message.from, message.subject, reason
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error!("Failed to filter important emails: {:?}", e);
+                                        }
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                error!(
+                                    "Failed to fetch Gmail previews for user {}: Error: {:?}",
+                                    user_id, e
+                                );
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to fetch active Gmail connections: {}", e);
+                }
+            }
+        })
+    }).expect("Failed to create Gmail monitor job");
+
+    sched.add(gmail_monitor_job).await.expect("Failed to add Gmail monitor job to scheduler");
         
 
     // Create a job that runs every 5 seconds to handle ongoing usage logs

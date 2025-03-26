@@ -748,6 +748,18 @@ impl UserRepository {
         Ok(connection.is_some())
     }
 
+    pub fn get_active_gmail_connection_users(&self) -> Result<Vec<i32>, DieselError> {
+        use crate::schema::gmail;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let user_ids = gmail::table
+            .filter(gmail::status.eq("active"))
+            .select(gmail::user_id)
+            .load::<i32>(&mut conn)?;
+
+        Ok(user_ids)
+    }
+
     pub fn get_gmail_tokens(&self, user_id: i32) -> Result<Option<(String, String)>, DieselError> {
         use crate::schema::gmail;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
