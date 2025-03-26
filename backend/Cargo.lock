@@ -261,6 +261,7 @@ dependencies = [
  "openssl",
  "quoted_printable",
  "rand 0.8.5",
+ "regex",
  "reqwest",
  "ring 0.17.11",
  "rusqlite",

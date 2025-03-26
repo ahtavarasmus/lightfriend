@@ -21,6 +21,7 @@ body {
     min-height: 100vh;
     position: relative;
     background-color: #000000;
+    padding-top: 
 }
 
 .pdl-btn {
@@ -1274,104 +1275,6 @@ button[type="submit"].loading::after {
 .field-value {
     color: #fff;
     font-size: 1.1rem;
-}
-
-.profile-input {
-    background: rgba(0, 0, 0, 0.2);
-    border: 1px solid rgba(30, 144, 255, 0.2);
-    border-radius: 8px;
-    padding: 0.75rem;
-    color: #ffffff;
-    font-size: 1rem;
-    transition: all 0.3s ease;
-    width: 100%;
-}
-
-.profile-input:focus {
-    outline: none;
-    border-color: rgba(30, 144, 255, 0.5);
-    box-shadow: 0 0 0 2px rgba(30, 144, 255, 0.1);
-}
-
-.edit-button {
-    background: linear-gradient(45deg, #1E90FF, #4169E1);
-    color: white;
-    border: none;
-    padding: 0.75rem 1.5rem;
-    border-radius: 8px;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    margin-top: 1rem;
-}
-
-.edit-button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
-}
-
-.edit-button.confirming {
-    background: linear-gradient(45deg, #4CAF50, #45a049);
-}
-
-.field-label-group {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.tooltip {
-    position: relative;
-    display: inline-block;
-}
-
-.tooltip-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    height: 18px;
-    background-color: #e0e0e0;
-    border-radius: 50%;
-    font-size: 12px;
-    cursor: help;
-    color: #666;
-}
-
-.tooltip-text {
-    visibility: hidden;
-    position: absolute;
-    width: 300px;
-    background-color: #333;
-    color: white;
-    text-align: left;
-    padding: 8px;
-    border-radius: 4px;
-    font-size: 14px;
-    line-height: 1.4;
-    z-index: 1;
-    bottom: 125%;
-    left: 50%;
-    transform: translateX(-50%);
-    opacity: 0;
-    transition: opacity 0.3s;
-}
-
-.tooltip:hover .tooltip-text {
-    visibility: visible;
-    opacity: 1;
-}
-
-/* Add a small arrow at the bottom of the tooltip */
-.tooltip-text::after {
-    content: "";
-    position: absolute;
-    top: 100%;
-    left: 50%;
-    margin-left: -5px;
-    border-width: 5px;
-    border-style: solid;
-    border-color: #333 transparent transparent transparent;
 }
 
 /* Subscription info styling */

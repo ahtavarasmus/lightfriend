@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+regex = "1.10.3"
 quoted_printable = "0.4"
 time = "0.3"
 sha1 = "0.10"

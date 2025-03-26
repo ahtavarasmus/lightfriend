@@ -526,6 +526,44 @@ let onclick_delete_calendar = {
                                             >
                                                 {"Disconnect"}
                                             </button>
+                                            <button
+                                                onclick={
+                                                    let error = error.clone();
+                                                    Callback::from(move |_: MouseEvent| {
+                                                        let error = error.clone();
+                                                        if let Some(window) = web_sys::window() {
+                                                            if let Ok(Some(storage)) = window.local_storage() {
+                                                                if let Ok(Some(token)) = storage.get_item("token") {
+                                                                    spawn_local(async move {
+                                                                        let request = Request::get(&format!("{}/api/gmail/previews", config::get_backend_url()))
+                                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                                            .send()
+                                                                            .await;
+
+                                                                        match request {
+                                                                            Ok(response) => {
+                                                                                if response.status() == 200 {
+                                                                                    if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                                                        web_sys::console::log_1(&format!("Gmail previews: {:?}", data).into());
+                                                                                    }
+                                                                                } else {
+                                                                                    error.set(Some("Failed to fetch Gmail previews".to_string()));
+                                                                                }
+                                                                            }
+                                                                            Err(e) => {
+                                                                                error.set(Some(format!("Network error: {}", e)));
+                                                                            }
+                                                                        }
+                                                                    });
+                                                                }
+                                                            }
+                                                        }
+                                                    })
+                                                }
+                                                class="test-button"
+                                            >
+                                                {"Test Previews"}
+                                            </button>
                                             <button 
                                                 onclick={
                                                     let error = error.clone();

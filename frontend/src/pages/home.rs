@@ -42,7 +42,7 @@ pub fn landing() -> Html {
     html! {
         <div class="landing-page">
             // Hero Section
-            <section class="hero">
+            <header class="hero">
                 <h1>{"Stay Connected with lightfriend"}</h1>
                 <p class="hero-subtitle">
                     {"Use your dumbphone smarter with AI-powered voice and text assistance—check messages and essential info when you need it, without endless scrolling or distractions."}
@@ -52,7 +52,7 @@ pub fn landing() -> Html {
                         {"Try Now with Free Credits"}
                     </button>
                 </Link<Route>>
-            </section>
+            </header>
 
             // Problem Section: User Challenges
             <section class="problems">
@@ -176,7 +176,7 @@ pub fn landing() -> Html {
                 </div>
             </section>
 
-            <section class="footer-cta">
+            <footer class="footer-cta">
                 <div class="footer-content">
                     <h2>{"Ready to Simplify and Stay Connected?"}</h2>
                     <p class="subtitle">
@@ -213,7 +213,7 @@ pub fn landing() -> Html {
                     </div>
                 </div>
                 </div>
-            </section>
+            </footer>
         </div>
     }
 }
