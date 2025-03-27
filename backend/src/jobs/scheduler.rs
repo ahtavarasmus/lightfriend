@@ -13,6 +13,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     let sched = JobScheduler::new().await.expect("Failed to create scheduler");
 
     // Create a job that runs every minute to fetch Gmail previews
+    /*
     let state_clone = Arc::clone(&state);
     let gmail_monitor_job = Job::new_async("0 * * * * *", move |_, _| {
         let state = state_clone.clone();
@@ -98,6 +99,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
     sched.add(gmail_monitor_job).await.expect("Failed to add Gmail monitor job to scheduler");
         
+    */
 
     // Create a job that runs every 5 seconds to handle ongoing usage logs
     let state_clone = Arc::clone(&state);

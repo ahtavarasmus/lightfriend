@@ -70,8 +70,7 @@ pub async fn gmail_login(
     let (auth_url, _) = state
         .gmail_oauth_client
         .authorize_url(|| CsrfToken::new(state_token.clone()))
-        .add_scope(Scope::new("https://www.googleapis.com/auth/gmail.readonly".to_string()))
-        .add_scope(Scope::new("https://www.googleapis.com/auth/gmail.send".to_string()))
+        .add_scope(Scope::new("https://www.googleapis.com/auth/gmail.modify".to_string()))
         .add_extra_param("access_type", "offline")
         .add_extra_param("prompt", "consent")
         .set_pkce_challenge(pkce_challenge)
