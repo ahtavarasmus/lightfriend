@@ -29,14 +29,15 @@
         <link data-trunk rel="css" href="src/admin/dashboard.css">
     </head>
     <body> 
-        <img src="https://drive.google.com/file/d/1bvdVY6ZPrHgP8BCwXIoHjch80H-5fnaS/view?usp=sharing" alt="Nordea code calculator" class="blog-image" />
-        <script async src="https://scripts.simpleanalyticscdn.com/latest.js"></script>
+        <script defer src="https://scripts.simpleanalyticscdn.com/latest.js"></script>
         <script
+          defer 
           src="https://browser.sentry-cdn.com/9.0.1/bundle.min.js"
           integrity="sha384-WUKfUKJWWozTO86fecAQl5HFU+mPCfwD/8YKsZivWNSWM2B7aFDZWGO9671FxUcq"
           crossorigin="anonymous"
         ></script>
         <script src="https://js.stripe.com/v3/"></script> 
-        <script src="wasm-support.js"></script>
+        <link rel="preload" href="/wasm-support.js" as="script">
+        <link rel="preload" href="/assets/inter-400-latin.woff2" as="font" type="font/woff2" crossorigin>
     </body>
 </html>
