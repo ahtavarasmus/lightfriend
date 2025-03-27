@@ -279,7 +279,12 @@ pub async fn send_conversation_message(
     let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
     let client = Client::new();
 
-    let form_data = vec![("Body", body), ("Author", twilio_number)];
+    let form_data = vec![
+        ("Body", body), 
+        ("Author", "lightfriend"), // Use a consistent author name
+        ("From", twilio_number),   // Specify the actual phone number in From field
+        ("X-Twilio-Webhook-Enabled", "true") // Enable webhooks for delivery status
+    ];
 
     let response: MessageResponse = client
         .post(format!(
@@ -292,7 +297,10 @@ pub async fn send_conversation_message(
         .await?
         .json()
         .await?;
-    println!("successfully sent the conversation message");
+    println!("successfully sent the conversation message with SID: {}", response.sid);
+    tracing::info!("Message sent successfully to conversation {} with message SID: {}", conversation_sid, response.sid);
+    println!("successfully sent the conversation message with SID: {}", response.sid);
+    tracing::info!("Message sent successfully to conversation {} with message SID: {}", conversation_sid, response.sid);
 
     Ok(response.sid)
 }
