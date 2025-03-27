@@ -1,5 +1,4 @@
 use dotenvy::dotenv;
-use tower_http::services::ServeDir;
 use axum::{
     routing::{get, post, delete},
     Router,
@@ -297,7 +296,7 @@ async fn main() {
 
     use tokio::net::TcpListener;
     let port = match std::env::var("ENVIRONMENT").as_deref() {
-        Ok("staging") => 3010,
+        Ok("staging") => 3100,
         _ => 3000,
     };
     tracing::info!("Starting server on port {}", port);
