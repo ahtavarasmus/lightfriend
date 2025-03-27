@@ -78,7 +78,7 @@ pub struct TwilioWebhookPayload {
     body: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct TwilioResponse {
     #[serde(rename = "Message")]
     pub message: String,
@@ -277,8 +277,10 @@ pub async fn handle_incoming_sms(
     // Check for Shazam shortcut ('S' or 's')
     if payload.body.trim() == "S" || payload.body.trim() == "s" {
         println!("Shazam shortcut detected");
-        let user = match state.user_repository.find_by_phone_number(&payload.from) {
-            Ok(Some(user)) => user,
+    let user = match state.user_repository.find_by_phone_number(&payload.from) {
+        Ok(Some(user)) => {
+            user
+        },
             Ok(None) => return (
                 StatusCode::NOT_FOUND,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -373,7 +375,8 @@ pub async fn handle_incoming_sms(
         let result = process_sms(state.clone(), payload.clone()).await;
         
         if result.0 != StatusCode::OK {
-            eprintln!("Background SMS processing failed" );
+            eprintln!("Background SMS processing failed with status: {:?}", result.0);
+            eprintln!("Error response: {:?}", result.1);
         }
     });
 
@@ -388,16 +391,23 @@ pub async fn handle_incoming_sms(
 }
 
 async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (StatusCode, axum::Json<TwilioResponse>) {
+
     let user = match state.user_repository.find_by_phone_number(&payload.from) {
-        Ok(Some(user)) => user,
-        Ok(None) => return (
-            StatusCode::NOT_FOUND,
-            axum::Json(TwilioResponse {
-                message: "User not found".to_string(),
-            })
-        ),
+        Ok(Some(user)) => {
+            tracing::info!("Found user with ID: {} for phone number: {}", user.id, payload.from);
+            user
+        },
+        Ok(None) => {
+            tracing::error!("No user found for phone number: {}", payload.from);
+            return (
+                StatusCode::NOT_FOUND,
+                axum::Json(TwilioResponse {
+                    message: "User not found".to_string(),
+                })
+            );
+        },
         Err(e) => {
-            eprintln!("Database error: {}", e);
+            tracing::error!("Database error while finding user for phone number {}: {}", payload.from, e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 axum::Json(TwilioResponse {
@@ -405,6 +415,10 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                 })
             );
         }
+    };
+    let auth_user = crate::handlers::auth_middleware::AuthUser {
+        user_id: user.id, 
+        is_admin: false,
     };
 
     // Check if user has enough credits
@@ -578,8 +592,31 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         }),
     );
 
+    let mut specific_email_properties = HashMap::new();
+    specific_email_properties.insert(
+        "query".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Description of the email you're looking for. Be specific about subject, sender, or content.".to_string()),
+            ..Default::default()
+        }),
+    );
+
     // Define tools
-    let tools = vec![chat_completion::Tool {
+    let tools = vec![
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: String::from("fetch_specific_email"),
+                description: Some(String::from("Find and fetch a specific email based on user's description. Use this when user asks about a particular email or wants to find an email with specific content.")),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(specific_email_properties),
+                    required: Some(vec![String::from("query")]),
+                },
+            },
+        },
+        chat_completion::Tool {
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
                 name: String::from("gmail_latest"),
@@ -865,6 +902,122 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                             message: "Shazam call initiated".to_string(),
                         })
                     );
+                } else if name == "fetch_specific_email" {
+                    println!("Executing fetch_specific_email tool call");
+                    #[derive(Deserialize)]
+                    struct EmailQuery {
+                        query: String,
+                    }
+                    
+                    let query: EmailQuery = match serde_json::from_str(arguments) {
+                        Ok(q) => q,
+                        Err(e) => {
+                            eprintln!("Failed to parse email query: {}", e);
+                            continue;
+                        }
+                    };
+
+                    // First fetch previews
+                    match crate::handlers::gmail::fetch_gmail_previews(&state, user.id, Some(20)).await {
+                        Ok(previews) => {
+                            if previews.is_empty() {
+                                tool_answers.insert(tool_call_id, "No emails found.".to_string());
+                                continue;
+                            }
+
+                            // Create a system message for email matching
+                            let sys_message = chat_completion::ChatCompletionMessage {
+                                role: chat_completion::MessageRole::system,
+                                content: chat_completion::Content::Text(
+                                    "You are an email matcher. Given a list of email previews and a search query, \
+                                    find the most relevant email. Return ONLY the ID of the most relevant email, or \
+                                    'NONE' if no email matches well. Consider subject, sender, and snippet in your matching.".to_string()
+                                ),
+                                name: None,
+                                tool_calls: None,
+                                tool_call_id: None,
+                            };
+
+                            // Create the content for matching
+                            let emails_json = serde_json::json!({
+                                "query": query.query,
+                                "emails": previews.iter().map(|p| {
+                                    serde_json::json!({
+                                        "id": p.id,
+                                        "subject": p.subject,
+                                        "from": p.from,
+                                        "date": p.date.map(|d| d.to_rfc3339()),
+                                        "snippet": p.snippet
+                                    })
+                                }).collect::<Vec<_>>()
+                            });
+
+                            let user_message = chat_completion::ChatCompletionMessage {
+                                role: chat_completion::MessageRole::user,
+                                content: chat_completion::Content::Text(emails_json.to_string()),
+                                name: None,
+                                tool_calls: None,
+                                tool_call_id: None,
+                            };
+
+                            let matching_req = chat_completion::ChatCompletionRequest::new(
+                                GPT4_O.to_string(),
+                                vec![sys_message, user_message],
+                            ).max_tokens(50);
+
+                            match client.chat_completion(matching_req).await {
+                                Ok(matching_result) => {
+                                    let email_id = matching_result.choices[0].message.content.clone().unwrap_or_default();
+                                    if email_id == "NONE" {
+                                        tool_answers.insert(tool_call_id, "Could not find a matching email.".to_string());
+                                        continue;
+                                    }
+
+                                    // Fetch the specific email
+                                    match crate::handlers::gmail::fetch_single_email(
+                                        axum::extract::State(state.clone()),
+                                        auth_user,
+                                        email_id.trim().to_string()
+                                    ).await {
+                                        Ok(Json(response)) => {
+                                            if let Some(email) = response.get("email") {
+                                                let formatted_response = format!(
+                                                    "Found email: From: {}, Subject: {}, Date: {}\n\n{}",
+                                                    email.get("from").and_then(|v| v.as_str()).unwrap_or("Unknown"),
+                                                    email.get("subject").and_then(|v| v.as_str()).unwrap_or("No subject"),
+                                                    email.get("date").and_then(|v| v.as_str()).unwrap_or("No date"),
+                                                    email.get("body").and_then(|v| v.as_str()).unwrap_or("No content")
+                                                );
+                                                tool_answers.insert(tool_call_id, formatted_response);
+                                            } else {
+                                                tool_answers.insert(tool_call_id, "Failed to fetch email details.".to_string());
+                                            }
+                                        }
+                                        Err((_, Json(error))) => {
+                                            tool_answers.insert(tool_call_id, format!("Error fetching email: {}", 
+                                                error.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error")));
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to match email: {}", e);
+                                    tool_answers.insert(tool_call_id, "Failed to find matching email.".to_string());
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            let error_message = match e {
+                                GmailError::NoConnection => "No active Gmail connection found. Visit the website to connect.",
+                                GmailError::TokenError(_) | GmailError::InvalidRefreshToken => 
+                                    "Your Gmail connection needs to be renewed. Please reconnect on the website.",
+                                GmailError::ApiError(msg) | GmailError::ParseError(msg) => {
+                                    eprintln!("Failed to fetch Gmail previews: {}", msg);
+                                    "Failed to fetch Gmail previews. Please try again later."
+                                }
+                            };
+                            tool_answers.insert(tool_call_id, error_message.to_string());
+                        }
+                    }
                 } else if name == "gmail_latest" {
                     println!("Executing gmail_latest tool call");
                     match crate::handlers::gmail::fetch_gmail_previews(

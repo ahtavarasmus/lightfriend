@@ -14,6 +14,8 @@ use serde_json::json;
 
 use crate::handlers::auth_dtos::Claims;
 
+
+#[derive(Clone, Copy)]
 pub struct AuthUser {
     pub user_id: i32,
     pub is_admin: bool,
