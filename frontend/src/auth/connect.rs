@@ -381,7 +381,7 @@ let onclick_delete_calendar = {
                                             {"Disconnect"}
                                         </button>
                                         {
-                                            if props.user_id == 1 {
+                                            if props.user_id == 1 || props.user_id == 56 {
                                                 let onclick_test = {
                                                     let error = error.clone();
                                                     Callback::from(move |_: MouseEvent| {
@@ -439,14 +439,14 @@ let onclick_delete_calendar = {
                                                     })
                                                 };
                                                 html! {
-                                                /*
+
                                                     <button 
                                                         onclick={onclick_test}
                                                         class="test-button"
                                                     >
                                                         {"Test Calendar"}
                                                     </button>
-                                                */
+
                                                 }
 
                                             } else {
