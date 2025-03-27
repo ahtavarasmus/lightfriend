@@ -252,7 +252,6 @@ async fn main() {
 
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
 
-    let static_files_service = ServeDir::new("static");
 
     let app = Router::new()
         .merge(public_routes)
@@ -266,7 +265,6 @@ async fn main() {
         .merge(elevenlabs_routes)
         .merge(elevenlabs_webhook_routes)
         // Serve static files (robots.txt, sitemap.xml) at the root
-        .nest_service("/", static_files_service)
         .layer(session_layer)
         .layer(
             TraceLayer::new_for_http()
