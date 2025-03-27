@@ -248,45 +248,6 @@ pub async fn handle_calendar_fetching(
     }
 }
 
-
-#[derive(Debug, Deserialize)]
-struct CalendarListEntry {
-    id: String,
-    summary: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CalendarListResponse {
-    items: Vec<CalendarListEntry>,
-}
-
-async fn fetch_calendar_list(
-    client: &reqwest::Client,
-    access_token: &str,
-) -> Result<Vec<CalendarListEntry>, CalendarError> {
-    let response = client
-        .get("https://www.googleapis.com/calendar/v3/users/me/calendarList")
-        .header(AUTHORIZATION, format!("Bearer {}", access_token))
-        .header(ACCEPT, "application/json")
-        .send()
-        .await
-        .map_err(|e| CalendarError::ApiError(e.to_string()))?;
-
-    if !response.status().is_success() {
-        return Err(CalendarError::ApiError(format!(
-            "Failed to fetch calendar list: {}",
-            response.status()
-        )));
-    }
-
-    let calendar_list: CalendarListResponse = response
-        .json()
-        .await
-        .map_err(|e| CalendarError::ParseError(e.to_string()))?;
-    Ok(calendar_list.items)
-}
-
-
 pub async fn fetch_calendar_events(
     state: &AppState,
     user_id: i32,
@@ -296,38 +257,88 @@ pub async fn fetch_calendar_events(
     tracing::info!("Fetching calendar events for timeframe: {:?} to {:?}", timeframe.start, timeframe.end);
 
     // Get Google Calendar tokens
-    let (mut access_token, refresh_token) = match state.user_repository.get_google_calendar_tokens(user_id) {
+    println!("Getting Google Calendar tokens for user_id: {}", user_id);
+    let (access_token, refresh_token) = match state.user_repository.get_google_calendar_tokens(user_id) {
         Ok(Some((access, refresh))) => {
             println!("Successfully retrieved and decrypted tokens");
-            tracing::debug!("Access token length: {}, Refresh token length: {}", access.len(), refresh.len());
+            tracing::debug!("Access token length: {}, Refresh token length: {}", 
+                access.len(), refresh.len());
             (access, refresh)
         },
-        Ok(None) => return Err(CalendarError::NoConnection),
-        Err(e) => return Err(CalendarError::TokenError(format!("Failed to decrypt tokens: {}", e))),
+        Ok(None) => {
+            println!("No active Google Calendar connection found");
+            return Err(CalendarError::NoConnection);
+        },
+        Err(e) => {
+            println!("Error getting tokens: {}", e);
+            tracing::error!("Failed to get calendar tokens: {}", e);
+            return Err(CalendarError::TokenError(format!("Failed to decrypt tokens: {}", e)));
+        }
     };
+    println!("Successfully retrieved tokens");
 
+    // Create HTTP client for Google Calendar API
     let client = reqwest::Client::new();
+    
+    // Format the dates for Google Calendar API
     let start_time = timeframe.start.format("%Y-%m-%dT%H:%M:%SZ").to_string();
     let end_time = timeframe.end.format("%Y-%m-%dT%H:%M:%SZ").to_string();
     println!("Formatted time range: {} to {}", start_time, end_time);
 
-    // Fetch the calendar list
-    let calendars = fetch_calendar_list(&client, &access_token).await?;
-    if calendars.is_empty() {
-        return Err(CalendarError::ApiError("No calendars found".to_string()));
-    }
+    // Make request to Google Calendar API
+    println!("Making initial request to Google Calendar API...");
+    let response = client
+        .get("https://www.googleapis.com/calendar/v3/calendars/primary/events")
+        .header(AUTHORIZATION, format!("Bearer {}", access_token))
+        .header(ACCEPT, "application/json")
+        .query(&[
+            ("timeMin", start_time.as_str()),
+            ("timeMax", end_time.as_str()),
+            ("singleEvents", "true"),
+            ("orderBy", "startTime"),
+        ])
+        .send()
+        .await
+        .map_err(|e| CalendarError::ApiError(e.to_string()))?;
+    println!("Initial response status: {}", response.status());
 
-    // Optionally filter to specific calendars (e.g., primary and iCloud)
-    // For now, fetch from all calendars
-    let mut all_events = Vec::new();
+    if response.status() == StatusCode::UNAUTHORIZED {
+        println!("Token expired, starting refresh process...");
+        // Token expired, try to refresh
+        tracing::info!("Access token expired, attempting to refresh");
+        
+        let http_client = reqwest::ClientBuilder::new()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("Client should build");
 
-    for calendar in calendars {
-        let calendar_id = calendar.id.clone();
-        println!("Fetching events from calendar: {}", calendar.summary.unwrap_or(calendar_id.clone()));
+        println!("Exchanging refresh token...");
+        let token_result = state
+            .google_calendar_oauth_client
+            .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token))
+            .request_async(&http_client)
+            .await
+            .map_err(|e| CalendarError::TokenError(e.to_string()))?;
 
-        let response = client
-            .get(format!("https://www.googleapis.com/calendar/v3/calendars/{}/events", calendar_id))
-            .header(AUTHORIZATION, format!("Bearer {}", access_token))
+        let new_access_token = token_result.access_token().secret();
+        let expires_in = token_result.expires_in()
+            .unwrap_or_default()
+            .as_secs() as i32;
+        println!("New token received, expires in {} seconds", expires_in);
+
+        // Update the access token in the database
+        println!("Updating access token in database...");
+        state.user_repository.update_google_calendar_access_token(
+            user_id,
+            new_access_token,
+            expires_in,
+        ).map_err(|e| CalendarError::TokenError(e.to_string()))?;
+
+        // Retry the calendar request with new token
+        println!("Retrying calendar request with new token...");
+        let retry_response = client
+            .get("https://www.googleapis.com/calendar/v3/calendars/primary/events")
+            .header(AUTHORIZATION, format!("Bearer {}", new_access_token))
             .header(ACCEPT, "application/json")
             .query(&[
                 ("timeMin", start_time.as_str()),
@@ -338,70 +349,33 @@ pub async fn fetch_calendar_events(
             .send()
             .await
             .map_err(|e| CalendarError::ApiError(e.to_string()))?;
+        println!("Retry response status: {}", retry_response.status());
 
-        if response.status() == StatusCode::UNAUTHORIZED {
-            println!("Token expired, refreshing...");
-            let http_client = reqwest::ClientBuilder::new()
-                .redirect(reqwest::redirect::Policy::none())
-                .build()
-                .expect("Client should build");
-
-            let token_result = state
-                .google_calendar_oauth_client
-                .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token.clone()))
-                .request_async(&http_client)
-                .await
-                .map_err(|e| CalendarError::TokenError(e.to_string()))?;
-
-            access_token = token_result.access_token().secret().to_string();
-            let expires_in = token_result.expires_in().unwrap_or_default().as_secs() as i32;
-
-            state.user_repository.update_google_calendar_access_token(
-                user_id,
-                &access_token,
-                expires_in,
-            ).map_err(|e| CalendarError::TokenError(e.to_string()))?;
-
-            // Retry with the new token
-            let retry_response = client
-                .get(format!("https://www.googleapis.com/calendar/v3/calendars/{}/events", calendar_id))
-                .header(AUTHORIZATION, format!("Bearer {}", access_token))
-                .header(ACCEPT, "application/json")
-                .query(&[
-                    ("timeMin", start_time.as_str()),
-                    ("timeMax", end_time.as_str()),
-                    ("singleEvents", "true"),
-                    ("orderBy", "startTime"),
-                ])
-                .send()
-                .await
-                .map_err(|e| CalendarError::ApiError(e.to_string()))?;
-
-            if !retry_response.status().is_success() {
-                return Err(CalendarError::ApiError(format!(
-                    "Failed to fetch events from calendar {} after token refresh: {}",
-                    calendar_id, retry_response.status()
-                )));
-            }
-
-            let calendar_data: CalendarResponse = retry_response
-                .json()
-                .await
-                .map_err(|e| CalendarError::ParseError(e.to_string()))?;
-            all_events.extend(calendar_data.items);
-        } else if !response.status().is_success() {
-            println!("Failed to fetch events from calendar {}: {}", calendar_id, response.status());
-            continue; // Skip this calendar and move to the next
-        } else {
-            let calendar_data: CalendarResponse = response
-                .json()
-                .await
-                .map_err(|e| CalendarError::ParseError(e.to_string()))?;
-            all_events.extend(calendar_data.items);
+        if !retry_response.status().is_success() {
+            return Err(CalendarError::ApiError(format!(
+                "Failed to fetch calendar events after token refresh: {}",
+                retry_response.status()
+            )));
         }
-    }
 
-    println!("Successfully retrieved {} events across all calendars", all_events.len());
-    Ok(all_events)
+        let calendar_data: CalendarResponse = retry_response.json().await
+            .map_err(|e| CalendarError::ParseError(e.to_string()))?;
+        println!("Successfully parsed calendar data after token refresh");
+
+        Ok(calendar_data.items)
+    } else if !response.status().is_success() {
+        println!("Request failed with status: {}", response.status());
+        Err(CalendarError::ApiError(format!(
+            "Failed to fetch calendar events: {}",
+            response.status()
+        )))
+    } else {
+        println!("Parsing successful response...");
+        let calendar_data: CalendarResponse = response.json().await
+            .map_err(|e| CalendarError::ParseError(e.to_string()))?;
+        println!("Successfully retrieved {} events", calendar_data.items.len());
+
+        Ok(calendar_data.items)
+    }
 }
 
