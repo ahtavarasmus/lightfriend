@@ -1,4 +1,6 @@
 use std::sync::Arc;
+use openai_api_rs::v1::api::OpenAIClient;
+use openai_api_rs::v1::common::GPT4_O;
 
 use crate::handlers::auth_middleware::AuthUser;
 use axum::{
@@ -471,6 +473,7 @@ fn extract_email_body(payload: &GmailPayload) -> Option<String> {
     None
 }
 
+/*
 pub async fn filter_important_emails(
     messages: Vec<GmailMessage>,
     client: &OpenAIClient,
@@ -537,7 +540,9 @@ pub async fn filter_important_emails(
 
     Ok(important_messages)
 }
+*/
 
+/*
 pub async fn handle_gmail_fetching(
     state: &AppState,
     user_id: i32,
@@ -561,7 +566,7 @@ pub async fn handle_gmail_fetching(
         ));
     }
 
-    let api_key = match env::var("OPENROUTER_API_KEY") {
+    let api_key = match std::env::var("OPENROUTER_API_KEY") {
         Ok(key) => key,
         Err(_) => {
             return Err((
@@ -652,6 +657,7 @@ pub async fn handle_gmail_fetching(
         }
     }
 }
+*/
 
 /// Fetches Gmail messages with configurable max results.
 pub async fn fetch_gmail_previews(
