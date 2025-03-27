@@ -517,7 +517,7 @@ let onclick_delete_calendar = {
                                 <p class="service-description">
                                     {"Send and receive Gmail messages through SMS or voice calls."}
                                 </p>
-                                if props.user_id == 1 {
+                                if props.user_id == 1 || props.user_id == 45 {
                                     if *gmail_connected {
                                         <div class="gmail-controls">
                                             <button 
