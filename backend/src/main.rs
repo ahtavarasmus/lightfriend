@@ -296,7 +296,7 @@ async fn main() {
 
     use tokio::net::TcpListener;
     let port = match std::env::var("ENVIRONMENT").as_deref() {
-        Ok("staging") => 3100,
+        Ok("staging") => 3100, // actually prod, but just saying staging
         _ => 3000,
     };
     tracing::info!("Starting server on port {}", port);
