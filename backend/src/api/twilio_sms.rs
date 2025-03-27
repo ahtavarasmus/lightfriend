@@ -840,6 +840,47 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                             eprintln!("Failed to fetch Gmail messages: {:?}", json_error);
                         }
                     }
+                } else if name == "gmail_preview" {
+                    println!("Executing gmail_preview tool call");
+                    match crate::handlers::gmail::fetch_gmail_previews(
+                        &state,
+                        user.id,
+                        Some(5),
+                    ).await {
+                        Ok(previews) => {
+                            let mut response = String::new();
+                            for (i, preview) in previews.iter().take(5).enumerate() {
+                                let subject = preview.subject.as_deref().unwrap_or("No subject");
+                                let from = preview.from.as_deref().unwrap_or("Unknown sender");
+                                let date = preview.date.map(|d| d.format("%m/%d").to_string()).unwrap_or_else(|| "No date".to_string());
+                                
+                                if i == 0 {
+                                    response.push_str(&format!("{}. {} from {} ({})", i + 1, subject, from, date));
+                                } else {
+                                    response.push_str(&format!(", {}. {} from {} ({})", i + 1, subject, from, date));
+                                }
+                            }
+                            
+                            if previews.len() > 5 {
+                                response.push_str(&format!(" (+ {} more)", previews.len() - 5));
+                            }
+                            
+                            if previews.is_empty() {
+                                response = "No recent emails found.".to_string();
+                            }
+                            
+                            tool_answers.insert(tool_call_id, response);
+                        }
+                        Err((status, json_error)) => {
+                            let error_message = match status {
+                                StatusCode::BAD_REQUEST => "No active Gmail connection found. Visit the website to connect.",
+                                StatusCode::UNAUTHORIZED => "Your Gmail connection needs to be renewed. Please reconnect on the website.",
+                                _ => "Failed to fetch Gmail previews. Please try again later.",
+                            };
+                            tool_answers.insert(tool_call_id, error_message.to_string());
+                            eprintln!("Failed to fetch Gmail previews: {:?}", json_error);
+                        }
+                    }
                 } else if name == "calendar" {
                     println!("Executing calendar tool call");
                     println!("Raw arguments: {}", arguments);
