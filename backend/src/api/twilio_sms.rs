@@ -79,9 +79,9 @@ pub struct TwilioWebhookPayload {
 }
 
 #[derive(Serialize)]
-struct TwilioResponse {
+pub struct TwilioResponse {
     #[serde(rename = "Message")]
-    message: String,
+    pub message: String,
 }
 
 pub async fn send_shazam_answer_to_user(
@@ -89,6 +89,8 @@ pub async fn send_shazam_answer_to_user(
     user_id: i32,
     message: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Add check for user's subscription status
+    tracing::info!("Checking subscription status for user {}", user_id);
     
     tracing::info!("Starting send_shazam_answer_to_user for user_id: {}", user_id);
     tracing::info!("Message to send: {}", message);
@@ -133,16 +135,37 @@ pub async fn send_shazam_answer_to_user(
     };
 
     tracing::info!("Getting conversation for user {} with sender number {}", user_id, sender_number);
+    // First check if there are any existing conversations
     let conversation = state
         .user_conversations
         .get_conversation(&user, sender_number.to_string())
         .await?;
+
+    // Verify the conversation is still active by fetching participants
+    let participants = crate::api::twilio_utils::fetch_conversation_participants(&conversation.conversation_sid).await?;
+    
+    if participants.is_empty() {
+        tracing::error!("No active participants found in conversation {}", conversation.conversation_sid);
+        return Err("No active participants in conversation".into());
+    }
+
+    // Check if the user's number is still active in the conversation
+    let user_participant = participants.iter().find(|p| {
+        p.messaging_binding.as_ref()
+            .and_then(|b| b.address.as_ref())
+            .map_or(false, |addr| addr == &user.phone_number)
+    });
+
+    if user_participant.is_none() {
+        tracing::error!("User {} is no longer active in conversation {}", user.phone_number, conversation.conversation_sid);
+        return Err("User is no longer active in conversation".into());
+    }
     tracing::info!("Retrieved conversation with SID: {}", conversation.conversation_sid);
 
     tracing::info!("Sending message to conversation {}", conversation.conversation_sid);
     crate::api::twilio_utils::send_conversation_message(
         &conversation.conversation_sid,
-        &sender_number,
+        &conversation.twilio_number,
         message,
     )
     .await
@@ -151,7 +174,15 @@ pub async fn send_shazam_answer_to_user(
         e
     })?;
 
-    tracing::info!("Successfully sent Shazam answer to user {} at {}", user_id, user.phone_number);
+    // Add a small delay to ensure message ordering
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    tracing::info!("Successfully sent Shazam answer to user {} at {} using conversation {} and number {}", 
+        user_id, 
+        user.phone_number, 
+        conversation.conversation_sid,
+        conversation.twilio_number
+    );
 
     // Deduct credits for the message
     if let Err(e) = state.user_repository
@@ -239,9 +270,86 @@ pub async fn send_conversation_outmessage(
 pub async fn handle_incoming_sms(
     State(state): State<Arc<AppState>>,
     Form(payload): Form<TwilioWebhookPayload>,
-) -> impl IntoResponse {
+) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
     println!("Received SMS from: {} to: {}", payload.from, payload.to);
     println!("Message: {}", payload.body);
+
+    // Check for Shazam shortcut ('S' or 's')
+    if payload.body.trim() == "S" || payload.body.trim() == "s" {
+        println!("Shazam shortcut detected");
+        let user = match state.user_repository.find_by_phone_number(&payload.from) {
+            Ok(Some(user)) => user,
+            Ok(None) => return (
+                StatusCode::NOT_FOUND,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                axum::Json(TwilioResponse {
+                    message: "User not found".to_string(),
+                })
+            ),
+            Err(e) => {
+                eprintln!("Database error: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    axum::Json(TwilioResponse {
+                        message: "Database error".to_string(),
+                    })
+                );
+            }
+        };
+
+        // Check if user has enough credits
+        let message_credits_cost = std::env::var("MESSAGE_COST")
+            .expect("MESSAGE_COST not set")
+            .parse::<f32>()
+            .unwrap_or(0.20);
+
+        if user.credits < message_credits_cost {
+            return (
+                StatusCode::BAD_REQUEST,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                axum::Json(TwilioResponse {
+                    message: "Insufficient credits points to use Shazam.".to_string(),
+                })
+            );
+        }
+
+        // Check credits threshold and handle automatic charging
+        match state.user_repository.is_credits_under_threshold(user.id) {
+            Ok(is_under) => {
+                if is_under && user.charge_when_under {
+                    println!("User {} credits is under threshold, attempting automatic charge", user.id);
+                    use axum::extract::{State, Path};
+                    let state_clone = Arc::clone(&state);
+                    tokio::spawn(async move {
+                        let _ = crate::handlers::stripe_handlers::automatic_charge(
+                            State(state_clone),
+                            Path(user.id),
+                        ).await;
+                    });
+                    println!("Initiated automatic recharge for user");
+                }
+            },
+            Err(e) => eprintln!("Failed to check if user credits is under threshold: {}", e),
+        }
+
+        let user_id = user.id;
+        let state_clone = state.clone();
+        tokio::spawn(async move {
+            crate::api::shazam_call::start_call_for_user(
+                axum::extract::Path(user_id.to_string()),
+                axum::extract::State(state_clone),
+            ).await;
+        });
+
+        return (
+            StatusCode::OK,
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            axum::Json(TwilioResponse {
+                message: "Shazam call initiated".to_string(),
+            })
+        );
+    }
 
     // Check for STOP command
     if payload.body.trim().to_uppercase() == "STOP" {
@@ -251,6 +359,7 @@ pub async fn handle_incoming_sms(
             } else {
                 return (
                     StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
                     axum::Json(TwilioResponse {
                         message: "You have been unsubscribed from notifications.".to_string(),
                     })
@@ -271,6 +380,7 @@ pub async fn handle_incoming_sms(
     // Immediately return a success response to Twilio
     (
         StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
         axum::Json(TwilioResponse {
             message: "Message received, processing in progress".to_string(),
         })
