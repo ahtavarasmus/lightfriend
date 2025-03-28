@@ -439,14 +439,14 @@ let onclick_delete_calendar = {
                                                     })
                                                 };
                                                 html! {
-
+                                                /*
                                                     <button 
                                                         onclick={onclick_test}
                                                         class="test-button"
                                                     >
                                                         {"Test Calendar"}
                                                     </button>
-
+                                                */
                                                 }
 
                                             } else {
@@ -517,7 +517,7 @@ let onclick_delete_calendar = {
                                 <p class="service-description">
                                     {"Send and receive Gmail messages through SMS or voice calls."}
                                 </p>
-                                if props.user_id == 1 || props.user_id == 45 {
+                                if props.user_id == 1 {
                                     if *gmail_connected {
                                         <div class="gmail-controls">
                                             <button 
