@@ -495,7 +495,7 @@ let onclick_delete_calendar = {
                         </h3>
                         <div class="service-list">
                             // Gmail
-                            <div class="service-item">
+                            <div class="service-item coming-soon">
                                 <div class="service-header">
                                     <div class="service-name">
                                         <img src="https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg" alt="Gmail"/>
