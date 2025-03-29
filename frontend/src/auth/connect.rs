@@ -20,11 +20,15 @@ pub fn connect(props: &ConnectProps) -> Html {
     let connecting = use_state(|| false);
     let calendar_connected = use_state(|| false);
     let gmail_connected = use_state(|| false);
+    let imap_connected = use_state(|| false);
+    let imap_email = use_state(|| String::new());
+    let imap_password = use_state(|| String::new());
 
     // Check connection status on component mount
     {
         let calendar_connected = calendar_connected.clone();
         let gmail_connected = gmail_connected.clone();
+        let imap_connected = imap_connected.clone();
         use_effect_with_deps(
             move |_| {
                 if let Some(window) = web_sys::window() {
@@ -73,6 +77,29 @@ pub fn connect(props: &ConnectProps) -> Html {
                                             }
                                         } else {
                                             web_sys::console::log_1(&"Failed to check Gmail status".into());
+                                        }
+                                    }
+                                });
+                            }
+                            // Check Gmail IMAP status
+                            {
+                                let imap_connected = imap_connected.clone();
+                                let token = token.clone();
+                                spawn_local(async move {
+                                    let request = Request::get(&format!("{}/api/auth/gmail/imap/status", config::get_backend_url()))
+                                        .header("Authorization", &format!("Bearer {}", token))
+                                        .send()
+                                        .await;
+
+                                    if let Ok(response) = request {
+                                        if response.ok() {
+                                            if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                                    imap_connected.set(connected);
+                                                }
+                                            }
+                                        } else {
+                                            web_sys::console::log_1(&"Failed to check IMAP status".into());
                                         }
                                     }
                                 });
@@ -128,212 +155,288 @@ pub fn connect(props: &ConnectProps) -> Html {
         (),
     );
 
-let onclick_calendar = {
-        let connecting = connecting.clone();
-        let error = error.clone();
-        Callback::from(move |_: MouseEvent| {
+    let onclick_calendar = {
             let connecting = connecting.clone();
             let error = error.clone();
+            Callback::from(move |_: MouseEvent| {
+                let connecting = connecting.clone();
+                let error = error.clone();
 
-            connecting.set(true);
-            error.set(None);
+                connecting.set(true);
+                error.set(None);
 
-            if let Some(window) = web_sys::window() {
-                if let Ok(Some(storage)) = window.local_storage() {
-                    if let Ok(Some(token)) = storage.get_item("token") {
-                        web_sys::console::log_1(&format!("Initiating OAuth flow with token: {}", token).into());
-                        spawn_local(async move {
-                            let request = Request::get(&format!("{}/api/auth/google/calendar/login", config::get_backend_url()))
-                                .header("Authorization", &format!("Bearer {}", token))
-                                .header("Content-Type", "application/json");
+                if let Some(window) = web_sys::window() {
+                    if let Ok(Some(storage)) = window.local_storage() {
+                        if let Ok(Some(token)) = storage.get_item("token") {
+                            web_sys::console::log_1(&format!("Initiating OAuth flow with token: {}", token).into());
+                            spawn_local(async move {
+                                let request = Request::get(&format!("{}/api/auth/google/calendar/login", config::get_backend_url()))
+                                    .header("Authorization", &format!("Bearer {}", token))
+                                    .header("Content-Type", "application/json");
 
-                            match request.send().await {
-                                Ok(response) => {
-                                    if (200..300).contains(&response.status()) {
-                                        match response.json::<serde_json::Value>().await {
-                                            Ok(data) => {
-                                                if let Some(auth_url) = data.get("auth_url").and_then(|u| u.as_str()) {
-                                                    web_sys::console::log_1(&format!("Redirecting to auth_url: {}", auth_url).into());
-                                                    if let Some(window) = web_sys::window() {
-                                                        let _ = window.location().set_href(auth_url);
+                                match request.send().await {
+                                    Ok(response) => {
+                                        if (200..300).contains(&response.status()) {
+                                            match response.json::<serde_json::Value>().await {
+                                                Ok(data) => {
+                                                    if let Some(auth_url) = data.get("auth_url").and_then(|u| u.as_str()) {
+                                                        web_sys::console::log_1(&format!("Redirecting to auth_url: {}", auth_url).into());
+                                                        if let Some(window) = web_sys::window() {
+                                                            let _ = window.location().set_href(auth_url);
+                                                        }
+                                                    } else {
+                                                        web_sys::console::log_1(&"Missing auth_url in response".into());
+                                                        error.set(Some("Invalid response format: missing auth_url".to_string()));
                                                     }
-                                                } else {
-                                                    web_sys::console::log_1(&"Missing auth_url in response".into());
-                                                    error.set(Some("Invalid response format: missing auth_url".to_string()));
+                                                }
+                                                Err(e) => {
+                                                    web_sys::console::log_1(&format!("Failed to parse response: {}", e).into());
+                                                    error.set(Some(format!("Failed to parse response: {}", e)));
                                                 }
                                             }
-                                            Err(e) => {
-                                                web_sys::console::log_1(&format!("Failed to parse response: {}", e).into());
-                                                error.set(Some(format!("Failed to parse response: {}", e)));
-                                            }
-                                        }
-                                    } else {
-                                        match response.json::<serde_json::Value>().await {
-                                            Ok(error_data) => {
-                                                if let Some(error_msg) = error_data.get("error").and_then(|e| e.as_str()) {
-                                                    web_sys::console::log_1(&format!("Server error: {}", error_msg).into());
-                                                    error.set(Some(error_msg.to_string()));
-                                                } else {
+                                        } else {
+                                            match response.json::<serde_json::Value>().await {
+                                                Ok(error_data) => {
+                                                    if let Some(error_msg) = error_data.get("error").and_then(|e| e.as_str()) {
+                                                        web_sys::console::log_1(&format!("Server error: {}", error_msg).into());
+                                                        error.set(Some(error_msg.to_string()));
+                                                    } else {
+                                                        web_sys::console::log_1(&format!("Server error: Status {}", response.status()).into());
+                                                        error.set(Some(format!("Server error: {}", response.status())));
+                                                    }
+                                                }
+                                                Err(_) => {
                                                     web_sys::console::log_1(&format!("Server error: Status {}", response.status()).into());
                                                     error.set(Some(format!("Server error: {}", response.status())));
                                                 }
                                             }
-                                            Err(_) => {
-                                                web_sys::console::log_1(&format!("Server error: Status {}", response.status()).into());
-                                                error.set(Some(format!("Server error: {}", response.status())));
-                                            }
                                         }
                                     }
+                                    Err(e) => {
+                                        web_sys::console::log_1(&format!("Network error: {}", e).into());
+                                        error.set(Some(format!("Network error: {}", e)));
+                                    }
                                 }
-                                Err(e) => {
-                                    web_sys::console::log_1(&format!("Network error: {}", e).into());
-                                    error.set(Some(format!("Network error: {}", e)));
-                                }
-                            }
+                                connecting.set(false);
+                            });
+                        } else {
+                            web_sys::console::log_1(&"No token found in localStorage".into());
+                            error.set(Some("Not authenticated".to_string()));
                             connecting.set(false);
-                        });
-                    } else {
-                        web_sys::console::log_1(&"No token found in localStorage".into());
-                        error.set(Some("Not authenticated".to_string()));
-                        connecting.set(false);
+                        }
                     }
                 }
-            }
-        })
-    };
+            })
+        };
 
-let onclick_gmail = {
-        let connecting = connecting.clone();
-        let error = error.clone();
-        Callback::from(move |_: MouseEvent| {
+        let onclick_gmail = {
             let connecting = connecting.clone();
             let error = error.clone();
+            Callback::from(move |_: MouseEvent| {
+                let connecting = connecting.clone();
+                let error = error.clone();
 
-            connecting.set(true);
-            error.set(None);
+                connecting.set(true);
+                error.set(None);
 
-            if let Some(window) = web_sys::window() {
-                if let Ok(Some(storage)) = window.local_storage() {
-                    if let Ok(Some(token)) = storage.get_item("token") {
-                        spawn_local(async move {
-                            let request = Request::get(&format!("{}/api/auth/google/gmail/login", config::get_backend_url()))
-                                .header("Authorization", &format!("Bearer {}", token))
-                                .header("Content-Type", "application/json");
+                if let Some(window) = web_sys::window() {
+                    if let Ok(Some(storage)) = window.local_storage() {
+                        if let Ok(Some(token)) = storage.get_item("token") {
+                            spawn_local(async move {
+                                let request = Request::get(&format!("{}/api/auth/google/gmail/login", config::get_backend_url()))
+                                    .header("Authorization", &format!("Bearer {}", token))
+                                    .header("Content-Type", "application/json");
 
-                            match request.send().await {
-                                Ok(response) => {
-                                if (200..300).contains(&response.status()) {
-                                        match response.json::<serde_json::Value>().await {
-                                            Ok(data) => {
-                                                if let Some(auth_url) = data.get("auth_url").and_then(|u| u.as_str()) {
-                                                    if let Some(window) = web_sys::window() {
-                                                        let _ = window.location().set_href(auth_url);
+                                match request.send().await {
+                                    Ok(response) => {
+                                    if (200..300).contains(&response.status()) {
+                                            match response.json::<serde_json::Value>().await {
+                                                Ok(data) => {
+                                                    if let Some(auth_url) = data.get("auth_url").and_then(|u| u.as_str()) {
+                                                        if let Some(window) = web_sys::window() {
+                                                            let _ = window.location().set_href(auth_url);
+                                                        }
+                                                    } else {
+                                                        error.set(Some("Invalid response format: missing auth_url".to_string()));
                                                     }
-                                                } else {
-                                                    error.set(Some("Invalid response format: missing auth_url".to_string()));
+                                                }
+                                                Err(e) => {
+                                                    error.set(Some(format!("Failed to parse response: {}", e)));
                                                 }
                                             }
-                                            Err(e) => {
-                                                error.set(Some(format!("Failed to parse response: {}", e)));
-                                            }
-                                        }
-                                    } else {
-                                        match response.json::<serde_json::Value>().await {
-                                            Ok(error_data) => {
-                                                if let Some(error_msg) = error_data.get("error").and_then(|e| e.as_str()) {
-                                                    error.set(Some(error_msg.to_string()));
-                                                } else {
+                                        } else {
+                                            match response.json::<serde_json::Value>().await {
+                                                Ok(error_data) => {
+                                                    if let Some(error_msg) = error_data.get("error").and_then(|e| e.as_str()) {
+                                                        error.set(Some(error_msg.to_string()));
+                                                    } else {
+                                                        error.set(Some(format!("Server error: {}", response.status())));
+                                                    }
+                                                }
+                                                Err(_) => {
                                                     error.set(Some(format!("Server error: {}", response.status())));
                                                 }
                                             }
-                                            Err(_) => {
-                                                error.set(Some(format!("Server error: {}", response.status())));
-                                            }
                                         }
                                     }
+                                    Err(e) => {
+                                        error.set(Some(format!("Network error: {}", e)));
+                                    }
                                 }
-                                Err(e) => {
-                                    error.set(Some(format!("Network error: {}", e)));
-                                }
-                            }
+                                connecting.set(false);
+                            });
+                        } else {
+                            error.set(Some("Not authenticated".to_string()));
                             connecting.set(false);
-                        });
-                    } else {
-                        error.set(Some("Not authenticated".to_string()));
-                        connecting.set(false);
+                        }
                     }
                 }
-            }
-        })
-    };
+            })
+        };
 
-let onclick_delete_gmail = {
-        let gmail_connected = gmail_connected.clone();
-        let error = error.clone();
-        Callback::from(move |_: MouseEvent| {
+        let onclick_delete_gmail = {
             let gmail_connected = gmail_connected.clone();
             let error = error.clone();
+            Callback::from(move |_: MouseEvent| {
+                let gmail_connected = gmail_connected.clone();
+                let error = error.clone();
 
-            if let Some(window) = web_sys::window() {
-                if let Ok(Some(storage)) = window.local_storage() {
-                    if let Ok(Some(token)) = storage.get_item("token") {
-                        spawn_local(async move {
-                            let request = Request::delete(&format!("{}/api/auth/google/gmail/delete_connection", config::get_backend_url()))
-                                .header("Authorization", &format!("Bearer {}", token))
-                                .send()
-                                .await;
+                if let Some(window) = web_sys::window() {
+                    if let Ok(Some(storage)) = window.local_storage() {
+                        if let Ok(Some(token)) = storage.get_item("token") {
+                            spawn_local(async move {
+                                let request = Request::delete(&format!("{}/api/auth/google/gmail/delete_connection", config::get_backend_url()))
+                                    .header("Authorization", &format!("Bearer {}", token))
+                                    .send()
+                                    .await;
 
-                            match request {
-                                Ok(response) => {
-                                    if response.ok() {
-                                        gmail_connected.set(false);
-                                    } else {
-                                        if let Ok(error_data) = response.json::<serde_json::Value>().await {
-                                            if let Some(error_msg) = error_data.get("error").and_then(|e| e.as_str()) {
-                                                error.set(Some(error_msg.to_string()));
-                                            } else {
-                                                error.set(Some(format!("Failed to delete connection: {}", response.status())));
+                                match request {
+                                    Ok(response) => {
+                                        if response.ok() {
+                                            gmail_connected.set(false);
+                                        } else {
+                                            if let Ok(error_data) = response.json::<serde_json::Value>().await {
+                                                if let Some(error_msg) = error_data.get("error").and_then(|e| e.as_str()) {
+                                                    error.set(Some(error_msg.to_string()));
+                                                } else {
+                                                    error.set(Some(format!("Failed to delete connection: {}", response.status())));
+                                                }
                                             }
                                         }
                                     }
+                                    Err(e) => {
+                                        error.set(Some(format!("Network error: {}", e)));
+                                    }
                                 }
-                                Err(e) => {
-                                    error.set(Some(format!("Network error: {}", e)));
-                                }
-                            }
-                        });
+                            });
+                        }
                     }
                 }
-            }
+            })
+        };
+
+        let onclick_delete_calendar = {
+                let calendar_connected = calendar_connected.clone();
+                let error = error.clone();
+                Callback::from(move |_: MouseEvent| {
+                    let calendar_connected = calendar_connected.clone();
+                    let error = error.clone();
+
+                    if let Some(window) = web_sys::window() {
+                        if let Ok(Some(storage)) = window.local_storage() {
+                            if let Ok(Some(token)) = storage.get_item("token") {
+                                spawn_local(async move {
+                                    let request = Request::delete(&format!("{}/api/auth/google/calendar/connection", config::get_backend_url()))
+                                        .header("Authorization", &format!("Bearer {}", token))
+                                        .send()
+                                        .await;
+
+                                    match request {
+                                        Ok(response) => {
+                                            if response.ok() {
+                                                calendar_connected.set(false);
+                                            } else {
+                                                if let Ok(error_data) = response.json::<serde_json::Value>().await {
+                                                    if let Some(error_msg) = error_data.get("error").and_then(|e| e.as_str()) {
+                                                        error.set(Some(error_msg.to_string()));
+                                                    } else {
+                                                        error.set(Some(format!("Failed to delete connection: {}", response.status())));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error.set(Some(format!("Network error: {}", e)));
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                })
+            };
+
+        // New handlers for IMAP email and password input
+    let onchange_imap_email = {
+        let imap_email = imap_email.clone();
+        Callback::from(move |e: Event| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            imap_email.set(input.value());
         })
     };
 
-let onclick_delete_calendar = {
-        let calendar_connected = calendar_connected.clone();
+    let onchange_imap_password = {
+        let imap_password = imap_password.clone();
+        Callback::from(move |e: Event| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            imap_password.set(input.value());
+        })
+    };
+
+    // Handler for connecting IMAP
+    let onclick_imap_connect = {
+        let imap_email_value = imap_email.clone();
+        let imap_password_value = imap_password.clone();
+        let imap_connected = imap_connected.clone();
         let error = error.clone();
+        let imap_email_setter = imap_email.clone();
+        let imap_password_setter = imap_password.clone();
+        
         Callback::from(move |_: MouseEvent| {
-            let calendar_connected = calendar_connected.clone();
+            let email = (*imap_email_value).clone();
+            let password = (*imap_password_value).clone();
+            let imap_connected = imap_connected.clone();
             let error = error.clone();
+            let imap_email_setter = imap_email_setter.clone();
+            let imap_password_setter = imap_password_setter.clone();
 
             if let Some(window) = web_sys::window() {
                 if let Ok(Some(storage)) = window.local_storage() {
                     if let Ok(Some(token)) = storage.get_item("token") {
                         spawn_local(async move {
-                            let request = Request::delete(&format!("{}/api/auth/google/calendar/connection", config::get_backend_url()))
+                            let payload = serde_json::json!({
+                                "email": email,
+                                "password": password,
+                            });
+                            let request = Request::post(&format!("{}/api/auth/gmail/imap/login", config::get_backend_url()))
                                 .header("Authorization", &format!("Bearer {}", token))
-                                .send()
-                                .await;
+                                .header("Content-Type", "application/json")
+                                .json(&payload)
+                                .unwrap();
 
-                            match request {
+                            match request.send().await {
                                 Ok(response) => {
                                     if response.ok() {
-                                        calendar_connected.set(false);
+                                        imap_connected.set(true);
+                                        imap_email_setter.set(String::new());
+                                        imap_password_setter.set(String::new());
+                                        error.set(None); // Clear error on success
                                     } else {
                                         if let Ok(error_data) = response.json::<serde_json::Value>().await {
                                             if let Some(error_msg) = error_data.get("error").and_then(|e| e.as_str()) {
                                                 error.set(Some(error_msg.to_string()));
                                             } else {
-                                                error.set(Some(format!("Failed to delete connection: {}", response.status())));
+                                                error.set(Some(format!("Failed to connect: {}", response.status())));
                                             }
                                         }
                                     }
@@ -348,6 +451,49 @@ let onclick_delete_calendar = {
             }
         })
     };
+
+            // Handler for disconnecting IMAP
+            let onclick_imap_disconnect = {
+                let imap_connected = imap_connected.clone();
+                let error = error.clone();
+                Callback::from(move |_: MouseEvent| {
+                    let imap_connected = imap_connected.clone();
+                    let error = error.clone();
+
+                    if let Some(window) = web_sys::window() {
+                        if let Ok(Some(storage)) = window.local_storage() {
+                            if let Ok(Some(token)) = storage.get_item("token") {
+                                spawn_local(async move {
+                                    let request = Request::delete(&format!("{}/api/auth/gmail/imap/disconnect", config::get_backend_url()))
+                                        .header("Authorization", &format!("Bearer {}", token))
+                                        .send()
+                                        .await;
+
+                                    match request {
+                                        Ok(response) => {
+                                            if response.ok() {
+                                                imap_connected.set(false);
+                                                error.set(None); // Clear error on success
+                                            } else {
+                                                if let Ok(error_data) = response.json::<serde_json::Value>().await {
+                                                    if let Some(error_msg) = error_data.get("error").and_then(|e| e.as_str()) {
+                                                        error.set(Some(error_msg.to_string()));
+                                                    } else {
+                                                        error.set(Some(format!("Failed to disconnect: {}", response.status())));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            error.set(Some(format!("Network error: {}", e)));
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                })
+            };
 
             html! {
                 <div class="connect-section">
@@ -494,133 +640,222 @@ let onclick_delete_calendar = {
                             {"Email Services"}
                         </h3>
                         <div class="service-list">
-                            // Gmail
-                            <div class="service-item coming-soon">
+                            // Gmail via IMAP section
+                            <div class="service-item">
                                 <div class="service-header">
                                     <div class="service-name">
-                                        <img src="https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg" alt="Gmail"/>
-                                        {"Gmail"}
+                                        <img src="https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg" alt="Gmail via IMAP"/>
+                                        {"Gmail via IMAP"}
+                                    </div>
+                                    if *imap_connected {
+                                        <span class="service-status">{"Connected ✓"}</span>
+                                    }
+                                </div>
+                                <p class="service-description">
+                                    {"Connect your Gmail account using IMAP to send and receive emails through SMS or voice calls. "}
+                                    <strong>{"You can create an app password "}</strong>
+                                    <a class="nice-link" href="https://support.google.com/accounts/answer/185833" target="_blank">{"here."}</a>
+                                    <strong>{" Regular passwords won't work. "}</strong>
+                                </p>
+                                if *imap_connected {
+                                    <div class="gmail-controls">
+                                        <button 
+                                            onclick={onclick_imap_disconnect}
+                                            class="disconnect-button"
+                                        >
+                                            {"Disconnect"}
+                                        </button>
                                         {
-                                            if props.user_id != 1 {
+                                            if props.user_id == 1 {
                                                 html! {
-                                                    <span class="coming-soon-tag">{"Coming Soon"}</span>
+                                                    <>
+                                                        <button
+                                                            onclick={
+                                                                let error = error.clone();
+                                                                Callback::from(move |_: MouseEvent| {
+                                                                    let error = error.clone();
+                                                                    if let Some(window) = web_sys::window() {
+                                                                        if let Ok(Some(storage)) = window.local_storage() {
+                                                                            if let Ok(Some(token)) = storage.get_item("token") {
+                                                                                spawn_local(async move {
+                                                                                    let request = Request::get(&format!("{}/api/gmail/imap/previews", config::get_backend_url()))
+                                                                                        .header("Authorization", &format!("Bearer {}", token))
+                                                                                        .send()
+                                                                                        .await;
+
+                                                                                    match request {
+                                                                                        Ok(response) => {
+                                                                                            if response.status() == 200 {
+                                                                                                if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                                                                    web_sys::console::log_1(&format!("IMAP previews: {:?}", data).into());
+                                                                                                }
+                                                                                            } else {
+                                                                                                error.set(Some("Failed to fetch IMAP previews".to_string()));
+                                                                                            }
+                                                                                        }
+                                                                                        Err(e) => {
+                                                                                            error.set(Some(format!("Network error: {}", e)));
+                                                                                        }
+                                                                                    }
+                                                                                });
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                })
+                                                            }
+                                                            class="test-button"
+                                                        >
+                                                            {"Test IMAP Previews"}
+                                                        </button>
+                                                        <button
+                                                            onclick={
+                                                                let error = error.clone();
+                                                                Callback::from(move |_: MouseEvent| {
+                                                                    let error = error.clone();
+                                                                    if let Some(window) = web_sys::window() {
+                                                                        if let Ok(Some(storage)) = window.local_storage() {
+                                                                            if let Ok(Some(token)) = storage.get_item("token") {
+                                                                                spawn_local(async move {
+                                                                                    let request = Request::get(&format!("{}/api/gmail/imap/full_emails", config::get_backend_url()))
+                                                                                        .header("Authorization", &format!("Bearer {}", token))
+                                                                                        .send()
+                                                                                        .await;
+
+                                                                                    match request {
+                                                                                        Ok(response) => {
+                                                                                            if response.status() == 200 {
+                                                                                                if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                                                                    web_sys::console::log_1(&format!("IMAP full emails: {:?}", data).into());
+                                                                                                }
+                                                                                            } else {
+                                                                                                error.set(Some("Failed to fetch full IMAP emails".to_string()));
+                                                                                            }
+                                                                                        }
+                                                                                        Err(e) => {
+                                                                                            error.set(Some(format!("Network error: {}", e)));
+                                                                                        }
+                                                                                    }
+                                                                                });
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                })
+                                                            }
+                                                            class="test-button"
+                                                        >
+                                                            {"Test Full Emails"}
+                                                        </button>
+                                                        <button
+                                                            onclick={
+                                                                let error = error.clone();
+                                                                Callback::from(move |_: MouseEvent| {
+                                                                    let error = error.clone();
+                                                                    if let Some(window) = web_sys::window() {
+                                                                        if let Ok(Some(storage)) = window.local_storage() {
+                                                                            if let Ok(Some(token)) = storage.get_item("token") {
+                                                                                spawn_local(async move {
+                                                                                    // Fetch first message from previews to test single message fetch
+                                                                                    let previews_request = Request::get(&format!("{}/api/gmail/imap/previews", config::get_backend_url()))
+                                                                                        .header("Authorization", &format!("Bearer {}", token))
+                                                                                        .send()
+                                                                                        .await;
+
+                                                                                    match previews_request {
+                                                                                        Ok(response) => {
+                                                                                            if response.status() == 200 {
+                                                                                                if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                                                                    if let Some(previews) = data.get("previews").and_then(|p| p.as_array()) {
+                                                                                                        if let Some(first_message) = previews.first() {
+                                                                                                            if let Some(id) = first_message.get("id").and_then(|i| i.as_str()) {
+                                                                                                                let message_request = Request::get(&format!("{}/api/gmail/imap/message/{}", config::get_backend_url(), id))
+                                                                                                                    .header("Authorization", &format!("Bearer {}", token))
+                                                                                                                    .send()
+                                                                                                                    .await;
+
+                                                                                                                match message_request {
+                                                                                                                    Ok(msg_response) => {
+                                                                                                                        if msg_response.status() == 200 {
+                                                                                                                            if let Ok(msg_data) = msg_response.json::<serde_json::Value>().await {
+                                                                                                                                web_sys::console::log_1(&format!("IMAP single message: {:?}", msg_data).into());
+                                                                                                                            }
+                                                                                                                        } else {
+                                                                                                                            error.set(Some("Failed to fetch single IMAP message".to_string()));
+                                                                                                                        }
+                                                                                                                    }
+                                                                                                                    Err(e) => {
+                                                                                                                        error.set(Some(format!("Network error: {}", e)));
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            }
+                                                                                                        }
+                                                                                                    }
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                        Err(e) => {
+                                                                                            error.set(Some(format!("Network error: {}", e)));
+                                                                                        }
+                                                                                    }
+                                                                                });
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                })
+                                                            }
+                                                            class="test-button"
+                                                        >
+                                                            {"Test Single Message"}
+                                                        </button>
+                                                    </>
                                                 }
                                             } else {
                                                 html! {}
                                             }
                                         }
                                     </div>
-                                    if *gmail_connected {
-                                        <span class="service-status">{"Connected ✓"}</span>
-                                    }
+                                } else {
+                                    <div class="imap-form">
+                                        <input
+                                            type="email"
+                                            placeholder="Gmail address"
+                                            value={(*imap_email).clone()}
+                                            onchange={onchange_imap_email}
+                                        />
+                                        <input
+                                            type="password"
+                                            placeholder="Password or App Password"
+                                            value={(*imap_password).clone()}
+                                            onchange={onchange_imap_password}
+                                        />
+                                        <button 
+                                            onclick={onclick_imap_connect}
+                                            class="connect-button"
+                                        >
+                                            {"Connect"}
+                                        </button>
+                                    </div>
+                                }
+                            </div>
+
+                            // Gmail (Commented out in favor of IMAP implementation)
+                            /*
+                            <div class="service-item coming-soon">
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        <img src="https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg" alt="Gmail"/>
+                                        {"Gmail"}
+                                        <span class="coming-soon-tag">{"Coming Soon"}</span>
+                                    </div>
+
                                 </div>
                                 <p class="service-description">
                                     {"Send and receive Gmail messages through SMS or voice calls."}
                                 </p>
-                                if props.user_id == 1 {
-                                    if *gmail_connected {
-                                        <div class="gmail-controls">
-                                            <button 
-                                                onclick={onclick_delete_gmail}
-                                                class="disconnect-button"
-                                            >
-                                                {"Disconnect"}
-                                            </button>
-                                            <button
-                                                onclick={
-                                                    let error = error.clone();
-                                                    Callback::from(move |_: MouseEvent| {
-                                                        let error = error.clone();
-                                                        if let Some(window) = web_sys::window() {
-                                                            if let Ok(Some(storage)) = window.local_storage() {
-                                                                if let Ok(Some(token)) = storage.get_item("token") {
-                                                                    spawn_local(async move {
-                                                                        let request = Request::get(&format!("{}/api/gmail/previews", config::get_backend_url()))
-                                                                            .header("Authorization", &format!("Bearer {}", token))
-                                                                            .send()
-                                                                            .await;
-
-                                                                        match request {
-                                                                            Ok(response) => {
-                                                                                if response.status() == 200 {
-                                                                                    if let Ok(data) = response.json::<serde_json::Value>().await {
-                                                                                        web_sys::console::log_1(&format!("Gmail previews: {:?}", data).into());
-                                                                                    }
-                                                                                } else {
-                                                                                    error.set(Some("Failed to fetch Gmail previews".to_string()));
-                                                                                }
-                                                                            }
-                                                                            Err(e) => {
-                                                                                error.set(Some(format!("Network error: {}", e)));
-                                                                            }
-                                                                        }
-                                                                    });
-                                                                }
-                                                            }
-                                                        }
-                                                    })
-                                                }
-                                                class="test-button"
-                                            >
-                                                {"Test Previews"}
-                                            </button>
-                                            <button 
-                                                onclick={
-                                                    let error = error.clone();
-                                                    Callback::from(move |_: MouseEvent| {
-                                                        let error = error.clone();
-                                                        if let Some(window) = web_sys::window() {
-                                                            if let Ok(Some(storage)) = window.local_storage() {
-                                                                if let Ok(Some(token)) = storage.get_item("token") {
-                                                                    spawn_local(async move {
-                                                                        let request = Request::get(&format!("{}/api/auth/google/gmail/test_fetch", config::get_backend_url()))
-                                                                            .header("Authorization", &format!("Bearer {}", token))
-                                                                            .send()
-                                                                            .await;
-
-                                                                        match request {
-                                                                            Ok(response) => {
-                                                                                if response.status() == 200 {
-                                                                                    if let Ok(data) = response.json::<serde_json::Value>().await {
-                                                                                        web_sys::console::log_1(&format!("Gmail test fetch result: {:?}", data).into());
-                                                                                    }
-                                                                                } else {
-                                                                                    error.set(Some("Failed to fetch Gmail messages".to_string()));
-                                                                                }
-                                                                            }
-                                                                            Err(e) => {
-                                                                                error.set(Some(format!("Network error: {}", e)));
-                                                                            }
-                                                                        }
-                                                                    });
-                                                                }
-                                                            }
-                                                        }
-                                                    })
-                                                }
-                                                class="test-button"
-                                            >
-                                                {"Test Gmail"}
-                                            </button>
-                                        </div>
-                                    } else {
-                                        <button 
-                                            onclick={onclick_gmail} 
-                                            class="connect-button"
-                                        >
-                                            if *connecting {
-                                                {"Connecting..."}
-                                            } else {
-                                                {"Connect"}
-                                            }
-                                        </button>
-                                    }
-                                } else {
-                                    <button class="connect-button" disabled=true>
-                                        {"Connect"}
-                                    </button>
-                                }
+                                <button class="connect-button" disabled=true>
+                                    {"Connect"}
+                                </button>
                             </div>
+                            */
 
                             // Outlook (Coming Soon)
                             <div class="service-item coming-soon">

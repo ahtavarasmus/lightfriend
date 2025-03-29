@@ -1,5 +1,5 @@
 use reqwest::Client;
-use crate::gmail::GmailError;
+use crate::handlers::gmail_imap::ImapError;
 use std::env;
 use std::error::Error;
 use std::sync::Arc;
@@ -581,13 +581,12 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         }),
     );
 
-    // TODO not used right now
-    let mut gmail_properties= HashMap::new();
-    gmail_properties.insert(
-        "number".to_string(),
+    let mut imap_properties = HashMap::new();
+    imap_properties.insert(
+        "param".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Number of eamils to fetch. If not specified, should be set to 5.".to_string()),
+            description: Some("Can be anything, will fetch last 5 emails regardless".to_string()),
             ..Default::default()
         }),
     );
@@ -597,34 +596,35 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         "query".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Description of the email you're looking for. Be specific about subject, sender, or content.".to_string()),
+            description: Some("The search query to find a specific email".to_string()),
             ..Default::default()
         }),
     );
+
 
     // Define tools
     let tools = vec![
         chat_completion::Tool {
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
-                name: String::from("fetch_specific_email"),
-                description: Some(String::from("Find and fetch a specific email based on user's description. Use this when user asks about a particular email or wants to find an email with specific content.")),
+                name: String::from("fetch_imap_emails"),
+                description: Some(String::from("Fetches the last 5 emails using IMAP. Use this when user asks about their recent emails or wants to check their inbox.")),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
-                    properties: Some(specific_email_properties),
-                    required: Some(vec![String::from("query")]),
+                    properties: Some(imap_properties),
+                    required: None,
                 },
             },
         },
         chat_completion::Tool {
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
-                name: String::from("gmail_latest"),
-                description: Some(String::from("Gmail tool fetches the user's latest emails.")),
+                name: String::from("fetch_specific_email"),
+                description: Some(String::from("Search and fetch a specific email based on a query. Use this when user asks about a specific email or wants to find an email about a particular topic.")),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
-                    properties: Some(gmail_properties),
-                    required: None,
+                    properties: Some(specific_email_properties),
+                    required: Some(vec![String::from("query")]),
                 },
             },
         },
@@ -902,6 +902,64 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                             message: "Shazam call initiated".to_string(),
                         })
                     );
+                } else if name == "fetch_imap_emails" {
+                    println!("Executing fetch_imap_emails tool call");
+                    match crate::handlers::gmail_imap::fetch_full_imap_emails(
+                        axum::extract::State(state.clone()),
+                        auth_user,
+                    ).await {
+                        Ok(Json(response)) => {
+                            if let Some(emails) = response.get("emails") {
+                                if let Some(emails_array) = emails.as_array() {
+                                    let mut response = String::new();
+                                    for (i, email) in emails_array.iter().take(5).enumerate() {
+                                        let subject = email.get("subject").and_then(|s| s.as_str()).unwrap_or("No subject");
+                                        let from = email.get("from").and_then(|f| f.as_str()).unwrap_or("Unknown sender");
+                                        let date = email.get("date").and_then(|d| d.as_str())
+                                            .and_then(|d| chrono::DateTime::parse_from_rfc3339(d).ok())
+                                            .map(|d| d.format("%m/%d").to_string())
+                                            .unwrap_or_else(|| "No date".to_string());
+                                        let body = email.get("body").and_then(|b| b.as_str()).unwrap_or("");
+                                        let snippet = if body.len() > 100 {
+                                            format!("{}...", body.chars().take(100).collect::<String>())
+                                        } else {
+                                            body.to_string()
+                                        };
+                                        
+                                        if i == 0 {
+                                            response.push_str(&format!("{}. {} from {} ({}):\n{}", i + 1, subject, from, date, snippet));
+                                        } else {
+                                            response.push_str(&format!("\n\n{}. {} from {} ({}):\n{}", i + 1, subject, from, date, snippet));
+                                        }
+                                    }
+                                    
+                                    if emails_array.len() > 5 {
+                                        response.push_str(&format!("\n\n(+ {} more emails)", emails_array.len() - 5));
+                                    }
+                                    
+                                    if emails_array.is_empty() {
+                                        response = "No recent emails found.".to_string();
+                                    }
+                                    
+                                    tool_answers.insert(tool_call_id, response);
+                                } else {
+                                    tool_answers.insert(tool_call_id, "Failed to parse emails.".to_string());
+                                }
+                            } else {
+                                tool_answers.insert(tool_call_id, "No emails found.".to_string());
+                            }
+
+                        }
+                        Err((status, Json(error))) => {
+                            let error_message = match status {
+                                StatusCode::BAD_REQUEST => "No IMAP connection found. Please check your email settings.",
+                                StatusCode::UNAUTHORIZED => "Your email credentials need to be updated.",
+                                _ => "Failed to fetch emails. Please try again later.",
+                            };
+                            tool_answers.insert(tool_call_id, error_message.to_string());
+                            eprintln!("Failed to fetch IMAP emails: {:?}", error);
+                        }
+                    }
                 } else if name == "fetch_specific_email" {
                     println!("Executing fetch_specific_email tool call");
                     #[derive(Deserialize)]
@@ -917,8 +975,8 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                         }
                     };
 
-                    // First fetch previews
-                    match crate::handlers::gmail::fetch_gmail_previews(&state, user.id, Some(20)).await {
+                    // First fetch previews using IMAP
+                    match crate::handlers::gmail_imap::fetch_emails_imap(&state, user.id, true).await {
                         Ok(previews) => {
                             if previews.is_empty() {
                                 tool_answers.insert(tool_call_id, "No emails found.".to_string());
@@ -930,18 +988,21 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                                 role: chat_completion::MessageRole::system,
                                 content: chat_completion::Content::Text(
                                     "You are an email matcher. Given a list of email previews and a search query, \
-                                    find the most relevant email. Return ONLY the ID of the most relevant email, or \
-                                    'NONE' if no email matches well. Consider subject, sender, and snippet in your matching.".to_string()
+                                    find the most relevant email. The emails are sorted from newest to oldest. \
+                                    When multiple emails match the query similarly well, prefer the newer ones. \
+                                    Return ONLY the ID of the most relevant email, or 'NONE' if no email matches well. \
+                                    Consider subject, sender, date, and snippet in your matching, with a bias towards \
+                                    more recent emails.".to_string()
                                 ),
                                 name: None,
                                 tool_calls: None,
                                 tool_call_id: None,
                             };
 
-                            // Create the content for matching
+                            // Create the content for matching, ensuring newest emails are considered first
                             let emails_json = serde_json::json!({
                                 "query": query.query,
-                                "emails": previews.iter().map(|p| {
+                                "emails": previews.iter().rev().map(|p| {  // Reverse to prioritize newer emails
                                     serde_json::json!({
                                         "id": p.id,
                                         "subject": p.subject,
@@ -973,29 +1034,32 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                                         continue;
                                     }
 
-                                    // Fetch the specific email
-                                    match crate::handlers::gmail::fetch_single_email(
-                                        axum::extract::State(state.clone()),
-                                        auth_user,
-                                        email_id.trim().to_string()
+                                    // Fetch the specific email using IMAP
+                                    match crate::handlers::gmail_imap::fetch_single_email_imap(
+                                        &state,
+                                        user.id,
+                                        email_id.trim()
                                     ).await {
-                                        Ok(Json(response)) => {
-                                            if let Some(email) = response.get("email") {
-                                                let formatted_response = format!(
-                                                    "Found email: From: {}, Subject: {}, Date: {}\n\n{}",
-                                                    email.get("from").and_then(|v| v.as_str()).unwrap_or("Unknown"),
-                                                    email.get("subject").and_then(|v| v.as_str()).unwrap_or("No subject"),
-                                                    email.get("date").and_then(|v| v.as_str()).unwrap_or("No date"),
-                                                    email.get("body").and_then(|v| v.as_str()).unwrap_or("No content")
-                                                );
-                                                tool_answers.insert(tool_call_id, formatted_response);
-                                            } else {
-                                                tool_answers.insert(tool_call_id, "Failed to fetch email details.".to_string());
-                                            }
+                                        Ok(email) => {
+                                            let formatted_response = format!(
+                                                "Found email: From: {}, Subject: {}, Date: {}\n\n{}",
+                                                email.from.unwrap_or_else(|| "Unknown".to_string()),
+                                                email.subject.unwrap_or_else(|| "No subject".to_string()),
+                                                email.date.map_or("No date".to_string(), |d| d.to_rfc3339()),
+                                                email.body.unwrap_or_else(|| "No content".to_string())
+                                            );
+                                            tool_answers.insert(tool_call_id, formatted_response);
                                         }
-                                        Err((_, Json(error))) => {
-                                            tool_answers.insert(tool_call_id, format!("Error fetching email: {}", 
-                                                error.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error")));
+                                        Err(e) => {
+                                            let error_message = match e {
+                                                ImapError::NoConnection => "No IMAP connection found. Please check your email settings.",
+                                                ImapError::CredentialsError(_) => "Your email credentials need to be updated.",
+                                                ImapError::ConnectionError(msg) | ImapError::FetchError(msg) | ImapError::ParseError(msg) => {
+                                                    eprintln!("Failed to fetch specific email: {}", msg);
+                                                    "Failed to fetch the email. Please try again later."
+                                                }
+                                            };
+                                            tool_answers.insert(tool_call_id, error_message.to_string());
                                         }
                                     }
                                 }
@@ -1007,56 +1071,11 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                         }
                         Err(e) => {
                             let error_message = match e {
-                                GmailError::NoConnection => "No active Gmail connection found. Visit the website to connect.",
-                                GmailError::TokenError(_) | GmailError::InvalidRefreshToken => 
-                                    "Your Gmail connection needs to be renewed. Please reconnect on the website.",
-                                GmailError::ApiError(msg) | GmailError::ParseError(msg) => {
-                                    eprintln!("Failed to fetch Gmail previews: {}", msg);
-                                    "Failed to fetch Gmail previews. Please try again later."
-                                }
-                            };
-                            tool_answers.insert(tool_call_id, error_message.to_string());
-                        }
-                    }
-                } else if name == "gmail_latest" {
-                    println!("Executing gmail_latest tool call");
-                    match crate::handlers::gmail::fetch_gmail_previews(
-                        &state,
-                        user.id,
-                        Some(5),
-                    ).await {
-                        Ok(previews) => {
-                            let mut response = String::new();
-                            for (i, preview) in previews.iter().take(5).enumerate() {
-                                let subject = preview.subject.as_deref().unwrap_or("No subject");
-                                let from = preview.from.as_deref().unwrap_or("Unknown sender");
-                                let date = preview.date.map(|d| d.format("%m/%d").to_string()).unwrap_or_else(|| "No date".to_string());
-                                
-                                if i == 0 {
-                                    response.push_str(&format!("{}. {} from {} ({})", i + 1, subject, from, date));
-                                } else {
-                                    response.push_str(&format!(", {}. {} from {} ({})", i + 1, subject, from, date));
-                                }
-                            }
-                            
-                            if previews.len() > 5 {
-                                response.push_str(&format!(" (+ {} more)", previews.len() - 5));
-                            }
-                            
-                            if previews.is_empty() {
-                                response = "No recent emails found.".to_string();
-                            }
-                            
-                            tool_answers.insert(tool_call_id, response);
-                        }
-                        Err(e) => {
-                            let error_message = match e {
-                                GmailError::NoConnection => "No active Gmail connection found. Visit the website to connect.",
-                                GmailError::TokenError(_) | GmailError::InvalidRefreshToken => 
-                                    "Your Gmail connection needs to be renewed. Please reconnect on the website.",
-                                GmailError::ApiError(msg) | GmailError::ParseError(msg) => {
-                                    eprintln!("Failed to fetch Gmail previews: {}", msg);
-                                    "Failed to fetch Gmail previews. Please try again later."
+                                ImapError::NoConnection => "No IMAP connection found. Please check your email settings.",
+                                ImapError::CredentialsError(_) => "Your email credentials need to be updated.",
+                                ImapError::ConnectionError(msg) | ImapError::FetchError(msg) | ImapError::ParseError(msg) => {
+                                    eprintln!("Failed to fetch email previews: {}", msg);
+                                    "Failed to fetch emails. Please try again later."
                                 }
                             };
                             tool_answers.insert(tool_call_id, error_message.to_string());

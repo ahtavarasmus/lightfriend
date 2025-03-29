@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+imap = "2.4"
+native-tls = "0.2"
 regex = "1.10.3"
 quoted_printable = "0.4"
 time = "0.3"
