@@ -11,6 +11,7 @@ use imap;
 use native_tls::TlsConnector;
 use quoted_printable;
 use base64;
+use mail_parser;
 
 use crate::{
     AppState,
@@ -59,24 +60,6 @@ pub async fn fetch_imap_previews(
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP previews", previews.len());
             
-            // Debug print each preview
-            for preview in &previews {
-                tracing::debug!("Email Preview:\n\
-                    ID: {}\n\
-                    Subject: {}\n\
-                    From: {}\n\
-                    Date: {}\n\
-                    Is Read: {}\n\
-                    Snippet: {}\n",
-                    preview.id,
-                    preview.subject.as_deref().unwrap_or("No subject"),
-                    preview.from.as_deref().unwrap_or("Unknown sender"),
-                    preview.date.map_or("No date".to_string(), |d| d.to_rfc3339()),
-                    preview.is_read,
-                    preview.snippet.as_deref().unwrap_or("No preview")
-                );
-            }
-            
             let formatted_previews: Vec<_> = previews
                 .into_iter()
                 .map(|p| {
@@ -117,26 +100,6 @@ pub async fn fetch_full_imap_emails(
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP full emails", previews.len());
             
-            // Debug print each email's full content
-            for preview in &previews {
-                tracing::info!("Full Email Content:\n\
-                    ID: {}\n\
-                    Subject: {}\n\
-                    From: {}\n\
-                    Date: {}\n\
-                    Is Read: {}\n\
-                    Snippet: {}\n\
-                    Body: {}\n\
-                    ----------------------------------------",
-                    preview.id,
-                    preview.subject.as_deref().unwrap_or("No subject"),
-                    preview.from.as_deref().unwrap_or("Unknown sender"),
-                    preview.date.map_or("No date".to_string(), |d| d.to_rfc3339()),
-                    preview.is_read,
-                    preview.snippet.as_deref().unwrap_or("No preview"),
-                    preview.body.as_deref().unwrap_or("No content")
-                );
-            }
             
             let formatted_emails: Vec<_> = previews
                 .into_iter()
@@ -187,23 +150,15 @@ pub async fn fetch_single_imap_email(
 
     match fetch_single_email_imap(&state, auth_user.user_id, &email_id).await {
         Ok(email) => {
-            // Debug print the full email
-            tracing::debug!("Full Email Content:\n\
-                ID: {}\n\
+            // Log only essential email content
+            tracing::info!("Email Content:\n\
                 Subject: {}\n\
                 From: {}\n\
-                From Email: {}\n\
-                Date: {}\n\
-                Is Read: {}\n\
-                Snippet: {}\n\
                 Body: {}\n",
-                email.id,
+
                 email.subject.as_deref().unwrap_or("No subject"),
                 email.from.as_deref().unwrap_or("Unknown sender"),
-                email.from_email.as_deref().unwrap_or("unknown@email.com"),
-                email.date.map_or("No date".to_string(), |d| d.to_rfc3339()),
-                email.is_read,
-                email.snippet.as_deref().unwrap_or("No preview"),
+
                 email.body.as_deref().unwrap_or("No content")
             );
 
@@ -322,108 +277,48 @@ pub async fn fetch_emails_imap(
         let full_body = message.body().map(|b| String::from_utf8_lossy(b).into_owned());
         let text_body = message.text().map(|b| String::from_utf8_lossy(b).into_owned());
         
+
+        use mail_parser::MessageParser;
+
         let body_content = full_body.or(text_body);
-        
+
         let (body, snippet) = body_content.as_ref().map(|content| {
-            // Function to decode and clean email content
-            fn process_email_content(content: &str) -> (String, String) {
-                // First decode quoted-printable content
-                let decoded = content.replace("=\r\n", "")
-                    .replace("=\n", "");
-                
-                let decoded = if let Ok(decoded) = quoted_printable::decode(decoded.as_bytes(), quoted_printable::ParseMode::Robust) {
-                    String::from_utf8(decoded.clone()).unwrap_or_else(|_| String::from_utf8_lossy(&decoded).into_owned())
-                } else {
-                    decoded
-                };
+            // Create a parser and parse the content into an Option<Message>
+            let parser = MessageParser::default();
+            let parsed = parser.parse(content.as_bytes());
 
-                // Decode UTF-8 encoded characters
-                let decoded = decoded.replace("=3D", "=")
-                    .replace("=C3=A4", "ä")
-                    .replace("=C3=B6", "ö")
-                    .replace("=C3=A5", "å")
-                    .replace("=E2=80=91", "-")
-                    .replace("=E2=80=99", "'")
-                    .replace("=20", " ");
-
-                // Extract and clean HTML content
-                let clean_content = if let Some(start_idx) = decoded.find("<!DOCTYPE html>") {
-                    if let Some(end_idx) = decoded[start_idx..].find("</html>") {
-                        let html_content = &decoded[start_idx..start_idx + end_idx + 7];
-                        
-                        // Remove style tags and their content
-                        let re_style = regex::Regex::new(r"<style\b[^>]*>[\s\S]*?</style>").unwrap();
-                        let content = re_style.replace_all(html_content, "");
-                        
-                        // Remove script tags and their content
-                        let re_script = regex::Regex::new(r"<script\b[^>]*>[\s\S]*?</script>").unwrap();
-                        let content = re_script.replace_all(&content, "");
-                        
-                        // Remove HTML tags but preserve line breaks
-                        let content = content.replace("<br>", "\n")
-                            .replace("<br/>", "\n")
-                            .replace("<br />", "\n")
-                            .replace("<p>", "\n")
-                            .replace("</p>", "\n");
-                        
-                        // Remove remaining HTML tags
-                        let re_tags = regex::Regex::new(r"<[^>]+>").unwrap();
-                        let content = re_tags.replace_all(&content, "");
-                        
-                        // Decode HTML entities
-                        let content = content
-                            .replace("&nbsp;", " ")
-                            .replace("&amp;", "&")
-                            .replace("&lt;", "<")
-                            .replace("&gt;", ">")
-                            .replace("&quot;", "\"")
-                            .replace("&#39;", "'");
-                        
-                // Clean up whitespace and remove zero-width characters
-                content.lines()
-                    .map(|line| {
-                        line.trim()
-                            .chars()
-                            .filter(|&c| {
-                                // Filter out zero-width and other invisible characters
-                                !matches!(c, '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{FEFF}' | 
-                                               '\u{2060}' | '\u{2061}' | '\u{2062}' | '\u{2063}' |
-                                               '\u{2064}' | '\u{2065}' | '\u{2066}' | '\u{2067}' |
-                                               '\u{2068}' | '\u{2069}')
-                            })
-                            .collect::<String>()
+            // Get the best available body content, if parsing succeeded
+            let clean_content = parsed.map(|msg| {
+                let body_text = msg.body_text(0).or_else(|| msg.body_html(0));
+                body_text
+                    .map(|text| {
+                        text.lines()
+                            .map(str::trim)
+                            .filter(|line| !line.is_empty())
+                            .collect::<Vec<_>>()
+                            .join("\n")
                     })
-                    .filter(|line| !line.is_empty())
-                    .collect::<Vec<_>>()
-                    .join("\n")
-                    } else {
-                        decoded
-                    }
-                } else {
-                    decoded
-                };
+                    .unwrap_or_else(|| String::from("[No readable body found]"))
+            }).unwrap_or_else(|| String::from("[Failed to parse email body]"));
 
+            // Generate a snippet from the clean body
+            let snippet = clean_content.chars().take(200).collect::<String>();
 
-                // Create snippet
-                let snippet = clean_content
-                    .lines()
-                    .filter(|line| !line.trim().is_empty())
-                    .take(3)
-                    .collect::<Vec<_>>()
-                    .join(" ");
-
-                let snippet = if snippet.chars().count() > 150 {
-                    let truncated: String = snippet.chars().take(150).collect();
-                    format!("{}...", truncated)
-                } else {
-                    snippet
-                };
-
-                (clean_content, snippet)
-            }
-
-            process_email_content(content)
+            (clean_content, snippet)
         }).unwrap_or_else(|| (String::new(), String::new()));
+
+
+
+            // Print email details
+            println!("\nFetched Email:");
+            println!("ID: {}", uid);
+            println!("Subject: {}", subject.as_deref().unwrap_or("No subject"));
+            println!("From: {}", from.as_deref().unwrap_or("Unknown sender"));
+            println!("Date: {}", date.map_or("Unknown date".to_string(), |d| d.to_rfc3339()));
+            println!("Is Read: {}", is_read);
+            println!("Snippet: {}", snippet);
+            println!("Body: {}", body);
+            println!("----------------------------------------");
 
             email_previews.push(ImapEmailPreview {
                 id: uid,
@@ -562,98 +457,37 @@ pub async fn fetch_single_email_imap(
     let full_body = message.body().map(|b| String::from_utf8_lossy(b).into_owned());
     let text_body = message.text().map(|b| String::from_utf8_lossy(b).into_owned());
     
+    use mail_parser::MessageParser;
+
     let body_content = full_body.or(text_body);
-    
+
     let (body, snippet) = body_content.as_ref().map(|content| {
-        // Reuse the process_email_content function from the preview fetch
-        fn process_email_content(content: &str) -> (String, String) {
-            // First decode quoted-printable content
-            let decoded = content.replace("=\r\n", "")
-                .replace("=\n", "");
-            
-            let decoded = if let Ok(decoded) = quoted_printable::decode(decoded.as_bytes(), quoted_printable::ParseMode::Robust) {
-                String::from_utf8(decoded.clone()).unwrap_or_else(|_| String::from_utf8_lossy(&decoded).into_owned())
-            } else {
-                decoded
-            };
+        // Create a parser and parse the content into an Option<Message>
+        let parser = MessageParser::default();
+        let parsed = parser.parse(content.as_bytes());
 
-            // Decode UTF-8 encoded characters
-            let decoded = decoded.replace("=3D", "=")
-                .replace("=C3=A4", "ä")
-                .replace("=C3=B6", "ö")
-                .replace("=C3=A5", "å")
-                .replace("=E2=80=91", "-")
-                .replace("=E2=80=99", "'")
-                .replace("=20", " ");
-
-            // Extract and clean HTML content
-            let clean_content = if let Some(start_idx) = decoded.find("<!DOCTYPE html>") {
-                if let Some(end_idx) = decoded[start_idx..].find("</html>") {
-                    let html_content = &decoded[start_idx..start_idx + end_idx + 7];
-                    
-                    // Remove style tags and their content
-                    let re_style = regex::Regex::new(r"<style\b[^>]*>[\s\S]*?</style>").unwrap();
-                    let content = re_style.replace_all(html_content, "");
-                    
-                    // Remove script tags and their content
-                    let re_script = regex::Regex::new(r"<script\b[^>]*>[\s\S]*?</script>").unwrap();
-                    let content = re_script.replace_all(&content, "");
-                    
-                    // Remove HTML tags but preserve line breaks
-                    let content = content.replace("<br>", "\n")
-                        .replace("<br/>", "\n")
-                        .replace("<br />", "\n")
-                        .replace("<p>", "\n")
-                        .replace("</p>", "\n");
-                    
-                    // Remove remaining HTML tags
-                    let re_tags = regex::Regex::new(r"<[^>]+>").unwrap();
-                    let content = re_tags.replace_all(&content, "");
-                    
-                    // Decode HTML entities
-                    let content = content
-                        .replace("&nbsp;", " ")
-                        .replace("&amp;", "&")
-                        .replace("&lt;", "<")
-                        .replace("&gt;", ">")
-                        .replace("&quot;", "\"")
-                        .replace("&#39;", "'");
-                    
-                    // Clean up whitespace
-                    content.lines()
-                        .map(|line| line.trim())
+        // Get the best available body content, if parsing succeeded
+        let clean_content = parsed.map(|msg| {
+            let body_text = msg.body_text(0).or_else(|| msg.body_html(0));
+            body_text
+                .map(|text| {
+                    text.lines()
+                        .map(str::trim)
                         .filter(|line| !line.is_empty())
                         .collect::<Vec<_>>()
                         .join("\n")
-                } else {
-                    decoded
-                }
-            } else {
-                decoded
-            };
+                })
+                .unwrap_or_else(|| String::from("[No readable body found]"))
+        }).unwrap_or_else(|| String::from("[Failed to parse email body]"));
 
-            // Create snippet
-            let snippet = clean_content
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .take(3)
-                .collect::<Vec<_>>()
-                .join(" ");
+        // Generate a snippet from the clean body
+        let snippet = clean_content.chars().take(200).collect::<String>();
 
-            let snippet = if snippet.chars().count() > 150 {
-                let truncated: String = snippet.chars().take(150).collect();
-                format!("{}...", truncated)
-            } else {
-                snippet
-            };
-
-            (clean_content, snippet)
-        }
-
-        process_email_content(content)
+        (clean_content, snippet)
     }).unwrap_or_else(|| (String::new(), String::new()));
 
-    // Logout
+
+        // Logout
     imap_session
         .logout()
         .map_err(|e| ImapError::ConnectionError(format!("Failed to logout: {}", e)))?;
