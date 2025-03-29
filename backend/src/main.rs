@@ -243,6 +243,7 @@ async fn main() {
         .route("/api/auth/google/calendar/login", get(google_calendar_auth::google_login))
         .route("/api/auth/google/calendar/connection", delete(google_calendar_auth::delete_google_calendar_connection))
         .route("/api/auth/google/calendar/status", get(google_calendar::google_calendar_status))
+        .route("/api/auth/google/calendar/email", get(google_calendar::get_calendar_email))
         .route("/api/calendar/events", get(google_calendar::handle_calendar_fetching_route))
 
         .route("/api/auth/google/gmail/login", get(gmail_auth::gmail_login))
