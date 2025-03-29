@@ -19,6 +19,7 @@ use oauth2::{
     EndpointSet,
     EndpointNotSet,
 };
+use urlencoding;
 use tower_http::cors::{CorsLayer, Any, AllowOrigin};
 use tower_http::trace::{TraceLayer, DefaultMakeSpan, DefaultOnResponse};
 use tracing::Level;
@@ -194,6 +195,7 @@ async fn main() {
         .route("/api/call/weather", post(elevenlabs::handle_weather_tool_call))
         .route("/api/call/shazam", get(elevenlabs::handle_shazam_tool_call))
         .route("/api/call/calendar", get(elevenlabs::handle_calendar_tool_call))
+        .route("/api/call/gmail", get(elevenlabs::handle_gmail_fetch_tool_call))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 
     let elevenlabs_webhook_routes = Router::new()

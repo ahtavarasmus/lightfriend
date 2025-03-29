@@ -50,13 +50,19 @@ pub enum ImapError {
     ParseError(String),
 }
 
+#[derive(Debug, Deserialize)]
+pub struct FetchEmailsQuery {
+    pub limit: Option<u32>,
+}
+
 pub async fn fetch_imap_previews(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
+    axum::extract::Query(params): axum::extract::Query<FetchEmailsQuery>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Starting IMAP preview fetch for user {}", auth_user.user_id);
+    tracing::info!("Starting IMAP preview fetch for user {} with limit {:?}", auth_user.user_id, params.limit);
 
-    match fetch_emails_imap(&state, auth_user.user_id, true).await {
+    match fetch_emails_imap(&state, auth_user.user_id, true, params.limit).await {
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP previews", previews.len());
             
@@ -93,10 +99,11 @@ pub async fn fetch_imap_previews(
 pub async fn fetch_full_imap_emails(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
+    axum::extract::Query(params): axum::extract::Query<FetchEmailsQuery>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Starting IMAP full emails fetch for user {}", auth_user.user_id);
+    tracing::info!("Starting IMAP full emails fetch for user {} with limit {:?}", auth_user.user_id, params.limit);
 
-    match fetch_emails_imap(&state, auth_user.user_id, false).await {
+    match fetch_emails_imap(&state, auth_user.user_id, false, params.limit).await {
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP full emails", previews.len());
             
@@ -194,6 +201,7 @@ pub async fn fetch_emails_imap(
     state: &AppState,
     user_id: i32,
     preview_only: bool,
+    limit: Option<u32>,
 ) -> Result<Vec<ImapEmailPreview>, ImapError> {
     // Get IMAP credentials
     let (email, password) = state
@@ -227,8 +235,9 @@ pub async fn fetch_emails_imap(
         .select("INBOX")
         .map_err(|e| ImapError::FetchError(format!("Failed to select INBOX: {}", e)))?;
 
-    // Fetch most recent messages (last 20 messages)
-    let sequence_set = format!("{}:{}", (mailbox.exists.saturating_sub(19)), mailbox.exists);
+    // Calculate how many messages to fetch based on limit parameter
+    let limit = limit.unwrap_or(20);
+    let sequence_set = format!("{}:{}", (mailbox.exists.saturating_sub(limit - 1)), mailbox.exists);
     let messages = imap_session
         .fetch(
             &sequence_set,

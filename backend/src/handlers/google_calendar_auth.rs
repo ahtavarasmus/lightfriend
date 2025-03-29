@@ -66,12 +66,19 @@ pub async fn google_login(
     }
 
     let state_token = format!("{}:{}", record.id.0, csrf_token.secret());
-    let (auth_url, _) = state
+    let mut auth_builder = state
         .google_calendar_oauth_client
         .authorize_url(|| CsrfToken::new(state_token.clone()))
         .add_scope(Scope::new("https://www.googleapis.com/auth/calendar.events".to_string()))
         .add_extra_param("access_type", "offline") // Add this to request offline access
-        .add_extra_param("prompt", "consent") // Optional: forces consent screen to ensure refresh token is issued
+        .add_extra_param("prompt", "consent"); // Optional: forces consent screen to ensure refresh token is issued
+
+    // Add additional calendar scope for user_id 1
+    if auth_user.is_admin {
+        auth_builder = auth_builder.add_scope(Scope::new("https://www.googleapis.com/auth/calendar".to_string()));
+    }
+
+    let (auth_url, _) = auth_builder
         .set_pkce_challenge(pkce_challenge)
         .url();
 
@@ -378,3 +385,4 @@ pub async fn google_callback(
     tracing::info!("Redirecting to frontend root: {}", frontend_url);
     Ok(Redirect::to(&frontend_url))
 }
+
