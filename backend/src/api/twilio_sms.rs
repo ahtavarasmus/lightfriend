@@ -489,7 +489,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: format!("You are a friendly and helpful AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Be direct and natural in your answers. Since users are using SMS, keep responses clear and brief. Avoid suggesting actions requiring smartphones or internet. Do not ask for confirmation to use tools. If there is even slightest hint that they could be helpful, use them immediately. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages. Use simple language and focus on the most important information first. This is what the user wants to you to know: {}. The user's timezone is {} with offset {}. When using tools that require time information (like calendar or gmail): 1. Always use RFC3339/ISO8601 format (e.g. '2024-03-23T14:30:00Z') 2. If no specific time is mentioned, use the current time for start and 24 hours ahead for end 3. Always consider the user's timezone when interpreting time-related requests 4. For 'today' queries, use 00:00 of current day as start and 23:59 as end in user's timezone 5. For 'tomorrow' queries, use 00:00 to 23:59 of next day in user's timezone. When you use tools make sure to add relevant info about the user to the tool call so they can act accordingly.", Utc::now().format("%Y-%m-%d"), user_info, timezone_str, offset),
+        content: format!("You are a friendly and helpful AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Be direct and natural in your answers. Since users are using SMS, keep responses clear and brief. Avoid suggesting actions requiring smartphones or internet. Do not ask for confirmation to use tools. If there is even slightest hint that they could be helpful, use them immediately. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages. Use simple language and focus on the most important information first. This is what the user wants to you to know: {}. The user's timezone is {} with offset {}. When using tools that require time information (like calendar or gmail): 1. Always use RFC3339/ISO8601 format (e.g. '2024-03-23T14:30:00Z') 2. If no specific time is mentioned, use the current time for start and 24 hours ahead for end 3. Always consider the user's timezone when interpreting time-related requests 4. For 'today' queries, use 00:00 of current day as start and 23:59 as end in user's timezone 5. For 'tomorrow' queries, use 00:00 to 23:59 of next day in user's timezone. 6. Unless user references the previous query's results, you should always use the tools to fetch the latest information before answering the question. When you use tools make sure to add relevant info about the user to the tool call so they can act accordingly.", Utc::now().format("%Y-%m-%d"), user_info, timezone_str, offset),
     }];
     
     // Process the message body to remove "forget" if it exists at the start
@@ -620,7 +620,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
                 name: String::from("fetch_specific_email"),
-                description: Some(String::from("Search and fetch a specific email based on a query. Use this when user asks about a specific email or wants to find an email about a particular topic.")),
+                description: Some(String::from("Search and fetch a specific email based on a query. Use this when user asks about a specific email or wants to find an email about a particular topic. You must ALWAYS respond with the whole message body or summary of the body if too long. Never reply with just the subject line!")),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
                     properties: Some(specific_email_properties),
@@ -912,7 +912,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                             if let Some(emails) = response.get("emails") {
                                 if let Some(emails_array) = emails.as_array() {
                                     let mut response = String::new();
-                                    for (i, email) in emails_array.iter().take(5).enumerate() {
+                                    for (i, email) in emails_array.iter().rev().take(5).rev().enumerate() {
                                         let subject = email.get("subject").and_then(|s| s.as_str()).unwrap_or("No subject");
                                         let from = email.get("from").and_then(|f| f.as_str()).unwrap_or("Unknown sender");
                                         let date = email.get("date").and_then(|d| d.as_str())
@@ -989,7 +989,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                                 content: chat_completion::Content::Text(
                                     "You are an email matcher. Given a list of email previews and a search query, \
                                     find the most relevant email. The emails are sorted from newest to oldest. \
-                                    When multiple emails match the query similarly well, prefer the newer ones. \
+                                    When multiple emails match the query similarly well, prefer the newest one by date and time. \
                                     Return ONLY the ID of the most relevant email, or 'NONE' if no email matches well. \
                                     Consider subject, sender, date, and snippet in your matching, with a bias towards \
                                     more recent emails.".to_string()
@@ -1003,15 +1003,18 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                             let emails_json = serde_json::json!({
                                 "query": query.query,
                                 "emails": previews.iter().rev().map(|p| {  // Reverse to prioritize newer emails
+                                    println!("from: {:#?}, date: {:#?}, body: {:#?}", p.from,p.date.map(|d| d.to_rfc3339()), p.body);
                                     serde_json::json!({
                                         "id": p.id,
                                         "subject": p.subject,
                                         "from": p.from,
                                         "date": p.date.map(|d| d.to_rfc3339()),
-                                        "snippet": p.snippet
+                                        "snippet": p.snippet,
+                                        "body": p.body
                                     })
                                 }).collect::<Vec<_>>()
                             });
+                            println!("emails_json: {:#?}", emails_json);
 
                             let user_message = chat_completion::ChatCompletionMessage {
                                 role: chat_completion::MessageRole::user,

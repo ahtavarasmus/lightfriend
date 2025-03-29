@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+mail-parser = "0.10"
 imap = "2.4"
 native-tls = "0.2"
 regex = "1.10.3"
