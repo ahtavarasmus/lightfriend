@@ -654,7 +654,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                 <p class="service-description">
                                     {"Connect your Gmail account using IMAP to send and receive emails through SMS or voice calls. "}
                                     <strong>{"You can create an app password "}</strong>
-                                    <a class="nice-link" href="https://support.google.com/accounts/answer/185833" target="_blank">{"here."}</a>
+                                    <a class="nice-link" href="https://myaccount.google.com/apppasswords" target="_blank">{"here."}</a>
                                     <strong>{" Regular passwords won't work. "}</strong>
                                 </p>
                                 if *imap_connected {
