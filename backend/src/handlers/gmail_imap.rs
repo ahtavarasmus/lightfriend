@@ -200,7 +200,10 @@ pub async fn fetch_emails_imap(
         .user_repository
         .get_gmail_imap_credentials(user_id)
         .map_err(|e| ImapError::CredentialsError(e.to_string()))?
-        .ok_or(ImapError::NoConnection)?;
+        .ok_or_else(|| ImapError::NoConnection)?;
+
+    // Add logging for debugging (remove in production)
+    tracing::debug!("Fetching IMAP emails for user {} with email {}", user_id, email);
 
     // Set up TLS
     let tls = TlsConnector::builder()

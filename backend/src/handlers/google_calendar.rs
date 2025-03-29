@@ -69,6 +69,48 @@ pub async fn google_calendar_status(
     }
 }
 
+pub async fn get_calendar_email(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_repository.get_google_calendar_tokens(auth_user.user_id) {
+        Ok(Some((access_token, _))) => {
+            let client = reqwest::Client::new();
+            let response = client
+                .get("https://www.googleapis.com/oauth2/v2/userinfo")
+                .header("Authorization", format!("Bearer {}", access_token))
+                .send()
+                .await;
+
+            match response {
+                Ok(resp) => {
+                    if resp.status().is_success() {
+                        if let Ok(user_info) = resp.json::<serde_json::Value>().await {
+                            if let Some(email) = user_info.get("email").and_then(|e| e.as_str()) {
+                                return Ok(Json(json!({
+                                    "email": email
+                                })));
+                            }
+                        }
+                    }
+                    Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                        "error": "Failed to get user email"
+                    }))))
+                }
+                Err(_) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+                    "error": "Failed to fetch user info"
+                }))))
+            }
+        }
+        Ok(None) => Err((StatusCode::NOT_FOUND, Json(json!({
+            "error": "No active Google Calendar connection found"
+        })))),
+        Err(_) => Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+            "error": "Failed to get calendar tokens"
+        }))))
+    }
+}
+
 #[derive(Debug)]
 pub enum CalendarError {
     NoConnection,

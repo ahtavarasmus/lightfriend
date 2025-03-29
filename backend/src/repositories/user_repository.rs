@@ -85,31 +85,29 @@ impl UserRepository {
         &self,
         user_id: i32,
     ) -> Result<Option<(String, String)>, diesel::result::Error> {
-        use crate::schema::imap_connection::dsl::*;
-        let connection = &mut self.pool.get().unwrap();
-        
-        let result = imap_connection
-            .filter(user_id.eq(user_id))
-            .filter(method.eq("gmail"))
-            .select((description, encrypted_password))
-            .first::<(String, String)>(connection)
-            .optional()?;
-        
-        if let Some((email, encrypted_pass)) = result {
-            // Get encryption key from environment
-            let encryption_key = std::env::var("ENCRYPTION_KEY")
-                .expect("ENCRYPTION_KEY must be set");
+        use crate::schema::imap_connection;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
 
+        // Get encryption key from environment
+        let encryption_key = std::env::var("ENCRYPTION_KEY")
+            .expect("ENCRYPTION_KEY must be set");
+
+        // Get the active IMAP connection for the user
+        let imap_conn = imap_connection::table
+            .filter(imap_connection::user_id.eq(user_id))
+            .filter(imap_connection::method.eq("gmail"))
+            .filter(imap_connection::status.eq("active"))
+            .first::<crate::models::user_models::ImapConnection>(&mut conn)
+            .optional()?;
+
+        if let Some(conn) = imap_conn {
             use magic_crypt::MagicCryptTrait;
             let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
 
-            // Decrypt password
-            match cipher.decrypt_base64_to_string(&encrypted_pass) {
-                Ok(decrypted_password) => Ok(Some((email, decrypted_password))),
-                Err(e) => {
-                    tracing::error!("Failed to decrypt IMAP password: {:?}", e);
-                    Err(diesel::result::Error::RollbackTransaction)
-                }
+            // Decrypt the password
+            match cipher.decrypt_base64_to_string(&conn.encrypted_password) {
+                Ok(decrypted_password) => Ok(Some((conn.description, decrypted_password))),
+                Err(_) => Err(diesel::result::Error::RollbackTransaction)
             }
         } else {
             Ok(None)
@@ -120,12 +118,12 @@ impl UserRepository {
         &self,
         user_id: i32,
     ) -> Result<(), diesel::result::Error> {
-        use crate::schema::imap_connection::dsl::*;
+        use crate::schema::imap_connection;
         let connection = &mut self.pool.get().unwrap();
         
-        diesel::delete(imap_connection
-            .filter(user_id.eq(user_id))
-            .filter(method.eq("gmail")))
+        diesel::delete(imap_connection::table
+            .filter(imap_connection::user_id.eq(user_id))
+            .filter(imap_connection::method.eq("gmail")))
             .execute(connection)?;
         
         Ok(())

@@ -642,23 +642,27 @@ pub fn connect(props: &ConnectProps) -> Html {
                         <div class="service-list">
                             // Gmail via IMAP section (only for user_id == 1)
                             {
-                                if props.user_id == 1 {
-                                    html! {
-                                        <div class="service-item">
-                                            <div class="service-header">
-                                                <div class="service-name">
-                                                    <img src="https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg" alt="Gmail via IMAP"/>
-                                                    {"Gmail via IMAP"}
-                                                </div>
-                                                if *imap_connected {
-                                                    <span class="service-status">{"Connected ✓"}</span>
-                                                }
+                                html! {
+                                    <div class="service-item">
+                                        <div class="service-header">
+                                            <div class="service-name">
+                                                <img src="https://upload.wikimedia.org/wikipedia/commons/7/7e/Gmail_icon_%282020%29.svg" alt="Gmail via IMAP"/>
+                                                {"Gmail via IMAP"}
                                             </div>
+                                            if *imap_connected {
+                                                <div class="service-status-container">
+                                                    <span class="service-status">{"Connected ✓"}</span>
+                                                    if !(*imap_email).is_empty() {
+                                                        <span class="connected-email">{format!(" ({})", *imap_email)}</span>
+                                                    }
+                                                </div>
+                                            }
+                                        </div>
                                 <p class="service-description">
                                     {"Connect your Gmail account using IMAP to send and receive emails through SMS or voice calls. "}
                                     <strong>{"You can create an app password "}</strong>
                                     <a class="nice-link" href="https://myaccount.google.com/apppasswords" target="_blank">{"here."}</a>
-                                    <strong>{" Regular passwords won't work. "}</strong>
+                                    <strong>{" Regular passwords won't work. (You have to have 2FA enabled)"}</strong>
                                 </p>
                                 if *imap_connected {
                                     <div class="gmail-controls">
@@ -840,9 +844,6 @@ pub fn connect(props: &ConnectProps) -> Html {
                                 }
                                         </div>
                                     }
-                                } else {
-                                    html! {}
-                                }
                             }
 
                             // Gmail (Commented out in favor of IMAP implementation)
@@ -930,7 +931,17 @@ pub fn connect(props: &ConnectProps) -> Html {
                         </div>
                     }
                     <style>
-                        {".gmail-controls {
+                        {".service-status-container {
+                            display: flex;
+                            align-items: center;
+                            gap: 8px;
+                        }
+                        .connected-email {
+                            font-size: 0.9em;
+                            color: #666;
+                            font-style: italic;
+                        }
+                        .gmail-controls {
                             display: flex;
                             gap: 10px;
                             margin-top: 10px;
