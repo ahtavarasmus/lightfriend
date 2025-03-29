@@ -272,7 +272,6 @@ pub async fn handle_incoming_sms(
     Form(payload): Form<TwilioWebhookPayload>,
 ) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
     println!("Received SMS from: {} to: {}", payload.from, payload.to);
-    println!("Message: {}", payload.body);
 
     // Check for Shazam shortcut ('S' or 's')
     if payload.body.trim() == "S" || payload.body.trim() == "s" {
@@ -457,7 +456,6 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
             Vec::new()
         }
     };
-    println!("{:#?}",messages);
 
     let user_info = match user.info {
         Some(info) => info,
@@ -519,10 +517,6 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         content: processed_body,
     });
 
-    // Print formatted messages for debugging
-    for msg in &chat_messages {
-        println!("Formatted message - Role: {}, Content: {}", msg.role, msg.content);
-    }
 
     let mut plex_properties = HashMap::new();
     plex_properties.insert(
@@ -760,7 +754,6 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
             println!("Model provided direct response (no tool calls needed)");
             // Direct response from the model
             let resp = result.choices[0].message.content.clone().unwrap_or_default();
-            println!("Direct response from model: {}", resp);
             resp
         }
         Some(chat_completion::FinishReason::tool_calls) => {
@@ -815,7 +808,6 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                 };
                 if name == "ask_perplexity" {
                     println!("Executing ask_perplexity tool call");
-                    println!("Raw arguments: {}", arguments);
                     let c: PerplexityQuestion = match serde_json::from_str(arguments) {
                         Ok(q) => q,
                         Err(e) => {
@@ -824,14 +816,11 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                         }
                     };
                     let query = format!("User info: {}. Query: {}", user_info, c.query);
-                    println!("question for perplexity: {}", query);
-                    println!("Calling Perplexity API with query: {}", query);
 
                     let sys_prompt = format!("You are assisting an AI text messaging service. The questions you receive are from text messaging conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. When listing multiple points, use simple numbering (1, 2, 3) 5. Focus on the most relevant information that addresses the user's immediate needs. This is what you should know about the user who this information is going to in their own words: {}", user_info);
                     match crate::utils::tool_exec::ask_perplexity(&query, &sys_prompt).await {
                         Ok(answer) => {
                             println!("Successfully received Perplexity answer");
-                            println!("Perplexity response: {}", answer);
                             tool_answers.insert(tool_call_id, answer);
                         }
                         Err(e) => {
@@ -841,7 +830,6 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     };
                 } else if name == "get_weather" {
                     println!("Executing get_weather tool call");
-                    println!("Raw arguments: {}", arguments);
                     let c: WeatherQuestion = match serde_json::from_str(arguments) {
                         Ok(q) => q,
                         Err(e) => {
@@ -851,13 +839,10 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     };
                     let location= c.location;
                     let units= c.units;
-                    println!("location for weather: {}", location);
-                    println!("units for weather: {}", units);
 
                     match crate::utils::tool_exec::get_weather(&location, &units).await {
                         Ok(answer) => {
                             println!("Successfully received weather answer");
-                            println!("Weather response: {}", answer);
                             tool_answers.insert(tool_call_id, answer);
                         }
                         Err(e) => {
@@ -1086,7 +1071,6 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     }
                 } else if name == "calendar" {
                     println!("Executing calendar tool call");
-                    println!("Raw arguments: {}", arguments);
                     let c: CalendarTimeFrame = match serde_json::from_str(arguments) {
                         Ok(q) => q,
                         Err(e) => {
@@ -1156,7 +1140,6 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                 Ok(follow_up_result) => {
                     println!("Received follow-up response from model");
                     let response = follow_up_result.choices[0].message.content.clone().unwrap_or_default();
-                    println!("Final response: {}", response);
                     response
                 }
                 Err(e) => {
