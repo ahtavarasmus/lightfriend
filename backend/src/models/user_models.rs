@@ -8,6 +8,7 @@ use crate::schema::unipile_connection;
 use crate::schema::google_calendar;
 use crate::schema::gmail;
 use crate::schema::bridges;
+use crate::schema::imap_connection;
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = users)]
@@ -35,6 +36,34 @@ pub struct User {
     pub timezone: Option<String>,
     pub timezone_auto: Option<bool>,
 }
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = imap_connection)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct ImapConnection {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub method: String,
+    pub encrypted_password: String,
+    pub status: String,
+    pub last_update: i32,
+    pub created_on: i32,
+    pub description: String,
+    pub expires_in: i32,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = imap_connection)]
+pub struct NewImapConnection {
+    pub user_id: i32,
+    pub method: String,
+    pub encrypted_password: String,
+    pub status: String,
+    pub last_update: i32,
+    pub created_on: i32,
+    pub description: String,
+    pub expires_in: i32,
+}
+
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = bridges)]

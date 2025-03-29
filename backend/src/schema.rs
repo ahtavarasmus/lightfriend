@@ -54,6 +54,20 @@ diesel::table! {
 }
 
 diesel::table! {
+    imap_connection (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        method -> Text,
+        encrypted_password -> Text,
+        status -> Text,
+        last_update -> Integer,
+        created_on -> Integer,
+        description -> Text,
+        expires_in -> Integer,
+    }
+}
+
+diesel::table! {
     subscriptions (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -124,6 +138,7 @@ diesel::table! {
 diesel::joinable!(bridges -> users (user_id));
 diesel::joinable!(conversations -> users (user_id));
 diesel::joinable!(gmail -> users (user_id));
+diesel::joinable!(imap_connection -> users (user_id));
 diesel::joinable!(subscriptions -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
@@ -131,6 +146,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     conversations,
     gmail,
     google_calendar,
+    imap_connection,
     subscriptions,
     unipile_connection,
     usage_logs,

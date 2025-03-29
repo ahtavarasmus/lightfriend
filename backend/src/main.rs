@@ -39,6 +39,8 @@ mod handlers {
     pub mod google_calendar;
     pub mod gmail_auth;
     pub mod gmail;
+    pub mod gmail_imap_auth;
+    pub mod gmail_imap;
     pub mod auth_middleware;
 }
 
@@ -84,6 +86,8 @@ use handlers::google_calendar_auth;
 use handlers::google_calendar;
 use handlers::gmail_auth;
 use handlers::gmail;
+use handlers::gmail_imap_auth;
+use handlers::gmail_imap;
 use api::twilio_sms;
 use api::elevenlabs;
 use api::elevenlabs_webhook;
@@ -248,6 +252,13 @@ async fn main() {
         .route("/api/auth/google/gmail/status", get(gmail::gmail_status))
         .route("/api/gmail/previews", get(gmail::fetch_email_previews))
         .route("/api/gmail/message/{id}", get(gmail::fetch_single_email))
+
+        .route("/api/auth/gmail/imap/login", post(gmail_imap_auth::gmail_imap_login))
+        .route("/api/auth/gmail/imap/status", get(gmail_imap_auth::gmail_imap_status))
+        .route("/api/auth/gmail/imap/disconnect", delete(gmail_imap_auth::delete_gmail_imap_connection))
+        .route("/api/gmail/imap/previews", get(gmail_imap::fetch_imap_previews))
+        .route("/api/gmail/imap/message/{id}", get(gmail_imap::fetch_single_imap_email))
+        .route("/api/gmail/imap/full_emails", get(gmail_imap::fetch_full_imap_emails))
 
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
 

@@ -16,9 +16,9 @@ pub struct UsageDataPoint {
 }
 
 use crate::{
-    models::user_models::{User, NewUsageLog, NewUnipileConnection, NewGoogleCalendar},
+    models::user_models::{User, NewUsageLog, NewUnipileConnection, NewGoogleCalendar, ImapConnection, NewImapConnection},
     handlers::auth_dtos::NewUser,
-    schema::{users, usage_logs, unipile_connection},
+    schema::{users, usage_logs, unipile_connection, imap_connection},
     DbPool,
 };
 
@@ -30,6 +30,107 @@ impl UserRepository {
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
     }
+
+    pub fn set_gmail_imap_credentials(
+        &self,
+        user_id: i32,
+        email: &str,
+        password: &str,
+    ) -> Result<(), diesel::result::Error> {
+        use crate::schema::imap_connection;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Get encryption key from environment
+        let encryption_key = std::env::var("ENCRYPTION_KEY")
+            .expect("ENCRYPTION_KEY must be set");
+
+        use magic_crypt::MagicCryptTrait;
+        let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
+
+        // Encrypt password
+        let encrypted_password = cipher.encrypt_str_to_base64(password);
+
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        // First, delete any existing connections for this user
+        diesel::delete(imap_connection::table)
+            .filter(imap_connection::user_id.eq(user_id))
+            .execute(&mut conn)?;
+
+        // Create new connection
+        let new_connection = NewImapConnection {
+            user_id,
+            method: "gmail".to_string(),
+            encrypted_password,
+            status: "active".to_string(),
+            last_update: current_time,
+            created_on: current_time,
+            description: email.to_string(),
+            expires_in: 0,
+        };
+
+        // Insert the new connection
+        diesel::insert_into(imap_connection::table)
+            .values(&new_connection)
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+    
+
+    pub fn get_gmail_imap_credentials(
+        &self,
+        user_id: i32,
+    ) -> Result<Option<(String, String)>, diesel::result::Error> {
+        use crate::schema::imap_connection::dsl::*;
+        let connection = &mut self.pool.get().unwrap();
+        
+        let result = imap_connection
+            .filter(user_id.eq(user_id))
+            .filter(method.eq("gmail"))
+            .select((description, encrypted_password))
+            .first::<(String, String)>(connection)
+            .optional()?;
+        
+        if let Some((email, encrypted_pass)) = result {
+            // Get encryption key from environment
+            let encryption_key = std::env::var("ENCRYPTION_KEY")
+                .expect("ENCRYPTION_KEY must be set");
+
+            use magic_crypt::MagicCryptTrait;
+            let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
+
+            // Decrypt password
+            match cipher.decrypt_base64_to_string(&encrypted_pass) {
+                Ok(decrypted_password) => Ok(Some((email, decrypted_password))),
+                Err(e) => {
+                    tracing::error!("Failed to decrypt IMAP password: {:?}", e);
+                    Err(diesel::result::Error::RollbackTransaction)
+                }
+            }
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn delete_gmail_imap_credentials(
+        &self,
+        user_id: i32,
+    ) -> Result<(), diesel::result::Error> {
+        use crate::schema::imap_connection::dsl::*;
+        let connection = &mut self.pool.get().unwrap();
+        
+        diesel::delete(imap_connection
+            .filter(user_id.eq(user_id))
+            .filter(method.eq("gmail")))
+            .execute(connection)?;
+        
+        Ok(())
+    }
+    
 
     pub fn set_preferred_number_to_default(&self, user_id: i32, phone_number: &str) -> Result<String, Box<dyn Error>> {
         // Get all Twilio phone numbers from environment
