@@ -434,6 +434,7 @@ pub fn Home() -> Html {
                             <h4>{"Tools"}</h4>
                             <ul>
                                 <li>{"Perplexity AI search"}</li>
+                                <li>{"Email and calendar integration"}</li>
                                 <li>{"Dedicated Weather search"}</li>
                                 <li>{"Send info to you by sms during voice calls"}</li>
                                 <li>{"Shazam song recognition - Get a call, play the song, AI sends it to you by sms."}</li>
@@ -452,7 +453,6 @@ pub fn Home() -> Html {
                             </ul>
                             <h3>{"Coming Soon"}</h3>
                             <ul>
-                                <li>{"Email and calendar integration"}</li>
                                 <li>{"WhatsApp and Telegram integration"}</li>
                                 <li>{"Reminder setting"}</li>
                                 <li>{"Camera functionality for photo translation and more"}</li>
