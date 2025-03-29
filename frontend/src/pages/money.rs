@@ -106,10 +106,10 @@ pub fn pricing() -> Html {
                         <li>{"Perplexity Search"}</li>
                         <li>{"Weather"}</li>
                         <li>{"Shazam"}</li>
-                        <li>{"Calendar Integration(coming)"}</li>
+                        <li>{"Calendar Integration"}</li>
+                        <li>{"Email Access"}</li>
                         <li>{"WhatsApp Integration(coming)"}</li>
                         <li>{"Telegram Integration(coming"}</li>
-                        <li>{"Email Access(coming)"}</li>
                         <li>{"24/7 Availability"}</li>
                     </ul>
                 </div>
