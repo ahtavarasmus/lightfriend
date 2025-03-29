@@ -584,16 +584,21 @@ pub fn connect(props: &ConnectProps) -> Html {
                                                         }
                                                     })
                                                 };
-                                                html! {
-                                                /*
-                                                    <button 
-                                                        onclick={onclick_test}
-                                                        class="test-button"
-                                                    >
-                                                        {"Test Calendar"}
-                                                    </button>
-                                                */
+                                                {
+                                                    if props.user_id == 1 {
+                                                        html! {
+                                                            <button 
+                                                                onclick={onclick_test}
+                                                                class="test-button"
+                                                            >
+                                                                {"Test Calendar"}
+                                                            </button>
+                                                        }
+                                                    } else {
+                                                        html! {}
+                                                    }
                                                 }
+                                                
 
                                             } else {
                                                 html! {}

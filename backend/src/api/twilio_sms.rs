@@ -904,9 +904,11 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     );
                 } else if name == "fetch_imap_emails" {
                     println!("Executing fetch_imap_emails tool call");
+                    let queryObj = crate::handlers::gmail_imap::FetchEmailsQuery { limit: None };
                     match crate::handlers::gmail_imap::fetch_full_imap_emails(
                         axum::extract::State(state.clone()),
                         auth_user,
+                        axum::extract::Query(queryObj),
                     ).await {
                         Ok(Json(response)) => {
                             if let Some(emails) = response.get("emails") {
@@ -976,7 +978,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     };
 
                     // First fetch previews using IMAP
-                    match crate::handlers::gmail_imap::fetch_emails_imap(&state, user.id, true).await {
+                    match crate::handlers::gmail_imap::fetch_emails_imap(&state, user.id, true, None).await {
                         Ok(previews) => {
                             if previews.is_empty() {
                                 tool_answers.insert(tool_call_id, "No emails found.".to_string());

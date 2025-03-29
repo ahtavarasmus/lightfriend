@@ -12,7 +12,8 @@ use crate::AppState;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use chrono::TimeZone;  // Add this import
+use chrono::TimeZone;
+use crate::handlers::gmail_imap::fetch_emails_imap;
 
 
 
@@ -20,6 +21,11 @@ use chrono::TimeZone;  // Add this import
 pub struct LocationCallPayload {
     location: String,
     units: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GmailFetchPayload {
+    user_id: i32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -51,8 +57,6 @@ pub struct ConversationConfig {
 pub struct AgentConfig {
     first_message: String,
 }
-
-
 
 
 pub async fn validate_elevenlabs_secret(
@@ -300,6 +304,62 @@ pub async fn fetch_assistant(
 
     Ok(Json(payload))
 }
+
+pub async fn handle_gmail_fetch_tool_call(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> Json<serde_json::Value> {
+
+    // Extract and parse user_id from query params
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Json(json!({
+                "error": "Invalid or missing user_id parameter"
+            }));
+        }
+    };
+    println!("Received Gmail fetch request for user: {}", user_id);
+    
+    match crate::handlers::gmail_imap::fetch_emails_imap(&state, user_id, true, Some(10)).await {
+        Ok(emails) => {
+            // Format emails for voice response
+            let mut response_text = String::from("Here are your recent emails. ");
+            
+            for (i, email) in emails.iter().enumerate() {
+                let subject = email.subject.as_deref().unwrap_or("No subject");
+                let from = email.from.as_deref().unwrap_or("Unknown sender");
+                let status = if email.is_read { "read" } else { "unread" };
+                let body = email.body.as_deref().unwrap_or("No content available");
+                response_text.push_str(&format!(
+                    "Email {}. From {}. Subject: {}. Status: {}. Content: {}. ",
+                    i + 1,
+                    from,
+                    subject,
+                    status,
+                    body
+                ));
+            }
+
+            if emails.is_empty() {
+                response_text = "You have no recent emails.".to_string();
+            }
+
+            Json(json!({
+                "response": response_text
+            }))
+        },
+        Err(e) => {
+            error!("Error fetching Gmail messages: {:?}", e);
+            Json(json!({
+                "error": "Failed to fetch Gmail messages",
+                "details": format!("{:?}", e)
+            }))
+        }
+    }
+}
+
+
 
 
 pub async fn handle_send_sms_tool_call(
