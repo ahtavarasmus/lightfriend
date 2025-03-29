@@ -640,9 +640,9 @@ pub fn connect(props: &ConnectProps) -> Html {
                             {"Email Services"}
                         </h3>
                         <div class="service-list">
-                            // Gmail via IMAP section (only for user_id 1)
+                            // Gmail via IMAP section (only for user_id == 1)
                             {
-                                if props.user_id == 1  || props.user_id == 33 {
+                                if props.user_id == 1 {
                                     html! {
                                         <div class="service-item">
                                             <div class="service-header">
@@ -840,6 +840,8 @@ pub fn connect(props: &ConnectProps) -> Html {
                                 }
                                         </div>
                                     }
+                                } else {
+                                    html! {}
                                 }
                             }
 
