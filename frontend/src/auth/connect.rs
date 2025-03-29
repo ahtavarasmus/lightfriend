@@ -823,7 +823,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         />
                                         <input
                                             type="password"
-                                            placeholder="Password or App Password"
+                                            placeholder="App Password"
                                             value={(*imap_password).clone()}
                                             onchange={onchange_imap_password}
                                         />
