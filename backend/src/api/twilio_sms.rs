@@ -1005,7 +1005,6 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                             let emails_json = serde_json::json!({
                                 "query": query.query,
                                 "emails": previews.iter().rev().map(|p| {  // Reverse to prioritize newer emails
-                                    println!("from: {:#?}, date: {:#?}, body: {:#?}", p.from,p.date.map(|d| d.to_rfc3339()), p.body);
                                     serde_json::json!({
                                         "id": p.id,
                                         "subject": p.subject,
@@ -1016,7 +1015,6 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                                     })
                                 }).collect::<Vec<_>>()
                             });
-                            println!("emails_json: {:#?}", emails_json);
 
                             let user_message = chat_completion::ChatCompletionMessage {
                                 role: chat_completion::MessageRole::user,

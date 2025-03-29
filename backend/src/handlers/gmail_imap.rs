@@ -157,17 +157,6 @@ pub async fn fetch_single_imap_email(
 
     match fetch_single_email_imap(&state, auth_user.user_id, &email_id).await {
         Ok(email) => {
-            // Log only essential email content
-            tracing::info!("Email Content:\n\
-                Subject: {}\n\
-                From: {}\n\
-                Body: {}\n",
-
-                email.subject.as_deref().unwrap_or("No subject"),
-                email.from.as_deref().unwrap_or("Unknown sender"),
-
-                email.body.as_deref().unwrap_or("No content")
-            );
 
             Ok(Json(json!({
                 "success": true,
@@ -318,19 +307,6 @@ pub async fn fetch_emails_imap(
 
             (clean_content, snippet)
         }).unwrap_or_else(|| (String::new(), String::new()));
-
-
-
-            // Print email details
-            println!("\nFetched Email:");
-            println!("ID: {}", uid);
-            println!("Subject: {}", subject.as_deref().unwrap_or("No subject"));
-            println!("From: {}", from.as_deref().unwrap_or("Unknown sender"));
-            println!("Date: {}", date.map_or("Unknown date".to_string(), |d| d.to_rfc3339()));
-            println!("Is Read: {}", is_read);
-            println!("Snippet: {}", snippet);
-            println!("Body: {}", body);
-            println!("----------------------------------------");
 
             email_previews.push(ImapEmailPreview {
                 id: uid,
