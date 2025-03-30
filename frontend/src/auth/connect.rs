@@ -563,22 +563,6 @@ pub fn connect(props: &ConnectProps) -> Html {
                                 }
                             </div>
 
-                            // Outlook Calendar (Coming Soon)
-                            <div class="service-item coming-soon">
-                                <div class="service-header">
-                                    <div class="service-name">
-                                        <img src="https://upload.wikimedia.org/wikipedia/commons/d/df/Microsoft_Office_Outlook_%282018%E2%80%93present%29.svg" alt="Outlook Calendar"/>
-                                        {"Outlook Calendar"}
-                                        <span class="coming-soon-tag">{"Coming Soon"}</span>
-                                    </div>
-                                </div>
-                                <p class="service-description">
-                                    {"Manage your Outlook Calendar events through SMS or voice calls."}
-                                </p>
-                                <button class="connect-button" disabled=true>
-                                    {"Connect"}
-                                </button>
-                            </div>
                         </div>
                     </div>
 
@@ -817,25 +801,6 @@ pub fn connect(props: &ConnectProps) -> Html {
                                     </div>
                                 }
                             </div>
-                                    
-
-
-                            // Outlook (Coming Soon)
-                            <div class="service-item coming-soon">
-                                <div class="service-header">
-                                    <div class="service-name">
-                                        <img src="https://upload.wikimedia.org/wikipedia/commons/d/df/Microsoft_Office_Outlook_%282018%E2%80%93present%29.svg" alt="Outlook"/>
-                                        {"Outlook"}
-                                        <span class="coming-soon-tag">{"Coming Soon"}</span>
-                                    </div>
-                                </div>
-                                <p class="service-description">
-                                    {"Send and receive Outlook emails through SMS or voice calls."}
-                                </p>
-                                <button class="connect-button" disabled=true>
-                                    {"Connect"}
-                                </button>
-                            </div>
                         </div>
                     </div>
 
@@ -876,6 +841,23 @@ pub fn connect(props: &ConnectProps) -> Html {
                                     {"Connect"}
                                 </button>
                             </div>
+                        </div>
+
+                        // Outlook Calendar (Coming Soon)
+                        <div class="service-item coming-soon">
+                            <div class="service-header">
+                                <div class="service-name">
+                                    <img src="https://upload.wikimedia.org/wikipedia/commons/d/df/Microsoft_Office_Outlook_%282018%E2%80%93present%29.svg" alt="Outlook Calendar"/>
+                                    {"Outlook Calendar"}
+                                    <span class="coming-soon-tag">{"Coming Soon"}</span>
+                                </div>
+                            </div>
+                            <p class="service-description">
+                                {"Manage your Outlook Calendar events through SMS or voice calls."}
+                            </p>
+                            <button class="connect-button" disabled=true>
+                                {"Connect"}
+                            </button>
                         </div>
                     </div>
 
