@@ -124,13 +124,6 @@ pub async fn fetch_full_imap_emails(
                 })
                 .collect();
 
-            // Print the bodies of the emails for debugging
-            for email in &formatted_emails {
-                if let Some(body) = email.get("body") {
-                    tracing::debug!("Email body: {}", body);
-                }
-            }
-
             Ok(Json(json!({ "success": true, "emails": formatted_emails })))
         }
         Err(e) => {
