@@ -40,9 +40,9 @@ mod handlers {
     pub mod google_calendar;
     pub mod gmail_auth;
     pub mod gmail;
-    pub mod gmail_imap_auth;
-    pub mod gmail_imap;
+    pub mod imap_auth;
     pub mod auth_middleware;
+    pub mod imap_handlers;
 }
 
 mod utils {
@@ -87,8 +87,8 @@ use handlers::google_calendar_auth;
 use handlers::google_calendar;
 use handlers::gmail_auth;
 use handlers::gmail;
-use handlers::gmail_imap_auth;
-use handlers::gmail_imap;
+use handlers::imap_auth;
+use handlers::imap_handlers;
 use api::twilio_sms;
 use api::elevenlabs;
 use api::elevenlabs_webhook;
@@ -195,7 +195,7 @@ async fn main() {
         .route("/api/call/weather", post(elevenlabs::handle_weather_tool_call))
         .route("/api/call/shazam", get(elevenlabs::handle_shazam_tool_call))
         .route("/api/call/calendar", get(elevenlabs::handle_calendar_tool_call))
-        .route("/api/call/gmail", get(elevenlabs::handle_gmail_fetch_tool_call))
+        .route("/api/call/email", get(elevenlabs::handle_email_fetch_tool_call))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 
     let elevenlabs_webhook_routes = Router::new()
@@ -256,12 +256,12 @@ async fn main() {
         .route("/api/gmail/previews", get(gmail::fetch_email_previews))
         .route("/api/gmail/message/{id}", get(gmail::fetch_single_email))
 
-        .route("/api/auth/gmail/imap/login", post(gmail_imap_auth::gmail_imap_login))
-        .route("/api/auth/gmail/imap/status", get(gmail_imap_auth::gmail_imap_status))
-        .route("/api/auth/gmail/imap/disconnect", delete(gmail_imap_auth::delete_gmail_imap_connection))
-        .route("/api/gmail/imap/previews", get(gmail_imap::fetch_imap_previews))
-        .route("/api/gmail/imap/message/{id}", get(gmail_imap::fetch_single_imap_email))
-        .route("/api/gmail/imap/full_emails", get(gmail_imap::fetch_full_imap_emails))
+        .route("/api/auth/imap/login", post(imap_auth::imap_login))
+        .route("/api/auth/imap/status", get(imap_auth::imap_status))
+        .route("/api/auth/imap/disconnect", delete(imap_auth::delete_imap_connection))
+        .route("/api/imap/previews", get(imap_handlers::fetch_imap_previews))
+        .route("/api/imap/message/{id}", get(imap_handlers::fetch_single_imap_email))
+        .route("/api/imap/full_emails", get(imap_handlers::fetch_full_imap_emails))
 
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
 

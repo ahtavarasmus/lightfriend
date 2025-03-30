@@ -30,12 +30,14 @@ impl UserRepository {
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
     }
-
-    pub fn set_gmail_imap_credentials(
+ 
+    pub fn set_imap_credentials(
         &self,
         user_id: i32,
         email: &str,
         password: &str,
+        imap_server: Option<&str>,
+        imap_port: Option<u16>,
     ) -> Result<(), diesel::result::Error> {
         use crate::schema::imap_connection;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -63,13 +65,15 @@ impl UserRepository {
         // Create new connection
         let new_connection = NewImapConnection {
             user_id,
-            method: "gmail".to_string(),
+            method: imap_server.map(|s| s.to_string()).unwrap_or("gmail".to_string()),
             encrypted_password,
             status: "active".to_string(),
             last_update: current_time,
             created_on: current_time,
             description: email.to_string(),
             expires_in: 0,
+            imap_server: imap_server.map(|s| s.to_string()),
+            imap_port: imap_port.map(|p| p as i32),
         };
 
         // Insert the new connection
@@ -81,10 +85,10 @@ impl UserRepository {
     }
     
 
-    pub fn get_gmail_imap_credentials(
+    pub fn get_imap_credentials(
         &self,
         user_id: i32,
-    ) -> Result<Option<(String, String)>, diesel::result::Error> {
+    ) -> Result<Option<(String, String, Option<String>, Option<i32>)>, diesel::result::Error> {
         use crate::schema::imap_connection;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
@@ -95,7 +99,6 @@ impl UserRepository {
         // Get the active IMAP connection for the user
         let imap_conn = imap_connection::table
             .filter(imap_connection::user_id.eq(user_id))
-            .filter(imap_connection::method.eq("gmail"))
             .filter(imap_connection::status.eq("active"))
             .first::<crate::models::user_models::ImapConnection>(&mut conn)
             .optional()?;
@@ -106,7 +109,7 @@ impl UserRepository {
 
             // Decrypt the password
             match cipher.decrypt_base64_to_string(&conn.encrypted_password) {
-                Ok(decrypted_password) => Ok(Some((conn.description, decrypted_password))),
+                Ok(decrypted_password) => Ok(Some((conn.description, decrypted_password, conn.imap_server, conn.imap_port))),
                 Err(_) => Err(diesel::result::Error::RollbackTransaction)
             }
         } else {
@@ -114,7 +117,7 @@ impl UserRepository {
         }
     }
 
-    pub fn delete_gmail_imap_credentials(
+    pub fn delete_imap_credentials(
         &self,
         user_id: i32,
     ) -> Result<(), diesel::result::Error> {
@@ -122,8 +125,7 @@ impl UserRepository {
         let connection = &mut self.pool.get().unwrap();
         
         diesel::delete(imap_connection::table
-            .filter(imap_connection::user_id.eq(user_id))
-            .filter(imap_connection::method.eq("gmail")))
+            .filter(imap_connection::user_id.eq(user_id)))
             .execute(connection)?;
         
         Ok(())

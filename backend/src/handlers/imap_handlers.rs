@@ -111,6 +111,7 @@ pub async fn fetch_full_imap_emails(
             let formatted_emails: Vec<_> = previews
                 .into_iter()
                 .map(|p| {
+
                     json!({
                         "id": p.id,
                         "subject": p.subject.unwrap_or_else(|| "No subject".to_string()),
@@ -122,6 +123,13 @@ pub async fn fetch_full_imap_emails(
                     })
                 })
                 .collect();
+
+            // Print the bodies of the emails for debugging
+            for email in &formatted_emails {
+                if let Some(body) = email.get("body") {
+                    tracing::debug!("Email body: {}", body);
+                }
+            }
 
             Ok(Json(json!({ "success": true, "emails": formatted_emails })))
         }
@@ -193,9 +201,9 @@ pub async fn fetch_emails_imap(
     limit: Option<u32>,
 ) -> Result<Vec<ImapEmailPreview>, ImapError> {
     // Get IMAP credentials
-    let (email, password) = state
+    let (email, password, imap_server, imap_port) = state
         .user_repository
-        .get_gmail_imap_credentials(user_id)
+        .get_imap_credentials(user_id)
         .map_err(|e| ImapError::CredentialsError(e.to_string()))?
         .ok_or_else(|| ImapError::NoConnection)?;
 
@@ -207,12 +215,11 @@ pub async fn fetch_emails_imap(
         .build()
         .map_err(|e| ImapError::ConnectionError(format!("Failed to create TLS connector: {}", e)))?;
 
+    let server = imap_server.as_deref().unwrap_or("imap.gmail.com");
+    let port = imap_port.unwrap_or(993);
     // Connect to IMAP server
-    let client = imap::connect(
-        ("imap.gmail.com", 993),
-        "imap.gmail.com",
-        &tls,
-    ).map_err(|e| ImapError::ConnectionError(format!("Failed to connect to IMAP server: {}", e)))?;
+    let client = imap::connect((server, port as u16), server, &tls)
+    .map_err(|e| ImapError::ConnectionError(format!("Failed to connect to IMAP server: {}", e)))?;
 
     // Login
     let mut imap_session = client
@@ -336,9 +343,9 @@ pub async fn fetch_single_email_imap(
     email_id: &str,
 ) -> Result<ImapEmail, ImapError> {
     // Get IMAP credentials
-    let (email, password) = state
+    let (email, password, imap_server, imap_port) = state
         .user_repository
-        .get_gmail_imap_credentials(user_id)
+        .get_imap_credentials(user_id)
         .map_err(|e| ImapError::CredentialsError(e.to_string()))?
         .ok_or(ImapError::NoConnection)?;
 
@@ -347,12 +354,11 @@ pub async fn fetch_single_email_imap(
         .build()
         .map_err(|e| ImapError::ConnectionError(format!("Failed to create TLS connector: {}", e)))?;
 
+    let server = imap_server.as_deref().unwrap_or("imap.gmail.com");
+    let port = imap_port.unwrap_or(993);
     // Connect to IMAP server
-    let client = imap::connect(
-        ("imap.gmail.com", 993),
-        "imap.gmail.com",
-        &tls,
-    ).map_err(|e| ImapError::ConnectionError(format!("Failed to connect to IMAP server: {}", e)))?;
+    let client = imap::connect((server, port as u16), server, &tls)
+    .map_err(|e| ImapError::ConnectionError(format!("Failed to connect to IMAP server: {}", e)))?;
 
     // Login
     let mut imap_session = client

@@ -49,6 +49,8 @@ pub struct ImapConnection {
     pub created_on: i32,
     pub description: String,
     pub expires_in: i32,
+    pub imap_server: Option<String>,
+    pub imap_port: Option<i32>,
 }
 
 #[derive(Insertable)]
@@ -62,6 +64,8 @@ pub struct NewImapConnection {
     pub created_on: i32,
     pub description: String,
     pub expires_in: i32,
+    pub imap_server: Option<String>,
+    pub imap_port: Option<i32>,
 }
 
 

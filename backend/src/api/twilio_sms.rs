@@ -1,5 +1,5 @@
 use reqwest::Client;
-use crate::handlers::gmail_imap::ImapError;
+use crate::handlers::imap_handlers::ImapError;
 use std::env;
 use std::error::Error;
 use std::sync::Arc;
@@ -487,7 +487,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: format!("You are a friendly and helpful AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Be direct and natural in your answers. Since users are using SMS, keep responses clear and brief. Avoid suggesting actions requiring smartphones or internet. Do not ask for confirmation to use tools. If there is even slightest hint that they could be helpful, use them immediately. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages. Use simple language and focus on the most important information first. This is what the user wants to you to know: {}. The user's timezone is {} with offset {}. When using tools that require time information (like calendar or gmail): 1. Always use RFC3339/ISO8601 format (e.g. '2024-03-23T14:30:00Z') 2. If no specific time is mentioned, use the current time for start and 24 hours ahead for end 3. Always consider the user's timezone when interpreting time-related requests 4. For 'today' queries, use 00:00 of current day as start and 23:59 as end in user's timezone 5. For 'tomorrow' queries, use 00:00 to 23:59 of next day in user's timezone. 6. Unless user references the previous query's results, you should always use the tools to fetch the latest information before answering the question. When you use tools make sure to add relevant info about the user to the tool call so they can act accordingly.", Utc::now().format("%Y-%m-%d"), user_info, timezone_str, offset),
+        content: format!("You are a friendly and helpful AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Be direct and natural in your answers. Since users are using SMS, keep responses clear and brief. Avoid suggesting actions requiring smartphones or internet. Do not ask for confirmation to use tools. If there is even slightest hint that they could be helpful, use them immediately. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages. Use simple language and focus on the most important information first. This is what the user wants to you to know: {}. The user's timezone is {} with offset {}. When using tools that require time information (like calendar or email): 1. Always use RFC3339/ISO8601 format (e.g. '2024-03-23T14:30:00Z') 2. If no specific time is mentioned, use the current time for start and 24 hours ahead for end 3. Always consider the user's timezone when interpreting time-related requests 4. For 'today' queries, use 00:00 of current day as start and 23:59 as end in user's timezone 5. For 'tomorrow' queries, use 00:00 to 23:59 of next day in user's timezone. 6. Unless user references the previous query's results, you should always use the tools to fetch the latest information before answering the question. When you use tools make sure to add relevant info about the user to the tool call so they can act accordingly.", Utc::now().format("%Y-%m-%d"), user_info, timezone_str, offset),
     }];
     
     // Process the message body to remove "forget" if it exists at the start
@@ -889,8 +889,8 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     );
                 } else if name == "fetch_imap_emails" {
                     println!("Executing fetch_imap_emails tool call");
-                    let queryObj = crate::handlers::gmail_imap::FetchEmailsQuery { limit: None };
-                    match crate::handlers::gmail_imap::fetch_full_imap_emails(
+                    let queryObj = crate::handlers::imap_handlers::FetchEmailsQuery { limit: None };
+                    match crate::handlers::imap_handlers::fetch_full_imap_emails(
                         axum::extract::State(state.clone()),
                         auth_user,
                         axum::extract::Query(queryObj),
@@ -963,7 +963,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     };
 
                     // First fetch previews using IMAP
-                    match crate::handlers::gmail_imap::fetch_emails_imap(&state, user.id, true, None).await {
+                    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user.id, true, None).await {
                         Ok(previews) => {
                             if previews.is_empty() {
                                 tool_answers.insert(tool_call_id, "No emails found.".to_string());
@@ -1023,7 +1023,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                                     }
 
                                     // Fetch the specific email using IMAP
-                                    match crate::handlers::gmail_imap::fetch_single_email_imap(
+                                    match crate::handlers::imap_handlers::fetch_single_email_imap(
                                         &state,
                                         user.id,
                                         email_id.trim()
