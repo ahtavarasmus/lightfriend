@@ -16,7 +16,7 @@ pub struct UsageDataPoint {
 }
 
 use crate::{
-    models::user_models::{User, NewUsageLog, NewUnipileConnection, NewGoogleCalendar, ImapConnection, NewImapConnection},
+    models::user_models::{User, NewUsageLog, NewUnipileConnection, NewGoogleCalendar, ImapConnection, NewImapConnection, Bridge, NewBridge},
     handlers::auth_dtos::NewUser,
     schema::{users, usage_logs, unipile_connection, imap_connection},
     DbPool,
@@ -946,6 +946,91 @@ impl UserRepository {
 
         diesel::delete(gmail::table)
             .filter(gmail::user_id.eq(user_id))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn set_matrix_credentials(&self, user_id: i32, username: &str, access_token: &str) -> Result<(), DieselError> {
+        use crate::utils::matrix_auth::MatrixAuth;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Encrypt the access token before storing
+        let encrypted_token = MatrixAuth::encrypt_token(access_token)
+            .map_err(|_| DieselError::RollbackTransaction)?;
+
+        diesel::update(users::table.find(user_id))
+            .set((
+                users::matrix_username.eq(username),
+                users::encrypted_matrix_access_token.eq(encrypted_token),
+            ))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn get_matrix_credentials(&self, user_id: i32) -> Result<Option<(String, String)>, DieselError> {
+        use crate::utils::matrix_auth::MatrixAuth;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let user = users::table
+            .find(user_id)
+            .first::<User>(&mut conn)?;
+
+        match (user.matrix_username, user.encrypted_matrix_access_token) {
+            (Some(username), Some(encrypted_token)) => {
+                let token = MatrixAuth::decrypt_token(&encrypted_token)
+                    .map_err(|_| DieselError::RollbackTransaction)?;
+                Ok(Some((username, token)))
+            },
+            _ => Ok(None),
+        }
+    }
+
+    pub fn delete_matrix_credentials(&self, user_id: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::update(users::table.find(user_id))
+            .set((
+                users::matrix_username.eq::<Option<String>>(None),
+                users::encrypted_matrix_access_token.eq::<Option<String>>(None),
+            ))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn create_bridge(&self, new_bridge: NewBridge) -> Result<(), DieselError> {
+        use crate::schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::insert_into(bridges::table)
+            .values(&new_bridge)
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn get_whatsapp_bridge(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
+        use crate::schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let bridge = bridges::table
+            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::bridge_type.eq("whatsapp"))
+            .first::<Bridge>(&mut conn)
+            .optional()?;
+
+        Ok(bridge)
+    }
+
+    pub fn delete_whatsapp_bridge(&self, user_id: i32) -> Result<(), DieselError> {
+        use crate::schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::delete(bridges::table)
+            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::bridge_type.eq("whatsapp"))
             .execute(&mut conn)?;
 
         Ok(())

@@ -43,12 +43,14 @@ mod handlers {
     pub mod imap_auth;
     pub mod auth_middleware;
     pub mod imap_handlers;
+    pub mod whatsapp_auth;
 }
 
 mod utils {
     pub mod encryption;
     pub mod tool_exec;
     pub mod usage;
+    pub mod matrix_auth;
 }
 mod api {
     pub mod vapi_endpoints;
@@ -123,7 +125,8 @@ pub fn validate_env() {
         "MESSAGE_COST", "MESSAGE_COST_US", "VOICE_SECOND_COST", "CHARGE_BACK_THRESHOLD", 
         "SHAZAM_PHONE_NUMBER", "SHAZAM_EUROPE_PHONE_NUMBER","SHAZAM_API_KEY", "SERVER_URL", 
         "ENCRYPTION_KEY", "COMPOSIO_API_KEY", "GOOGLE_CALENDAR_CLIENT_ID", 
-        "GOOGLE_CALENDAR_CLIENT_SECRET",
+        "GOOGLE_CALENDAR_CLIENT_SECRET", "MATRIX_HOMESERVER", "MATRIX_SHARED_SECRET",
+        "WHATSAPP_BRIDGE_BOT",
     ];
     for var in required_vars.iter() {
         std::env::var(var).expect(&format!("{} must be set", var));
