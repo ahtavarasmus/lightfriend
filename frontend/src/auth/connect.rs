@@ -17,6 +17,9 @@ pub struct ConnectProps {
 pub fn connect(props: &ConnectProps) -> Html {
     let error = use_state(|| None::<String>);
     let connecting = use_state(|| false);
+    let whatsapp_connected = use_state(|| false);
+    let whatsapp_connecting = use_state(|| false);
+    let whatsapp_qr_code = use_state(|| None::<String>);
     let calendar_connected = use_state(|| false);
     let gmail_connected = use_state(|| false);
     let imap_connected = use_state(|| false);
@@ -237,6 +240,142 @@ pub fn connect(props: &ConnectProps) -> Html {
     };
 
     // Handler for disconnecting IMAP
+    // Check WhatsApp connection status on component mount
+    {
+        let whatsapp_connected = whatsapp_connected.clone();
+        use_effect_with_deps(
+            move |_| {
+                if let Some(window) = web_sys::window() {
+                    if let Ok(Some(storage)) = window.local_storage() {
+                        if let Ok(Some(token)) = storage.get_item("token") {
+                            spawn_local(async move {
+                                let request = Request::get(&format!("{}/api/auth/whatsapp/status", config::get_backend_url()))
+                                    .header("Authorization", &format!("Bearer {}", token))
+                                    .send()
+                                    .await;
+
+                                if let Ok(response) = request {
+                                    if response.ok() {
+                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                            if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                                whatsapp_connected.set(connected);
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+                || ()
+            },
+            (),
+        );
+    }
+
+    let onclick_whatsapp_connect = {
+        let whatsapp_connecting = whatsapp_connecting.clone();
+        let whatsapp_qr_code = whatsapp_qr_code.clone();
+        let error = error.clone();
+        
+        Callback::from(move |_| {
+            let whatsapp_connecting = whatsapp_connecting.clone();
+            let whatsapp_qr_code = whatsapp_qr_code.clone();
+            let error = error.clone();
+
+            whatsapp_connecting.set(true);
+            error.set(None);
+
+            if let Some(window) = web_sys::window() {
+                if let Ok(Some(storage)) = window.local_storage() {
+                    if let Ok(Some(token)) = storage.get_item("token") {
+                        spawn_local(async move {
+                            let request = Request::get(&format!("{}/api/auth/whatsapp/connect", config::get_backend_url()))
+                                .header("Authorization", &format!("Bearer {}", token))
+                                .send()
+                                .await;
+
+                            match request {
+                                Ok(response) => {
+                                    if response.ok() {
+                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                            if let Some(qr_url) = data.get("qr_code_url").and_then(|u| u.as_str()) {
+                                                whatsapp_qr_code.set(Some(qr_url.to_string()));
+                                            } else {
+                                                error.set(Some("Failed to get QR code".to_string()));
+                                            }
+                                        }
+                                    } else {
+                                        if let Ok(error_data) = response.json::<serde_json::Value>().await {
+                                            if let Some(error_msg) = error_data.get("error").and_then(|e| e.as_str()) {
+                                                error.set(Some(error_msg.to_string()));
+                                            } else {
+                                                error.set(Some(format!("Failed to connect: {}", response.status())));
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error.set(Some(format!("Network error: {}", e)));
+                                }
+                            }
+                            whatsapp_connecting.set(false);
+                        });
+                    }
+                }
+            }
+        })
+    };
+
+    let onclick_whatsapp_disconnect = {
+        let whatsapp_connected = whatsapp_connected.clone();
+        let error = error.clone();
+        
+        Callback::from(move |_| {
+            let whatsapp_connected = whatsapp_connected.clone();
+            let error = error.clone();
+
+            if let Some(window) = web_sys::window() {
+                if let Ok(Some(storage)) = window.local_storage() {
+                    if let Ok(Some(token)) = storage.get_item("token") {
+                        spawn_local(async move {
+                            let request = Request::delete(&format!("{}/api/auth/whatsapp/disconnect", config::get_backend_url()))
+                                .header("Authorization", &format!("Bearer {}", token))
+                                .send()
+                                .await;
+
+                            match request {
+                                Ok(response) => {
+                                    if response.ok() {
+                                        whatsapp_connected.set(false);
+                                    } else {
+                                        if let Ok(error_data) = response.json::<serde_json::Value>().await {
+                                            if let Some(error_msg) = error_data.get("error").and_then(|e| e.as_str()) {
+                                                error.set(Some(error_msg.to_string()));
+                                            } else {
+                                                error.set(Some(format!("Failed to disconnect: {}", response.status())));
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    error.set(Some(format!("Network error: {}", e)));
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+        })
+    };
+
+    let onclick_close_qr_modal = {
+        let whatsapp_qr_code = whatsapp_qr_code.clone();
+        Callback::from(move |_| {
+            whatsapp_qr_code.set(None);
+        })
+    };
+
     let onclick_imap_disconnect = {
         let imap_connected = imap_connected.clone();
         let error = error.clone();
@@ -827,19 +966,51 @@ pub fn connect(props: &ConnectProps) -> Html {
                                 </button>
                             </div>
 
-                            <div class="service-item coming-soon">
+                            <div class="service-item">
                                 <div class="service-header">
                                     <div class="service-name">
                                         <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp"/>
                                         {"WhatsApp"}
                                     </div>
+                                    if *whatsapp_connected {
+                                        <span class="service-status">{"Connected ✓"}</span>
+                                    }
                                 </div>
                                 <p class="service-description">
                                     {"Send and receive WhatsApp messages through SMS or voice calls."}
                                 </p>
-                                <button class="connect-button" disabled=true>
-                                    {"Connect"}
-                                </button>
+                                if *whatsapp_connected {
+                                    <button 
+                                        onclick={onclick_whatsapp_disconnect}
+                                        class="disconnect-button"
+                                    >
+                                        {"Disconnect"}
+                                    </button>
+                                } else {
+                                    <button 
+                                        onclick={onclick_whatsapp_connect}
+                                        class="connect-button"
+                                        disabled={*whatsapp_connecting}
+                                    >
+                                        if *whatsapp_connecting {
+                                            {"Connecting..."}
+                                        } else {
+                                            {"Connect"}
+                                        }
+                                    </button>
+                                }
+                                if let Some(qr_code) = &*whatsapp_qr_code {
+                                    <div class="qr-code-modal">
+                                        <div class="qr-code-content">
+                                            <h3>{"Scan QR Code with WhatsApp"}</h3>
+                                            <img src={qr_code.clone()} alt="WhatsApp QR Code" />
+                                            <p>{"Open WhatsApp on your phone and scan this QR code to connect."}</p>
+                                            <button onclick={onclick_close_qr_modal} class="close-button">
+                                                {"Close"}
+                                            </button>
+                                        </div>
+                                    </div>
+                                }
                             </div>
                         </div>
 

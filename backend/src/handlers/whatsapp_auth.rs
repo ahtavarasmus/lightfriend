@@ -9,10 +9,15 @@ use matrix_sdk::{
     room::Room,
     ruma::{
         api::client::room::create_room::v3::Request as CreateRoomRequest,
-        events::room::message::{RoomMessageEventContent, SyncRoomMessageEvent},
+        events::room::message::{RoomMessageEventContent, SyncRoomMessageEvent, MessageType},
+        events::AnySyncTimelineEvent,
         OwnedRoomId, OwnedUserId,
     },
 };
+use matrix_sdk::ruma::events::AnySyncMessageLikeEvent;
+use matrix_sdk::ruma::events::SyncMessageLikeEvent;
+
+
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
@@ -67,40 +72,58 @@ async fn ensure_matrix_credentials(
     Ok((username, access_token))
 }
 
+
 async fn connect_whatsapp(
     client: &MatrixClient,
     bridge_bot: &str,
 ) -> Result<(OwnedRoomId, String)> {
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
     let request = CreateRoomRequest::new();
-    let response = client.create_room(&request).await?;
-    let room_id = response.room_id;
+    let response = client.create_room(request).await?;
+    let room_id = response.room_id();
 
     let room = client.get_room(&room_id).ok_or(anyhow!("Room not found"))?;
     room.invite_user_by_id(&bot_user_id).await?;
-    room.send(RoomMessageEventContent::text_plain("login qr"), None).await?;
+    room.send(RoomMessageEventContent::text_plain("login qr")).await?;
 
     let mut qr_url = None;
     client.sync_once(MatrixSyncSettings::default()).await?;
 
     // Set up event handler for QR code
-    let mut sync_settings = MatrixSyncSettings::default();
-    sync_settings.timeout = Some(Duration::from_secs(1));
+    let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(1));
 
     for _ in 0..30 {
         client.sync_once(sync_settings.clone()).await?;
         
         // Check for new messages
         if let Some(room) = client.get_room(&room_id) {
-            let messages = room.messages().await?;
+            let options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
+            let messages = room.messages(options).await?;
             for msg in messages.chunk {
-                if msg.sender == bot_user_id {
-                    if let Some(content) = msg.content.as_event() {
-                        if let Some(img) = content.as_image() {
-                            qr_url = Some(format!("{}/_matrix/media/r0/download/{}", 
-                                client.homeserver(), 
-                                img.url));
-                            break;
+                let raw_event = msg.raw();
+                if let Ok(event) = raw_event.deserialize() {
+                    if event.sender() == bot_user_id {
+                        if let AnySyncTimelineEvent::MessageLike(
+                            AnySyncMessageLikeEvent::RoomMessage(sync_event)
+                        ) = event {
+                            // Access the content field from SyncMessageLikeEvent
+                            let content: SyncMessageLikeEvent<RoomMessageEventContent> = sync_event.into();
+                            let event_content: RoomMessageEventContent = match content {
+                                SyncMessageLikeEvent::Original(original_event) => original_event.content,
+                                SyncMessageLikeEvent::Redacted(_) => panic!("Event was redacted, expected original content"),
+                            };
+                            // Check if the message is an image
+                            if let MessageType::Image(img_content) = event_content.msgtype {
+                                // Get the MXC URI from the MediaSource
+                                if let matrix_sdk::ruma::events::room::MediaSource::Plain(mxc_uri) = img_content.source {
+                                    qr_url = Some(format!(
+                                        "{}/_matrix/media/r0/download/{}", 
+                                        client.homeserver(), 
+                                        mxc_uri
+                                    ));
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -114,7 +137,7 @@ async fn connect_whatsapp(
     }
 
     let qr_url = qr_url.ok_or(anyhow!("QR code not received"))?;
-    Ok((room_id, qr_url))
+    Ok((room_id.into(), qr_url))
 }
 
 pub async fn start_whatsapp_connection(
@@ -134,7 +157,6 @@ pub async fn start_whatsapp_connection(
 
     let client = MatrixClient::builder()
         .homeserver_url(homeserver_url)
-        .access_token(access_token)
         .build()
         .map_err(|e| {
             tracing::error!("Failed to create Matrix client: {}", e);
@@ -143,6 +165,30 @@ pub async fn start_whatsapp_connection(
                 AxumJson(json!({"error": "Failed to create Matrix client"})),
             )
         })?;
+    use matrix_sdk::authentication::matrix::MatrixSession;
+    use matrix_sdk::authentication::AuthSession;
+    use matrix_sdk::SessionMeta;
+    use matrix_sdk::authentication::matrix::MatrixSessionTokens;
+    // Set the access token by restoring a session
+    let session = AuthSession::Matrix(MatrixSession {
+        meta: SessionMeta {
+            user_id: 
+            device_id:
+        },
+        tokens: MatrixSessionTokens {
+            access_token: access_token.to_string(),
+            refresh_token: None, // Optional, if you have one
+        },
+    });
+
+    client.restore_session(session).await.map_err(|e| {
+        tracing::error!("Failed to restore session: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": "Failed to restore session"})),
+        )
+    })?;
+
 
     // Connect to WhatsApp bridge
     let (room_id, qr_url) = connect_whatsapp(&client, &bridge_bot)

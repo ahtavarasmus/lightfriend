@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-matrix_sdk = "0.10"
 anyhow = "1.0"
 mail-parser = "0.10"
 imap = "2.4"
@@ -34,7 +33,7 @@ rand = "0.8"
 reqwest = { version = "0.12", features = ["multipart", "json"] }
 hound = "3.5"
 base64 = "0.21"
-rusqlite = { version = "0.31.0", features = ["bundled"] }  # Auto-compiles SQLite
+rusqlite = { version = "0.32.1", features = ["bundled"] }  # Auto-compiles SQLite
 sentry = "0.36.0"
 once_cell = "1.20.3"
 openai-api-rs = "5.2.6"
@@ -56,3 +55,4 @@ oauth2 = { version = "5.0", features = ["reqwest"] }
 tower-sessions = { version = "0.12.0", features = ["axum-core"] }
 tower = "0.4"
 mockall = "0.11"
+matrix-sdk = "0.10.0"

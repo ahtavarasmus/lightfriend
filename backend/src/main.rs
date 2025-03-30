@@ -91,6 +91,7 @@ use handlers::gmail_auth;
 use handlers::gmail;
 use handlers::imap_auth;
 use handlers::imap_handlers;
+use handlers::whatsapp_auth;
 use api::twilio_sms;
 use api::elevenlabs;
 use api::elevenlabs_webhook;
@@ -265,6 +266,11 @@ async fn main() {
         .route("/api/imap/previews", get(imap_handlers::fetch_imap_previews))
         .route("/api/imap/message/{id}", get(imap_handlers::fetch_single_imap_email))
         .route("/api/imap/full_emails", get(imap_handlers::fetch_full_imap_emails))
+
+        .route("/api/auth/whatsapp/status", get(whatsapp_auth::get_whatsapp_status))
+        .route("/api/auth/whatsapp/connect", get(whatsapp_auth::start_whatsapp_connection))
+        .route("/api/auth/whatsapp/disconnect", delete(whatsapp_auth::disconnect_whatsapp))
+
 
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
 
