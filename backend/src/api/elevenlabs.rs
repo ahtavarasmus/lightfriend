@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use chrono::TimeZone;
-use crate::handlers::gmail_imap::fetch_emails_imap;
+use crate::handlers::imap_handlers::fetch_emails_imap;
 
 
 
@@ -305,7 +305,7 @@ pub async fn fetch_assistant(
     Ok(Json(payload))
 }
 
-pub async fn handle_gmail_fetch_tool_call(
+pub async fn handle_email_fetch_tool_call(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> Json<serde_json::Value> {
@@ -321,7 +321,7 @@ pub async fn handle_gmail_fetch_tool_call(
     };
     println!("Received Gmail fetch request for user: {}", user_id);
     
-    match crate::handlers::gmail_imap::fetch_emails_imap(&state, user_id, true, Some(10)).await {
+    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user_id, true, Some(10)).await {
         Ok(emails) => {
             // Format emails for voice response
             let mut response_text = String::from("Here are your recent emails. ");

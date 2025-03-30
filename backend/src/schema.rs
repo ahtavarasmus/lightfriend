@@ -64,6 +64,8 @@ diesel::table! {
         created_on -> Integer,
         description -> Text,
         expires_in -> Integer,
+        imap_server -> Nullable<Text>,
+        imap_port -> Nullable<Integer>,
     }
 }
 
