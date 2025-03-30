@@ -1,4 +1,24 @@
 
+.producthunt-demo {
+    padding: 2rem 0;
+    text-align: center;
+}
+
+.producthunt-iframe-container {
+    margin: 2rem auto;
+    max-width: 500px;
+    width: 100%;
+    display: flex;
+    justify-content: center;
+}
+
+@media (max-width: 520px) {
+    .producthunt-iframe-container iframe {
+        width: 100%;
+        height: auto;
+        min-height: 405px;
+    }
+}
 
 .problems {
     padding: 6rem 2rem;
@@ -509,6 +529,29 @@
     color: #999;
     margin-bottom: 2.5rem;
     line-height: 1.6;
+}
+
+.hero {
+    padding: 6rem 0;
+    text-align: center;
+}
+
+.producthunt-badge {
+    margin-bottom: 2rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+@media (max-width: 768px) {
+    .producthunt-badge {
+        margin-bottom: 1.5rem;
+    }
+    
+    .producthunt-badge img {
+        width: 200px;
+        height: auto;
+    }
 }
 
 
