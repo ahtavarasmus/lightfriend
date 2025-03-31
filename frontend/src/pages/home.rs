@@ -92,6 +92,18 @@ pub fn landing() -> Html {
                         <p>{"Enjoy the simple, distraction-free life with lightfriend’s AI assistance when it matters. Access your email, calendar, messaging apps or just search internet answers when needed through natural voice calling or sms interface. Don't worry, it's not too convenient ;) - just enough to get the job done."}</p>
                     </div>
                 </div>
+                <div class="video-demo">
+                    <p>{"Watch lightfriend in action:"}</p>
+                    <a 
+                        href="https://www.youtube.com/shorts/KrVdJbHPB-o" 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        class="demo-link"
+                    >
+                        {"▶️ See Demo"}
+                    </a>
+                </div>
+
             </section>
 
             // Features Section: Practical Tools
