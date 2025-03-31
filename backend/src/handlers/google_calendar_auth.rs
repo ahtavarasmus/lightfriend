@@ -27,6 +27,11 @@ pub struct AuthRequest {
     state: String,
 }
 
+#[derive(Deserialize)]
+pub struct LoginRequest {
+    calendar_access_type: Option<String>,
+}
+
 #[derive(Serialize)]
 pub struct TokenInfo {
     access_token: String,
@@ -37,6 +42,7 @@ pub struct TokenInfo {
 pub async fn google_login(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
+    Query(params): Query<LoginRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Received request to /api/auth/google/login");
 
@@ -55,6 +61,7 @@ pub async fn google_login(
     record.data.insert("pkce_verifier".to_string(), json!(pkce_verifier.secret().to_string()));
     record.data.insert("csrf_token".to_string(), json!(csrf_token.secret().to_string()));
     record.data.insert("user_id".to_string(), json!(auth_user.user_id));
+    record.data.insert("calendar_access_type".to_string(), json!(params.calendar_access_type.unwrap_or_else(|| "primary".to_string())));
 
     tracing::info!("Storing session record with ID: {}", record.id.0);
     if let Err(e) = state.session_store.create(&mut record).await {
@@ -66,6 +73,11 @@ pub async fn google_login(
     }
 
     let state_token = format!("{}:{}", record.id.0, csrf_token.secret());
+    // Get the calendar access type from the session data
+    let calendar_access_type = record.data.get("calendar_access_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("primary");
+
     let mut auth_builder = state
         .google_calendar_oauth_client
         .authorize_url(|| CsrfToken::new(state_token.clone()))
@@ -73,8 +85,10 @@ pub async fn google_login(
         .add_extra_param("access_type", "offline") // Add this to request offline access
         .add_extra_param("prompt", "consent"); // Optional: forces consent screen to ensure refresh token is issued
 
-    // Add additional calendar scope for user_id 1
-    auth_builder = auth_builder.add_scope(Scope::new("https://www.googleapis.com/auth/calendar".to_string()));
+    // Add full calendar scope if "all" access type is requested
+    if calendar_access_type == "all" {
+        auth_builder = auth_builder.add_scope(Scope::new("https://www.googleapis.com/auth/calendar".to_string()));
+    }
 
     let (auth_url, _) = auth_builder
         .set_pkce_challenge(pkce_challenge)
