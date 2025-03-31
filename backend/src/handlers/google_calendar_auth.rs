@@ -74,7 +74,7 @@ pub async fn google_login(
         .add_extra_param("prompt", "consent"); // Optional: forces consent screen to ensure refresh token is issued
 
     // Add additional calendar scope for user_id 1
-    if auth_user.is_admin || auth_user.user_id == 30 {
+    if auth_user.is_admin || auth_user.user_id == 30 || auth_user.user_id == 63 {
         auth_builder = auth_builder.add_scope(Scope::new("https://www.googleapis.com/auth/calendar".to_string()));
     }
 
