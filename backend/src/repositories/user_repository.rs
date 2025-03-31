@@ -139,6 +139,7 @@ impl UserRepository {
             ("USA_PHONE", "+1"),
             ("NLD_PHONE", "+31"),
             ("CHZ_PHONE", "+420"),
+            ("AUS_PHONE", "+61"),
         ];
 
         // Collect phone numbers into a HashMap for easier matching
