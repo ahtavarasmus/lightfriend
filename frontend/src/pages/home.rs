@@ -13,6 +13,7 @@ const PHONE_NUMBERS: &[(&str, &str, Option<&str>)] = &[
     ("us", "+18153684737", None),
     ("fin", "+358454901522", None),
     ("nl", "+3197006520696", None),
+    ("gb", "+447383240344", None),
     ("cz", "+420910921902", Some("(no sms)")),
 ];
 
