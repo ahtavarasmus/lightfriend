@@ -963,7 +963,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     };
 
                     // First fetch previews using IMAP
-                    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user.id, true, None).await {
+                    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user.id, true, None, false).await {
                         Ok(previews) => {
                             if previews.is_empty() {
                                 tool_answers.insert(tool_call_id, "No emails found.".to_string());

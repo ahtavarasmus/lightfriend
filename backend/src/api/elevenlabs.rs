@@ -229,20 +229,6 @@ pub async fn fetch_assistant(
             dynamic_variables.insert("timezone".to_string(), json!(timezone_str));
             dynamic_variables.insert("timezone_offset_from_utc".to_string(), json!(offset));
 
-            // Check Google Calendar availability
-            match state.user_repository.has_active_google_calendar(user.id) {
-                Ok(has_calendar) => {
-                    if has_calendar {
-                        dynamic_variables.insert("google_calendar_status".to_string(), json!("connected"));
-                    } else {
-                        dynamic_variables.insert("google_calendar_status".to_string(), json!("not connected"));
-                    }
-                },
-                Err(e) => {
-                    eprintln!("Error checking Google Calendar status: {}", e);
-                    dynamic_variables.insert("google_calendar_status".to_string(), json!("not connected"));
-                }
-            }
 
             let charge_back_threshold= std::env::var("CHARGE_BACK_THRESHOLD")
                 .expect("CHARGE_BACK_THRESHOLD not set")
@@ -321,7 +307,7 @@ pub async fn handle_email_fetch_tool_call(
     };
     println!("Received Gmail fetch request for user: {}", user_id);
     
-    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user_id, true, Some(10)).await {
+    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user_id, true, Some(10), false).await {
         Ok(emails) => {
             // Format emails for voice response
             let mut response_text = String::from("Here are your recent emails. ");

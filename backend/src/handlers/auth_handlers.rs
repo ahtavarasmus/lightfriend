@@ -195,6 +195,16 @@ pub async fn register(
     
     println!("Registration attempt for email: {}", reg_req.email);
 
+    use regex::Regex;
+    let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
+    if !email_regex.is_match(&reg_req.email) {
+        println!("Invalid email format: {}", reg_req.email);
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid email format"}))
+        ));
+    }
+
     // Check if email exists
     println!("Checking if email exists...");
     if state.user_repository.email_exists(&reg_req.email).map_err(|e| {
@@ -211,13 +221,13 @@ pub async fn register(
         ));
     }
     println!("Email is available");
-
-    // Validate phone number format
-    if !reg_req.phone_number.starts_with('+') {
+    
+    let phone_regex = Regex::new(r"^\+[1-9]\d{1,14}$").unwrap();
+    if !phone_regex.is_match(&reg_req.phone_number) {
         println!("Invalid phone number format: {}", reg_req.phone_number);
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Phone number must start with '+'" })),
+            Json(json!({"error": "Phone number must be in E.164 format (e.g., +1234567890)"}))
         ));
     }
 
