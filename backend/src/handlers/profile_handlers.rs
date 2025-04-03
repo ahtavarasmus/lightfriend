@@ -205,17 +205,25 @@ pub async fn update_profile(
     auth_user: AuthUser,
     Json(update_req): Json<UpdateProfileRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-
-
-    // Validate phone number format
-    if !update_req.phone_number.starts_with('+') {
+ 
+    use regex::Regex;
+    let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
+    if !email_regex.is_match(&update_req.email) {
+        println!("Invalid email format: {}", update_req.email);
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Phone number must start with '+'" }))
+            Json(json!({"error": "Invalid email format"}))
         ));
     }
-
-
+    
+    let phone_regex = Regex::new(r"^\+[1-9]\d{1,14}$").unwrap();
+    if !phone_regex.is_match(&update_req.phone_number) {
+        println!("Invalid phone number format: {}", update_req.phone_number);
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Phone number must be in E.164 format (e.g., +1234567890)"}))
+        ));
+    }
 
     match state.user_repository.update_profile(
         auth_user.user_id,

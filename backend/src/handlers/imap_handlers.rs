@@ -62,7 +62,7 @@ pub async fn fetch_imap_previews(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Starting IMAP preview fetch for user {} with limit {:?}", auth_user.user_id, params.limit);
 
-    match fetch_emails_imap(&state, auth_user.user_id, true, params.limit).await {
+    match fetch_emails_imap(&state, auth_user.user_id, true, params.limit, false).await {
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP previews", previews.len());
             
@@ -103,7 +103,7 @@ pub async fn fetch_full_imap_emails(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Starting IMAP full emails fetch for user {} with limit {:?}", auth_user.user_id, params.limit);
 
-    match fetch_emails_imap(&state, auth_user.user_id, false, params.limit).await {
+    match fetch_emails_imap(&state, auth_user.user_id, false, params.limit, false).await {
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP full emails", previews.len());
             
@@ -192,6 +192,7 @@ pub async fn fetch_emails_imap(
     user_id: i32,
     preview_only: bool,
     limit: Option<u32>,
+    unprocessed: bool, 
 ) -> Result<Vec<ImapEmailPreview>, ImapError> {
     // Get IMAP credentials
     let (email, password, imap_server, imap_port) = state
@@ -230,14 +231,25 @@ pub async fn fetch_emails_imap(
     let messages = imap_session
         .fetch(
             &sequence_set,
-            "(UID FLAGS ENVELOPE BODY[] BODY[TEXT])",  // Added BODY[] to get full message content
+            "(UID FLAGS ENVELOPE BODY.PEEK[])",  // PEEK to not mark the email as read
         )
         .map_err(|e| ImapError::FetchError(format!("Failed to fetch messages: {}", e)))?;
 
     let mut email_previews = Vec::new();
+    const PROCESSED_FLAG: &str = "lightfriend_processed";  // Custom flag
 
     for message in messages.iter() {
         let uid = message.uid.unwrap_or(0).to_string();
+
+        let flags = message.flags();
+        let is_processed = flags.iter().any(|f| f.to_string() == PROCESSED_FLAG);
+        
+        // Skip processed emails if unprocessed is true
+        if unprocessed && is_processed {
+            tracing::info!("Skipping already processed email");
+            continue;
+        }
+
         let envelope = message.envelope().ok_or_else(|| {
             ImapError::ParseError("Failed to get message envelope".to_string())
         })?;
@@ -308,15 +320,22 @@ pub async fn fetch_emails_imap(
             (clean_content, snippet)
         }).unwrap_or_else(|| (String::new(), String::new()));
 
-            email_previews.push(ImapEmailPreview {
-                id: uid,
-                subject,
-                from,
-                date,
-                snippet: Some(snippet),
-                body: Some(body),
-                is_read,
-            });
+        email_previews.push(ImapEmailPreview {
+            id: uid.clone(),
+            subject,
+            from,
+            date,
+            snippet: Some(snippet),
+            body: Some(body),
+            is_read,
+        });
+
+        // Only set the processed flag if unprocessed is true
+        if unprocessed {
+            imap_session
+                .uid_store(&uid, format!("+FLAGS ({})", PROCESSED_FLAG))
+                .map_err(|e| ImapError::FetchError(format!("Failed to set flag: {}", e)))?;
+        }
     }
 
     // Logout
