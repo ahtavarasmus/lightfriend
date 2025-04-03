@@ -10,6 +10,8 @@ use serde_json::json;
 use jsonwebtoken::{encode, Header, EncodingKey};
 use chrono::{Duration, Utc};
 use serde::Deserialize;
+use std::num::NonZeroU32;
+use governor::{Quota, RateLimiter, clock::DefaultClock};
 
 #[derive(Deserialize)]
 pub struct BroadcastMessageRequest {
@@ -33,7 +35,7 @@ pub async fn get_users(
         println!("Database error while checking admin status: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
+            Json(json!({"error": format!("Database error")}))
         )
     })? {
         println!("User is not an admin");
@@ -49,7 +51,7 @@ pub async fn get_users(
         println!("Database error while fetching users: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
+            Json(json!({"error": format!("Database error")}))
         )
     })?;
     
@@ -79,6 +81,26 @@ pub async fn login(
     Json(login_req): Json<LoginRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     println!("Login attempt for email: {}", login_req.email); // Debug log
+
+    // Define rate limit: 5 attempts per minute
+    let quota = Quota::per_minute(NonZeroU32::new(5).unwrap());
+    let limiter_key = login_req.email.clone(); // Use email as the key
+
+    // Get or create a keyed rate limiter for this email
+    let entry = state.login_limiter
+        .entry(limiter_key.clone())
+        .or_insert_with(|| RateLimiter::keyed(quota)); // Bind the Entry here
+    let limiter = entry.value(); // Now borrow from the bound value
+
+    // Check if rate limit is exceeded
+    if limiter.check_key(&limiter_key).is_err() {
+        println!("Rate limit exceeded for email: [redacted]");
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({"error": "Too many login attempts, try again later"})),
+        ));
+    }
+    
 
     let user = match state.user_repository.find_by_email(&login_req.email) {
         Ok(Some(user)) => user,
@@ -195,13 +217,23 @@ pub async fn register(
     
     println!("Registration attempt for email: {}", reg_req.email);
 
+    use regex::Regex;
+    let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
+    if !email_regex.is_match(&reg_req.email) {
+        println!("Invalid email format: {}", reg_req.email);
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid email format"}))
+        ));
+    }
+
     // Check if email exists
     println!("Checking if email exists...");
     if state.user_repository.email_exists(&reg_req.email).map_err(|e| {
         println!("Database error while checking email: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR, 
-            Json(json!({ "error": format!("Database error: {}", e) }))
+            Json(json!({ "error": format!("Database error") }))
         )
     })? {
         println!("Email {} already exists", reg_req.email);
@@ -212,22 +244,28 @@ pub async fn register(
     }
     println!("Email is available");
 
-    // Validate phone number format
-    if !reg_req.phone_number.starts_with('+') {
+    let phone_regex = Regex::new(r"^\+[1-9]\d{1,14}$").unwrap();
+    if !phone_regex.is_match(&reg_req.phone_number) {
         println!("Invalid phone number format: {}", reg_req.phone_number);
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Phone number must start with '+'" })),
+            Json(json!({"error": "Phone number must be in E.164 format (e.g., +1234567890)"}))
         ));
     }
 
+    if reg_req.password.len() < 8 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Password must be 8+ characters" })),
+        ));
+    }
     // Check if phone number exists
     println!("Checking if phone number exists...");
     if state.user_repository.phone_number_exists(&reg_req.phone_number).map_err(|e| {
         println!("Database error while checking phone number: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR, 
-            Json(json!({ "error": format!("Database error: {}", e) }))
+            Json(json!({ "error": format!("Database error") }))
         )
     })? {
         println!("Phone number {} already exists", reg_req.phone_number);
@@ -245,7 +283,7 @@ pub async fn register(
             println!("Password hashing failed: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("Password hashing failed: {}", e) })),
+                Json(json!({ "error": format!("Password hashing failed") })),
             )
         })?;
     println!("Password hashed successfully");
@@ -277,7 +315,7 @@ pub async fn register(
         println!("User creation failed: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("User creation failed: {}", e) })),
+            Json(json!({ "error": format!("User creation failed") })),
         )
     })?;
 
@@ -287,7 +325,7 @@ pub async fn register(
     let user = state.user_repository.find_by_email(&reg_req.email)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to retrieve user: {}", e)}))
+            Json(json!({"error": format!("Failed to retrieve user")}))
         ))?
         .ok_or_else(|| (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -300,7 +338,7 @@ pub async fn register(
             println!("Failed to set preferred number: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "error": format!("Failed to set preferred number: {}", e) })),
+                Json(json!({ "error": format!("Failed to set preferred number") })),
             )
         })?;
 
@@ -308,7 +346,7 @@ pub async fn register(
     let user = state.user_repository.find_by_email(&reg_req.email)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to retrieve user: {}", e)}))
+            Json(json!({"error": format!("Failed to retrieve user")}))
         ))?
         .ok_or_else(|| (
             StatusCode::INTERNAL_SERVER_ERROR,
