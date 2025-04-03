@@ -9,6 +9,8 @@ use tower_sessions::{MemoryStore, SessionManagerLayer};
 use std::collections::HashMap;
 use diesel::prelude::*;
 use diesel::r2d2::{self, ConnectionManager};
+use dashmap::DashMap;
+use governor::{Quota, RateLimiter, clock::DefaultClock, state::keyed::DefaultKeyedStateStore};
 use oauth2::{
     basic::BasicClient,
     AuthUrl,
@@ -33,9 +35,8 @@ mod handlers {
     pub mod billing_handlers;
     pub mod admin_handlers;
     pub mod stripe_handlers;
-    pub mod oauth_handlers;
-    pub mod composio_auth;
-    pub mod unipile_auth;
+    //pub mod composio_auth;
+    //pub mod unipile_auth;
     pub mod google_calendar_auth;
     pub mod google_calendar;
     pub mod gmail_auth;
@@ -82,9 +83,8 @@ use handlers::profile_handlers;
 use handlers::billing_handlers;
 use handlers::admin_handlers;
 use handlers::stripe_handlers;
-use handlers::oauth_handlers;
-use handlers::composio_auth;
-use handlers::unipile_auth;
+//use handlers::composio_auth;
+//use handlers::unipile_auth;
 use handlers::google_calendar_auth;
 use handlers::google_calendar;
 use handlers::gmail_auth;
@@ -114,6 +114,7 @@ pub struct AppState {
     google_calendar_oauth_client: GoogleOAuthClient,
     gmail_oauth_client: GoogleOAuthClient,
     session_store: MemoryStore,
+    login_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
 }
 
 pub fn validate_env() {
@@ -186,6 +187,10 @@ async fn main() {
         google_calendar_oauth_client,
         gmail_oauth_client,
         session_store: session_store.clone(),
+        login_limiter: {
+            let mut map = DashMap::new();
+            map
+        },
     });
 
     let twilio_routes = Router::new()

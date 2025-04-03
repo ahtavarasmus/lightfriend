@@ -14,10 +14,6 @@ use matrix_sdk::{
         OwnedRoomId, OwnedUserId,
     },
 };
-use matrix_sdk::ruma::events::AnySyncMessageLikeEvent;
-use matrix_sdk::ruma::events::SyncMessageLikeEvent;
-
-
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
@@ -35,19 +31,32 @@ pub struct WhatsappConnectionResponse {
     qr_code_url: String,
 }
 
+
 async fn ensure_matrix_credentials(
     state: &AppState,
     user_id: i32,
-) -> Result<(String, String), (StatusCode, AxumJson<serde_json::Value>)> {
+) -> Result<(String, String, String, String), (StatusCode, AxumJson<serde_json::Value>)> {
+    let homeserver_url = std::env::var("MATRIX_HOMESERVER")
+        .map_err(|_| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": "MATRIX_HOMESERVER not set"})),
+        ))?;
+
     // Check if user already has Matrix credentials
-    if let Ok(Some((username, access_token))) = state.user_repository.get_matrix_credentials(user_id) {
-        return Ok((username, access_token));
+    if let Ok(Some((username, access_token, device_id))) = state.user_repository.get_matrix_credentials(user_id) {
+        let full_user_id = format!("@{}:{}", username, homeserver_url.trim_start_matches("http://").trim_start_matches("https://"));
+        return Ok((username, access_token, full_user_id, device_id));
     }
 
-    // If not, create new Matrix credentials
+    // Create new Matrix credentials
     let matrix_auth = MatrixAuth::new(
-        std::env::var("MATRIX_HOMESERVER").expect("MATRIX_HOMESERVER not set"),
-        std::env::var("MATRIX_SHARED_SECRET").expect("MATRIX_SHARED_SECRET not set"),
+        homeserver_url.clone(),
+        std::env::var("MATRIX_SHARED_SECRET").map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "MATRIX_SHARED_SECRET not set"})),
+            )
+        })?,
     );
 
     let (username, access_token) = matrix_auth.register_user().await
@@ -58,9 +67,50 @@ async fn ensure_matrix_credentials(
                 AxumJson(json!({"error": "Failed to create Matrix credentials"})),
             )
         })?;
+    let full_user_id = format!("@{}:{}", username, homeserver_url.trim_start_matches("http://").trim_start_matches("https://"));
 
-    // Store the new credentials
-    state.user_repository.set_matrix_credentials(user_id, &username, &access_token)
+    let client = MatrixClient::builder()
+        .homeserver_url(&homeserver_url)
+        .build()
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to build Matrix client: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "Failed to initialize Matrix client"})),
+            )
+        })?;
+    client.restore_session(matrix_sdk::Session {
+        meta: matrix_sdk::SessionMeta {
+            user_id: OwnedUserId::try_from(&full_user_id).map_err(|e| {
+                tracing::error!("Invalid user_id format: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    AxumJson(json!({"error": "Invalid user_id format"})),
+                )
+            })?,
+            device_id: None,
+        },
+        tokens: matrix_sdk::SessionTokens {
+            access_token: access_token.clone(),
+            refresh_token: None,
+        },
+    }).await.map_err(|e| {
+        tracing::error!("Failed to restore session: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": "Failed to restore Matrix session"})),
+        )
+    })?;
+    let device_id = client.device_id().ok_or(anyhow!("No device_id")).map_err(|e| {
+        tracing::error!("No device_id available: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": "No device_id available"})),
+        )
+    })?.to_string();
+
+    state.user_repository.set_matrix_credentials(user_id, &username, &access_token, &device_id)
         .map_err(|e| {
             tracing::error!("Failed to store Matrix credentials: {}", e);
             (
@@ -69,8 +119,9 @@ async fn ensure_matrix_credentials(
             )
         })?;
 
-    Ok((username, access_token))
+    Ok((username, access_token, full_user_id, device_id))
 }
+
 
 
 async fn connect_whatsapp(
@@ -171,7 +222,7 @@ pub async fn start_whatsapp_connection(
     use matrix_sdk::authentication::matrix::MatrixSessionTokens;
     // Set the access token by restoring a session
     let session = AuthSession::Matrix(MatrixSession {
-        meta: SessionMeta {
+        meta: MatrixSession {
             user_id: 
             device_id:
         },

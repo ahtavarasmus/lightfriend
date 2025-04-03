@@ -40,6 +40,7 @@ impl MatrixAuth {
         let mac_result = hex::encode(mac.finalize().into_bytes());
 
         // Register user
+        println!("registering user post request");
         let register_res = self.http_client.post(format!("{}/_synapse/admin/v1/register", self.homeserver))
             .json(&json!({
                 "nonce": nonce,
@@ -54,6 +55,11 @@ impl MatrixAuth {
             .await?;
 
         let access_token = register_res["access_token"].as_str().ok_or(anyhow!("No access token"))?.to_string();
+        let device_id = register_res["device_id"]
+            .as_str()
+            .ok_or(anyhow!("No device_id in response"))?
+            .to_string();
+        println!("device_id: {}", device_id);
         Ok((username, access_token))
     }
 

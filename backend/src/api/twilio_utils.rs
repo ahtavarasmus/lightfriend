@@ -301,8 +301,33 @@ pub async fn send_conversation_message(
     tracing::info!("Message sent successfully to conversation {} with message SID: {}", conversation_sid, response.sid);
     println!("successfully sent the conversation message with SID: {}", response.sid);
     tracing::info!("Message sent successfully to conversation {} with message SID: {}", conversation_sid, response.sid);
+    //redact_message(conversation_sid, &response.sid).await?;
 
     Ok(response.sid)
 }
 
+// TODO 
+pub async fn redact_message(
+    conversation_sid: &str,
+    message_sid: &str,
+) -> Result<(), Box<dyn Error>> {
+    let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
+    let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
+    let client = Client::new();
+
+    let form_data = vec![("Body", "")]; // Set body to empty to redact
+
+    client
+        .post(format!(
+            "https://conversations.twilio.com/v1/Conversations/{}/Messages/{}",
+            conversation_sid, message_sid
+        ))
+        .basic_auth(&account_sid, Some(&auth_token))
+        .form(&form_data)
+        .send()
+        .await?;
+
+    tracing::info!("Message {} in conversation {} redacted", message_sid, conversation_sid);
+    Ok(())
+}
 
