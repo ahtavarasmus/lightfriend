@@ -937,6 +937,90 @@
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 
+.dashboard-tabs {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    border-bottom: 1px solid rgba(30, 144, 255, 0.1);
+    padding-bottom: 1rem;
+}
+
+.tab-button {
+    background: transparent;
+    border: none;
+    color: #999;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.tab-button::after {
+    content: '';
+    position: absolute;
+    bottom: -1rem;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: transparent;
+    transition: background-color 0.3s ease;
+}
+
+.tab-button.active {
+    color: #1E90FF;
+}
+
+.tab-button.active::after {
+    background: #1E90FF;
+}
+
+.tab-button:hover {
+    color: #7EB2FF;
+}
+
+.proactive-tab .coming-soon {
+    text-align: center;
+    padding: 2rem;
+    background: rgba(30, 144, 255, 0.05);
+    border-radius: 12px;
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    margin: 2rem 0;
+}
+
+.proactive-tab .coming-soon h3 {
+    color: #7EB2FF;
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+}
+
+.proactive-tab .coming-soon p {
+    color: #999;
+    margin-bottom: 1.5rem;
+}
+
+.proactive-tab .coming-soon ul {
+    list-style: none;
+    padding: 0;
+    text-align: left;
+    max-width: 300px;
+    margin: 0 auto;
+}
+
+.proactive-tab .coming-soon li {
+    color: #999;
+    padding: 0.5rem 0;
+    padding-left: 1.5rem;
+    position: relative;
+}
+
+.proactive-tab .coming-soon li::before {
+    content: '•';
+    position: absolute;
+    left: 0.5rem;
+    color: #1E90FF;
+}
+
 .development-links {
     margin-top: 2rem;
     font-size: 0.9rem;

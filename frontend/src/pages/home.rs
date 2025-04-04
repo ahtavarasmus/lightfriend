@@ -9,6 +9,63 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 
+fn render_notification_settings(profile: Option<&UserProfile>) -> Html {
+    html! {
+        <div class="notification-settings">
+            {
+                if let Some(profile) = profile {
+                    html! {
+                        <>
+                            <div class="notify-toggle">
+                                <span>{"Notifications"}</span>
+                                <span class="toggle-status">
+                                    {if profile.notify {"Active"} else {"Inactive"}}
+                                </span>
+                                <label class="switch">
+                                    <input 
+                                        type="checkbox" 
+                                        checked={profile.notify}
+                                        onchange={{
+                                            let user_id = profile.id;
+                                            Callback::from(move |e: Event| {
+                                                let input: HtmlInputElement = e.target_unchecked_into();
+                                                let notify = input.checked();
+                                                
+                                                if let Some(token) = window()
+                                                    .and_then(|w| w.local_storage().ok())
+                                                    .flatten()
+                                                    .and_then(|storage| storage.get_item("token").ok())
+                                                    .flatten()
+                                                {
+                                                    spawn_local(async move {
+                                                        let _ = Request::post(&format!("{}/api/profile/update-notify/{}", config::get_backend_url(), user_id))
+                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                            .header("Content-Type", "application/json")
+                                                            .json(&json!({"notify": notify}))
+                                                            .expect("Failed to serialize notify request")
+                                                            .send()
+                                                            .await;
+                                                    });
+                                                }
+                                            })
+                                        }}
+                                    />
+                                    <span class="slider round"></span>
+                                </label>
+                            </div>
+                            <p class="notification-description">
+                                {"Receive notifications about new feature updates."}
+                            </p>
+                        </>
+                    }
+                } else {
+                    html! {}
+                }
+            }
+        </div>
+    }
+}
+
 const PHONE_NUMBERS: &[(&str, &str, Option<&str>)] = &[
     ("us", "+18153684737", None),
     ("fin", "+358454901522", None),
@@ -25,6 +82,12 @@ struct UserProfile {
     time_to_delete: bool,
     preferred_number: Option<String>,
     notify: bool,
+}
+
+#[derive(Clone, PartialEq)]
+enum DashboardTab {
+    Connections,
+    Proactive,
 }
 
 pub fn is_logged_in() -> bool {
@@ -282,6 +345,7 @@ pub fn Home() -> Html {
     let user_verified = use_state(|| true);
     let error = use_state(|| None::<String>);
     let is_expanded = use_state(|| false);
+    let active_tab = use_state(|| DashboardTab::Connections);
     let navigator = use_navigator().unwrap();
 
     // Single profile fetch effect
@@ -356,108 +420,133 @@ pub fn Home() -> Html {
     } else {
             html! {
                 <div class="dashboard-container">
-                    <div class="dashboard-panel">
-                        <div class="panel-header">
-                            <h1 class="panel-title">{"Dashboard"}</h1>
-                        </div>
-                        <h2 class="section-title">{"Your lightfriend is Ready!"}</h2>
-                         <div class="phone-selector">
-                            <button 
-                                class="selector-btn"
-                                onclick={let is_expanded = is_expanded.clone(); 
-                                    move |_| is_expanded.set(!*is_expanded)}>
-                                {
-                                    if let Some(profile) = (*profile_data).as_ref() {
-                                        if let Some(preferred) = &profile.preferred_number {
-                                            format!("Your lightfriend's Number: {}", preferred)
-                                        } else {
-                                            "Select Your lightfriend's Number".to_string()
-                                        }
+                <div class="dashboard-panel">
+                    <div class="panel-header">
+                        <h1 class="panel-title">{"Dashboard"}</h1>
+                    </div>
+                    <h2 class="section-title">{"Your lightfriend is Ready!"}</h2>
+                    <div class="phone-selector">
+                        <button 
+                            class="selector-btn"
+                            onclick={let is_expanded = is_expanded.clone(); 
+                                move |_| is_expanded.set(!*is_expanded)}>
+                            {
+                                if let Some(profile) = (*profile_data).as_ref() {
+                                    if let Some(preferred) = &profile.preferred_number {
+                                        format!("Your lightfriend's Number: {}", preferred)
                                     } else {
                                         "Select Your lightfriend's Number".to_string()
                                     }
+                                } else {
+                                    "Select Your lightfriend's Number".to_string()
                                 }
-                            </button>
-                            
-                            if *is_expanded {
-                                <div class="phone-display">
-                                    { PHONE_NUMBERS.iter().map(|(country, number, note)| {
-                                        let number_clean = number.to_string();  // Store clean number for API use
-                                        let display_number = if let Some(note_text) = note {
-                                            format!("{} {}", number, note_text)
-                                        } else {
-                                            number.to_string()
-                                        };
-                                        let is_selected = if let Some(profile) = (*profile_data).as_ref() {
-                                            profile.preferred_number.as_ref().map_or(false, |pref| pref == &number_clean)
-                                        } else {
-                                            false
-                                        };
+                            }
+                        </button>
+                        
+                        if *is_expanded {
+                            <div class="phone-display">
+                                { PHONE_NUMBERS.iter().map(|(country, number, note)| {
+                                    let number_clean = number.to_string();  // Store clean number for API use
+                                    let display_number = if let Some(note_text) = note {
+                                        format!("{} {}", number, note_text)
+                                    } else {
+                                        number.to_string()
+                                    };
+                                    let is_selected = if let Some(profile) = (*profile_data).as_ref() {
+                                        profile.preferred_number.as_ref().map_or(false, |pref| pref.trim() == number_clean.trim())
+                                    } else {
+                                        false
+                                    };
+                                    
+                                    let onclick = {
+                                        let number = number_clean.clone();
+                                        let profile_data = profile_data.clone();
+                                        let is_expanded = is_expanded.clone();
                                         
-                                        let onclick = {
-                                            let number = number_clean.clone();
+                                        Callback::from(move |_| {
+                                            let number = number.clone();
                                             let profile_data = profile_data.clone();
-                                            let is_expanded = is_expanded.clone();
                                             
-                                            Callback::from(move |_| {
-                                                let number = number.clone();
-                                                let profile_data = profile_data.clone();
-                                                
-                                                if let Some(token) = window()
-                                                    .and_then(|w| w.local_storage().ok())
-                                                    .flatten()
-                                                    .and_then(|storage| storage.get_item("token").ok())
-                                                    .flatten()
-                                                {
-                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                        let response = Request::post(&format!("{}/api/profile/preferred-number", config::get_backend_url()))
-                                                            .header("Authorization", &format!("Bearer {}", token))
-                                                            .header("Content-Type", "application/json")
-                                                            .body(format!("{{\"preferred_number\": \"{}\"}}", number))
-                                                            .send()
-                                                            .await;
-                                                        
-                                                        if let Ok(response) = response {
-                                                            if response.status() == 200 {
-                                                                if let Some(mut current_profile) = (*profile_data).clone() {
-                                                                    current_profile.preferred_number = Some(number);
-                                                                    profile_data.set(Some(current_profile));
-                                                                }
+                                            if let Some(token) = window()
+                                                .and_then(|w| w.local_storage().ok())
+                                                .flatten()
+                                                .and_then(|storage| storage.get_item("token").ok())
+                                                .flatten()
+                                            {
+                                                wasm_bindgen_futures::spawn_local(async move {
+                                                    let response = Request::post(&format!("{}/api/profile/preferred-number", config::get_backend_url()))
+                                                        .header("Authorization", &format!("Bearer {}", token))
+                                                        .header("Content-Type", "application/json")
+                                                        .body(format!("{{\"preferred_number\": \"{}\"}}", number))
+                                                        .send()
+                                                        .await;
+                                                    
+                                                    if let Ok(response) = response {
+                                                        if response.status() == 200 {
+                                                            if let Some(mut current_profile) = (*profile_data).clone() {
+                                                                current_profile.preferred_number = Some(number);
+                                                                profile_data.set(Some(current_profile));
                                                             }
                                                         }
-                                                    });
-                                                }
-                                                is_expanded.set(false);
-                                            })
-                                        };
-
-                                        html! {
-                                            <div 
-                                                class={classes!("phone-number-item", if is_selected { "selected" } else { "" })}
-                                                onclick={onclick}
-                                            >
-                                                <div class="number-info">
-                                                    <span class="country">{country}</span>
-                                                    <span class="number">{display_number}</span>
-                                                    if is_selected {
-                                                        <span class="selected-indicator">{"✓"}</span>
                                                     }
-                                                </div>
-                                            </div>
-                                        }
-                                    }).collect::<Html>() }
-                                </div>
-                            }
-                            
-                        </div>
-                        
-                        <p class="instruction-text">
-                            {"Select the best number for you above."}
-                            <br/>
-                            <br/>
-                        </p>
+                                                });
+                                            }
+                                            is_expanded.set(false);
+                                        })
+                                    };
 
-                        <div class="calendar-section">
+                                    html! {
+                                        <div 
+                                            class={classes!("phone-number-item", if is_selected { "selected" } else { "" })}
+                                            onclick={onclick}
+                                        >
+                                            <div class="number-info">
+                                                <span class="country">{country}</span>
+                                                <span class="number">{display_number}</span>
+                                                if is_selected {
+                                                    <span class="selected-indicator">{"✓"}</span>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+                                }).collect::<Html>() }
+                            </div>
+                        }
+                        
+                    </div>
+                    
+                    <p class="instruction-text">
+                        {"Select the best number for you above."}
+                        <br/>
+                        <br/>
+                    </p>
+
+
+                    <div class="dashboard-tabs">
+                        <button 
+                            class={classes!("tab-button", (*active_tab == DashboardTab::Connections).then(|| "active"))}
+                            onclick={{
+                                let active_tab = active_tab.clone();
+                                Callback::from(move |_| active_tab.set(DashboardTab::Connections))
+                            }}
+                        >
+                            {"Connections"}
+                        </button>
+                        <button 
+                            class={classes!("tab-button", (*active_tab == DashboardTab::Proactive).then(|| "active"))}
+                            onclick={{
+                                let active_tab = active_tab.clone();
+                                Callback::from(move |_| active_tab.set(DashboardTab::Proactive))
+                            }}
+                        >
+                            {"Proactive"}
+                        </button>
+                    </div>
+                        {
+                            match *active_tab {
+                                DashboardTab::Connections => html! {
+                                    <div class="connections-tab">
+                                                                <div class="calendar-section">
                             {
                                 if let Some(profile) = (*profile_data).as_ref() {
                                     html! {
@@ -567,6 +656,26 @@ pub fn Home() -> Html {
                                 }
                             </div>
 
+                                    </div>
+                                },
+                                DashboardTab::Proactive => html! {
+                                    <div class="proactive-tab">
+                                        <div class="coming-soon">
+                                            <h3>{"Coming Soon!"}</h3>
+                                            <p>{"Proactive features will allow you to set up automatic notifications for important messages and events."}</p>
+                                            <ul>
+                                                <li>{"Message priority filtering"}</li>
+                                                <li>{"Custom notification rules"}</li>
+                                                <li>{"Time-based alerts"}</li>
+                                                <li>{"Emergency contact notifications"}</li>
+                                            </ul>
+                                        </div>
+
+                                        {render_notification_settings((*profile_data).as_ref())}
+                                    </div>
+                                }
+                            }
+                        }
                         <footer class="dashboard-footer">
                             <div class="development-links">
                                 <p>{"Follow development progress at "}

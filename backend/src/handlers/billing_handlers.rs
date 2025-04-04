@@ -131,7 +131,7 @@ pub async fn increase_credits(
     }
 
     // Update user's credits in database
-    state.user_repository.increase_credits(user_id, 2.00)
+    state.user_repository.increase_credits(user_id, 1.00)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)}))

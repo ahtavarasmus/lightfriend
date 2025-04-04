@@ -35,7 +35,10 @@ pub struct User {
     pub encrypted_matrix_access_token: Option<String>,
     pub timezone: Option<String>,
     pub timezone_auto: Option<bool>,
+    pub sub_tier: Option<String>,
+    pub msgs_left: i32,
 }
+
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = imap_connection)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
