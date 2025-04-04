@@ -2,6 +2,10 @@
 use diesel::prelude::*;
 use crate::schema::users;
 use crate::schema::conversations;
+use crate::schema::waiting_checks;
+use crate::schema::priority_senders;
+use crate::schema::keywords;
+use crate::schema::importance_priorities;
 use crate::schema::usage_logs;
 use crate::schema::subscriptions;
 use crate::schema::unipile_connection;
@@ -264,4 +268,80 @@ pub struct NewGmail {
     pub created_on: i32,
     pub description: String,
     pub expires_in: i32,
+}
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = waiting_checks)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct WaitingCheck {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub due_date: i32,
+    pub content: String,
+    pub remove_when_found: bool,
+    pub service_type: String,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = waiting_checks)]
+pub struct NewWaitingCheck {
+    pub user_id: i32,
+    pub due_date: i32,
+    pub content: String,
+    pub remove_when_found: bool,
+    pub service_type: String,
+}
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = priority_senders)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct PrioritySender {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub sender: String,
+    pub service_type: String, // like email, whatsapp, .. 
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = priority_senders)]
+pub struct NewPrioritySender {
+    pub user_id: i32,
+    pub sender: String,
+    pub service_type: String, // like email, whatsapp, .. 
+}
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = keywords)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct Keyword {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub keyword: String,
+    pub service_type: String, // like email, whatsapp, .. 
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = keywords)]
+pub struct NewKeyword {
+    pub user_id: i32,
+    pub keyword: String,
+    pub service_type: String, // like email, whatsapp, .. 
+}
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = importance_priorities)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct ImportancePriority {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub threshold: i32,
+    pub service_type: String,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = importance_priorities)]
+pub struct NewImportancePriority {
+    pub user_id: i32,
+    pub threshold: i32,
+    pub service_type: String,
 }

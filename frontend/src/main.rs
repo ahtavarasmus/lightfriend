@@ -19,6 +19,7 @@ mod pages {
     pub mod money;
     pub mod termsprivacy;
     pub mod blog;
+    pub mod proactive;
 }
 mod auth {
     pub mod connect;

@@ -58,6 +58,7 @@ pub struct ProfileResponse {
 
 use crate::handlers::auth_middleware::AuthUser;
 
+
 pub async fn get_profile(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
