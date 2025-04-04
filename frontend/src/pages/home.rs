@@ -340,6 +340,9 @@ fn delete_unverified_account(profile_id: i32, token: String) {
 
 #[function_component]
 pub fn Home() -> Html {
+    let styles = stylist::Style::new(include_str!("home.css"))
+        .expect("Failed to create Style");
+
     let logged_in = is_logged_in();
     let profile_data = use_state(|| None::<UserProfile>);
     let user_verified = use_state(|| true);
@@ -419,107 +422,108 @@ pub fn Home() -> Html {
         html! {}
     } else {
             html! {
+            <div class={styles}>
                 <div class="dashboard-container">
                 <div class="dashboard-panel">
                     <div class="panel-header">
                         <h1 class="panel-title">{"Dashboard"}</h1>
                     </div>
                     <h2 class="section-title">{"Your lightfriend is Ready!"}</h2>
-                    <div class="phone-selector">
-                        <button 
-                            class="selector-btn"
-                            onclick={let is_expanded = is_expanded.clone(); 
-                                move |_| is_expanded.set(!*is_expanded)}>
-                            {
-                                if let Some(profile) = (*profile_data).as_ref() {
-                                    if let Some(preferred) = &profile.preferred_number {
-                                        format!("Your lightfriend's Number: {}", preferred)
+                        <div class="phone-selector">
+                            <button 
+                                class="selector-btn"
+                                onclick={let is_expanded = is_expanded.clone(); 
+                                    move |_| is_expanded.set(!*is_expanded)}>
+                                {
+                                    if let Some(profile) = (*profile_data).as_ref() {
+                                        if let Some(preferred) = &profile.preferred_number {
+                                            format!("Your lightfriend's Number: {}", preferred)
+                                        } else {
+                                            "Select Your lightfriend's Number".to_string()
+                                        }
                                     } else {
                                         "Select Your lightfriend's Number".to_string()
                                     }
-                                } else {
-                                    "Select Your lightfriend's Number".to_string()
                                 }
-                            }
-                        </button>
-                        
-                        if *is_expanded {
-                            <div class="phone-display">
-                                { PHONE_NUMBERS.iter().map(|(country, number, note)| {
-                                    let number_clean = number.to_string();  // Store clean number for API use
-                                    let display_number = if let Some(note_text) = note {
-                                        format!("{} {}", number, note_text)
-                                    } else {
-                                        number.to_string()
-                                    };
-                                    let is_selected = if let Some(profile) = (*profile_data).as_ref() {
-                                        profile.preferred_number.as_ref().map_or(false, |pref| pref.trim() == number_clean.trim())
-                                    } else {
-                                        false
-                                    };
-                                    
-                                    let onclick = {
-                                        let number = number_clean.clone();
-                                        let profile_data = profile_data.clone();
-                                        let is_expanded = is_expanded.clone();
+                            </button>
+                            
+                            if *is_expanded {
+                                <div class="phone-display">
+                                    { PHONE_NUMBERS.iter().map(|(country, number, note)| {
+                                        let number_clean = number.to_string();  // Store clean number for API use
+                                        let display_number = if let Some(note_text) = note {
+                                            format!("{} {}", number, note_text)
+                                        } else {
+                                            number.to_string()
+                                        };
+                                        let is_selected = if let Some(profile) = (*profile_data).as_ref() {
+                                            profile.preferred_number.as_ref().map_or(false, |pref| pref.trim() == number_clean.trim())
+                                        } else {
+                                            false
+                                        };
                                         
-                                        Callback::from(move |_| {
-                                            let number = number.clone();
+                                        let onclick = {
+                                            let number = number_clean.clone();
                                             let profile_data = profile_data.clone();
+                                            let is_expanded = is_expanded.clone();
                                             
-                                            if let Some(token) = window()
-                                                .and_then(|w| w.local_storage().ok())
-                                                .flatten()
-                                                .and_then(|storage| storage.get_item("token").ok())
-                                                .flatten()
-                                            {
-                                                wasm_bindgen_futures::spawn_local(async move {
-                                                    let response = Request::post(&format!("{}/api/profile/preferred-number", config::get_backend_url()))
-                                                        .header("Authorization", &format!("Bearer {}", token))
-                                                        .header("Content-Type", "application/json")
-                                                        .body(format!("{{\"preferred_number\": \"{}\"}}", number))
-                                                        .send()
-                                                        .await;
-                                                    
-                                                    if let Ok(response) = response {
-                                                        if response.status() == 200 {
-                                                            if let Some(mut current_profile) = (*profile_data).clone() {
-                                                                current_profile.preferred_number = Some(number);
-                                                                profile_data.set(Some(current_profile));
+                                            Callback::from(move |_| {
+                                                let number = number.clone();
+                                                let profile_data = profile_data.clone();
+                                                
+                                                if let Some(token) = window()
+                                                    .and_then(|w| w.local_storage().ok())
+                                                    .flatten()
+                                                    .and_then(|storage| storage.get_item("token").ok())
+                                                    .flatten()
+                                                {
+                                                    wasm_bindgen_futures::spawn_local(async move {
+                                                        let response = Request::post(&format!("{}/api/profile/preferred-number", config::get_backend_url()))
+                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                            .header("Content-Type", "application/json")
+                                                            .body(format!("{{\"preferred_number\": \"{}\"}}", number))
+                                                            .send()
+                                                            .await;
+                                                        
+                                                        if let Ok(response) = response {
+                                                            if response.status() == 200 {
+                                                                if let Some(mut current_profile) = (*profile_data).clone() {
+                                                                    current_profile.preferred_number = Some(number);
+                                                                    profile_data.set(Some(current_profile));
+                                                                }
                                                             }
                                                         }
-                                                    }
-                                                });
-                                            }
-                                            is_expanded.set(false);
-                                        })
-                                    };
-
-                                    html! {
-                                        <div 
-                                            class={classes!("phone-number-item", if is_selected { "selected" } else { "" })}
-                                            onclick={onclick}
-                                        >
-                                            <div class="number-info">
-                                                <span class="country">{country}</span>
-                                                <span class="number">{display_number}</span>
-                                                if is_selected {
-                                                    <span class="selected-indicator">{"✓"}</span>
+                                                    });
                                                 }
+                                                is_expanded.set(false);
+                                            })
+                                        };
+
+                                        html! {
+                                            <div 
+                                                class={classes!("phone-number-item", if is_selected { "selected" } else { "" })}
+                                                onclick={onclick}
+                                            >
+                                                <div class="number-info">
+                                                    <span class="country">{country}</span>
+                                                    <span class="number">{display_number}</span>
+                                                    if is_selected {
+                                                        <span class="selected-indicator">{"✓"}</span>
+                                                    }
+                                                </div>
                                             </div>
-                                        </div>
-                                    }
-                                }).collect::<Html>() }
-                            </div>
-                        }
+                                        }
+                                    }).collect::<Html>() }
+                                </div>
+                            }
+                            
+                        </div>
                         
-                    </div>
-                    
-                    <p class="instruction-text">
-                        {"Select the best number for you above."}
-                        <br/>
-                        <br/>
-                    </p>
+                        <p class="instruction-text">
+                            {"Select the best number for you above."}
+                            <br/>
+                            <br/>
+                        </p>
 
 
                     <div class="dashboard-tabs">
@@ -696,6 +700,7 @@ pub fn Home() -> Html {
                         </footer>
                 </div>
             </div>
+        </div>
         }
     }
 }

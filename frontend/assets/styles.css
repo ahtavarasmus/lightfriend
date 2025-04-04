@@ -815,64 +815,6 @@ button[type="submit"].loading::after {
     }
 }
 
-.iq-button {
-    background: linear-gradient(45deg, #FFD700, #FFA500);
-    color: #000;
-    border: none;
-    padding: 0.75rem 1.5rem;
-    border-radius: 8px;
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    margin-left: 1rem;
-    position: relative;
-    overflow: hidden;
-    box-shadow: 0 2px 10px rgba(255, 215, 0, 0.2);
-}
-
-.iq-button:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 15px rgba(255, 215, 0, 0.4);
-    background: linear-gradient(45deg, #FFE44D, #FFB347);
-}
-
-.iq-button:active {
-    transform: translateY(0);
-}
-
-.iq-button::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(45deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-    transform: translateX(-100%);
-    transition: transform 0.6s;
-}
-
-.iq-button:hover::before {
-    transform: translateX(100%);
-}
-
-.iq-button.reset {
-    background: linear-gradient(45deg, #FF6B6B, #FF4757);
-    color: white;
-    box-shadow: 0 2px 10px rgba(255, 107, 107, 0.2);
-}
-
-.iq-button.reset:hover {
-    background: linear-gradient(45deg, #FF8787, #FF6B6B);
-    box-shadow: 0 4px 15px rgba(255, 107, 107, 0.4);
-}
 
 .users-table-container {
     overflow-x: auto;
