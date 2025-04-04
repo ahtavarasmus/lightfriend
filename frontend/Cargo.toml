@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 plotters = "0.3"
 plotters-canvas = "0.3"
+urlencoding = "2.1.0"
 chrono = { version = "0.4", features = ["wasmbind", "serde"] }
 yew = { version = "0.20", features = ["csr"] }
 tracing = "0.1"

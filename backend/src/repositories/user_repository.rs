@@ -707,6 +707,66 @@ impl UserRepository {
         Ok(charge_when_under)
     }
 
+    // Get the user's subscription tier
+    pub fn get_subscription_tier(&self, user_id: i32) -> Result<Option<String>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let sub_tier = users::table
+            .find(user_id)
+            .select(users::sub_tier)
+            .first::<Option<String>>(&mut conn)?;
+        Ok(sub_tier)
+    }
+
+    // Set the user's subscription tier
+    pub fn update_messages_left(&self, user_id: i32, new_count: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::msgs_left.eq(new_count))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn set_subscription_tier(&self, user_id: i32, tier: Option<&str>) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::sub_tier.eq(tier))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    // Check if user has a specific subscription tier and has messages left
+    pub fn has_valid_subscription_tier_with_messages(&self, user_id: i32, tier: &str) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let user = users::table
+            .find(user_id)
+            .select((users::sub_tier, users::msgs_left))
+            .first::<(Option<String>, i32)>(&mut conn)?;
+        
+        // Check both subscription tier and remaining messages
+        Ok(user.0.map_or(false, |t| t == tier) && user.1 > 0)
+    }
+
+    pub fn decrease_messages_left(&self, user_id: i32) -> Result<i32, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Get current messages left
+        let current_msgs = users::table
+            .find(user_id)
+            .select(users::msgs_left)
+            .first::<i32>(&mut conn)?;
+            
+        // Only decrease if greater than 0
+        if current_msgs > 0 {
+            let new_msgs = current_msgs - 1;
+            diesel::update(users::table.find(user_id))
+                .set(users::msgs_left.eq(new_msgs))
+                .execute(&mut conn)?;
+            Ok(new_msgs)
+        } else {
+            Ok(0)
+        }
+    }
+
     pub fn create_unipile_connection(&self, new_connection: &NewUnipileConnection) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
@@ -858,6 +918,18 @@ impl UserRepository {
         let user_ids = gmail::table
             .filter(gmail::status.eq("active"))
             .select(gmail::user_id)
+            .load::<i32>(&mut conn)?;
+
+        Ok(user_ids)
+    }
+
+    pub fn get_active_imap_connection_users(&self) -> Result<Vec<i32>, DieselError> {
+        use crate::schema::imap_connection;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let user_ids = imap_connection::table
+            .filter(imap_connection::status.eq("active"))
+            .select(imap_connection::user_id)
             .load::<i32>(&mut conn)?;
 
         Ok(user_ids)

@@ -134,6 +134,8 @@ diesel::table! {
         encrypted_matrix_access_token -> Nullable<Text>,
         timezone -> Nullable<Text>,
         timezone_auto -> Nullable<Bool>,
+        sub_tier -> Nullable<Text>,
+        msgs_left -> Integer,
     }
 }
 

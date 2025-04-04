@@ -221,6 +221,8 @@ async fn main() {
         .route("/api/admin/preferred-number/{user_id}", post(admin_handlers::update_preferred_number_admin))
         .route("/api/admin/broadcast", post(admin_handlers::broadcast_message))
         .route("/api/admin/set-preferred-number-default/{user_id}", post(admin_handlers::set_preferred_number_default))
+        .route("/api/admin/subscription/{user_id}/{tier}", post(admin_handlers::update_subscription_tier))
+        .route("/api/admin/messages/{user_id}/{amount}", post(admin_handlers::update_user_messages))
         .route("/api/billing/reset-credits/{user_id}", post(billing_handlers::reset_credits))
         .route_layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::require_admin));
 

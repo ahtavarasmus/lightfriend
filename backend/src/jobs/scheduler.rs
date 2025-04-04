@@ -9,110 +9,160 @@ use crate::handlers::gmail;
 
 use std::env;
 
+use crate::handlers::imap_handlers;
+use crate::api::twilio_utils;
+
 pub async fn start_scheduler(state: Arc<AppState>) {
     let sched = JobScheduler::new().await.expect("Failed to create scheduler");
 
-    // Create a job that runs every minute to fetch Gmail previews
-    /*
+    // Create a job that runs every minute to check for new messages across services
     let state_clone = Arc::clone(&state);
-    let gmail_monitor_job = Job::new_async("0 * * * * *", move |_, _| {
+    let message_monitor_job = Job::new_async("0 * * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
-            info!("Running scheduled Gmail preview fetch job...");
+            info!("Running scheduled message check across services...");
             
-            // Get users with active Gmail connections
-            match state.user_repository.get_active_gmail_connection_users() {
-                Ok(user_ids) => {
-                    for user_id in user_ids {
-                        info!("Fetching Gmail previews for user {}", user_id);
-                        match crate::gmail::fetch_gmail_previews(&state, user_id, Some(10)).await {
-                            Ok(messages) => {
-                                info!("Successfully fetched {} Gmail messages for user {}", messages.len(), user_id);
-                                
-                                // Filter unread messages
-                                let unread_messages: Vec<_> = messages.into_iter()
-                                    .filter(|msg| !msg.is_read)
-                                    .collect();
-                                
-                                if !unread_messages.is_empty() {
-                                    info!("Found {} unread messages", unread_messages.len());
-                                    let api_key = match env::var("OPENROUTER_API_KEY") {
-                                    Ok(key) => key,
-                                    Err(_) => {
-                                        eprintln!("OPENROUTER_API_KEY not set");
-                                        return (
-                                            StatusCode::INTERNAL_SERVER_ERROR,
-                                            axum::Json(TwilioResponse {
-                                                message: "Server configuration error".to_string(),
-                                            })
-                                        );
-                                    }
-                                };
+            // Get all users with valid message monitor subscription
+            let users_with_subscription = match state.user_repository.get_all_users() {
+                Ok(users) => {
+                    let mut subscribed_users = Vec::new();
+                    for user in users {
+                        match state.user_repository.has_valid_subscription_tier_with_messages(user.id, "message_monitor") {
+                            Ok(true) => {
+                                subscribed_users.push(user);
+                            },
+                            Ok(false) => {
+                                info!("User {} does not have valid subscription or messages left for message monitoring", user.id);
+                            },
+                            Err(e) => {
+                                error!("Failed to check subscription status for user {}: {:?}", user.id, e);
+                            }
+                        }
+                    }
+                    subscribed_users
+                },
+                Err(e) => {
+                    error!("Failed to fetch users: {}", e);
+                    Vec::new()
+                }
+            };
 
-                                let client = match OpenAIClient::builder()
-                                    .with_endpoint("https://openrouter.ai/api/v1")
-                                    .with_api_key(api_key)
-                                    .build() {
-                                        Ok(client) => client,
+            // Process each subscribed user
+            for user in users_with_subscription {
+                info!("Processing services for subscribed user {}", user.id);
+
+                // Check IMAP service
+                if let Ok(imap_users) = state.user_repository.get_active_imap_connection_users() {
+                    if imap_users.contains(&user.id) {
+                        info!("Checking IMAP messages for user {}", user.id);
+                        match imap_handlers::fetch_emails_imap(&state, user.id, true, Some(10), true).await {
+                            Ok(emails) => {
+                                info!("Successfully fetched {} new IMAP emails for user {}", emails.len(), user.id);
+                                
+                                if !emails.is_empty() {
+                                    // Check if we should process this notification based on messages left
+                                    let should_continue = match state.user_repository.decrease_messages_left(user.id) {
+                                        Ok(msgs_left) => {
+                                            info!("User {} has {} messages left after decrease", user.id, msgs_left);
+                                            msgs_left > 0
+                                        },
                                         Err(e) => {
-                                            eprintln!("Failed to build OpenAI client: {}", e);
-                                            return (
-                                                StatusCode::INTERNAL_SERVER_ERROR,
-                                                axum::Json(TwilioResponse {
-                                                    message: "Failed to initialize AI service".to_string(),
-                                                })
-                                            );
+                                            error!("Failed to decrease messages left for user {}: {}", user.id, e);
+                                            false
                                         }
                                     };
 
-                                    // Filter important emails
-                                    match gmail::filter_important_emails(unread_messages, &client).await {
-                                        Ok(important_messages) => {
-                                            for (message, reason) in important_messages {
-                                                info!(
-                                                    "Important unread email found - From: {:?}, Subject: {:?}, Reason: {}",
-                                                    message.from, message.subject, reason
-                                                );
-                                            }
-                                        }
+                                    if !should_continue {
+                                        info!("Skipping further processing for user {} due to no messages left", user.id);
+                                        continue;
+                                    }
+                                    let sender_number = match user.preferred_number.clone() {
+                                        Some(number) => {
+                                            tracing::info!("Using user's preferred number: {}", number);
+                                            number
+                                        },
+                                        None => {
+                                            let number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set");
+                                            tracing::info!("Using default SHAZAM_PHONE_NUMBER: {}", number);
+                                            number
+                                        },
+                                    };
+
+                                    // Get the conversation for the user
+                                    let conversation = match state.user_conversations.get_conversation(&user, sender_number).await {
+                                        Ok(conv) => conv,
                                         Err(e) => {
-                                            error!("Failed to filter important emails: {:?}", e);
+                                            eprintln!("Failed to ensure conversation exists: {}", e);
+                                            continue;
                                         }
+                                    };
+
+                                    // Create notification message
+                                    let notification = format!(
+                                        "You have {} new email(s):\n{}",
+                                        emails.len(),
+                                        emails.iter()
+                                            .take(3) // Limit to first 3 emails
+                                            .map(|email| format!(
+                                                "From: {}\nSubject: {}\n",
+                                                email.from.as_deref().unwrap_or("Unknown"),
+                                                email.subject.as_deref().unwrap_or("No subject")
+                                            ))
+                                            .collect::<Vec<_>>()
+                                            .join("\n")
+                                    );
+
+                                    // Send SMS notification
+                                    match twilio_utils::send_conversation_message(
+                                        &conversation.conversation_sid,
+                                        &conversation.twilio_number,
+                                        &notification
+                                    ).await {
+                                        Ok(_) => info!("Successfully sent email notification to user {}", user.id),
+                                        Err(e) => error!("Failed to send email notification: {}", e),
                                     }
                                 }
                             },
                             Err(e) => {
-                                error!(
-                                    "Failed to fetch Gmail previews for user {}: Error: {:?}",
-                                    user_id, e
-                                );
+                                error!("Failed to fetch IMAP emails for user {}: Error: {:?}", user.id, e);
                             }
                         }
                     }
                 }
-                Err(e) => {
-                    error!("Failed to fetch active Gmail connections: {}", e);
-                }
-            }
-        })
-    }).expect("Failed to create Gmail monitor job");
 
-    sched.add(gmail_monitor_job).await.expect("Failed to add Gmail monitor job to scheduler");
-        
-    */
+                // Check if we should continue processing other services
+                match state.user_repository.has_valid_subscription_tier_with_messages(user.id, "message_monitor") {
+                    Ok(false) => {
+                        info!("Skipping remaining services for user {} due to no messages left", user.id);
+                        continue;
+                    },
+                    Err(e) => {
+                        error!("Failed to check messages left for user {}: {}", user.id, e);
+                        continue;
+                    },
+                    Ok(true) => {
+                        info!("Continuing to process other services for user {}", user.id);
+                    }
+                }
+
+                // Add more services here following the same pattern
+            }
+
+        })
+    }).expect("Failed to create message monitor job");
+
+    sched.add(message_monitor_job).await.expect("Failed to add message monitor job to scheduler");
 
     // Create a job that runs every 5 seconds to handle ongoing usage logs
     let state_clone = Arc::clone(&state);
     let usage_monitor_job = Job::new_async("*/5 * * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
-            info!("Running scheduled usage monitor job...");
             let api_key = env::var("ELEVENLABS_API_KEY").expect("ELEVENLABS_API_KEY must be set");
             let client = reqwest::Client::new();
 
             match state.user_repository.get_all_ongoing_usage() {
                 Ok(ongoing_logs) => {
-                    info!("Found {} ongoing usage logs to process", ongoing_logs.len());
                     for log in ongoing_logs {
                         info!("Processing usage log for user {} with conversation_id {:?}", log.user_id, log.conversation_id);
                         let conversation_id = match log.conversation_id {
