@@ -70,6 +70,33 @@ diesel::table! {
 }
 
 diesel::table! {
+    importance_priorities (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        threshold -> Integer,
+        service_type -> Text,
+    }
+}
+
+diesel::table! {
+    keywords (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        keyword -> Text,
+        service_type -> Text,
+    }
+}
+
+diesel::table! {
+    priority_senders (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        sender -> Text,
+        service_type -> Text,
+    }
+}
+
+diesel::table! {
     subscriptions (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -139,11 +166,26 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    waiting_checks (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        due_date -> Integer,
+        content -> Text,
+        remove_when_found -> Bool,
+        service_type -> Text,
+    }
+}
+
 diesel::joinable!(bridges -> users (user_id));
 diesel::joinable!(conversations -> users (user_id));
 diesel::joinable!(gmail -> users (user_id));
 diesel::joinable!(imap_connection -> users (user_id));
+diesel::joinable!(importance_priorities -> users (user_id));
+diesel::joinable!(keywords -> users (user_id));
+diesel::joinable!(priority_senders -> users (user_id));
 diesel::joinable!(subscriptions -> users (user_id));
+diesel::joinable!(waiting_checks -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     bridges,
@@ -151,8 +193,12 @@ diesel::allow_tables_to_appear_in_same_query!(
     gmail,
     google_calendar,
     imap_connection,
+    importance_priorities,
+    keywords,
+    priority_senders,
     subscriptions,
     unipile_connection,
     usage_logs,
     users,
+    waiting_checks,
 );

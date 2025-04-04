@@ -16,9 +16,16 @@ pub struct UsageDataPoint {
 }
 
 use crate::{
-    models::user_models::{User, NewUsageLog, NewUnipileConnection, NewGoogleCalendar, ImapConnection, NewImapConnection},
+    models::user_models::{
+        User, NewUsageLog, NewUnipileConnection, NewGoogleCalendar, ImapConnection, NewImapConnection,
+        WaitingCheck, NewWaitingCheck, PrioritySender, NewPrioritySender,
+        Keyword, NewKeyword, ImportancePriority, NewImportancePriority,
+    },
     handlers::auth_dtos::NewUser,
-    schema::{users, usage_logs, unipile_connection, imap_connection},
+    schema::{
+        users, usage_logs, unipile_connection, imap_connection,
+        waiting_checks, priority_senders, keywords, importance_priorities,
+    },
     DbPool,
 };
 
@@ -705,6 +712,115 @@ impl UserRepository {
             .select(users::charge_when_under)
             .first::<bool>(&mut conn)?;
         Ok(charge_when_under)
+    }
+
+    // Waiting Checks methods
+    pub fn create_waiting_check(&self, new_check: &NewWaitingCheck) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::insert_into(waiting_checks::table)
+            .values(new_check)
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn delete_waiting_check(&self, user_id: i32, service_type: &str, content: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(waiting_checks::table)
+            .filter(waiting_checks::user_id.eq(user_id))
+            .filter(waiting_checks::service_type.eq(service_type))
+            .filter(waiting_checks::content.eq(content))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_waiting_checks(&self, user_id: i32, service_type: &str) -> Result<Vec<WaitingCheck>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        waiting_checks::table
+            .filter(waiting_checks::user_id.eq(user_id))
+            .filter(waiting_checks::service_type.eq(service_type))
+            .load::<WaitingCheck>(&mut conn)
+    }
+
+    // Priority Senders methods
+    pub fn create_priority_sender(&self, new_sender: &NewPrioritySender) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::insert_into(priority_senders::table)
+            .values(new_sender)
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn delete_priority_sender(&self, user_id: i32, service_type: &str, sender: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(priority_senders::table)
+            .filter(priority_senders::user_id.eq(user_id))
+            .filter(priority_senders::service_type.eq(service_type))
+            .filter(priority_senders::sender.eq(sender))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_priority_senders(&self, user_id: i32, service_type: &str) -> Result<Vec<PrioritySender>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        priority_senders::table
+            .filter(priority_senders::user_id.eq(user_id))
+            .filter(priority_senders::service_type.eq(service_type))
+            .load::<PrioritySender>(&mut conn)
+    }
+
+    // Keywords methods
+    pub fn create_keyword(&self, new_keyword: &NewKeyword) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::insert_into(keywords::table)
+            .values(new_keyword)
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn delete_keyword(&self, user_id: i32, service_type: &str, keyword: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(keywords::table)
+            .filter(keywords::user_id.eq(user_id))
+            .filter(keywords::service_type.eq(service_type))
+            .filter(keywords::keyword.eq(keyword))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_keywords(&self, user_id: i32, service_type: &str) -> Result<Vec<Keyword>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        keywords::table
+            .filter(keywords::user_id.eq(user_id))
+            .filter(keywords::service_type.eq(service_type))
+            .load::<Keyword>(&mut conn)
+    }
+
+    // Importance Priorities methods
+    pub fn create_importance_priority(&self, new_priority: &NewImportancePriority) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::insert_into(importance_priorities::table)
+            .values(new_priority)
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn delete_importance_priority(&self, user_id: i32, service_type: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(importance_priorities::table)
+            .filter(importance_priorities::user_id.eq(user_id))
+            .filter(importance_priorities::service_type.eq(service_type))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_importance_priority(&self, user_id: i32, service_type: &str) -> Result<Option<ImportancePriority>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let importance_priority = importance_priorities::table
+            .filter(importance_priorities::user_id.eq(user_id))
+            .filter(importance_priorities::service_type.eq(service_type))
+            .first::<ImportancePriority>(&mut conn)
+            .optional()?;
+        Ok(importance_priority)
     }
 
     // Get the user's subscription tier

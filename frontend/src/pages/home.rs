@@ -1,5 +1,6 @@
 use yew::prelude::*;
 use crate::auth::connect::Connect;
+use crate::pages::proactive::Proactive;
 use yew_router::prelude::*;
 use crate::Route;
 use crate::config;
@@ -664,18 +665,18 @@ pub fn Home() -> Html {
                                 },
                                 DashboardTab::Proactive => html! {
                                     <div class="proactive-tab">
-                                        <div class="coming-soon">
-                                            <h3>{"Coming Soon!"}</h3>
-                                            <p>{"Proactive features will allow you to set up automatic notifications for important messages and events."}</p>
-                                            <ul>
-                                                <li>{"Message priority filtering"}</li>
-                                                <li>{"Custom notification rules"}</li>
-                                                <li>{"Time-based alerts"}</li>
-                                                <li>{"Emergency contact notifications"}</li>
-                                            </ul>
-                                        </div>
-
-                                        {render_notification_settings((*profile_data).as_ref())}
+                                        {
+                                            if let Some(profile) = (*profile_data).as_ref() {
+                                                html! {
+                                                    <>
+                                                        <Proactive user_id={profile.id} />
+                                                        {render_notification_settings(Some(profile))}
+                                                    </>
+                                                }
+                                            } else {
+                                                html! {}
+                                            }
+                                        }
                                     </div>
                                 }
                             }

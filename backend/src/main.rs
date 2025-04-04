@@ -43,6 +43,7 @@ mod handlers {
     pub mod imap_auth;
     pub mod auth_middleware;
     pub mod imap_handlers;
+    pub mod filter_handlers;
 }
 
 mod utils {
@@ -89,6 +90,7 @@ use handlers::gmail_auth;
 use handlers::gmail;
 use handlers::imap_auth;
 use handlers::imap_handlers;
+use handlers::filter_handlers;
 use api::twilio_sms;
 use api::elevenlabs;
 use api::elevenlabs_webhook;
@@ -264,6 +266,23 @@ async fn main() {
         .route("/api/imap/previews", get(imap_handlers::fetch_imap_previews))
         .route("/api/imap/message/{id}", get(imap_handlers::fetch_single_imap_email))
         .route("/api/imap/full_emails", get(imap_handlers::fetch_full_imap_emails))
+
+        // Filter routes
+        .route("/api/filters/waiting-check/{service_type}", post(filter_handlers::create_waiting_check))
+        .route("/api/filters/waiting-check/{service_type}/{content}", delete(filter_handlers::delete_waiting_check))
+        .route("/api/filters/waiting-checks/{service_type}", get(filter_handlers::get_waiting_checks))
+
+        .route("/api/filters/priority-sender/{service_type}", post(filter_handlers::create_priority_sender))
+        .route("/api/filters/priority-sender/{service_type}/{sender}", delete(filter_handlers::delete_priority_sender))
+        .route("/api/filters/priority-senders/{service_type}", get(filter_handlers::get_priority_senders))
+
+        .route("/api/filters/keyword/{service_type}", post(filter_handlers::create_keyword))
+        .route("/api/filters/keyword/{service_type}/{keyword}", delete(filter_handlers::delete_keyword))
+        .route("/api/filters/keywords/{service_type}", get(filter_handlers::get_keywords))
+
+        .route("/api/filters/importance-priority/{service_type}", post(filter_handlers::create_importance_priority))
+        .route("/api/filters/importance-priority/{service_type}", delete(filter_handlers::delete_importance_priority))
+        .route("/api/filters/importance-priority/{service_type}", get(filter_handlers::get_importance_priority))
 
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
 
