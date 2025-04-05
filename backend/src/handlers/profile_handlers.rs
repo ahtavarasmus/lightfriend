@@ -54,6 +54,7 @@ pub struct ProfileResponse {
     stripe_payment_method_id: Option<String>,
     timezone: Option<String>,
     timezone_auto: Option<bool>,
+    sub_tier: Option<String>,
 }
 
 use crate::handlers::auth_middleware::AuthUser;
@@ -97,6 +98,7 @@ pub async fn get_profile(
                 stripe_payment_method_id: user.stripe_payment_method_id,
                 timezone: user.timezone,
                 timezone_auto: user.timezone_auto,
+                sub_tier: user.sub_tier
             }))
         }
         None => Err((
