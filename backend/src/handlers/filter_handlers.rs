@@ -49,6 +49,12 @@ pub struct ImportancePriorityRequest {
 
 // Response DTOs
 #[derive(Serialize)]
+pub struct ConnectedService {
+    service_type: String,
+    identifier: String,  // email address or calendar name
+}
+
+#[derive(Serialize)]
 pub struct WaitingCheckResponse {
     user_id: i32,
     content: String,
@@ -258,6 +264,24 @@ pub async fn create_keyword(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Attempting to create keyword for user {}", auth_user.user_id);
 
+    // First check if the keyword already exists
+    let existing_keywords = state.user_repository.get_keywords(auth_user.user_id, &request.service_type)
+        .map_err(|e| {
+            tracing::error!("Failed to fetch keywords for user {}: {}", auth_user.user_id, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)}))
+            )
+        })?;
+
+    // Check if keyword already exists (case-insensitive)
+    if existing_keywords.iter().any(|k| k.keyword.to_lowercase() == request.keyword.to_lowercase()) {
+        return Err((
+            StatusCode::CONFLICT,
+            Json(json!({"error": "Keyword already exists"}))
+        ));
+    }
+
     let new_keyword = NewKeyword {
         user_id: auth_user.user_id,
         keyword: request.keyword.clone(),
@@ -269,10 +293,7 @@ pub async fn create_keyword(
             tracing::info!("Successfully created keyword {} for user {}", request.keyword, auth_user.user_id);
             Ok(Json(json!({"message": "Keyword created successfully"})))
         },
-        Err(DieselError::RollbackTransaction) => Err((
-            StatusCode::CONFLICT,
-            Json(json!({"error": "Keyword already exists"}))
-        )),
+
         Err(e) => {
             tracing::error!("Failed to create keyword for user {}: {}", auth_user.user_id, e);
             Err((
@@ -313,7 +334,7 @@ pub async fn get_keywords(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Path(service_type): Path<String>,
-) -> Result<Json<Vec<KeywordResponse>>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<Vec<String>>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Fetching keywords for user {} and service {}", auth_user.user_id, service_type);
 
     let keywords = state.user_repository.get_keywords(auth_user.user_id, &service_type)
@@ -325,13 +346,10 @@ pub async fn get_keywords(
             )
         })?;
 
-    let response: Vec<KeywordResponse> = keywords.into_iter().map(|keyword| KeywordResponse {
-        user_id: keyword.user_id,
-        keyword: keyword.keyword,
-        service_type: keyword.service_type,
-    }).collect();
+    let keyword_strings: Vec<String> = keywords.into_iter().map(|keyword| keyword.keyword).collect();
+    tracing::info!("Successfully fetched keywords");
 
-    Ok(Json(response))
+    Ok(Json(keyword_strings))
 }
 
 // Importance Priorities handlers
@@ -392,6 +410,31 @@ pub async fn delete_importance_priority(
         },
     }
 }
+pub async fn get_connected_services(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<Vec<ConnectedService>>, (StatusCode, Json<serde_json::Value>)> {
+    let mut services = Vec::new();
+
+    // Check Google Calendar
+    if let Ok(true) = state.user_repository.has_active_google_calendar(auth_user.user_id) {
+        services.push(ConnectedService {
+            service_type: "calendar".to_string(),
+            identifier: "".to_string(),  // Using access token email as identifier
+        });
+    }
+
+    // Check IMAP
+    if let Ok(Some((email, _, _, _))) = state.user_repository.get_imap_credentials(auth_user.user_id) {
+        services.push(ConnectedService {
+            service_type: "imap".to_string(),
+            identifier: email,
+        });
+    }
+
+    Ok(Json(services))
+}
+
 pub async fn get_importance_priority(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,

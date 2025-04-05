@@ -795,9 +795,16 @@ impl UserRepository {
             .load::<Keyword>(&mut conn)
     }
 
-    // Importance Priorities methods
     pub fn create_importance_priority(&self, new_priority: &NewImportancePriority) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // First delete any existing importance priority for this user and service type
+        diesel::delete(importance_priorities::table)
+            .filter(importance_priorities::user_id.eq(new_priority.user_id))
+            .filter(importance_priorities::service_type.eq(&new_priority.service_type))
+            .execute(&mut conn)?;
+
+        // Then insert the new priority
         diesel::insert_into(importance_priorities::table)
             .values(new_priority)
             .execute(&mut conn)?;

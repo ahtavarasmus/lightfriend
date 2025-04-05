@@ -283,6 +283,7 @@ async fn main() {
         .route("/api/filters/importance-priority/{service_type}", post(filter_handlers::create_importance_priority))
         .route("/api/filters/importance-priority/{service_type}", delete(filter_handlers::delete_importance_priority))
         .route("/api/filters/importance-priority/{service_type}", get(filter_handlers::get_importance_priority))
+        .route("/api/filters/connected-services", get(filter_handlers::get_connected_services))
 
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
 

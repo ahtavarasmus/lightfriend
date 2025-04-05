@@ -83,6 +83,7 @@ struct UserProfile {
     time_to_delete: bool,
     preferred_number: Option<String>,
     notify: bool,
+    sub_tier: Option<String>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -667,11 +668,86 @@ pub fn Home() -> Html {
                                     <div class="proactive-tab">
                                         {
                                             if let Some(profile) = (*profile_data).as_ref() {
-                                                html! {
-                                                    <>
-                                                        <Proactive user_id={profile.id} />
-                                                        {render_notification_settings(Some(profile))}
-                                                    </>
+                                                if profile.sub_tier.is_some() {
+                                                    html! {
+                                                        <>
+                                                            <Proactive user_id={profile.id} />
+                                                        </>
+                                                    }
+                                                } else {
+                                                    html! {
+                                                        <div class="subscription-required">
+                                                            <h3>{"Proactive Features Require a Subscription"}</h3>
+                                                            <p>{"Get access to proactive features like:"}</p>
+                                                            <ul>
+                                                                <li>{"Priority message filtering"}</li>
+                                                                <li>{"Keyword-based notifications"}</li>
+                                                                <li>{"Waiting checks for important content"}</li>
+                                                            </ul>
+                                                            <a href="/pricing" class="upgrade-button">{"Upgrade Now"}</a>
+                                                            <style>
+                                                                {r#"
+                                                                .subscription-required {
+                                                                    background: rgba(30, 30, 30, 0.7);
+                                                                    border: 1px solid rgba(30, 144, 255, 0.1);
+                                                                    border-radius: 12px;
+                                                                    padding: 2rem;
+                                                                    text-align: center;
+                                                                    margin: 2rem auto;
+                                                                    max-width: 600px;
+                                                                }
+
+                                                                .subscription-required h3 {
+                                                                    color: #7EB2FF;
+                                                                    font-size: 1.5rem;
+                                                                    margin-bottom: 1rem;
+                                                                }
+
+                                                                .subscription-required p {
+                                                                    color: #fff;
+                                                                    margin-bottom: 1.5rem;
+                                                                }
+
+                                                                .subscription-required ul {
+                                                                    list-style: none;
+                                                                    padding: 0;
+                                                                    margin: 0 0 2rem 0;
+                                                                    text-align: left;
+                                                                }
+
+                                                                .subscription-required ul li {
+                                                                    color: #fff;
+                                                                    padding: 0.5rem 0;
+                                                                    position: relative;
+                                                                    padding-left: 1.5rem;
+                                                                }
+
+                                                                .subscription-required ul li:before {
+                                                                    content: "✓";
+                                                                    color: #7EB2FF;
+                                                                    position: absolute;
+                                                                    left: 0;
+                                                                }
+
+                                                                .upgrade-button {
+                                                                    display: inline-block;
+                                                                    padding: 1rem 2rem;
+                                                                    background: linear-gradient(45deg, #1E90FF, #4169E1);
+                                                                    color: white;
+                                                                    text-decoration: none;
+                                                                    border-radius: 8px;
+                                                                    font-weight: bold;
+                                                                    transition: all 0.3s ease;
+                                                                }
+
+                                                                .upgrade-button:hover {
+                                                                    transform: translateY(-2px);
+                                                                    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
+                                                                }
+                                                                "#}
+                                                            </style>
+                                                        </div>
+                                                    }
                                                 }
                                             } else {
                                                 html! {}
