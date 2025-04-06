@@ -6,6 +6,8 @@ use web_sys::{window, HtmlInputElement, KeyboardEvent, InputEvent};
 use serde_json::Number;
 use chrono::Date;
 use wasm_bindgen::JsValue;
+use crate::profile::imap_general_checks::ImapGeneralChecks;
+
 
 trait PadStart {
     fn pad_start_with_character(&self, width: usize, padding: char) -> String;
@@ -89,8 +91,8 @@ pub struct Props {
 // Helper functions
 fn get_service_display_name(service_type: &str) -> String {
     match service_type {
-        "calendar" => "Google Calendar",
         "imap" => "IMAP Email",
+        "calendar" => "Google Calendar",
         _ => service_type,
     }.to_string()
 }
@@ -133,6 +135,7 @@ pub fn connected_services(props: &Props) -> Html {
     let services_state = use_state(|| Vec::<ServiceState>::new());
     let error = use_state(|| None::<String>);
     let selected_service = use_state(|| None::<String>);
+    let is_proactive = use_state(|| false);
     let new_keyword = use_state(|| String::new());
     let new_priority_sender = use_state(|| String::new());
     let filter_settings = use_state(|| None::<FilterSettings>);
@@ -217,6 +220,40 @@ pub fn connected_services(props: &Props) -> Html {
             }
         })
     };
+
+    // Fetch IMAP proactive state on mount
+    {
+        let is_proactive = is_proactive.clone();
+        let error = error.clone();
+
+        use_effect_with_deps(move |_| {
+            if let Some(token) = window()
+                .and_then(|w| w.local_storage().ok())
+                .flatten()
+                .and_then(|storage| storage.get_item("token").ok())
+                .flatten()
+            {
+                spawn_local(async move {
+                    if let Ok(response) = Request::get(&format!("{}/api/profile/imap-proactive", config::get_backend_url()))
+                        .header("Authorization", &format!("Bearer {}", token))
+                        .send()
+                        .await
+                    {
+                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                            if let Some(proactive) = data.get("proactive").and_then(|v| v.as_bool()) {
+                                is_proactive.set(proactive);
+                            }
+                        } else {
+                            error.set(Some("Failed to parse proactive state".to_string()));
+                        }
+                    } else {
+                        error.set(Some("Failed to fetch proactive state".to_string()));
+                    }
+                });
+            }
+            || ()
+        }, ());
+    }
 
     // Fetch connected services and their keywords on mount
     {
@@ -389,9 +426,64 @@ pub fn connected_services(props: &Props) -> Html {
             {
                 if let Some(selected) = (*selected_service).clone() {
                     if let Some(service) = (*services_state).iter().find(|s| s.service_type == selected) {
-                        if let Some(settings) = &service.filter_settings {
+                        if service.service_type == "calendar" {
+                            html! {
+                                <div class="coming-soon-container">
+                                    <div class="coming-soon-content">
+                                        <h3>{"Google Calendar Proactive Coming Soon!"}</h3>
+                                        <p>{"We're working hard to bring you smart notifications for your Google Calendar events."}</p>
+                                    </div>
+                                </div>
+                            }
+                        } else if let Some(settings) = &service.filter_settings {
                             html! {
                                 <div class="filters-container">
+                                    <div class="proactive-toggle-section">
+                                        <div class="notify-toggle">
+                                            <span>{"Proactive IMAP"}</span>
+                                            <span class="toggle-status">
+                                                {if *is_proactive { "Active" } else { "Inactive" }}
+                                            </span>
+                                            <label class="switch">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={*is_proactive}
+                                                    onchange={
+                                                        let is_proactive = is_proactive.clone();
+                                                        Callback::from(move |e: Event| {
+                                                            let input: HtmlInputElement = e.target_unchecked_into();
+                                                            let proactive = input.checked();
+                                                            let is_proactive_clone = is_proactive.clone();
+                                                            
+                                                            if let Some(token) = window()
+                                                                .and_then(|w| w.local_storage().ok())
+                                                                .flatten()
+                                                                .and_then(|storage| storage.get_item("token").ok())
+                                                                .flatten()
+                                                            {
+                                                                spawn_local(async move {
+                                                                    if let Ok(_) = Request::post(&format!("{}/api/profile/imap-proactive", config::get_backend_url()))
+                                                                        .header("Authorization", &format!("Bearer {}", token))
+                                                                        .header("Content-Type", "application/json")
+                                                                        .json(&json!({"proactive": proactive}))
+                                                                        .expect("Failed to serialize proactive request")
+                                                                        .send()
+                                                                        .await
+                                                                    {
+                                                                        is_proactive_clone.set(proactive);
+                                                                    }
+                                                                });
+                                                            }
+                                                        })
+                                                    }
+                                                />
+                                                <span class="slider round"></span>
+                                            </label>
+                                        </div>
+                                        <p class="notification-description">
+                                            {"Enable proactive notifications for IMAP email based on your filters."}
+                                        </p>
+                                    </div>
                                     <div class="filter-section">
                                         <h3>{"Keywords"}</h3>
                                         <div class="keyword-input">
@@ -1008,11 +1100,93 @@ pub fn connected_services(props: &Props) -> Html {
                                                         >
                                                             {"Save"}
                                                         </button>
-                                                    }
-                                                } else {
-                                                    html! {}
-                                                }
-                                            }
+                    }
+                } else {
+                    html! {}
+                }
+            }
+
+            <style>
+                {r#"
+                .coming-soon-container {
+                    background: rgba(30, 30, 30, 0.5);
+                    border: 1px solid rgba(30, 144, 255, 0.1);
+                    border-radius: 12px;
+                    padding: 2rem;
+                    text-align: center;
+                    margin-top: 2rem;
+                    backdrop-filter: blur(10px);
+                }
+
+                .coming-soon-content {
+                    max-width: 600px;
+                    margin: 0 auto;
+                }
+
+                .coming-soon-content h3 {
+                    color: #7EB2FF;
+                    font-size: 1.8rem;
+                    margin-bottom: 1rem;
+                }
+
+                .coming-soon-content p {
+                    color: rgba(255, 255, 255, 0.8);
+                    font-size: 1.1rem;
+                    line-height: 1.6;
+                    margin-bottom: 2rem;
+                }
+
+                .features-preview {
+                    background: rgba(30, 144, 255, 0.05);
+                    border: 1px solid rgba(30, 144, 255, 0.1);
+                    border-radius: 8px;
+                    padding: 1.5rem;
+                    text-align: left;
+                }
+
+                .features-preview h4 {
+                    color: #7EB2FF;
+                    font-size: 1.2rem;
+                    margin-bottom: 1rem;
+                }
+
+                .features-preview ul {
+                    list-style: none;
+                    padding: 0;
+                    margin: 0;
+                }
+
+                .features-preview li {
+                    color: #fff;
+                    font-size: 1rem;
+                    margin-bottom: 0.8rem;
+                    padding-left: 1.5rem;
+                    position: relative;
+                }
+
+                .features-preview li:before {
+                    content: "→";
+                    position: absolute;
+                    left: 0;
+                    color: #7EB2FF;
+                }
+
+                @media (max-width: 768px) {
+                    .coming-soon-container {
+                        padding: 1.5rem;
+                        margin: 1rem;
+                    }
+
+                    .coming-soon-content h3 {
+                        font-size: 1.5rem;
+                    }
+
+                    .coming-soon-content p {
+                        font-size: 1rem;
+                    }
+                }
+                "#}
+            </style>
                                         </div>
                                     </div>
                                 </div>
@@ -1038,10 +1212,67 @@ pub fn connected_services(props: &Props) -> Html {
                 }
             }
 
+            {
+                if let Some(selected) = (*selected_service).clone() {
+                    if selected == "imap" {
+                        if let Some(service) = (*services_state).iter().find(|s| s.service_type == "imap") {
+                            if let Some(settings) = &service.filter_settings {
+                                let priority_senders: Vec<String> = settings.priority_senders.iter()
+                                    .map(|sender| sender.sender.clone())
+                                    .collect();
+                                
+                                let waiting_checks: Vec<String> = settings.waiting_checks.iter()
+                                    .map(|check| check.content.clone())
+                                    .collect();
+
+                                let threshold = settings.importance_priority
+                                    .as_ref()
+                                    .map(|ip| ip.threshold)
+                                    .unwrap_or(7);
+
+                                html! {
+                                    <ImapGeneralChecks 
+                                        on_update={Callback::from(|_| {})}
+                                        keywords={settings.keywords.clone()}
+                                        priority_senders={priority_senders}
+                                        waiting_checks={waiting_checks}
+                                        threshold={threshold}
+                                    />
+                                }
+                            } else {
+                                html! {
+                                    <ImapGeneralChecks 
+                                        on_update={Callback::from(|_| {})}
+                                        keywords={vec![]}
+                                        priority_senders={vec![]}
+                                        waiting_checks={vec![]}
+                                        threshold={7}
+                                    />
+                                }
+                            }
+                        } else {
+                            html! {
+                                <ImapGeneralChecks 
+                                    on_update={Callback::from(|_| {})}
+                                    keywords={vec![]}
+                                    priority_senders={vec![]}
+                                    waiting_checks={vec![]}
+                                    threshold={7}
+                                />
+                            }
+                        }
+                    } else {
+                        html! {}
+                    }
+                } else {
+                    html! {}
+                }
+            }
+
             <style>
                 {r#"
                 .proactive-container {
-                    padding: 20px;
+                    padding: 0;
                     max-width: 800px;
                     margin: 0 auto;
                 }
@@ -1418,7 +1649,86 @@ pub fn connected_services(props: &Props) -> Html {
                 .filters-container {
                     display: flex;
                     flex-direction: column;
-                    gap: 2rem;
+                }
+
+                .proactive-toggle-section {
+                    background: rgba(30, 30, 30, 0.5);
+                    border: 1px solid rgba(30, 144, 255, 0.1);
+                    border-radius: 8px;
+                    padding: 1.5rem;
+                    margin-bottom: 1rem;
+                }
+
+                .notify-toggle {
+                    display: flex;
+                    align-items: center;
+                    gap: 1rem;
+                    margin-bottom: 0.5rem;
+                }
+
+                .toggle-status {
+                    color: #7EB2FF;
+                    font-size: 0.9rem;
+                }
+
+                .notification-description {
+                    color: #999;
+                    font-size: 0.9rem;
+                    margin: 0;
+                }
+
+                /* Switch styles */
+                .switch {
+                    position: relative;
+                    display: inline-block;
+                    width: 60px;
+                    height: 34px;
+                    margin-left: auto;
+                }
+
+                .switch input {
+                    opacity: 0;
+                    width: 0;
+                    height: 0;
+                }
+
+                .slider {
+                    position: absolute;
+                    cursor: pointer;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background-color: rgba(30, 30, 30, 0.7);
+                    transition: .4s;
+                    border: 1px solid rgba(30, 144, 255, 0.2);
+                }
+
+                .slider:before {
+                    position: absolute;
+                    content: "";
+                    height: 26px;
+                    width: 26px;
+                    left: 4px;
+                    bottom: 3px;
+                    background-color: white;
+                    transition: .4s;
+                }
+
+                input:checked + .slider {
+                    background-color: #1E90FF;
+                }
+
+                input:checked + .slider:before {
+                    transform: translateX(26px);
+                }
+
+                .slider.round {
+                    border-radius: 34px;
+                }
+
+                .slider.round:before {
+                    border-radius: 50%;
                 }
 
                 .filter-section {
@@ -1426,6 +1736,7 @@ pub fn connected_services(props: &Props) -> Html {
                     border: 1px solid rgba(30, 144, 255, 0.1);
                     border-radius: 8px;
                     padding: 1.5rem;
+                    margin-top: 0;
                 }
 
                 .filter-section h3 {
@@ -1572,7 +1883,9 @@ pub struct ProactiveProps {
 pub fn proactive(props: &ProactiveProps) -> Html {
 
     html! {
+
         <ConnectedServices user_id={props.user_id} />
+
     }
 }
 

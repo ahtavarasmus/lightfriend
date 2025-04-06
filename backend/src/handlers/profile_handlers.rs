@@ -263,6 +263,88 @@ pub async fn update_profile(
     })))
 }
 
+#[derive(Deserialize)]
+pub struct ImapGeneralChecksRequest {
+    checks: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ImapGeneralChecksResponse {
+    checks: Option<String>,
+}
+
+pub async fn get_imap_general_checks(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<ImapGeneralChecksResponse>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_repository.get_imap_general_checks(auth_user.user_id) {
+        Ok(checks) => Ok(Json(ImapGeneralChecksResponse { checks })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to get IMAP general checks: {}", e)}))
+        )),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ImapProactiveRequest {
+    proactive: bool,
+}
+
+pub async fn update_imap_proactive(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<ImapProactiveRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_repository.update_imap_proactive(auth_user.user_id, request.proactive) {
+        Ok(_) => Ok(Json(json!({
+            "message": "IMAP proactive setting updated successfully"
+        }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to update IMAP proactive setting: {}", e)}))
+        )),
+    }
+}
+
+#[derive(Serialize)]
+pub struct ImapProactiveResponse {
+    proactive: bool,
+}
+
+pub async fn get_imap_proactive(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<ImapProactiveResponse>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_repository.get_imap_proactive(auth_user.user_id) {
+        Ok(proactive) => Ok(Json(ImapProactiveResponse { proactive })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to get IMAP proactive setting: {}", e)}))
+        )),
+    }
+}
+
+pub async fn update_imap_general_checks(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<ImapGeneralChecksRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Convert Option<String> to Option<&str>
+    let checks_ref: Option<&str> = request.checks.as_deref();
+
+    // Update the IMAP general checks
+    match state.user_repository.update_imap_general_checks(auth_user.user_id, checks_ref) {
+        Ok(_) => Ok(Json(json!({
+            "message": "IMAP general checks updated successfully"
+        }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to update IMAP general checks: {}", e)}))
+        )),
+    }
+}
+
 pub async fn delete_user(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,

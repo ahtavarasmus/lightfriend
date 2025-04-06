@@ -13,6 +13,7 @@ mod profile {
     pub mod settings;
     pub mod usage_graph;
     pub mod timezone_detector;
+    pub mod imap_general_checks;
 }
 mod pages {
     pub mod home;
