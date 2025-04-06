@@ -120,12 +120,13 @@ pub fn validate_env() {
         "JWT_SECRET_KEY", "JWT_REFRESH_KEY", "DATABASE_URL", "PERPLEXITY_API_KEY",
         "ASSISTANT_ID", "ELEVENLABS_SERVER_URL_SECRET", "FIN_PHONE", "USA_PHONE",
         "NLD_PHONE", "CHZ_PHONE", "AUS_PHONE", "GB_PHONE","TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN",
-        "ENVIRONMENT", "FRONTEND_URL", "OPENROUTER_API_KEY", "STRIPE_CREDITS_PRODUCT_ID",
+        "ENVIRONMENT", "FRONTEND_URL", "STRIPE_SUBSCRIPTION_US_PRICE_ID", "STRIPE_CREDITS_PRODUCT_ID",
+        "STRIPE_SUBSCRIPTION_WORLD_PRICE_ID",
         "STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET",
         "MESSAGE_COST", "MESSAGE_COST_US", "VOICE_SECOND_COST", "CHARGE_BACK_THRESHOLD", 
         "SHAZAM_PHONE_NUMBER", "SHAZAM_EUROPE_PHONE_NUMBER","SHAZAM_API_KEY", "SERVER_URL", 
         "ENCRYPTION_KEY", "COMPOSIO_API_KEY", "GOOGLE_CALENDAR_CLIENT_ID", 
-        "GOOGLE_CALENDAR_CLIENT_SECRET",
+        "GOOGLE_CALENDAR_CLIENT_SECRET", "OPENROUTER_API_KEY",
     ];
     for var in required_vars.iter() {
         std::env::var(var).expect(&format!("{} must be set", var));
@@ -242,6 +243,7 @@ async fn main() {
         .route("/api/billing/update-auto-topup/{user_id}", post(billing_handlers::update_topup))
 
         .route("/api/stripe/checkout-session/{user_id}", post(stripe_handlers::create_checkout_session))
+        .route("/api/stripe/subscription-checkout/{user_id}", post(stripe_handlers::create_subscription_checkout))
         // TODO can use this on the topping up credits if user already has bought some before
         // .route("/api/stripe/automatic-charge/{user_id}", post(stripe_handlers::automatic_charge))
         .route("/api/stripe/customer-portal/{user_id}", get(stripe_handlers::create_customer_portal_session))

@@ -37,7 +37,7 @@ use pages::{
     blog::Blog,
     home::is_logged_in,
     termsprivacy::{TermsAndConditions, PrivacyPolicy},
-    money::Pricing,
+    money::{Pricing, PricingWrapper},
 };
 
 use auth::{
@@ -116,7 +116,21 @@ fn switch(routes: Route) -> Html {
         },
         Route::Pricing => {
             info!("Rendering Pricing page");
-            html! { <Pricing /> }
+            let logged_in = is_logged_in();
+            if logged_in {
+                html! { 
+                    <PricingWrapper />
+                }
+            } else {
+                html! { 
+                    <Pricing 
+                        user_id={0}
+                        user_email={"".to_string()}
+                        sub_tier={None::<String>}
+                        is_logged_in={false}
+                    /> 
+                }
+            }
         },
     }
 }
