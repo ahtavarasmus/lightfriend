@@ -97,6 +97,15 @@ diesel::table! {
 }
 
 diesel::table! {
+    processed_emails (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        email_uid -> Text,
+        processed_at -> Integer,
+    }
+}
+
+diesel::table! {
     subscriptions (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -163,6 +172,8 @@ diesel::table! {
         timezone_auto -> Nullable<Bool>,
         sub_tier -> Nullable<Text>,
         msgs_left -> Integer,
+        imap_general_checks -> Nullable<Text>,
+        imap_proactive -> Bool,
     }
 }
 
@@ -184,6 +195,7 @@ diesel::joinable!(imap_connection -> users (user_id));
 diesel::joinable!(importance_priorities -> users (user_id));
 diesel::joinable!(keywords -> users (user_id));
 diesel::joinable!(priority_senders -> users (user_id));
+diesel::joinable!(processed_emails -> users (user_id));
 diesel::joinable!(subscriptions -> users (user_id));
 diesel::joinable!(waiting_checks -> users (user_id));
 
@@ -196,6 +208,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     importance_priorities,
     keywords,
     priority_senders,
+    processed_emails,
     subscriptions,
     unipile_connection,
     usage_logs,

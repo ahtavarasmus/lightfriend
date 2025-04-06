@@ -90,7 +90,7 @@ pub async fn create_waiting_check(
     auth_user: AuthUser,
     Json(request): Json<WaitingCheckRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Attempting to create waiting check for user {}", auth_user.user_id);
+    tracing::info!("Attempting to create waiting check for user {} with type: {}", auth_user.user_id, request.service_type);
 
     let new_check = NewWaitingCheck {
         user_id: auth_user.user_id,
@@ -178,7 +178,7 @@ pub async fn create_priority_sender(
     auth_user: AuthUser,
     Json(request): Json<PrioritySenderRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::info!("Attempting to create priority sender for user {}", auth_user.user_id);
+    tracing::info!("Attempting to create priority sender for user {} with type: {}", auth_user.user_id, request.service_type);
 
     let new_sender = NewPrioritySender {
         user_id: auth_user.user_id,
@@ -417,12 +417,14 @@ pub async fn get_connected_services(
     let mut services = Vec::new();
 
     // Check Google Calendar
+    /*
     if let Ok(true) = state.user_repository.has_active_google_calendar(auth_user.user_id) {
         services.push(ConnectedService {
             service_type: "calendar".to_string(),
             identifier: "".to_string(),  // Using access token email as identifier
         });
     }
+    */
 
     // Check IMAP
     if let Ok(Some((email, _, _, _))) = state.user_repository.get_imap_credentials(auth_user.user_id) {

@@ -13,6 +13,7 @@ use crate::schema::google_calendar;
 use crate::schema::gmail;
 use crate::schema::bridges;
 use crate::schema::imap_connection;
+use crate::schema::processed_emails;
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = users)]
@@ -41,6 +42,8 @@ pub struct User {
     pub timezone_auto: Option<bool>,
     pub sub_tier: Option<String>,
     pub msgs_left: i32,
+    pub imap_general_checks: Option<String>,
+    pub imap_proactive: bool,
 }
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -73,6 +76,24 @@ pub struct NewImapConnection {
     pub expires_in: i32,
     pub imap_server: Option<String>,
     pub imap_port: Option<i32>,
+}
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = processed_emails)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct ProcessedEmail {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub email_uid: String,
+    pub processed_at: i32, 
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = processed_emails)]
+pub struct NewProcessedEmails {
+    pub user_id: i32,
+    pub email_uid: String,
+    pub processed_at: i32, 
 }
 
 

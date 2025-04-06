@@ -285,6 +285,13 @@ async fn main() {
         .route("/api/filters/importance-priority/{service_type}", get(filter_handlers::get_importance_priority))
         .route("/api/filters/connected-services", get(filter_handlers::get_connected_services))
 
+        .route("/api/profile/imap-general-checks", post(profile_handlers::update_imap_general_checks))
+        .route("/api/profile/imap-general-checks", get(profile_handlers::get_imap_general_checks))
+        .route("/api/profile/imap-proactive", post(profile_handlers::update_imap_proactive))
+        .route("/api/profile/imap-proactive", get(profile_handlers::get_imap_proactive))
+
+
+
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
 
 

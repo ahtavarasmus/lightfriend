@@ -23,6 +23,7 @@ pub struct ImapEmailPreview {
     pub id: String,
     pub subject: Option<String>,
     pub from: Option<String>,
+    pub from_email: Option<String>,
     pub date: Option<DateTime<Utc>>,
     pub snippet: Option<String>,
     pub body: Option<String>,
@@ -194,6 +195,8 @@ pub async fn fetch_emails_imap(
     limit: Option<u32>,
     unprocessed: bool, 
 ) -> Result<Vec<ImapEmailPreview>, ImapError> {
+    tracing::debug!("Starting fetch_emails_imap for user {} with preview_only: {}, limit: {:?}, unprocessed: {}", 
+        user_id, preview_only, limit, unprocessed);
     // Get IMAP credentials
     let (email, password, imap_server, imap_port) = state
         .user_repository
@@ -236,17 +239,17 @@ pub async fn fetch_emails_imap(
         .map_err(|e| ImapError::FetchError(format!("Failed to fetch messages: {}", e)))?;
 
     let mut email_previews = Vec::new();
-    const PROCESSED_FLAG: &str = "lightfriend_processed";  // Custom flag
 
     for message in messages.iter() {
         let uid = message.uid.unwrap_or(0).to_string();
-
-        let flags = message.flags();
-        let is_processed = flags.iter().any(|f| f.to_string() == PROCESSED_FLAG);
+        
+        // Check if email is already processed using repository method
+        let is_processed = state.user_repository.is_email_processed(user_id, &uid)
+            .map_err(|e| ImapError::FetchError(format!("Failed to check email processed status: {}", e)))?;
         
         // Skip processed emails if unprocessed is true
         if unprocessed && is_processed {
-            tracing::info!("Skipping already processed email");
+            tracing::info!("Skipping already processed email: {}", uid);
             continue;
         }
 
@@ -254,17 +257,28 @@ pub async fn fetch_emails_imap(
             ImapError::ParseError("Failed to get message envelope".to_string())
         })?;
 
-        let from = envelope
+        let (from, from_email) = envelope
             .from
             .as_ref()
             .and_then(|addrs| addrs.first())
             .map(|addr| {
-                format!(
-                    "{} <{}>",
-                    addr.name.as_ref().and_then(|n| String::from_utf8(n.to_vec()).ok()).unwrap_or_default(),
-                    addr.mailbox.as_ref().and_then(|m| String::from_utf8(m.to_vec()).ok()).unwrap_or_default()
-                )
-            });
+                let name = addr.name
+                    .as_ref()
+                    .and_then(|n| String::from_utf8(n.to_vec()).ok())
+                    .unwrap_or_default();
+                let email = addr.mailbox
+                    .as_ref()
+                    .and_then(|m| {
+                        let mailbox = String::from_utf8(m.to_vec()).ok()?;
+                        let host = addr.host
+                            .as_ref()
+                            .and_then(|h| String::from_utf8(h.to_vec()).ok())?;
+                        Some(format!("{}@{}", mailbox, host))
+                    })
+                    .unwrap_or_default();
+                (name, email)
+            })
+            .unwrap_or_default();
 
         let subject = envelope
             .subject
@@ -322,20 +336,36 @@ pub async fn fetch_emails_imap(
 
         email_previews.push(ImapEmailPreview {
             id: uid.clone(),
-            subject,
-            from,
+            subject: subject.clone(),
+            from: Some(from.clone()),
+            from_email: Some(from_email.clone()),
             date,
             snippet: Some(snippet),
             body: Some(body),
             is_read,
         });
 
-        // Only set the processed flag if unprocessed is true
+        // Mark email as processed if unprocessed is true
         if unprocessed {
-            imap_session
-                .uid_store(&uid, format!("+FLAGS ({})", PROCESSED_FLAG))
-                .map_err(|e| ImapError::FetchError(format!("Failed to set flag: {}", e)))?;
+            match state.user_repository.mark_email_as_processed(user_id, &uid) {
+                Ok(_) => {
+                    tracing::info!("Marked email {} as processed", uid);
+                }
+                Err(e) => {
+                    tracing::error!("Failed to mark email {} as processed: {}", uid, e);
+                    // Continue processing other emails even if marking as processed fails
+                }
+            }
         }
+
+        // Log email details for debugging
+        tracing::debug!("Processed email: id={}, subject={:?}, from={:?}, date={:?}, is_read={}", 
+            uid,
+            subject,
+            from,
+            date,
+            is_read
+        );
     }
 
     // Logout
