@@ -161,16 +161,24 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                 props.on_profile_update.emit(updated_profile.clone());
 
 
-                                success.set(Some("Profile updated successfully".to_string()));
-                                error.set(None);
-                                is_editing.set(false);
+                                // Check if phone number was changed
+                                let phone_changed = (*user_profile).phone_number != (*phone_number).clone();
                                 
-                                // Clear success message after 3 seconds
-                                let success_clone = success.clone();
-                                spawn_local(async move {
-                                    gloo_timers::future::TimeoutFuture::new(3_000).await;
-                                    success_clone.set(None);
-                                });
+                                if phone_changed {
+                                    // If phone number changed, redirect to home for verification
+                                    navigator.push(&Route::Home);
+                                } else {
+                                    success.set(Some("Profile updated successfully".to_string()));
+                                    error.set(None);
+                                    is_editing.set(false);
+                                    
+                                    // Clear success message after 3 seconds
+                                    let success_clone = success.clone();
+                                    spawn_local(async move {
+                                        gloo_timers::future::TimeoutFuture::new(3_000).await;
+                                        success_clone.set(None);
+                                    });
+                                }
                             } else {
                                 error.set(Some("Failed to update profile. Phone number/email already exists?".to_string()));
                             }

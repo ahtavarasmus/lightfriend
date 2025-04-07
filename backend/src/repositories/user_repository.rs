@@ -281,7 +281,14 @@ impl UserRepository {
             return Err(DieselError::NotFound);
         }
 
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        // Get current user to check if phone number is changing
+        let current_user = users::table
+            .find(user_id)
+            .first::<User>(&mut conn)?;
+
+        // If phone number is changing, set verified to false
+        let should_unverify = current_user.phone_number != phone_number;
+
         diesel::update(users::table.find(user_id))
             .set((
                 users::email.eq(email),
@@ -290,6 +297,7 @@ impl UserRepository {
                 users::info.eq(info),
                 users::timezone.eq(timezone),
                 users::timezone_auto.eq(timezone_auto),
+                users::verified.eq(!should_unverify && current_user.verified), // Only keep verified true if phone number hasn't changed
             ))
             .execute(&mut conn)?;
         Ok(())

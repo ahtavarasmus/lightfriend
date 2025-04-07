@@ -489,8 +489,10 @@ pub async fn stripe_webhook(
                     stripe::Expandable::Id(id) => id,
                     stripe::Expandable::Object(customer) => customer.id,
                 };
+                // TODO have to fetch the latest emails if account connected here and mark them as processed :D !!!!
                 
                 // Update user's subscription tier to "tier 1" and set messages_left to 150
+
                 if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
                     state.user_repository.set_subscription_tier(
                         user.id,
