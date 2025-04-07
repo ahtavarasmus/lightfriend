@@ -58,7 +58,7 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
                     .and_then(|storage| storage.get_item("token").ok())
                     .flatten()
                 {
-                    let response = Request::post(&format!("{}/api/stripe/subscription-checkout/{}", config::get_backend_url(), 1))
+                    let response = Request::post(&format!("{}/api/stripe/subscription-checkout/{}", config::get_backend_url(), user_id))
                         .header("Authorization", &format!("Bearer {}", token))
                         .send()
                         .await;

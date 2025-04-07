@@ -116,7 +116,6 @@ pub async fn create_subscription_checkout(
                     .expect("STRIPE_SUBSCRIPTION_US_PRICE_ID must be set in environment");
     }
     
-    // Create a Checkout Session for subscription
     let checkout_session = CheckoutSession::create(
         &client,
         CreateCheckoutSession {
@@ -136,6 +135,14 @@ pub async fn create_subscription_checkout(
             automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
                 enabled: true,
                 liability: None,
+            }),
+            tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
+                enabled: true,
+            }),
+            customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
+                address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
+                name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto), // Add this line
+                shipping: None,
             }),
             ..Default::default()
         },
