@@ -962,107 +962,37 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                         }
                     };
 
-                    // First fetch previews using IMAP
-                    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user.id, true, None, false).await {
-                        Ok(previews) => {
-                            if previews.is_empty() {
+                    // Fetch the latest 20 emails with full content
+                    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user.id, true, Some(20), false).await {
+                        Ok(emails) => {
+                            if emails.is_empty() {
                                 tool_answers.insert(tool_call_id, "No emails found.".to_string());
                                 continue;
                             }
 
-                            // Create a system message for email matching
-                            let sys_message = chat_completion::ChatCompletionMessage {
-                                role: chat_completion::MessageRole::system,
-                                content: chat_completion::Content::Text(
-                                    "You are an email matcher. Given a list of email previews and a search query, \
-                                    find the most relevant email. The emails are sorted from newest to oldest. \
-                                    When multiple emails match the query similarly well, prefer the newest one by date and time. \
-                                    Return ONLY the ID of the most relevant email, or 'NONE' if no email matches well. \
-                                    Consider subject, sender, date, and snippet in your matching, with a bias towards \
-                                    more recent emails.".to_string()
-                                ),
-                                name: None,
-                                tool_calls: None,
-                                tool_call_id: None,
-                            };
-
-                            // Create the content for matching, ensuring newest emails are considered first
-                            let emails_json = serde_json::json!({
-                                "query": query.query,
-                                "emails": previews.iter().rev().map(|p| {  // Reverse to prioritize newer emails
-                                    serde_json::json!({
-                                        "id": p.id,
-                                        "subject": p.subject,
-                                        "from": p.from,
-                                        "date": p.date.map(|d| d.to_rfc3339()),
-                                        "snippet": p.snippet,
-                                        "body": p.body
-                                    })
-                                }).collect::<Vec<_>>()
-                            });
-
-                            let user_message = chat_completion::ChatCompletionMessage {
-                                role: chat_completion::MessageRole::user,
-                                content: chat_completion::Content::Text(emails_json.to_string()),
-                                name: None,
-                                tool_calls: None,
-                                tool_call_id: None,
-                            };
-
-                            let matching_req = chat_completion::ChatCompletionRequest::new(
-                                GPT4_O.to_string(),
-                                vec![sys_message, user_message],
-                            ).max_tokens(50);
-
-                            match client.chat_completion(matching_req).await {
-                                Ok(matching_result) => {
-                                    let email_id = matching_result.choices[0].message.content.clone().unwrap_or_default();
-                                    if email_id == "NONE" {
-                                        tool_answers.insert(tool_call_id, "Could not find a matching email.".to_string());
-                                        continue;
-                                    }
-
-                                    // Fetch the specific email using IMAP
-                                    match crate::handlers::imap_handlers::fetch_single_email_imap(
-                                        &state,
-                                        user.id,
-                                        email_id.trim()
-                                    ).await {
-                                        Ok(email) => {
-                                            let formatted_response = format!(
-                                                "Found email: From: {}, Subject: {}, Date: {}\n\n{}",
-                                                email.from.unwrap_or_else(|| "Unknown".to_string()),
-                                                email.subject.unwrap_or_else(|| "No subject".to_string()),
-                                                email.date.map_or("No date".to_string(), |d| d.to_rfc3339()),
-                                                email.body.unwrap_or_else(|| "No content".to_string())
-                                            );
-                                            tool_answers.insert(tool_call_id, formatted_response);
-                                        }
-                                        Err(e) => {
-                                            let error_message = match e {
-                                                ImapError::NoConnection => "No IMAP connection found. Please check your email settings.",
-                                                ImapError::CredentialsError(_) => "Your email credentials need to be updated.",
-                                                ImapError::ConnectionError(msg) | ImapError::FetchError(msg) | ImapError::ParseError(msg) => {
-                                                    eprintln!("Failed to fetch specific email: {}", msg);
-                                                    "Failed to fetch the email. Please try again later."
-                                                }
-                                            };
-                                            tool_answers.insert(tool_call_id, error_message.to_string());
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to match email: {}", e);
-                                    tool_answers.insert(tool_call_id, "Failed to find matching email.".to_string());
-                                }
+                            // Format all emails into a searchable response
+                            let mut response = format!("Search query: '{}'\n\nLatest emails (newest first):\n\n", query.query);
+                            for (i, email) in emails.iter().enumerate() {
+                                let formatted_email = format!(
+                                    "Email {}:\nFrom: {}\nSubject: {}\nDate: {}\n\n{}\n{}\n",
+                                    i + 1,
+                                    email.from.as_deref().unwrap_or("Unknown"),
+                                    email.subject.as_deref().unwrap_or("No subject"),
+                                    email.date.map_or("No date".to_string(), |d| d.to_rfc3339()),
+                                    email.snippet.as_deref().unwrap_or(""),
+                                    email.body.as_deref().unwrap_or("No content")
+                                );
+                                response.push_str(&formatted_email);
                             }
+
+                            tool_answers.insert(tool_call_id, response);
                         }
                         Err(e) => {
                             let error_message = match e {
                                 ImapError::NoConnection => "No IMAP connection found. Please check your email settings.",
                                 ImapError::CredentialsError(_) => "Your email credentials need to be updated.",
                                 ImapError::ConnectionError(msg) | ImapError::FetchError(msg) | ImapError::ParseError(msg) => {
-                                    eprintln!("Failed to fetch email previews: {}", msg);
+                                    eprintln!("Failed to fetch emails: {}", msg);
                                     "Failed to fetch emails. Please try again later."
                                 }
                             };

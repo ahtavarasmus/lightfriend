@@ -200,7 +200,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         general_checks_prompt,
                                         importance_priority
                                     );
-                                    tracing::info!("{:#?}", system_message);
 
                                     let api_key = match env::var("OPENROUTER_API_KEY") {
                                         Ok(key) => {
@@ -314,8 +313,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     .tools(tools)
                                     .tool_choice(openai_api_rs::v1::chat_completion::ToolChoiceType::Required);
 
-                                        info!("Sending email to LLM for evaluation:\n{:#?}", email_content);
-                                        info!("Using system message:\n{}", system_message);
                                         
                                     match client.chat_completion(req.clone()).await {
                                         Ok(response) => {
@@ -325,10 +322,10 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                     if let Some(name) = &tool_call.function.name {
                                                         if name == "evaluate_email" {
                                                             if let Some(arguments) = &tool_call.function.arguments {
-                                                                info!("Processing tool call arguments: {}", arguments);
+                                                                info!("Processing tool call arguments");
                                                                 match serde_json::from_str::<serde_json::Value>(arguments) {
                                                                     Ok(evaluation) => {
-                                                                        info!("Parsed evaluation: {:?}", evaluation);
+                                                                        info!("Parsed evaluation");
                                                                         if evaluation["should_notify"].as_bool().unwrap_or(false) {
                                                                             info!("Email marked as important, adding to notification list");
                                                                             important_emails.push(email);
@@ -339,7 +336,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                                                 // Find the matching waiting check
                                                                                 if let Some(check) = waiting_checks.iter().find(|wc| wc.id == Some(matched_check_id as i32)) {
                                                                                     if check.remove_when_found {
-                                                                                        info!("Removing waiting check with ID {}: {}", matched_check_id, check.content);
+                                                                                        info!("Removing waiting check with ID {}", matched_check_id);
                                                                                         if let Err(e) = state.user_repository.delete_waiting_check(
                                                                                             user.id,
                                                                                             "imap",
@@ -524,11 +521,21 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         }
                                     };
 
+                                    // Check if this is the final message
+                                    let is_final_message = user.msgs_left <= 1;
+
+                                    // Append final message notice if needed
+                                    let final_notification = if is_final_message {
+                                        format!("{}\n\nNote: This is your final proactive message for this month. Your message quota will reset at the start of next month.", notification)
+                                    } else {
+                                        notification
+                                    };
+
                                     // Send SMS notification
                                     match twilio_utils::send_conversation_message(
                                         &conversation.conversation_sid,
                                         &conversation.twilio_number,
-                                        &notification
+                                        &final_notification
                                     ).await {
                                         Ok(_) => info!("Successfully sent email notification to user {}", user.id),
                                         Err(e) => error!("Failed to send email notification: {}", e),

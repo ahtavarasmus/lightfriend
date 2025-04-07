@@ -303,13 +303,41 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <div class="faq-grid">
                     <div class="faq-item">
                         <h3>{"How does billing work?"}</h3>
-                        <p>{"You’ll purchase credits in advance to use for voice calls and SMS messages. You can optionally enable automatic top-up to recharge your account with additional credits whenever your balance runs low, ensuring uninterrupted service. No minimum fees or hidden charges."}</p>
+                        <p>{"You’ll purchase credits in advance to use for voice calls and SMS messages. You can optionally enable automatic top-up to recharge your account with additional credits whenever your balance runs low, ensuring uninterrupted service. No minimum fees or hidden charges. Proactive messaging subscription is paid on montly basis and gives 150 notification montly quota."}</p>
                     </div>
                     
                     <div class="faq-item">
                         <h3>{"What counts as a message or call?"}</h3>
                         <p>{"You are charged for all messages and calls you initiate. For example texting 'shazam' to lightfriend, you will only be charged for the 'shazam' message and not the listening call."}</p>
                     </div>
+
+                    <div class="faq-item">
+                        <h3>{"How does proactive email monitoring work?"}</h3>
+                        <p>{"Our AI continuously monitors your email every minute, analyzing new messages using advanced criteria including priority senders, custom keywords, and waiting checks. It evaluates each email's importance on a scale of 0-10, considering factors like urgency indicators, sender importance, and content significance. You'll only be notified of truly important messages."}</p>
+                    </div>
+
+                    <div class="faq-item">
+                        <h3>{"What are waiting checks?"}</h3>
+                        <p>{"Waiting checks are temporary filters you can set up to watch for specific emails. For example, if you're expecting an important reply, you can create a waiting check. Once the matching email arrives, you'll be notified, and if configured, the check can automatically remove itself after finding the match."}</p>
+                    </div>
+
+                    <div class="faq-item">
+                        <h3>{"How does the AI determine email importance?"}</h3>
+                        <p>{"The AI uses a comprehensive evaluation process that checks for: urgency indicators (words like 'urgent', 'deadline'), sender importance (managers, clients), content significance (action items, meetings), context (CC'd stakeholders, business hours), and personal impact. You can also set your own importance threshold (default is 7/10) for notifications."}</p>
+                    </div>
+
+                    <div class="faq-item">
+                        <h3>{"What about message quotas?"}</h3>
+                        <p>{"The subscription includes up to 150 proactive notifications per month. You'll receive a notice when you're on your last notification, and your quota automatically resets at the start of each month. This helps manage costs while ensuring you don't miss truly important messages."}</p>
+                    </div>
+
+                    <div class="faq-item">
+                        <h3>{"What email services are supported?"}</h3>
+                        <p>{"Currently, we support IMAP email monitoring, meaning all major email providers work."}</p>
+                    </div>
+
+
+
                     <div class="faq-item">
                         <h3>{"What about refunds?"}</h3>
                         <p>{"Due to the pay-as-you-go nature of our service, we don't offer refunds. You're only charged for services you actually use."}</p>
@@ -503,8 +531,11 @@ pub fn pricing(props: &PricingProps) -> Html {
 
                 .faq-grid {
                     display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                    gap: 2rem;
+                    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+                    gap: 2.5rem;
+                    max-width: 1400px;
+                    margin: 0 auto;
+                }
                 }
 
                 .faq-item {
@@ -513,6 +544,14 @@ pub fn pricing(props: &PricingProps) -> Html {
                     border-radius: 16px;
                     padding: 2rem;
                     backdrop-filter: blur(10px);
+                    transition: all 0.3s ease;
+                }
+
+                .faq-item:hover {
+                    transform: translateY(-5px);
+                    border-color: rgba(30, 144, 255, 0.3);
+                    box-shadow: 0 8px 32px rgba(30, 144, 255, 0.1);
+                }
                 }
 
                 .faq-item h3 {
