@@ -327,6 +327,45 @@ pub async fn get_imap_proactive(
     }
 }
 
+#[derive(Serialize)]
+pub struct EmailJudgmentResponse {
+    pub id: i32,
+    pub email_timestamp: i32,
+    pub processed_at: i32,
+    pub should_notify: bool,
+    pub score: i32,
+    pub reason: String,
+}
+
+pub async fn get_email_judgments(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<Vec<EmailJudgmentResponse>>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_repository.get_user_email_judgments(auth_user.user_id) {
+        Ok(judgments) => {
+            let responses: Vec<EmailJudgmentResponse> = judgments
+                .into_iter()
+                .map(|j| EmailJudgmentResponse {
+                    id: j.id.unwrap_or(0),
+                    email_timestamp: j.email_timestamp,
+                    processed_at: j.processed_at,
+                    should_notify: j.should_notify,
+                    score: j.score,
+                    reason: j.reason,
+                })
+                .collect();
+            Ok(Json(responses))
+        },
+        Err(e) => {
+            tracing::error!("Failed to get email judgments: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to get email judgments: {}", e)}))
+            ))
+        }
+    }
+}
+
 pub async fn update_imap_general_checks(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,

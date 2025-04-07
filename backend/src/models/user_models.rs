@@ -14,6 +14,7 @@ use crate::schema::gmail;
 use crate::schema::bridges;
 use crate::schema::imap_connection;
 use crate::schema::processed_emails;
+use crate::schema::email_judgments;
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = users)]
@@ -94,6 +95,30 @@ pub struct NewProcessedEmails {
     pub user_id: i32,
     pub email_uid: String,
     pub processed_at: i32, 
+}
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = email_judgments)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct EmailJudgment {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub email_timestamp: i32,
+    pub processed_at: i32,
+    pub should_notify: bool,
+    pub score: i32,
+    pub reason: String,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = email_judgments)]
+pub struct NewEmailJudgment {
+    pub user_id: i32,
+    pub email_timestamp: i32,
+    pub processed_at: i32,
+    pub should_notify: bool,
+    pub score: i32,
+    pub reason: String,
 }
 
 
