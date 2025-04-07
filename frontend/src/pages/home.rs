@@ -110,15 +110,6 @@ pub fn landing() -> Html {
         <div class="landing-page">
             // Hero Section
             <header class="hero">
-                <div class="producthunt-badge">
-                    <a href="https://www.producthunt.com/posts/lightfriend?embed=true&utm_source=badge-featured&utm_medium=badge&utm_souce=badge-lightfriend" target="_blank">
-                        <img src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=947660&theme=light&t=1743335214644" 
-                            alt="lightfriend - Use your dumbphone smarter with AI-powered assistance. | Product Hunt" 
-                            style="width: 250px; height: 54px;" 
-                            width="250" 
-                            height="54" />
-                    </a>
-                </div>
                 <h1>{"Stay Connected with lightfriend"}</h1>
                 <p class="hero-subtitle">
                     {"Use your dumbphone smarter with AI-powered voice and text assistance—check messages and essential info when you need it, without endless scrolling or distractions."}

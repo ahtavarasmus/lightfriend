@@ -357,15 +357,6 @@ pub async fn fetch_emails_imap(
                 }
             }
         }
-
-        // Log email details for debugging
-        tracing::debug!("Processed email: id={}, subject={:?}, from={:?}, date={:?}, is_read={}", 
-            uid,
-            subject,
-            from,
-            date,
-            is_read
-        );
     }
 
     // Logout
