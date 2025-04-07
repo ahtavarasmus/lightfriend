@@ -1662,11 +1662,6 @@ pub fn Home() -> Html {
                             
                             match response.json::<UserProfile>().await {
                                 Ok(profile) => {
-                                    if !profile.verified && profile.time_to_delete {
-                                        delete_unverified_account(profile.id, token);
-                                        return;
-                                    }
-                                    
                                     user_verified.set(profile.verified);
                                     profile_data.set(Some(profile));
                                     error.set(None);
