@@ -432,6 +432,19 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                 </span>
                             </div>
                             
+                            // Show subscription tier if it exists
+                            {
+                                if let Some(sub_tier) = &user_profile.sub_tier {
+                                    html! {
+                                        <div class="subscription-tier">
+                                            <span>{"Current Subscription: "}</span>
+                                            <span class="tier-label">{sub_tier}</span>
+                                        </div>
+                                    }
+                                } else {
+                                    html! {}
+                                }
+                            }
                             <div class="auto-topup-container">
                                 if user_profile.stripe_payment_method_id.is_some() {
                                     <button 
@@ -451,7 +464,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                         {"Buy Credits"}
                                     </button>
 
-                                if user_profile.stripe_payment_method_id.is_some() {
+                                if user_profile.stripe_payment_method_id.is_some() || user_profile.sub_tier.is_some() {
                                     <button 
                                         class="customer-portal-button"
                                         onclick={open_customer_portal.clone()}

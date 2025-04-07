@@ -153,6 +153,8 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     charge_when_under: (*user_profile).charge_when_under,
                                     charge_back_to: (*user_profile).charge_back_to,
                                     stripe_payment_method_id: (*user_profile).stripe_payment_method_id.clone(),
+                                    sub_tier: (*user_profile).sub_tier.clone(),
+                                    msgs_left: (*user_profile).msgs_left,
                                 };
 
                                 // Notify parent component
