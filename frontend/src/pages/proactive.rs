@@ -54,6 +54,16 @@ struct ImportancePriority {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+struct EmailJudgmentResponse {
+    id: i32,
+    email_timestamp: i32,
+    processed_at: i32,
+    should_notify: bool,
+    score: i32,
+    reason: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct ImportancePriorityResponse {
     user_id: i32,
     threshold: i32,
@@ -180,6 +190,39 @@ pub fn connected_services(props: &Props) -> Html {
         );
     }
     let is_modified = use_state(|| false);
+    let email_judgments = use_state(|| None::<Vec<EmailJudgmentResponse>>);
+
+    // Fetch email judgments on mount
+    {
+        let email_judgments = email_judgments.clone();
+        let error = error.clone();
+
+        use_effect_with_deps(move |_| {
+            if let Some(token) = window()
+                .and_then(|w| w.local_storage().ok())
+                .flatten()
+                .and_then(|storage| storage.get_item("token").ok())
+                .flatten()
+            {
+                spawn_local(async move {
+                    if let Ok(response) = Request::get(&format!("{}/api/profile/email-judgments", config::get_backend_url()))
+                        .header("Authorization", &format!("Bearer {}", token))
+                        .send()
+                        .await
+                    {
+                        if let Ok(judgments) = response.json::<Vec<EmailJudgmentResponse>>().await {
+                            email_judgments.set(Some(judgments));
+                        } else {
+                            error.set(Some("Failed to parse email judgments".to_string()));
+                        }
+                    } else {
+                        error.set(Some("Failed to fetch email judgments".to_string()));
+                    }
+                });
+            }
+            || ()
+        }, ());
+    }
     // Function to fetch keywords for a specific service
     let fetch_keywords = {
         let services_state = services_state.clone();
@@ -419,9 +462,11 @@ pub fn connected_services(props: &Props) -> Html {
     html! {
         <div class="proactive-container">
             <h2>{"Proactive messaging"}</h2>
+            /*
             <div class="service-boxes-container">
                 {render_service_grid()}
             </div>
+            */
             
             {
                 if let Some(selected) = (*selected_service).clone() {
@@ -440,7 +485,8 @@ pub fn connected_services(props: &Props) -> Html {
                                 <div class="filters-container">
                                     <div class="proactive-toggle-section">
                                         <div class="notify-toggle">
-                                            <span>{"Proactive IMAP"}</span>
+                                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%234285f4' d='M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48H48zM0 176V384c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V176L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z'/%3E%3C/svg%3E" alt="IMAP"/>
+                                            <span class="proactive-title">{"Proactive EMAIL"}</span>
                                             <span class="toggle-status">
                                                 {if *is_proactive { "Active" } else { "Inactive" }}
                                             </span>
@@ -484,6 +530,54 @@ pub fn connected_services(props: &Props) -> Html {
                                             {"Enable proactive notifications for IMAP email based on your filters."}
                                         </p>
                                     </div>
+                                    <div class="filter-section">
+                                        <h3>{"Filter Activity Log"}</h3>
+                                        <div class="judgment-list">
+                                            {
+                                                if let Some(judgments) = &*email_judgments {
+                                                    judgments.iter().map(|judgment| {
+                                                        let date = format_timestamp(judgment.email_timestamp);
+                                                        let processed_date = format_timestamp(judgment.processed_at);
+                                                        html! {
+                                                            <div class={classes!(
+                                                                "judgment-item",
+                                                                if judgment.should_notify { "notify" } else { "no-notify" }
+                                                            )}>
+                                                                <div class="judgment-header">
+                                                                    <span class="judgment-date">{date}</span>
+                                                                    <span class={classes!(
+                                                                        "judgment-status",
+                                                                        if judgment.should_notify { "notify" } else { "no-notify" }
+                                                                    )}>
+                                                                        {if judgment.should_notify { "Notified" } else { "Skipped" }}
+                                                                    </span>
+                                                                </div>
+                                                                <div class="judgment-score">
+                                                                    <span class="score-label">{"Importance Score: "}</span>
+                                                                    <span class="score-value">{judgment.score}{" / 10"}</span>
+                                                                </div>
+                                                                <div class="judgment-reason">
+                                                                    <span class="reason-label">{"Reason: "}</span>
+                                                                    <span class="reason-text">{&judgment.reason}</span>
+                                                                </div>
+                                                                <div class="judgment-processed">
+                                                                    <span class="processed-label">{"Processed: "}</span>
+                                                                    <span class="processed-date">{processed_date}</span>
+                                                                </div>
+                                                            </div>
+                                                        }
+                                                    }).collect::<Html>()
+                                                } else {
+                                                    html! {
+                                                        <div class="loading-judgments">
+                                                            {"Loading filter activity..."}
+                                                        </div>
+                                                    }
+                                                }
+                                            }
+                                        </div>
+                                    </div>
+
                                     <div class="filter-section">
                                         <h3>{"Keywords"}</h3>
                                         <div class="keyword-input">
@@ -1020,6 +1114,7 @@ pub fn connected_services(props: &Props) -> Html {
                                     </div>
 
                                     <div class="filter-section">
+
                                         <h3>{"Importance Priority"}</h3>
 
                                         <div class="filter-input">
@@ -1100,93 +1195,93 @@ pub fn connected_services(props: &Props) -> Html {
                                                         >
                                                             {"Save"}
                                                         </button>
-                    }
-                } else {
-                    html! {}
-                }
-            }
+                                                    }
+                                                } else {
+                                                    html! {}
+                                                }
+                                            }
 
-            <style>
-                {r#"
-                .coming-soon-container {
-                    background: rgba(30, 30, 30, 0.5);
-                    border: 1px solid rgba(30, 144, 255, 0.1);
-                    border-radius: 12px;
-                    padding: 2rem;
-                    text-align: center;
-                    margin-top: 2rem;
-                    backdrop-filter: blur(10px);
-                }
+                                            <style>
+                                                {r#"
+                                                .coming-soon-container {
+                                                    background: rgba(30, 30, 30, 0.5);
+                                                    border: 1px solid rgba(30, 144, 255, 0.1);
+                                                    border-radius: 12px;
+                                                    padding: 2rem;
+                                                    text-align: center;
+                                                    margin-top: 2rem;
+                                                    backdrop-filter: blur(10px);
+                                                }
 
-                .coming-soon-content {
-                    max-width: 600px;
-                    margin: 0 auto;
-                }
+                                                .coming-soon-content {
+                                                    max-width: 600px;
+                                                    margin: 0 auto;
+                                                }
 
-                .coming-soon-content h3 {
-                    color: #7EB2FF;
-                    font-size: 1.8rem;
-                    margin-bottom: 1rem;
-                }
+                                                .coming-soon-content h3 {
+                                                    color: #7EB2FF;
+                                                    font-size: 1.8rem;
+                                                    margin-bottom: 1rem;
+                                                }
 
-                .coming-soon-content p {
-                    color: rgba(255, 255, 255, 0.8);
-                    font-size: 1.1rem;
-                    line-height: 1.6;
-                    margin-bottom: 2rem;
-                }
+                                                .coming-soon-content p {
+                                                    color: rgba(255, 255, 255, 0.8);
+                                                    font-size: 1.1rem;
+                                                    line-height: 1.6;
+                                                    margin-bottom: 2rem;
+                                                }
 
-                .features-preview {
-                    background: rgba(30, 144, 255, 0.05);
-                    border: 1px solid rgba(30, 144, 255, 0.1);
-                    border-radius: 8px;
-                    padding: 1.5rem;
-                    text-align: left;
-                }
+                                                .features-preview {
+                                                    background: rgba(30, 144, 255, 0.05);
+                                                    border: 1px solid rgba(30, 144, 255, 0.1);
+                                                    border-radius: 8px;
+                                                    padding: 1.5rem;
+                                                    text-align: left;
+                                                }
 
-                .features-preview h4 {
-                    color: #7EB2FF;
-                    font-size: 1.2rem;
-                    margin-bottom: 1rem;
-                }
+                                                .features-preview h4 {
+                                                    color: #7EB2FF;
+                                                    font-size: 1.2rem;
+                                                    margin-bottom: 1rem;
+                                                }
 
-                .features-preview ul {
-                    list-style: none;
-                    padding: 0;
-                    margin: 0;
-                }
+                                                .features-preview ul {
+                                                    list-style: none;
+                                                    padding: 0;
+                                                    margin: 0;
+                                                }
 
-                .features-preview li {
-                    color: #fff;
-                    font-size: 1rem;
-                    margin-bottom: 0.8rem;
-                    padding-left: 1.5rem;
-                    position: relative;
-                }
+                                                .features-preview li {
+                                                    color: #fff;
+                                                    font-size: 1rem;
+                                                    margin-bottom: 0.8rem;
+                                                    padding-left: 1.5rem;
+                                                    position: relative;
+                                                }
 
-                .features-preview li:before {
-                    content: "→";
-                    position: absolute;
-                    left: 0;
-                    color: #7EB2FF;
-                }
+                                                .features-preview li:before {
+                                                    content: "→";
+                                                    position: absolute;
+                                                    left: 0;
+                                                    color: #7EB2FF;
+                                                }
 
-                @media (max-width: 768px) {
-                    .coming-soon-container {
-                        padding: 1.5rem;
-                        margin: 1rem;
-                    }
+                                                @media (max-width: 768px) {
+                                                    .coming-soon-container {
+                                                        padding: 1.5rem;
+                                                        margin: 1rem;
+                                                    }
 
-                    .coming-soon-content h3 {
-                        font-size: 1.5rem;
-                    }
+                                                    .coming-soon-content h3 {
+                                                        font-size: 1.5rem;
+                                                    }
 
-                    .coming-soon-content p {
-                        font-size: 1rem;
-                    }
-                }
-                "#}
-            </style>
+                                                    .coming-soon-content p {
+                                                        font-size: 1rem;
+                                                    }
+                                                }
+                                                "#}
+                                            </style>
                                         </div>
                                     </div>
                                 </div>
@@ -1663,18 +1758,75 @@ pub fn connected_services(props: &Props) -> Html {
                     display: flex;
                     align-items: center;
                     gap: 1rem;
-                    margin-bottom: 0.5rem;
+                    margin-bottom: 0.8rem;
+                }
+
+                .notify-toggle span:first-child {
+                    font-size: 1.1rem;
+                    font-weight: 500;
+                    color: #7EB2FF;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                    background: linear-gradient(45deg, #7EB2FF, #4169E1);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
                 }
 
                 .toggle-status {
                     color: #7EB2FF;
                     font-size: 0.9rem;
+                    padding: 0.3rem 0.8rem;
+                    background: rgba(30, 144, 255, 0.1);
+                    border-radius: 12px;
+                    border: 1px solid rgba(30, 144, 255, 0.2);
+                    transition: all 0.3s ease;
                 }
 
                 .notification-description {
-                    color: #999;
+                    color: rgba(255, 255, 255, 0.7);
                     font-size: 0.9rem;
                     margin: 0;
+                    line-height: 1.4;
+                    padding-left: 0.2rem;
+                }
+
+                .proactive-title {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.8rem;
+                    font-size: 1.1rem;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    letter-spacing: 0.8px;
+                    color: #7EB2FF;
+                    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+                    background: linear-gradient(135deg, #7EB2FF 0%, #4169E1 100%);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    padding: 0.2rem 0;
+                    position: relative;
+                    transition: all 0.3s ease;
+                }
+
+                .proactive-title::after {
+                    content: '';
+                    position: absolute;
+                    bottom: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 2px;
+                    background: linear-gradient(90deg, #7EB2FF 0%, transparent 100%);
+                    opacity: 0.3;
+                }
+
+                .proactive-title:hover {
+                    transform: translateY(-1px);
+                    text-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+                }
+                .notify-toggle img {
+                    width: 24px;
+                    height: 24px;
                 }
 
                 /* Switch styles */
@@ -1743,6 +1895,136 @@ pub fn connected_services(props: &Props) -> Html {
                     color: #7EB2FF;
                     font-size: 1.2rem;
                     margin-bottom: 1rem;
+                }
+
+                /* Judgment list styles */
+                .judgment-list {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 1rem;
+                    max-height: 500px;
+                    overflow-y: auto;
+                    padding-right: 0.5rem;
+                }
+
+                .judgment-list::-webkit-scrollbar {
+                    width: 8px;
+                }
+
+                .judgment-list::-webkit-scrollbar-track {
+                    background: rgba(30, 30, 30, 0.5);
+                    border-radius: 4px;
+                }
+
+                .judgment-list::-webkit-scrollbar-thumb {
+                    background: rgba(30, 144, 255, 0.3);
+                    border-radius: 4px;
+                }
+
+                .judgment-list::-webkit-scrollbar-thumb:hover {
+                    background: rgba(30, 144, 255, 0.5);
+                }
+
+                .judgment-item {
+                    background: rgba(30, 30, 30, 0.7);
+                    border: 1px solid rgba(30, 144, 255, 0.1);
+                    border-radius: 8px;
+                    padding: 1rem;
+                    transition: all 0.3s ease;
+                }
+
+                .judgment-item:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.1);
+                }
+
+                .judgment-item.notify {
+                    border-left: 4px solid #4CAF50;
+                }
+
+                .judgment-item.no-notify {
+                    border-left: 4px solid #ff4757;
+                }
+
+                .judgment-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    margin-bottom: 0.5rem;
+                }
+
+                .judgment-date {
+                    color: #7EB2FF;
+                    font-size: 0.9rem;
+                }
+
+                .judgment-status {
+                    font-size: 0.8rem;
+                    padding: 0.3rem 0.8rem;
+                    border-radius: 12px;
+                    font-weight: 500;
+                }
+
+                .judgment-status.notify {
+                    background: rgba(76, 175, 80, 0.1);
+                    color: #4CAF50;
+                }
+
+                .judgment-status.no-notify {
+                    background: rgba(255, 71, 87, 0.1);
+                    color: #ff4757;
+                }
+
+                .judgment-score {
+                    margin-bottom: 0.5rem;
+                }
+
+                .score-label {
+                    color: #999;
+                    font-size: 0.9rem;
+                }
+
+                .score-value {
+                    color: #fff;
+                    font-size: 0.9rem;
+                    font-weight: 500;
+                }
+
+                .judgment-reason {
+                    margin-bottom: 0.5rem;
+                }
+
+                .reason-label {
+                    color: #999;
+                    font-size: 0.9rem;
+                }
+
+                .reason-text {
+                    color: #fff;
+                    font-size: 0.9rem;
+                    display: block;
+                    margin-top: 0.2rem;
+                    line-height: 1.4;
+                }
+
+                .judgment-processed {
+                    font-size: 0.8rem;
+                    color: #666;
+                }
+
+                .processed-label {
+                    color: #999;
+                }
+
+                .processed-date {
+                    color: #666;
+                }
+
+                .loading-judgments {
+                    text-align: center;
+                    padding: 2rem;
+                    color: #999;
+                    font-style: italic;
                 }
 
                 .filter-input {

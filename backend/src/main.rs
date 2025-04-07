@@ -291,6 +291,7 @@ async fn main() {
         .route("/api/profile/imap-general-checks", get(profile_handlers::get_imap_general_checks))
         .route("/api/profile/imap-proactive", post(profile_handlers::update_imap_proactive))
         .route("/api/profile/imap-proactive", get(profile_handlers::get_imap_proactive))
+        .route("/api/profile/email-judgments", get(profile_handlers::get_email_judgments))
 
 
 

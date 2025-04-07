@@ -1262,6 +1262,50 @@ impl UserRepository {
         Ok(())
     }
 
+    // Create a new email judgment
+    pub fn create_email_judgment(&self, new_judgment: &crate::models::user_models::NewEmailJudgment) -> Result<(), DieselError> {
+        use crate::schema::email_judgments;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::insert_into(email_judgments::table)
+            .values(new_judgment)
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    // Delete email judgments older than 30 days
+    pub fn delete_old_email_judgments(&self, user_id: i32) -> Result<(), DieselError> {
+        use crate::schema::email_judgments;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Calculate timestamp for 30 days ago
+        let thirty_days_ago = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32 - (30 * 24 * 60 * 60); // 30 days in seconds
+
+        diesel::delete(email_judgments::table)
+            .filter(email_judgments::user_id.eq(user_id))
+            .filter(email_judgments::processed_at.lt(thirty_days_ago))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    // Get all email judgments for a specific user
+    pub fn get_user_email_judgments(&self, user_id: i32) -> Result<Vec<crate::models::user_models::EmailJudgment>, DieselError> {
+        use crate::schema::email_judgments;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let judgments = email_judgments::table
+            .filter(email_judgments::user_id.eq(user_id))
+            .order_by(email_judgments::processed_at.desc())
+            .load::<crate::models::user_models::EmailJudgment>(&mut conn)?;
+
+        Ok(judgments)
+    }
+
     pub fn create_gmail_connection(
         &self,
         user_id: i32,

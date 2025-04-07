@@ -93,6 +93,13 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                                             // Update the original collection
                                             processed_emails.truncate(keep_count);
+
+                                            // Also clean up old email judgments
+                                            if let Err(e) = state.user_repository.delete_old_email_judgments(user.id) {
+                                                error!("Failed to delete old email judgments for user {}: {}", user.id, e);
+                                            } else {
+                                                info!("Successfully cleaned up old email judgments for user {}", user.id);
+                                            }
                                         }
                                     }
                                     Err(e) => error!("Failed to fetch processed emails for garbage collection: {}", e),
@@ -324,14 +331,40 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                             if let Some(arguments) = &tool_call.function.arguments {
                                                                 info!("Processing tool call arguments");
                                                                 match serde_json::from_str::<serde_json::Value>(arguments) {
-                                                                    Ok(evaluation) => {
-                                                                        info!("Parsed evaluation");
-                                                                        if evaluation["should_notify"].as_bool().unwrap_or(false) {
-                                                                            info!("Email marked as important, adding to notification list");
-                                                                            important_emails.push(email);
-                                                                            
-                                                                            // Check if notification was due to a waiting check
-                                                                            if let Some(matched_check_id) = evaluation["matched_waiting_check"].as_i64() {
+                                                    Ok(evaluation) => {
+                                                        info!("Parsed evaluation");
+                                                        
+                                                        // Create email judgment log regardless of notification decision
+                                                        let current_time = std::time::SystemTime::now()
+                                                            .duration_since(std::time::UNIX_EPOCH)
+                                                            .unwrap()
+                                                            .as_secs() as i32;
+
+                                                        let email_timestamp = email.date
+                                                            .map(|dt| dt.timestamp() as i32)
+                                                            .unwrap_or(current_time);
+
+                                                        let new_judgment = crate::models::user_models::NewEmailJudgment {
+                                                            user_id: user.id,
+                                                            email_timestamp,
+                                                            processed_at: current_time,
+                                                            should_notify: evaluation["should_notify"].as_bool().unwrap_or(false),
+                                                            score: evaluation["score"].as_i64().unwrap_or(0) as i32,
+                                                            reason: evaluation["reason"].as_str().unwrap_or("No reason provided").to_string(),
+                                                        };
+
+                                                        if let Err(e) = state.user_repository.create_email_judgment(&new_judgment) {
+                                                            error!("Failed to create email judgment log: {}", e);
+                                                        } else {
+                                                            info!("Successfully created email judgment log for email");
+                                                        }
+
+                                                        if evaluation["should_notify"].as_bool().unwrap_or(false) {
+                                                            info!("Email marked as important, adding to notification list");
+                                                            important_emails.push(email);
+                                                            
+                                                            // Check if notification was due to a waiting check
+                                                            if let Some(matched_check_id) = evaluation["matched_waiting_check"].as_i64() {
                                                                                 info!("Matched waiting check ID: {}", matched_check_id);
                                                                                 // Find the matching waiting check
                                                                                 if let Some(check) = waiting_checks.iter().find(|wc| wc.id == Some(matched_check_id as i32)) {

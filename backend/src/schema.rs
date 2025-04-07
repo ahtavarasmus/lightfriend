@@ -26,6 +26,18 @@ diesel::table! {
 }
 
 diesel::table! {
+    email_judgments (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        email_timestamp -> Integer,
+        processed_at -> Integer,
+        should_notify -> Bool,
+        score -> Integer,
+        reason -> Text,
+    }
+}
+
+diesel::table! {
     gmail (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -202,6 +214,7 @@ diesel::joinable!(waiting_checks -> users (user_id));
 diesel::allow_tables_to_appear_in_same_query!(
     bridges,
     conversations,
+    email_judgments,
     gmail,
     google_calendar,
     imap_connection,

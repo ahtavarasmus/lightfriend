@@ -165,12 +165,12 @@ pub fn pricing(props: &PricingProps) -> Html {
                                     <div class="price-container">
                                         <div class="price us-price">
                                             <span class="region">{"US/Canada: "}</span>
-                                            <span class="amount">{"€10.00"}</span>
+                                            <span class="amount">{"€5.00"}</span>
                                             <span class="period">{"/month"}</span>
                                         </div>
                                         <div class="price other-price">
                                             <span class="region">{"Other regions: "}</span>
-                                            <span class="amount">{"€20.00"}</span>
+                                            <span class="amount">{"€10.00"}</span>
                                             <span class="period">{"/month"}</span>
                                         </div>
                                     </div>
@@ -184,7 +184,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 if is_us_canada {
                                     html! {
                                         <div class="price">
-                                            <span class="amount">{"€10.00"}</span>
+                                            <span class="amount">{"€5.00"}</span>
                                             <span class="period">{"/month"}</span>
                                             <div class="region-note">{"US/Canada pricing"}</div>
                                         </div>
@@ -192,9 +192,9 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 } else {
                                     html! {
                                         <div class="price">
-                                            <span class="amount">{"€20.00"}</span>
+                                            <span class="amount">{"€10.00"}</span>
                                             <span class="period">{"/month"}</span>
-                                            <div class="region-note">{"International pricing"}</div>
+                                            <div class="region-note">{"international pricing"}</div>
                                         </div>
                                     }
                                 }
