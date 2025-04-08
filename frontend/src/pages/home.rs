@@ -1100,10 +1100,8 @@ pub fn landing() -> Html {
                     }
 
                     .info-section {
-                        background: rgba(0, 0, 0, 0.2);
-                        border-radius: 12px;
-                        padding: 2rem;
-                        margin: 1.5rem 0;
+                        padding: 1.5rem 0;
+                        margin: 1rem 0;
                         text-align: center;
                     }
 
@@ -1271,14 +1269,8 @@ pub fn landing() -> Html {
 
                     /* Responsive design */
                     @media (max-width: 768px) {
-                        .dashboard-panel {
-                            padding: 2rem;
-                        }
-
-                        .panel-header {
-                            flex-direction: column;
-                            text-align: center;
-                            gap: 1rem;
+                        .dashboard-container {
+                            padding: 2rem 1rem;
                         }
 
                         .phone-number {
@@ -1296,14 +1288,7 @@ pub fn landing() -> Html {
                         margin-top: 1rem;
                     }
 
-    .dashboard-container {
-        min-height: 100vh;
-        background: #1a1a1a;
-        display: flex;
-        align-items: flex-start;
-        justify-content: center;
-        padding: 2rem 1rem;
-    }
+    
 
     .dashboard-panel {
         background: rgba(30, 30, 30, 0.7);
@@ -1315,17 +1300,6 @@ pub fn landing() -> Html {
         backdrop-filter: blur(10px);
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
         overflow: hidden;
-    }
-
-    @media (min-width: 768px) {
-        .dashboard-container {
-            padding: 4rem 2rem;
-            align-items: center;
-        }
-
-        .dashboard-panel {
-            padding: 3rem;
-        }
     }
 
     .dashboard-tabs {
@@ -1707,8 +1681,6 @@ fn delete_unverified_account(profile_id: i32, token: String) {
 
 #[function_component]
 pub fn Home() -> Html {
-    let styles = stylist::Style::new(include_str!("home.css"))
-        .expect("Failed to create Style");
 
     let logged_in = is_logged_in();
     let profile_data = use_state(|| None::<UserProfile>);
@@ -1784,12 +1756,9 @@ pub fn Home() -> Html {
         html! {}
     } else {
             html! {
-            <div class={styles}>
+                <>
                 <div class="dashboard-container">
-                <div class="dashboard-panel">
-                    <div class="panel-header">
-                        <h1 class="panel-title">{"Dashboard"}</h1>
-                    </div>
+                    <h1 class="panel-title">{"Dashboard"}</h1>
                     <h2 class="section-title">{"Your lightfriend is Ready!"}</h2>
                         <div class="phone-selector">
                             <button 
@@ -1912,7 +1881,6 @@ pub fn Home() -> Html {
                             match *active_tab {
                                 DashboardTab::Connections => html! {
                                     <div class="connections-tab">
-                                                                <div class="calendar-section">
                             {
                                 if let Some(profile) = (*profile_data).as_ref() {
                                     html! {
@@ -1922,7 +1890,6 @@ pub fn Home() -> Html {
                                     html! {}
                                 }
                             }
-                        </div>
 
                         <div class="feature-status">
                             <h3>{"Currently Available"}</h3>
@@ -1933,6 +1900,7 @@ pub fn Home() -> Html {
                                 <li>{"Dedicated Weather search"}</li>
                                 <li>{"Send info to you by sms during voice calls"}</li>
                                 <li>{"Shazam song recognition - Get a call, play the song, AI sends it to you by sms."}</li>
+                                <li>{"Proactive messages(notifications for critical messages)"}</li>
                             </ul>
                             <h4>{"Methods"}</h4>
                             <ul>
@@ -1951,7 +1919,6 @@ pub fn Home() -> Html {
                                 <li>{"WhatsApp and Telegram integration"}</li>
                                 <li>{"Reminder setting"}</li>
                                 <li>{"Camera functionality for photo translation and more"}</li>
-                                <li>{"Proactive messages(notifications for critical messages)"}</li>
                             </ul>
                             
                             <p class="feature-suggestion">
@@ -2136,7 +2103,6 @@ pub fn Home() -> Html {
                             </div>
                         </footer>
                 </div>
-            </div>
             <style>
                 {r#"
 
@@ -2862,19 +2828,14 @@ pub fn Home() -> Html {
                         font-size: 1.2rem;
                     }
 
-                    .panel-header {
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: center;
-                        margin-bottom: 2.5rem;
-                    }
 
                     .panel-title {
-                        font-size: 2rem;
+                        font-size: 2.5rem;
                         background: linear-gradient(45deg, #fff, #7EB2FF);
                         -webkit-background-clip: text;
                         -webkit-text-fill-color: transparent;
-                        margin: 0;
+                        margin: 0 0 1.5rem 0;
+                        text-align: center;
                     }
 
                     .back-link {
@@ -2920,13 +2881,18 @@ pub fn Home() -> Html {
                         margin-top: 1rem;
                     }
 
-                    .feature-status {
-                        margin-top: 2rem;
+                    .feature-status, .calendar-section {
+                        margin-top: 3rem;
                         text-align: left;
-                        background: rgba(30, 144, 255, 0.05);
-                        border: 1px solid rgba(30, 144, 255, 0.1);
+                        padding: 2rem;
+                        background: rgba(30, 30, 30, 0.7);
                         border-radius: 12px;
-                        padding: 1.5rem;
+                        border: 1px solid rgba(30, 144, 255, 0.1);
+                        backdrop-filter: blur(10px);
+                    }
+
+                    .calendar-section {
+                        margin-top: 0;
                     }
 
                     .feature-status h3 {
@@ -3060,22 +3026,13 @@ pub fn Home() -> Html {
 
                     .dashboard-container {
                         min-height: 100vh;
-                        background: #1a1a1a;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        padding: 4rem 2rem;
-                    }
 
-                    .dashboard-panel {
-                        background: rgba(30, 30, 30, 0.7);
-                        border: 1px solid rgba(30, 144, 255, 0.1);
-                        border-radius: 16px;
-                        padding: 3rem;
+                        border-radius: 12px;
+                        background: #1a1a1a;
+                        padding: 3rem 2rem;
                         width: 100%;
-                        max-width: 700px;
-                        backdrop-filter: blur(10px);
-                        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                        max-width: 800px;
+                        margin: 4rem auto;
                     }
 
                     .dashboard-tabs {
@@ -3418,7 +3375,7 @@ pub fn Home() -> Html {
                 "#}
             </style>
             
-        </div>
+            </>
         }
     }
 }

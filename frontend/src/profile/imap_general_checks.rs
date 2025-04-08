@@ -461,8 +461,8 @@ html! {
 
                 @media (max-width: 768px) {
                     .imap-checks-container {
-                        padding: 1.5rem;
-                        margin: 1rem 0;
+                        padding: 0;
+                        margin: 0;
                     }
 
                     .button-group {

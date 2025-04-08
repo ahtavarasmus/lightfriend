@@ -898,8 +898,221 @@ pub fn connect(props: &ConnectProps) -> Html {
                             {err}
                         </div>
                     }
-                    <style>
-                        {".calendar-connect-options {
+<style>
+{".connect-section {
+    max-width: 800px;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.service-group {
+    margin-bottom: 2.5rem;
+    background: rgba(30, 30, 30, 0.7);
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    border-radius: 16px;
+    padding: 2rem;
+    backdrop-filter: blur(10px);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+    .service-group {
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    .service-item {
+        padding: 1rem;
+    }
+    
+    .service-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.5rem;
+    }
+    
+    .service-status-container {
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+    
+    .imap-form input,
+    .imap-form select {
+        width: 100%;
+        box-sizing: border-box;
+    }
+}
+
+.service-group-title {
+    font-size: 1.4rem;
+    color: #7EB2FF;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid rgba(30, 144, 255, 0.1);
+}
+
+.service-list {
+    display: grid;
+    gap: 1.5rem;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.service-item {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    border-radius: 12px;
+    padding: 1.5rem;
+    transition: all 0.3s ease;
+    width: 100%;
+    box-sizing: border-box;
+    overflow-wrap: break-word;
+    word-wrap: break-word;
+    word-break: break-word;
+}
+
+.service-item:hover {
+    transform: translateY(-2px);
+    border-color: rgba(30, 144, 255, 0.4);
+    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.1);
+}
+
+.service-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+}
+
+.service-name {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1.1rem;
+    color: #fff;
+}
+
+.service-name img {
+    width: 24px;
+    height: 24px;
+}
+
+.service-status {
+    font-size: 0.9rem;
+    color: #7EB2FF;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.service-description {
+    color: #999;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    margin-bottom: 1.5rem;
+}
+
+.connect-button, .disconnect-button {
+    width: 100%;
+    padding: 0.75rem;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-align: center;
+    border: none;
+}
+
+.connect-button {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+}
+
+.connect-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
+}
+
+.disconnect-button {
+    background: transparent;
+    border: 1px solid rgba(255, 99, 71, 0.3);
+    color: #FF6347;
+}
+
+.disconnect-button:hover {
+    background: rgba(255, 99, 71, 0.1);
+    border-color: rgba(255, 99, 71, 0.5);
+}
+
+.imap-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.imap-form input, .imap-form select {
+    padding: 0.75rem;
+    border-radius: 8px;
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    background: rgba(0, 0, 0, 0.2);
+    color: #fff;
+    font-size: 0.95rem;
+}
+
+.imap-form input:focus, .imap-form select:focus {
+    border-color: rgba(30, 144, 255, 0.4);
+    outline: none;
+}
+
+.error-message {
+    color: #FF6347;
+    background: rgba(255, 99, 71, 0.1);
+    border: 1px solid rgba(255, 99, 71, 0.2);
+    padding: 1rem;
+    border-radius: 8px;
+    margin-top: 1rem;
+    font-size: 0.9rem;
+}
+
+.coming-soon {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.coming-soon-tag {
+    background: rgba(30, 144, 255, 0.1);
+    color: #1E90FF;
+    font-size: 0.8rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    margin-left: 0.75rem;
+}
+
+.test-button {
+    background: rgba(76, 175, 80, 0.2);
+    color: #4CAF50;
+    border: 1px solid rgba(76, 175, 80, 0.3);
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    margin-top: 0.75rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.test-button:hover {
+    background: rgba(76, 175, 80, 0.3);
+    border-color: rgba(76, 175, 80, 0.4);
+}
+
+.calendar-connect-options {
                             display: flex;
                             flex-direction: column;
                             gap: 10px;
@@ -945,7 +1158,169 @@ pub fn connect(props: &ConnectProps) -> Html {
                         }
                         .test-button:hover {
                             background-color: #45a049;
-                        }"}
+                        }
+
+                        .service-group {
+                            margin-bottom: 2rem;
+                        }
+
+                        .service-group:last-child {
+                            margin-bottom: 0;
+                        }
+
+                        .service-group-title {
+                            color: #7EB2FF;
+                            font-size: 1.2rem;
+                            margin-bottom: 1rem;
+                            display: flex;
+                            align-items: center;
+                            gap: 0.5rem;
+                        }
+
+                        .service-group-title i {
+                            font-size: 1.1rem;
+                        }
+
+                        .service-list {
+                            display: grid;
+                            gap: 1rem;
+                        }
+
+                        .service-item {
+                            background: rgba(0, 0, 0, 0.2);
+                            border: 1px solid rgba(30, 144, 255, 0.2);
+                            border-radius: 8px;
+                            padding: 1.5rem;
+                            transition: all 0.3s ease;
+                        }
+
+                        .service-item:hover {
+                            border-color: rgba(30, 144, 255, 0.4);
+                            transform: translateY(-2px);
+                        }
+
+                        .service-header {
+                            display: flex;
+                            align-items: center;
+                            justify-content: space-between;
+                            margin-bottom: 1rem;
+                        }
+
+                        .service-name {
+                            display: flex;
+                            align-items: center;
+                            gap: 0.75rem;
+                            color: #fff;
+                            font-size: 1.1rem;
+                        }
+
+                        .service-name img {
+                            width: 24px;
+                            height: 24px;
+                        }
+
+                        .service-status {
+                            font-size: 0.9rem;
+                            color: #666;
+                        }
+
+                        .service-description {
+                            color: #999;
+                            font-size: 0.9rem;
+                            margin-bottom: 1.5rem;
+                            line-height: 1.4;
+                        }
+
+                        .connect-button {
+                            background: linear-gradient(45deg, #1E90FF, #4169E1);
+                            color: white;
+                            border: none;
+                            padding: 0.75rem 1.5rem;
+                            border-radius: 6px;
+                            font-size: 0.9rem;
+                            cursor: pointer;
+                            transition: all 0.3s ease;
+                            display: inline-flex;
+                            align-items: center;
+                            gap: 0.5rem;
+                            width: 100%;
+                            justify-content: center;
+                        }
+
+                        .connect-button:hover {
+                            transform: translateY(-2px);
+                            box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
+                        }
+
+                        .connect-button.connected {
+                            background: rgba(30, 144, 255, 0.1);
+                            border: 1px solid rgba(30, 144, 255, 0.3);
+                            color: #1E90FF;
+                        }
+
+                        .connect-button.connected:hover {
+                            background: rgba(30, 144, 255, 0.15);
+                        }
+
+                        .disconnect-button {
+                            background: transparent;
+                            border: 1px solid rgba(255, 99, 71, 0.3);
+                            color: #FF6347;
+                            padding: 0.75rem 1.5rem;
+                            border-radius: 6px;
+                            font-size: 0.9rem;
+                            cursor: pointer;
+                            transition: all 0.3s ease;
+                            margin-top: 0.5rem;
+                            width: 100%;
+                        }
+
+                        .disconnect-button:hover {
+                            background: rgba(255, 99, 71, 0.1);
+                            border-color: rgba(255, 99, 71, 0.5);
+                        }
+
+                        .coming-soon {
+                            opacity: 0.5;
+                            pointer-events: none;
+                        }
+
+                        .coming-soon-tag {
+                            background: rgba(30, 144, 255, 0.1);
+                            color: #1E90FF;
+                            font-size: 0.8rem;
+                            padding: 0.25rem 0.5rem;
+                            border-radius: 4px;
+                            margin-left: 0.5rem;
+                        }
+
+                        .error-message {
+                            color: #FF6347;
+                            font-size: 0.9rem;
+                            margin-top: 1rem;
+                            padding: 0.75rem;
+                            background: rgba(255, 99, 71, 0.1);
+                            border-radius: 6px;
+                            border: 1px solid rgba(255, 99, 71, 0.2);
+                        }
+
+                        @media (max-width: 768px) {
+                            .connect-section {
+                                padding: 1.5rem;
+                            }
+
+                            .service-list {
+                                grid-template-columns: 1fr;
+                            }
+
+                            .service-item {
+                                padding: 1rem;
+                            }
+                        }
+
+
+
+                        "}
                     </style>
                 </div>
             }
