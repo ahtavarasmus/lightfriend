@@ -144,35 +144,17 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     info!("Building system message with following parameters:");
                                     info!("Importance threshold: {}", importance_priority);
                                     
-                                    // Default general checks prompt - this could be customized per user in the future
-                                    let general_checks_prompt = "
-                                        Step 1: Check for Urgency Indicators
-                                        - Look for words like 'urgent', 'immediate', 'asap', 'deadline', 'important'
-                                        - Check for time-sensitive phrases like 'by tomorrow', 'end of day', 'as soon as possible'
-                                        - Look for exclamation marks or all-caps words that might indicate urgency
-
-                                        Step 2: Analyze Sender Importance
-                                        - Check if it's from a manager, supervisor, or higher-up in organization
-                                        - Look for professional titles or positions in signatures
-                                        - Consider if it's from a client or important business partner
-
-                                        Step 3: Assess Content Significance
-                                        - Look for action items or direct requests
-                                        - Check for mentions of meetings, deadlines, or deliverables
-                                        - Identify if it's part of an ongoing important conversation
-                                        - Look for financial or legal terms that might indicate important matters
-
-                                        Step 4: Consider Context
-                                        - Check if it's a reply to an email you sent
-                                        - Look for CC'd important stakeholders
-                                        - Consider if it's outside normal business hours
-                                        - Check if it's marked as high priority
-
-                                        Step 5: Evaluate Personal Impact
-                                        - Assess if immediate action is required
-                                        - Consider if delaying response could have negative consequences
-                                        - Look for personal or confidential matters
-                                    ";
+                                    // Get user's custom general checks prompt or use default
+                                    let general_checks_prompt = match state.user_repository.get_imap_general_checks(user.id) {
+                                        Ok(prompt) => {
+                                            info!("Using custom general checks prompt for user {}", user.id);
+                                            prompt
+                                        },
+                                        Err(e) => {
+                                            error!("Failed to get general checks prompt for user {}: {}", user.id, e);
+                                            continue;
+                                        }
+                                    };
 
                                     let waiting_checks_formatted = waiting_checks.iter()
                                         .map(|wc| format!("{{id: {}, content: '{}'}}", wc.id.unwrap_or(-1), wc.content))
@@ -462,9 +444,9 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                                     // Define the system message for notification formatting
                                     let format_system_message = "You are an AI assistant that creates concise, natural-sounding SMS notifications about important emails. \
-                                        Your message should be clear, informative, and engaging while keeping the length appropriate for SMS. \
-                                        Include the most relevant details from each email while maintaining a conversational tone. \
-                                        Focus on what makes these emails important and why the user should care. Also mention that they are from email. You are the users assistant which provides this important information.";
+                                        Your message should be clear, informative while keeping the length appropriate for SMS. \
+                                        Include the relevant details from each email. \
+                                        Focus on what makes these emails important and state the information, never reason about the content. Also mention that the message(s) was from email. You are the users assistant which provides this important information.";
 
                                     // Define the tool for notification formatting
                                     let mut format_properties = std::collections::HashMap::new();

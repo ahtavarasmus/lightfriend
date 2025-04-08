@@ -272,7 +272,7 @@ pub struct ImapGeneralChecksRequest {
 
 #[derive(Serialize)]
 pub struct ImapGeneralChecksResponse {
-    checks: Option<String>,
+    checks: String,
 }
 
 pub async fn get_imap_general_checks(

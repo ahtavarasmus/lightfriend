@@ -892,13 +892,44 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn get_imap_general_checks(&self, user_id: i32) -> Result<Option<String>, DieselError> {
+    pub fn get_imap_general_checks(&self, user_id: i32) -> Result<String, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let checks = users::table
             .find(user_id)
             .select(users::imap_general_checks)
             .first::<Option<String>>(&mut conn)?;
-        Ok(checks)
+            
+        Ok(checks.unwrap_or_else(|| {
+            // Default general checks prompt
+            String::from("
+                Step 1: Check for Urgency Indicators
+                - Look for words like 'urgent', 'immediate', 'asap', 'deadline', 'important'
+                - Check for time-sensitive phrases like 'by tomorrow', 'end of day', 'as soon as possible'
+                - Look for exclamation marks or all-caps words that might indicate urgency
+
+                Step 2: Analyze Sender Importance
+                - Check if it's from a manager, supervisor, or higher-up in organization
+                - Look for professional titles or positions in signatures
+                - Consider if it's from a client or important business partner
+
+                Step 3: Assess Content Significance
+                - Look for action items or direct requests
+                - Check for mentions of meetings, deadlines, or deliverables
+                - Identify if it's part of an ongoing important conversation
+                - Look for financial or legal terms that might indicate important matters
+
+                Step 4: Consider Context
+                - Check if it's a reply to an email you sent
+                - Look for CC'd important stakeholders
+                - Consider if it's outside normal business hours
+                - Check if it's marked as high priority
+
+                Step 5: Evaluate Personal Impact
+                - Assess if immediate action is required
+                - Consider if delaying response could have negative consequences
+                - Look for personal or confidential matters
+            ")
+        }))
     }
 
     // Check if user has a specific subscription tier and has messages left
