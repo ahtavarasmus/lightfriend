@@ -1306,7 +1306,8 @@ pub fn connect(props: &ConnectProps) -> Html {
 
                         @media (max-width: 768px) {
                             .connect-section {
-                                padding: 1.5rem;
+                                padding: 0;
+                                margin: 0;
                             }
 
                             .service-list {
