@@ -84,6 +84,42 @@ pub struct TwilioResponse {
     pub message: String,
 }
 
+#[derive(Deserialize)]
+struct WaitingCheckArgs {
+    content: String,
+    due_date: Option<i64>,
+    remove_when_found: Option<bool>,
+}
+
+async fn handle_create_waiting_check(
+    state: &Arc<AppState>,
+    user_id: i32,
+    args: &str,
+) -> Result<String, Box<dyn Error>> {
+    let args: WaitingCheckArgs = serde_json::from_str(args)?;
+
+    // Calculate default due date (2 weeks from now) if not provided
+    let due_date = args.due_date.unwrap_or_else(|| {
+        let two_weeks = chrono::Duration::weeks(2);
+        (chrono::Utc::now() + two_weeks).timestamp()
+    }) as i32;
+
+    // Default remove_when_found to true if not provided
+    let remove_when_found = args.remove_when_found.unwrap_or(true);
+
+    let new_check = crate::models::user_models::NewWaitingCheck {
+        user_id,
+        due_date,
+        content: args.content,
+        remove_when_found,
+        service_type: "imap".to_string(), // Default to email service type
+    };
+
+    state.user_repository.create_waiting_check(&new_check)?;
+
+    Ok("I'll keep an eye out for that in your emails and notify you when I find it.".to_string())
+}
+
 pub async fn send_shazam_answer_to_user(
     state: Arc<crate::shazam_call::ShazamState>,
     user_id: i32,
@@ -518,6 +554,32 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
     });
 
 
+    let mut waiting_check_properties = HashMap::new();
+    waiting_check_properties.insert(
+        "content".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("The content to look for in emails".to_string()),
+            ..Default::default()
+        }),
+    );
+    waiting_check_properties.insert(
+        "due_date".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Number),
+            description: Some("Unix timestamp for when this check should be completed by, default to two weeks into the future.".to_string()),
+            ..Default::default()
+        }),
+    );
+    waiting_check_properties.insert(
+        "remove_when_found".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some("Whether to remove the check once the content is found, default to true.".to_string()),
+            ..Default::default()
+        }),
+    );
+
     let mut plex_properties = HashMap::new();
     plex_properties.insert(
         "query".to_string(),
@@ -598,6 +660,18 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
 
     // Define tools
     let tools = vec![
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: String::from("create_waiting_check"),
+                description: Some(String::from("Creates a waiting check for monitoring emails. Use this when user wants to be notified about specific emails or content in their emails.")),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(waiting_check_properties),
+                    required: Some(vec![String::from("content")]),
+                },
+            },
+        },
         chat_completion::Tool {
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
@@ -997,6 +1071,17 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                                 }
                             };
                             tool_answers.insert(tool_call_id, error_message.to_string());
+                        }
+                    }
+                } else if name == "create_waiting_check" {
+                    println!("Executing create_waiting_check tool call");
+                    match handle_create_waiting_check(&state, user.id, arguments).await {
+                        Ok(answer) => {
+                            tool_answers.insert(tool_call_id, answer);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to create waiting check: {}", e);
+                            tool_answers.insert(tool_call_id, "Sorry, I couldn't set up the email monitoring. Please try again.".to_string());
                         }
                     }
                 } else if name == "calendar" {

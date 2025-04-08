@@ -199,6 +199,7 @@ async fn main() {
         .route("/api/call/shazam", get(elevenlabs::handle_shazam_tool_call))
         .route("/api/call/calendar", get(elevenlabs::handle_calendar_tool_call))
         .route("/api/call/email", get(elevenlabs::handle_email_fetch_tool_call))
+        .route("/api/call/email/waiting_check", post(elevenlabs::handle_create_waiting_check_email_tool_call))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 
     let elevenlabs_webhook_routes = Router::new()
