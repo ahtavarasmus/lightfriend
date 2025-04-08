@@ -846,8 +846,36 @@ pub fn landing() -> Html {
                     }
 
                     .hero {
-                        padding: 6rem 0;
+                        min-height: 100vh;
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        justify-content: center;
                         text-align: center;
+                        padding: 6rem 0;
+                        position: relative;
+                        padding-top: 120px; /* Add extra padding to prevent content from hiding under nav */
+                        background: linear-gradient(
+                            to bottom,
+                            rgba(30, 144, 255, 0.05),
+                            transparent
+                        );
+                    }
+
+                    .hero h1 {
+                        font-size: 4.5rem;
+                        line-height: 1.1;
+                        margin-bottom: 1.5rem;
+                        background: linear-gradient(
+                            45deg,
+                            #fff,
+                            rgba(126, 178, 255, 0.8)
+                        );
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                        font-weight: 700;
+                        max-width: 900px;
+                        position: relative;
                     }
 
                     .producthunt-badge {
