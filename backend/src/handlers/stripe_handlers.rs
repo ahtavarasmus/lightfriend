@@ -499,7 +499,9 @@ pub async fn stripe_webhook(
                         Some("tier 1"),
                     ).ok();
                     state.user_repository.update_messages_left(user.id, 150).ok();
-                    println!("Updated subscription tier to 'tier 1' and set 150 messages for user {}", user.id);
+                    // Enable proactive IMAP messaging for subscribed users
+                    state.user_repository.update_imap_proactive(user.id, true).ok();
+                    println!("Updated subscription tier to 'tier 1', set 150 messages, and enabled proactive IMAP for user {}", user.id);
                 }
             }
         },
