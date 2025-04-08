@@ -2130,24 +2130,189 @@ pub fn connected_services(props: &Props) -> Html {
                 /* Responsive design */
                 @media (max-width: 768px) {
                     .proactive-container {
+                        padding: 0.5rem;
+                        max-width: 100%;
+                    }
+
+                    .filter-section {
                         padding: 1rem;
+                        margin: 0.5rem 0;
+                        border-radius: 6px;
                     }
 
-                    .keyword-input {
-                        flex-direction: column;
+                    .proactive-toggle-section {
+                        padding: 1rem;
+                        margin: 0.5rem 0;
+                        border-radius: 6px;
                     }
 
-                    .keyword-input button {
-                        width: 100%;
-                    }
-
-                    .keyword-list {
+                    .notify-toggle {
+                        flex-wrap: wrap;
                         gap: 0.5rem;
                     }
 
-                    .keyword-item {
+                    .proactive-title {
+                        font-size: 1rem;
+                        flex: 1 1 auto;
+                    }
+
+                    .toggle-status {
+                        font-size: 0.8rem;
+                        padding: 0.2rem 0.6rem;
+                    }
+
+                    .notification-description {
+                        font-size: 0.85rem;
+                        margin-top: 0.5rem;
+                    }
+
+                    .keyword-input,
+                    .filter-input {
+                        flex-direction: column;
+                        gap: 0.5rem;
+                        margin-bottom: 1rem;
+                    }
+
+                    .keyword-input button,
+                    .filter-input button {
+                        width: 100%;
+                        padding: 0.6rem 1rem;
+                    }
+
+                    .keyword-list,
+                    .filter-list {
+                        gap: 0.5rem;
+                    }
+
+                    .keyword-item,
+                    .filter-item {
                         width: 100%;
                         justify-content: space-between;
+                        padding: 0.4rem 0.8rem;
+                        font-size: 0.9rem;
+                    }
+
+                    .judgment-list {
+                        max-height: 400px;
+                        padding-right: 0;
+                    }
+
+                    .judgment-item {
+                        padding: 0.8rem;
+                        margin-bottom: 0.5rem;
+                    }
+
+                    .judgment-header {
+                        flex-wrap: wrap;
+                        gap: 0.5rem;
+                    }
+
+                    .judgment-date,
+                    .judgment-status {
+                        font-size: 0.8rem;
+                    }
+
+                    .judgment-reason,
+                    .judgment-score,
+                    .judgment-processed {
+                        font-size: 0.85rem;
+                        margin-bottom: 0.4rem;
+                    }
+
+                    .importance-input-group {
+                        width: 100%;
+                    }
+
+                    .filter-input input[type="number"] {
+                        width: 100%;
+                        text-align: left;
+                    }
+
+                    .priority-label {
+                        font-size: 0.8rem;
+                    }
+
+                    .save-btn {
+                        width: 100%;
+                        margin-top: 0.5rem;
+                    }
+
+                    /* Adjust switch size for mobile */
+                    .switch {
+                        width: 50px;
+                        height: 28px;
+                    }
+
+                    .slider:before {
+                        height: 20px;
+                        width: 20px;
+                        left: 4px;
+                        bottom: 3px;
+                    }
+
+                    input:checked + .slider:before {
+                        transform: translateX(22px);
+                    }
+
+                    /* Adjust waiting check inputs for mobile */
+                    .waiting-check-fields {
+                        width: 100%;
+                    }
+
+                    .waiting-check-fields input[type="text"],
+                    .waiting-check-fields input[type="date"] {
+                        width: 100%;
+                        padding: 0.6rem 0.8rem;
+                    }
+
+                    .waiting-check-fields label {
+                        font-size: 0.85rem;
+                    }
+
+                    /* Improve scrollbar for mobile */
+                    .judgment-list::-webkit-scrollbar {
+                        width: 4px;
+                    }
+
+                    /* Add some breathing room between sections */
+                    .filters-container > * {
+                        margin-bottom: 0.75rem;
+                    }
+
+                    /* Make headings more compact */
+                    .filter-section h3 {
+                        font-size: 1.1rem;
+                        margin-bottom: 0.75rem;
+                    }
+
+                    /* Adjust the main container padding */
+                    .proactive-container h2 {
+                        font-size: 1.3rem;
+                        margin: 0.5rem 0 1rem 0;
+                    }
+                }
+
+                /* Additional breakpoint for very small screens */
+                @media (max-width: 380px) {
+                    .proactive-container {
+                        padding: 0.25rem;
+                    }
+
+                    .filter-section,
+                    .proactive-toggle-section {
+                        padding: 0.75rem;
+                    }
+
+                    .proactive-title {
+                        font-size: 0.9rem;
+                    }
+
+                    .notification-description {
+                        font-size: 0.8rem;
+                    }
+
+                    .judgment-item {
+                        padding: 0.6rem;
                     }
                 }
                 "#}
