@@ -1035,20 +1035,30 @@ pub fn landing() -> Html {
                         font-size: 1.2rem;
                     }
 
-                    .panel-header {
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: center;
-                        margin-bottom: 2.5rem;
-                    }
+    .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+    }
 
-                    .panel-title {
-                        font-size: 2rem;
-                        background: linear-gradient(45deg, #fff, #7EB2FF);
-                        -webkit-background-clip: text;
-                        -webkit-text-fill-color: transparent;
-                        margin: 0;
-                    }
+    .panel-title {
+        font-size: 1.5rem;
+        background: linear-gradient(45deg, #fff, #7EB2FF);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        margin: 0;
+    }
+
+    @media (min-width: 768px) {
+        .panel-header {
+            margin-bottom: 2.5rem;
+        }
+
+        .panel-title {
+            font-size: 2rem;
+        }
+    }
 
                     .back-link {
                         color: #1E90FF;
@@ -1069,15 +1079,28 @@ pub fn landing() -> Html {
                         text-align: center;
                     }
 
-                    .section-title {
-                        color: #7EB2FF;
-                        font-size: 1.5rem;
-                        margin-bottom: 1.5rem;
-                    }
+    .section-title {
+        color: #7EB2FF;
+        font-size: 1.2rem;
+        margin-bottom: 1rem;
+    }
 
-                    .phone-display {
-                        margin: 2rem 0;
-                    }
+    .phone-display {
+        margin: 1rem 0;
+        max-height: 300px;
+        overflow-y: auto;
+    }
+
+    @media (min-width: 768px) {
+        .section-title {
+            font-size: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .phone-display {
+            margin: 2rem 0;
+        }
+    }
 
 
                     .phone-number {
@@ -1093,20 +1116,34 @@ pub fn landing() -> Html {
                         margin-top: 1rem;
                     }
 
-                    .feature-status {
-                        margin-top: 2rem;
-                        text-align: left;
-                        background: rgba(30, 144, 255, 0.05);
-                        border: 1px solid rgba(30, 144, 255, 0.1);
-                        border-radius: 12px;
-                        padding: 1.5rem;
-                    }
+    .feature-status {
+        margin-top: 1.5rem;
+        text-align: left;
+        background: rgba(30, 144, 255, 0.05);
+        border: 1px solid rgba(30, 144, 255, 0.1);
+        border-radius: 12px;
+        padding: 1rem;
+        font-size: 0.9rem;
+    }
 
-                    .feature-status h3 {
-                        color: #7EB2FF;
-                        font-size: 1.1rem;
-                        margin: 1rem 0 0.5rem 0;
-                    }
+    .feature-status h3 {
+        color: #7EB2FF;
+        font-size: 1rem;
+        margin: 0.75rem 0 0.5rem 0;
+    }
+
+    @media (min-width: 768px) {
+        .feature-status {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            font-size: 1rem;
+        }
+
+        .feature-status h3 {
+            font-size: 1.1rem;
+            margin: 1rem 0 0.5rem 0;
+        }
+    }
 
                     .feature-status h3:first-child {
                         margin-top: 0;
@@ -1231,44 +1268,72 @@ pub fn landing() -> Html {
                         margin-top: 1rem;
                     }
 
-                    .dashboard-container {
-                        min-height: 100vh;
-                        background: #1a1a1a;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        padding: 4rem 2rem;
-                    }
+    .dashboard-container {
+        min-height: 100vh;
+        background: #1a1a1a;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 2rem 1rem;
+    }
 
-                    .dashboard-panel {
-                        background: rgba(30, 30, 30, 0.7);
-                        border: 1px solid rgba(30, 144, 255, 0.1);
-                        border-radius: 16px;
-                        padding: 3rem;
-                        width: 100%;
-                        max-width: 700px;
-                        backdrop-filter: blur(10px);
-                        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-                    }
+    .dashboard-panel {
+        background: rgba(30, 30, 30, 0.7);
+        border: 1px solid rgba(30, 144, 255, 0.1);
+        border-radius: 16px;
+        padding: 1.5rem;
+        width: 100%;
+        max-width: 700px;
+        backdrop-filter: blur(10px);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        overflow: hidden;
+    }
 
-                    .dashboard-tabs {
-                        display: flex;
-                        gap: 1rem;
-                        margin-bottom: 2rem;
-                        border-bottom: 1px solid rgba(30, 144, 255, 0.1);
-                        padding-bottom: 1rem;
-                    }
+    @media (min-width: 768px) {
+        .dashboard-container {
+            padding: 4rem 2rem;
+            align-items: center;
+        }
 
-                    .tab-button {
-                        background: transparent;
-                        border: none;
-                        color: #999;
-                        padding: 0.5rem 1rem;
-                        cursor: pointer;
-                        font-size: 1rem;
-                        transition: all 0.3s ease;
-                        position: relative;
-                    }
+        .dashboard-panel {
+            padding: 3rem;
+        }
+    }
+
+    .dashboard-tabs {
+        display: flex;
+        gap: 0.5rem;
+        margin-bottom: 1.5rem;
+        border-bottom: 1px solid rgba(30, 144, 255, 0.1);
+        padding-bottom: 0.75rem;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .tab-button {
+        background: transparent;
+        border: none;
+        color: #999;
+        padding: 0.5rem 0.75rem;
+        cursor: pointer;
+        font-size: 0.9rem;
+        transition: all 0.3s ease;
+        position: relative;
+        white-space: nowrap;
+    }
+
+    @media (min-width: 768px) {
+        .dashboard-tabs {
+            gap: 1rem;
+            margin-bottom: 2rem;
+            padding-bottom: 1rem;
+        }
+
+        .tab-button {
+            padding: 0.5rem 1rem;
+            font-size: 1rem;
+        }
+    }
 
                     .tab-button::after {
                         content: '';
