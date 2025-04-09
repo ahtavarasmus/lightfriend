@@ -84,6 +84,42 @@ pub struct TwilioResponse {
     pub message: String,
 }
 
+#[derive(Deserialize)]
+struct WaitingCheckArgs {
+    content: String,
+    due_date: Option<i64>,
+    remove_when_found: Option<bool>,
+}
+
+async fn handle_create_waiting_check(
+    state: &Arc<AppState>,
+    user_id: i32,
+    args: &str,
+) -> Result<String, Box<dyn Error>> {
+    let args: WaitingCheckArgs = serde_json::from_str(args)?;
+
+    // Calculate default due date (2 weeks from now) if not provided
+    let due_date = args.due_date.unwrap_or_else(|| {
+        let two_weeks = chrono::Duration::weeks(2);
+        (chrono::Utc::now() + two_weeks).timestamp()
+    }) as i32;
+
+    // Default remove_when_found to true if not provided
+    let remove_when_found = args.remove_when_found.unwrap_or(true);
+
+    let new_check = crate::models::user_models::NewWaitingCheck {
+        user_id,
+        due_date,
+        content: args.content,
+        remove_when_found,
+        service_type: "imap".to_string(), // Default to email service type
+    };
+
+    state.user_repository.create_waiting_check(&new_check)?;
+
+    Ok("I'll keep an eye out for that in your emails and notify you when I find it.".to_string())
+}
+
 pub async fn send_shazam_answer_to_user(
     state: Arc<crate::shazam_call::ShazamState>,
     user_id: i32,
@@ -518,6 +554,32 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
     });
 
 
+    let mut waiting_check_properties = HashMap::new();
+    waiting_check_properties.insert(
+        "content".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("The content to look for in emails".to_string()),
+            ..Default::default()
+        }),
+    );
+    waiting_check_properties.insert(
+        "due_date".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Number),
+            description: Some("Unix timestamp for when this check should be completed by, default to two weeks into the future.".to_string()),
+            ..Default::default()
+        }),
+    );
+    waiting_check_properties.insert(
+        "remove_when_found".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some("Whether to remove the check once the content is found, default to true.".to_string()),
+            ..Default::default()
+        }),
+    );
+
     let mut plex_properties = HashMap::new();
     plex_properties.insert(
         "query".to_string(),
@@ -598,6 +660,18 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
 
     // Define tools
     let tools = vec![
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: String::from("create_waiting_check"),
+                description: Some(String::from("Creates a waiting check for monitoring emails. Use this when user wants to be notified about specific emails or content in their emails.")),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(waiting_check_properties),
+                    required: Some(vec![String::from("content")]),
+                },
+            },
+        },
         chat_completion::Tool {
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
@@ -962,111 +1036,52 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                         }
                     };
 
-                    // First fetch previews using IMAP
-                    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user.id, true, None).await {
-                        Ok(previews) => {
-                            if previews.is_empty() {
+                    // Fetch the latest 20 emails with full content
+                    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user.id, true, Some(20), false).await {
+                        Ok(emails) => {
+                            if emails.is_empty() {
                                 tool_answers.insert(tool_call_id, "No emails found.".to_string());
                                 continue;
                             }
 
-                            // Create a system message for email matching
-                            let sys_message = chat_completion::ChatCompletionMessage {
-                                role: chat_completion::MessageRole::system,
-                                content: chat_completion::Content::Text(
-                                    "You are an email matcher. Given a list of email previews and a search query, \
-                                    find the most relevant email. The emails are sorted from newest to oldest. \
-                                    When multiple emails match the query similarly well, prefer the newest one by date and time. \
-                                    Return ONLY the ID of the most relevant email, or 'NONE' if no email matches well. \
-                                    Consider subject, sender, date, and snippet in your matching, with a bias towards \
-                                    more recent emails.".to_string()
-                                ),
-                                name: None,
-                                tool_calls: None,
-                                tool_call_id: None,
-                            };
-
-                            // Create the content for matching, ensuring newest emails are considered first
-                            let emails_json = serde_json::json!({
-                                "query": query.query,
-                                "emails": previews.iter().rev().map(|p| {  // Reverse to prioritize newer emails
-                                    serde_json::json!({
-                                        "id": p.id,
-                                        "subject": p.subject,
-                                        "from": p.from,
-                                        "date": p.date.map(|d| d.to_rfc3339()),
-                                        "snippet": p.snippet,
-                                        "body": p.body
-                                    })
-                                }).collect::<Vec<_>>()
-                            });
-
-                            let user_message = chat_completion::ChatCompletionMessage {
-                                role: chat_completion::MessageRole::user,
-                                content: chat_completion::Content::Text(emails_json.to_string()),
-                                name: None,
-                                tool_calls: None,
-                                tool_call_id: None,
-                            };
-
-                            let matching_req = chat_completion::ChatCompletionRequest::new(
-                                GPT4_O.to_string(),
-                                vec![sys_message, user_message],
-                            ).max_tokens(50);
-
-                            match client.chat_completion(matching_req).await {
-                                Ok(matching_result) => {
-                                    let email_id = matching_result.choices[0].message.content.clone().unwrap_or_default();
-                                    if email_id == "NONE" {
-                                        tool_answers.insert(tool_call_id, "Could not find a matching email.".to_string());
-                                        continue;
-                                    }
-
-                                    // Fetch the specific email using IMAP
-                                    match crate::handlers::imap_handlers::fetch_single_email_imap(
-                                        &state,
-                                        user.id,
-                                        email_id.trim()
-                                    ).await {
-                                        Ok(email) => {
-                                            let formatted_response = format!(
-                                                "Found email: From: {}, Subject: {}, Date: {}\n\n{}",
-                                                email.from.unwrap_or_else(|| "Unknown".to_string()),
-                                                email.subject.unwrap_or_else(|| "No subject".to_string()),
-                                                email.date.map_or("No date".to_string(), |d| d.to_rfc3339()),
-                                                email.body.unwrap_or_else(|| "No content".to_string())
-                                            );
-                                            tool_answers.insert(tool_call_id, formatted_response);
-                                        }
-                                        Err(e) => {
-                                            let error_message = match e {
-                                                ImapError::NoConnection => "No IMAP connection found. Please check your email settings.",
-                                                ImapError::CredentialsError(_) => "Your email credentials need to be updated.",
-                                                ImapError::ConnectionError(msg) | ImapError::FetchError(msg) | ImapError::ParseError(msg) => {
-                                                    eprintln!("Failed to fetch specific email: {}", msg);
-                                                    "Failed to fetch the email. Please try again later."
-                                                }
-                                            };
-                                            tool_answers.insert(tool_call_id, error_message.to_string());
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to match email: {}", e);
-                                    tool_answers.insert(tool_call_id, "Failed to find matching email.".to_string());
-                                }
+                            // Format all emails into a searchable response
+                            let mut response = format!("Search query: '{}'\n\nLatest emails (newest first):\n\n", query.query);
+                            for (i, email) in emails.iter().enumerate() {
+                                let formatted_email = format!(
+                                    "Email {}:\nFrom: {}\nSubject: {}\nDate: {}\n\n{}\n{}\n",
+                                    i + 1,
+                                    email.from.as_deref().unwrap_or("Unknown"),
+                                    email.subject.as_deref().unwrap_or("No subject"),
+                                    email.date.map_or("No date".to_string(), |d| d.to_rfc3339()),
+                                    email.snippet.as_deref().unwrap_or(""),
+                                    email.body.as_deref().unwrap_or("No content")
+                                );
+                                response.push_str(&formatted_email);
                             }
+
+                            tool_answers.insert(tool_call_id, response);
                         }
                         Err(e) => {
                             let error_message = match e {
                                 ImapError::NoConnection => "No IMAP connection found. Please check your email settings.",
                                 ImapError::CredentialsError(_) => "Your email credentials need to be updated.",
                                 ImapError::ConnectionError(msg) | ImapError::FetchError(msg) | ImapError::ParseError(msg) => {
-                                    eprintln!("Failed to fetch email previews: {}", msg);
+                                    eprintln!("Failed to fetch emails: {}", msg);
                                     "Failed to fetch emails. Please try again later."
                                 }
                             };
                             tool_answers.insert(tool_call_id, error_message.to_string());
+                        }
+                    }
+                } else if name == "create_waiting_check" {
+                    println!("Executing create_waiting_check tool call");
+                    match handle_create_waiting_check(&state, user.id, arguments).await {
+                        Ok(answer) => {
+                            tool_answers.insert(tool_call_id, answer);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to create waiting check: {}", e);
+                            tool_answers.insert(tool_call_id, "Sorry, I couldn't set up the email monitoring. Please try again.".to_string());
                         }
                     }
                 } else if name == "calendar" {

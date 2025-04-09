@@ -26,6 +26,18 @@ diesel::table! {
 }
 
 diesel::table! {
+    email_judgments (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        email_timestamp -> Integer,
+        processed_at -> Integer,
+        should_notify -> Bool,
+        score -> Integer,
+        reason -> Text,
+    }
+}
+
+diesel::table! {
     gmail (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -66,6 +78,42 @@ diesel::table! {
         expires_in -> Integer,
         imap_server -> Nullable<Text>,
         imap_port -> Nullable<Integer>,
+    }
+}
+
+diesel::table! {
+    importance_priorities (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        threshold -> Integer,
+        service_type -> Text,
+    }
+}
+
+diesel::table! {
+    keywords (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        keyword -> Text,
+        service_type -> Text,
+    }
+}
+
+diesel::table! {
+    priority_senders (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        sender -> Text,
+        service_type -> Text,
+    }
+}
+
+diesel::table! {
+    processed_emails (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        email_uid -> Text,
+        processed_at -> Integer,
     }
 }
 
@@ -134,6 +182,21 @@ diesel::table! {
         encrypted_matrix_access_token -> Nullable<Text>,
         timezone -> Nullable<Text>,
         timezone_auto -> Nullable<Bool>,
+        sub_tier -> Nullable<Text>,
+        msgs_left -> Integer,
+        imap_general_checks -> Nullable<Text>,
+        imap_proactive -> Bool,
+    }
+}
+
+diesel::table! {
+    waiting_checks (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        due_date -> Integer,
+        content -> Text,
+        remove_when_found -> Bool,
+        service_type -> Text,
     }
 }
 
@@ -141,16 +204,27 @@ diesel::joinable!(bridges -> users (user_id));
 diesel::joinable!(conversations -> users (user_id));
 diesel::joinable!(gmail -> users (user_id));
 diesel::joinable!(imap_connection -> users (user_id));
+diesel::joinable!(importance_priorities -> users (user_id));
+diesel::joinable!(keywords -> users (user_id));
+diesel::joinable!(priority_senders -> users (user_id));
+diesel::joinable!(processed_emails -> users (user_id));
 diesel::joinable!(subscriptions -> users (user_id));
+diesel::joinable!(waiting_checks -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     bridges,
     conversations,
+    email_judgments,
     gmail,
     google_calendar,
     imap_connection,
+    importance_priorities,
+    keywords,
+    priority_senders,
+    processed_emails,
     subscriptions,
     unipile_connection,
     usage_logs,
     users,
+    waiting_checks,
 );

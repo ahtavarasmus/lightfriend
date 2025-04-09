@@ -23,6 +23,7 @@ pub struct ImapEmailPreview {
     pub id: String,
     pub subject: Option<String>,
     pub from: Option<String>,
+    pub from_email: Option<String>,
     pub date: Option<DateTime<Utc>>,
     pub snippet: Option<String>,
     pub body: Option<String>,
@@ -62,7 +63,7 @@ pub async fn fetch_imap_previews(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Starting IMAP preview fetch for user {} with limit {:?}", auth_user.user_id, params.limit);
 
-    match fetch_emails_imap(&state, auth_user.user_id, true, params.limit).await {
+    match fetch_emails_imap(&state, auth_user.user_id, true, params.limit, false).await {
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP previews", previews.len());
             
@@ -103,7 +104,7 @@ pub async fn fetch_full_imap_emails(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Starting IMAP full emails fetch for user {} with limit {:?}", auth_user.user_id, params.limit);
 
-    match fetch_emails_imap(&state, auth_user.user_id, false, params.limit).await {
+    match fetch_emails_imap(&state, auth_user.user_id, false, params.limit, false).await {
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP full emails", previews.len());
             
@@ -192,7 +193,10 @@ pub async fn fetch_emails_imap(
     user_id: i32,
     preview_only: bool,
     limit: Option<u32>,
+    unprocessed: bool, 
 ) -> Result<Vec<ImapEmailPreview>, ImapError> {
+    tracing::debug!("Starting fetch_emails_imap for user {} with preview_only: {}, limit: {:?}, unprocessed: {}", 
+        user_id, preview_only, limit, unprocessed);
     // Get IMAP credentials
     let (email, password, imap_server, imap_port) = state
         .user_repository
@@ -230,7 +234,7 @@ pub async fn fetch_emails_imap(
     let messages = imap_session
         .fetch(
             &sequence_set,
-            "(UID FLAGS ENVELOPE BODY[] BODY[TEXT])",  // Added BODY[] to get full message content
+            "(UID FLAGS ENVELOPE BODY.PEEK[])",  // PEEK to not mark the email as read
         )
         .map_err(|e| ImapError::FetchError(format!("Failed to fetch messages: {}", e)))?;
 
@@ -238,21 +242,43 @@ pub async fn fetch_emails_imap(
 
     for message in messages.iter() {
         let uid = message.uid.unwrap_or(0).to_string();
+        
+        // Check if email is already processed using repository method
+        let is_processed = state.user_repository.is_email_processed(user_id, &uid)
+            .map_err(|e| ImapError::FetchError(format!("Failed to check email processed status: {}", e)))?;
+        
+        // Skip processed emails if unprocessed is true
+        if unprocessed && is_processed {
+            tracing::info!("Skipping already processed email: {}", uid);
+            continue;
+        }
+
         let envelope = message.envelope().ok_or_else(|| {
             ImapError::ParseError("Failed to get message envelope".to_string())
         })?;
 
-        let from = envelope
+        let (from, from_email) = envelope
             .from
             .as_ref()
             .and_then(|addrs| addrs.first())
             .map(|addr| {
-                format!(
-                    "{} <{}>",
-                    addr.name.as_ref().and_then(|n| String::from_utf8(n.to_vec()).ok()).unwrap_or_default(),
-                    addr.mailbox.as_ref().and_then(|m| String::from_utf8(m.to_vec()).ok()).unwrap_or_default()
-                )
-            });
+                let name = addr.name
+                    .as_ref()
+                    .and_then(|n| String::from_utf8(n.to_vec()).ok())
+                    .unwrap_or_default();
+                let email = addr.mailbox
+                    .as_ref()
+                    .and_then(|m| {
+                        let mailbox = String::from_utf8(m.to_vec()).ok()?;
+                        let host = addr.host
+                            .as_ref()
+                            .and_then(|h| String::from_utf8(h.to_vec()).ok())?;
+                        Some(format!("{}@{}", mailbox, host))
+                    })
+                    .unwrap_or_default();
+                (name, email)
+            })
+            .unwrap_or_default();
 
         let subject = envelope
             .subject
@@ -308,15 +334,29 @@ pub async fn fetch_emails_imap(
             (clean_content, snippet)
         }).unwrap_or_else(|| (String::new(), String::new()));
 
-            email_previews.push(ImapEmailPreview {
-                id: uid,
-                subject,
-                from,
-                date,
-                snippet: Some(snippet),
-                body: Some(body),
-                is_read,
-            });
+        email_previews.push(ImapEmailPreview {
+            id: uid.clone(),
+            subject: subject.clone(),
+            from: Some(from.clone()),
+            from_email: Some(from_email.clone()),
+            date,
+            snippet: Some(snippet),
+            body: Some(body),
+            is_read,
+        });
+
+        // Mark email as processed if unprocessed is true
+        if unprocessed {
+            match state.user_repository.mark_email_as_processed(user_id, &uid) {
+                Ok(_) => {
+                    tracing::info!("Marked email {} as processed", uid);
+                }
+                Err(e) => {
+                    tracing::error!("Failed to mark email {} as processed: {}", uid, e);
+                    // Continue processing other emails even if marking as processed fails
+                }
+            }
+        }
     }
 
     // Logout

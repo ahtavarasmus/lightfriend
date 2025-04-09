@@ -34,6 +34,8 @@ pub struct UserProfile {
     pub stripe_payment_method_id: Option<String>,
     pub timezone: Option<String>,
     pub timezone_auto: Option<bool>,
+    pub sub_tier: Option<String>,
+    pub msgs_left: i32,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]

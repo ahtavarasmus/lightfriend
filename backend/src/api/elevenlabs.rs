@@ -229,20 +229,6 @@ pub async fn fetch_assistant(
             dynamic_variables.insert("timezone".to_string(), json!(timezone_str));
             dynamic_variables.insert("timezone_offset_from_utc".to_string(), json!(offset));
 
-            // Check Google Calendar availability
-            match state.user_repository.has_active_google_calendar(user.id) {
-                Ok(has_calendar) => {
-                    if has_calendar {
-                        dynamic_variables.insert("google_calendar_status".to_string(), json!("connected"));
-                    } else {
-                        dynamic_variables.insert("google_calendar_status".to_string(), json!("not connected"));
-                    }
-                },
-                Err(e) => {
-                    eprintln!("Error checking Google Calendar status: {}", e);
-                    dynamic_variables.insert("google_calendar_status".to_string(), json!("not connected"));
-                }
-            }
 
             let charge_back_threshold= std::env::var("CHARGE_BACK_THRESHOLD")
                 .expect("CHARGE_BACK_THRESHOLD not set")
@@ -305,6 +291,112 @@ pub async fn fetch_assistant(
     Ok(Json(payload))
 }
 
+
+#[derive(Deserialize)]
+pub struct WaitingCheckPayload {
+    pub content: String,
+    pub due_date: Option<String>,
+    pub remove_when_found: Option<bool>,
+    pub user_id: i32,
+}
+
+pub async fn handle_create_waiting_check_email_tool_call(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<WaitingCheckPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Received waiting check creation request for user: {}", payload.user_id);
+
+    // Handle due_date: parse provided string or use default (2 weeks from now)
+    let due_date_utc = match payload.due_date {
+        Some(date_str) => {
+            // Validate the provided date string
+            match chrono::DateTime::parse_from_rfc3339(&date_str) {
+                Ok(_) => date_str, // If valid RFC3339, use as-is
+                Err(_) => {
+                    println!("Invalid due_date format provided, using default");
+                    let two_weeks = chrono::Duration::weeks(2);
+                    (chrono::Utc::now() + two_weeks)
+                        .format("%Y-%m-%dT00:00:00Z")
+                        .to_string()
+                }
+            }
+        }
+        None => {
+            let two_weeks = chrono::Duration::weeks(2);
+            (chrono::Utc::now() + two_weeks)
+                .format("%Y-%m-%dT00:00:00Z")
+                .to_string()
+        }
+    };
+
+    // Convert UTC string to timestamp integer
+    let due_date_timestamp = chrono::DateTime::parse_from_rfc3339(&due_date_utc)
+        .map(|dt| dt.timestamp())
+        .unwrap_or_else(|e| {
+            error!("Failed to parse due_date: {}", e);
+            (chrono::Utc::now() + chrono::Duration::weeks(2)).timestamp()
+        }) as i32;
+
+    // Default remove_when_found to true if not provided
+    let remove_when_found = payload.remove_when_found.unwrap_or(true);
+
+    // Verify user exists
+    match state.user_repository.find_by_id(payload.user_id) {
+        Ok(Some(_user)) => {
+            let new_check = crate::models::user_models::NewWaitingCheck {
+                user_id: payload.user_id,
+                due_date: due_date_timestamp,
+                content: payload.content,
+                remove_when_found,
+                service_type: "imap".to_string(),
+            };
+
+            match state.user_repository.create_waiting_check(&new_check) {
+                Ok(_) => {
+                    println!("Successfully created waiting check for user: {} with due date: {}", 
+                        payload.user_id, due_date_utc);
+                    Ok(Json(json!({
+                        "response": "I'll keep an eye out for that in your emails and notify you when I find it.",
+                        "status": "success",
+                        "user_id": payload.user_id,
+                        "due_date": due_date_utc
+                    })))
+                },
+                Err(e) => {
+                    error!("Failed to create waiting check: {}", e);
+                    Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "Failed to create waiting check",
+                            "details": e.to_string()
+                        }))
+                    ))
+                }
+            }
+        },
+        Ok(None) => {
+            println!("User not found: {}", payload.user_id);
+            Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": "User not found"
+                }))
+            ))
+        },
+        Err(e) => {
+            error!("Error fetching user: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to fetch user",
+                    "details": e.to_string()
+                }))
+            ))
+        }
+    }
+}
+
+
 pub async fn handle_email_fetch_tool_call(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
@@ -321,7 +413,7 @@ pub async fn handle_email_fetch_tool_call(
     };
     println!("Received Gmail fetch request for user: {}", user_id);
     
-    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user_id, true, Some(10)).await {
+    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user_id, true, Some(10), false).await {
         Ok(emails) => {
             // Format emails for voice response
             let mut response_text = String::from("Here are your recent emails. ");

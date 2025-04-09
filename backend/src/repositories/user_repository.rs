@@ -16,9 +16,16 @@ pub struct UsageDataPoint {
 }
 
 use crate::{
-    models::user_models::{User, NewUsageLog, NewUnipileConnection, NewGoogleCalendar, ImapConnection, NewImapConnection, Bridge, NewBridge},
+    models::user_models::{User, NewUsageLog, NewUnipileConnection, NewGoogleCalendar, 
+        ImapConnection, NewImapConnection, Bridge, NewBridge, WaitingCheck, 
+        NewWaitingCheck, PrioritySender, NewPrioritySender, Keyword, 
+        NewKeyword, ImportancePriority, NewImportancePriority
+    },
     handlers::auth_dtos::NewUser,
-    schema::{users, usage_logs, unipile_connection, imap_connection},
+    schema::{
+        users, usage_logs, unipile_connection, imap_connection,
+        waiting_checks, priority_senders, keywords, importance_priorities,
+    },
     DbPool,
 };
 
@@ -139,6 +146,8 @@ impl UserRepository {
             ("USA_PHONE", "+1"),
             ("NLD_PHONE", "+31"),
             ("CHZ_PHONE", "+420"),
+            ("AUS_PHONE", "+61"),
+            ("GB_PHONE", "+44"),
         ];
 
         // Collect phone numbers into a HashMap for easier matching
@@ -272,7 +281,14 @@ impl UserRepository {
             return Err(DieselError::NotFound);
         }
 
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        // Get current user to check if phone number is changing
+        let current_user = users::table
+            .find(user_id)
+            .first::<User>(&mut conn)?;
+
+        // If phone number is changing, set verified to false
+        let should_unverify = current_user.phone_number != phone_number;
+
         diesel::update(users::table.find(user_id))
             .set((
                 users::email.eq(email),
@@ -281,6 +297,7 @@ impl UserRepository {
                 users::info.eq(info),
                 users::timezone.eq(timezone),
                 users::timezone_auto.eq(timezone_auto),
+                users::verified.eq(!should_unverify && current_user.verified), // Only keep verified true if phone number hasn't changed
             ))
             .execute(&mut conn)?;
         Ok(())
@@ -705,6 +722,249 @@ impl UserRepository {
         Ok(charge_when_under)
     }
 
+    // Waiting Checks methods
+    pub fn create_waiting_check(&self, new_check: &NewWaitingCheck) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::insert_into(waiting_checks::table)
+            .values(new_check)
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn delete_waiting_check(&self, user_id: i32, service_type: &str, content: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(waiting_checks::table)
+            .filter(waiting_checks::user_id.eq(user_id))
+            .filter(waiting_checks::service_type.eq(service_type))
+            .filter(waiting_checks::content.eq(content))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_waiting_checks(&self, user_id: i32, service_type: &str) -> Result<Vec<WaitingCheck>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        waiting_checks::table
+            .filter(waiting_checks::user_id.eq(user_id))
+            .filter(waiting_checks::service_type.eq(service_type))
+            .load::<WaitingCheck>(&mut conn)
+    }
+
+    // Priority Senders methods
+    pub fn create_priority_sender(&self, new_sender: &NewPrioritySender) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::insert_into(priority_senders::table)
+            .values(new_sender)
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn delete_priority_sender(&self, user_id: i32, service_type: &str, sender: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(priority_senders::table)
+            .filter(priority_senders::user_id.eq(user_id))
+            .filter(priority_senders::service_type.eq(service_type))
+            .filter(priority_senders::sender.eq(sender))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_priority_senders(&self, user_id: i32, service_type: &str) -> Result<Vec<PrioritySender>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        priority_senders::table
+            .filter(priority_senders::user_id.eq(user_id))
+            .filter(priority_senders::service_type.eq(service_type))
+            .load::<PrioritySender>(&mut conn)
+    }
+
+    // Keywords methods
+    pub fn create_keyword(&self, new_keyword: &NewKeyword) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::insert_into(keywords::table)
+            .values(new_keyword)
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn delete_keyword(&self, user_id: i32, service_type: &str, keyword: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(keywords::table)
+            .filter(keywords::user_id.eq(user_id))
+            .filter(keywords::service_type.eq(service_type))
+            .filter(keywords::keyword.eq(keyword))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_keywords(&self, user_id: i32, service_type: &str) -> Result<Vec<Keyword>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        keywords::table
+            .filter(keywords::user_id.eq(user_id))
+            .filter(keywords::service_type.eq(service_type))
+            .load::<Keyword>(&mut conn)
+    }
+
+    pub fn create_importance_priority(&self, new_priority: &NewImportancePriority) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // First delete any existing importance priority for this user and service type
+        diesel::delete(importance_priorities::table)
+            .filter(importance_priorities::user_id.eq(new_priority.user_id))
+            .filter(importance_priorities::service_type.eq(&new_priority.service_type))
+            .execute(&mut conn)?;
+
+        // Then insert the new priority
+        diesel::insert_into(importance_priorities::table)
+            .values(new_priority)
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn delete_importance_priority(&self, user_id: i32, service_type: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(importance_priorities::table)
+            .filter(importance_priorities::user_id.eq(user_id))
+            .filter(importance_priorities::service_type.eq(service_type))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_importance_priority(&self, user_id: i32, service_type: &str) -> Result<Option<ImportancePriority>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let importance_priority = importance_priorities::table
+            .filter(importance_priorities::user_id.eq(user_id))
+            .filter(importance_priorities::service_type.eq(service_type))
+            .first::<ImportancePriority>(&mut conn)
+            .optional()?;
+        Ok(importance_priority)
+    }
+
+    // Update user's imap_proactive setting
+    pub fn update_imap_proactive(&self, user_id: i32, proactive: bool) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::imap_proactive.eq(proactive))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_imap_proactive(&self, user_id: i32) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let proactive = users::table
+            .find(user_id)
+            .select(users::imap_proactive)
+            .first::<bool>(&mut conn)?;
+        Ok(proactive)
+    }
+
+    // Get the user's subscription tier
+    pub fn get_subscription_tier(&self, user_id: i32) -> Result<Option<String>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let sub_tier = users::table
+            .find(user_id)
+            .select(users::sub_tier)
+            .first::<Option<String>>(&mut conn)?;
+        Ok(sub_tier)
+    }
+
+    // Set the user's subscription tier
+    pub fn update_messages_left(&self, user_id: i32, new_count: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::msgs_left.eq(new_count))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn set_subscription_tier(&self, user_id: i32, tier: Option<&str>) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::sub_tier.eq(tier))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    // Update user's custom IMAP general checks
+    pub fn update_imap_general_checks(&self, user_id: i32, checks: Option<&str>) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::imap_general_checks.eq(checks))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_imap_general_checks(&self, user_id: i32) -> Result<String, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let checks = users::table
+            .find(user_id)
+            .select(users::imap_general_checks)
+            .first::<Option<String>>(&mut conn)?;
+            
+        Ok(checks.unwrap_or_else(|| {
+            // Default general checks prompt
+            String::from("
+                Step 1: Check for Urgency Indicators
+                - Look for words like 'urgent', 'immediate', 'asap', 'deadline', 'important'
+                - Check for time-sensitive phrases like 'by tomorrow', 'end of day', 'as soon as possible'
+                - Look for exclamation marks or all-caps words that might indicate urgency
+
+                Step 2: Analyze Sender Importance
+                - Check if it's from a manager, supervisor, or higher-up in organization
+                - Look for professional titles or positions in signatures
+                - Consider if it's from a client or important business partner
+
+                Step 3: Assess Content Significance
+                - Look for action items or direct requests
+                - Check for mentions of meetings, deadlines, or deliverables
+                - Identify if it's part of an ongoing important conversation
+                - Look for financial or legal terms that might indicate important matters
+
+                Step 4: Consider Context
+                - Check if it's a reply to an email you sent
+                - Look for CC'd important stakeholders
+                - Consider if it's outside normal business hours
+                - Check if it's marked as high priority
+
+                Step 5: Evaluate Personal Impact
+                - Assess if immediate action is required
+                - Consider if delaying response could have negative consequences
+                - Look for personal or confidential matters
+            ")
+        }))
+    }
+
+    // Check if user has a specific subscription tier and has messages left
+    pub fn has_valid_subscription_tier_with_messages(&self, user_id: i32, tier: &str) -> Result<bool, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let user = users::table
+            .find(user_id)
+            .select((users::sub_tier, users::msgs_left))
+            .first::<(Option<String>, i32)>(&mut conn)?;
+        
+        // Check both subscription tier and remaining messages
+        Ok(user.0.map_or(false, |t| t == tier) && user.1 > 0)
+    }
+
+    pub fn decrease_messages_left(&self, user_id: i32) -> Result<i32, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Get current messages left
+        let current_msgs = users::table
+            .find(user_id)
+            .select(users::msgs_left)
+            .first::<i32>(&mut conn)?;
+            
+        // Only decrease if greater than 0
+        if current_msgs > 0 {
+            let new_msgs = current_msgs - 1;
+            diesel::update(users::table.find(user_id))
+                .set(users::msgs_left.eq(new_msgs))
+                .execute(&mut conn)?;
+            Ok(new_msgs)
+        } else {
+            Ok(0)
+        }
+    }
+
     pub fn create_unipile_connection(&self, new_connection: &NewUnipileConnection) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
@@ -861,6 +1121,18 @@ impl UserRepository {
         Ok(user_ids)
     }
 
+    pub fn get_active_imap_connection_users(&self) -> Result<Vec<i32>, DieselError> {
+        use crate::schema::imap_connection;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let user_ids = imap_connection::table
+            .filter(imap_connection::status.eq("active"))
+            .select(imap_connection::user_id)
+            .load::<i32>(&mut conn)?;
+
+        Ok(user_ids)
+    }
+
     pub fn get_gmail_tokens(&self, user_id: i32) -> Result<Option<(String, String)>, DieselError> {
         use crate::schema::gmail;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -951,6 +1223,7 @@ impl UserRepository {
         Ok(())
     }
 
+<<<<<<< HEAD
     pub fn set_matrix_credentials(&self, user_id: i32, username: &str, access_token: &str) -> Result<(), DieselError> {
         use crate::utils::matrix_auth::MatrixAuth;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1031,11 +1304,133 @@ impl UserRepository {
         diesel::delete(bridges::table)
             .filter(bridges::user_id.eq(user_id))
             .filter(bridges::bridge_type.eq("whatsapp"))
+=======
+    // Mark an email as processed
+    pub fn mark_email_as_processed(&self, user_id: i32, email_uid: &str) -> Result<(), DieselError> {
+        use crate::schema::processed_emails;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // First check if the email is already processed
+        let already_processed = self.is_email_processed(user_id, email_uid)?;
+        if already_processed {
+            tracing::debug!("Email {} for user {} is already marked as processed", email_uid, user_id);
+            return Ok(());
+        }
+
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        let new_processed_email = crate::models::user_models::NewProcessedEmails {
+            user_id,
+            email_uid: email_uid.to_string(),
+            processed_at: current_time,
+        };
+
+        match diesel::insert_into(processed_emails::table)
+            .values(&new_processed_email)
+            .execute(&mut conn)
+        {
+            Ok(_) => {
+                tracing::debug!("Successfully marked email {} as processed for user {}", email_uid, user_id);
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!("Failed to mark email {} as processed for user {}: {}", email_uid, user_id, e);
+                Err(e)
+            }
+        }
+    }
+
+    // Check if an email is processed
+    pub fn is_email_processed(&self, user_id: i32, email_uid: &str) -> Result<bool, DieselError> {
+        use crate::schema::processed_emails;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let processed = processed_emails::table
+            .filter(processed_emails::user_id.eq(user_id))
+            .filter(processed_emails::email_uid.eq(email_uid))
+            .first::<crate::models::user_models::ProcessedEmail>(&mut conn)
+            .optional()?;
+
+        Ok(processed.is_some())
+    }
+
+    // Get all processed emails for a user
+    pub fn get_processed_emails(&self, user_id: i32) -> Result<Vec<crate::models::user_models::ProcessedEmail>, DieselError> {
+        use crate::schema::processed_emails;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let processed = processed_emails::table
+            .filter(processed_emails::user_id.eq(user_id))
+            .order_by(processed_emails::processed_at.desc())
+            .load::<crate::models::user_models::ProcessedEmail>(&mut conn)?;
+
+        Ok(processed)
+    }
+
+    // Delete a single processed email record
+    pub fn delete_processed_email(&self, user_id: i32, email_uid: &str) -> Result<(), DieselError> {
+        use crate::schema::processed_emails;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::delete(processed_emails::table)
+            .filter(processed_emails::user_id.eq(user_id))
+            .filter(processed_emails::email_uid.eq(email_uid))
+>>>>>>> master
             .execute(&mut conn)?;
 
         Ok(())
     }
 
+<<<<<<< HEAD
+=======
+    // Create a new email judgment
+    pub fn create_email_judgment(&self, new_judgment: &crate::models::user_models::NewEmailJudgment) -> Result<(), DieselError> {
+        use crate::schema::email_judgments;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::insert_into(email_judgments::table)
+            .values(new_judgment)
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    // Delete email judgments older than 30 days
+    pub fn delete_old_email_judgments(&self, user_id: i32) -> Result<(), DieselError> {
+        use crate::schema::email_judgments;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Calculate timestamp for 30 days ago
+        let thirty_days_ago = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32 - (30 * 24 * 60 * 60); // 30 days in seconds
+
+        diesel::delete(email_judgments::table)
+            .filter(email_judgments::user_id.eq(user_id))
+            .filter(email_judgments::processed_at.lt(thirty_days_ago))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    // Get all email judgments for a specific user
+    pub fn get_user_email_judgments(&self, user_id: i32) -> Result<Vec<crate::models::user_models::EmailJudgment>, DieselError> {
+        use crate::schema::email_judgments;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let judgments = email_judgments::table
+            .filter(email_judgments::user_id.eq(user_id))
+            .order_by(email_judgments::processed_at.desc())
+            .load::<crate::models::user_models::EmailJudgment>(&mut conn)?;
+
+        Ok(judgments)
+    }
+
+>>>>>>> master
     pub fn create_gmail_connection(
         &self,
         user_id: i32,

@@ -29,6 +29,142 @@ use std::sync::Arc;
 pub struct BuyCreditsRequest {
     pub amount_dollars: f32,
 }
+
+
+pub async fn create_subscription_checkout(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(user_id): Path<i32>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    println!("Starting create_subscription_checkout for user_id: {}", user_id);
+
+    // Validate user_id
+    if user_id <= 0 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid user ID"})),
+        ));
+    }
+
+    // Check if user is accessing their own data or is an admin
+    if auth_user.user_id != user_id && !auth_user.is_admin {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Access denied"})),
+        ));
+    }
+
+    // Verify user exists in database
+    let user = state
+        .user_repository
+        .find_by_id(user_id)
+        .map_err(|e| {
+            println!("Database error when finding user: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to verify user"})),
+            )
+        })?
+        .ok_or_else(|| {
+            println!("User not found: {}", user_id);
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            )
+        })?;
+
+    // Initialize Stripe client
+    let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY").map_err(|_| {
+        println!("STRIPE_SECRET_KEY not found in environment");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Stripe configuration error"})),
+        )
+    })?;
+    let client = Client::new(stripe_secret_key);
+    println!("Stripe client initialized");
+
+    // Get or create Stripe customer
+    let customer_id = match state.user_repository.get_stripe_customer_id(user_id) {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            let user = state
+                .user_repository
+                .find_by_id(user_id)
+                .map_err(|e| (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Database error: {}", e)})),
+                ))?
+                .ok_or_else(|| (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"error": "User not found"})),
+                ))?;
+            create_new_customer(&client, user_id, &user.email, &state).await?
+        },
+        Err(e) => return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)})),
+        )),
+    };
+
+    let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
+
+    let mut price_id = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID")
+                            .expect("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID must be set in environment");
+    if user.phone_number.starts_with("+1"){
+        price_id = std::env::var("STRIPE_SUBSCRIPTION_US_PRICE_ID")
+                    .expect("STRIPE_SUBSCRIPTION_US_PRICE_ID must be set in environment");
+    }
+    
+    let checkout_session = CheckoutSession::create(
+        &client,
+        CreateCheckoutSession {
+            success_url: Some(&format!("{}/profile?subscription=success", domain_url)),
+            cancel_url: Some(&format!("{}/profile?subscription=canceled", domain_url)),
+            mode: Some(stripe::CheckoutSessionMode::Subscription),
+            line_items: Some(vec![
+                stripe::CreateCheckoutSessionLineItems {
+                    price: Some(price_id),
+                    quantity: Some(1),
+                    ..Default::default()
+                }
+            ]),
+            customer: Some(customer_id.parse().unwrap()),
+            allow_promotion_codes: Some(true),
+            billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
+            automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
+                enabled: true,
+                liability: None,
+            }),
+            tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
+                enabled: true,
+            }),
+            customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
+                address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
+                name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto), // Add this line
+                shipping: None,
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| {
+        println!("Stripe error details: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to create Subscription Checkout Session: {}", e)})),
+        )
+    })?;
+
+    println!("Subscription checkout session created successfully");
+    
+    // Return the Checkout session URL
+    Ok(Json(json!({
+        "url": checkout_session.url.unwrap(),
+        "message": "Redirecting to Stripe Checkout for subscription"
+    })))
+}
+
 pub async fn create_customer_portal_session(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -346,11 +482,91 @@ pub async fn stripe_webhook(
     println!("Stripe event verified successfully: {}", event.type_);
     // Process the event based on its type
     match event.type_ {
+        stripe::EventType::CustomerSubscriptionCreated => {
+            println!("Processing customer.subscription.created event");
+            if let stripe::EventObject::Subscription(subscription) = event.data.object {
+                let customer_id = match subscription.customer {
+                    stripe::Expandable::Id(id) => id,
+                    stripe::Expandable::Object(customer) => customer.id,
+                };
+                // TODO have to fetch the latest emails if account connected here and mark them as processed :D !!!!
+                
+                // Update user's subscription tier to "tier 1" and set messages_left to 150
+
+                if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
+                    state.user_repository.set_subscription_tier(
+                        user.id,
+                        Some("tier 1"),
+                    ).ok();
+                    state.user_repository.update_messages_left(user.id, 150).ok();
+                    // Enable proactive IMAP messaging for subscribed users
+                    state.user_repository.update_imap_proactive(user.id, true).ok();
+                    println!("Updated subscription tier to 'tier 1', set 150 messages, and enabled proactive IMAP for user {}", user.id);
+                }
+            }
+        },
+        stripe::EventType::CustomerSubscriptionUpdated => {
+            println!("Processing customer.subscription.updated event");
+            if let stripe::EventObject::Subscription(subscription) = event.data.object {
+                let customer_id = match subscription.customer {
+                    stripe::Expandable::Id(id) => id,
+                    stripe::Expandable::Object(customer) => customer.id,
+                };
+
+                // Check if this is an active subscription and a renewal
+                let is_active = subscription.status == stripe::SubscriptionStatus::Active;
+                let current_period_start = subscription.current_period_start;
+                
+                // The subscription was just renewed if current_period_start is very recent (within last minute)
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i64;
+                let is_renewal = is_active && (now - current_period_start) < 60; // Within last minute
+
+                if is_renewal {
+                    println!("Subscription renewal detected for customer: {} at period start: {}", customer_id, current_period_start);
+                    if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
+                        state.user_repository.update_messages_left(user.id, 150).ok();
+                        println!("Reset to 150 messages for user {} on subscription renewal", user.id);
+                    } else {
+                        println!("No user found for customer ID: {}", customer_id);
+                    }
+                } else {
+                    println!("Subscription updated but not a renewal (status: {:?}, period start: {})", subscription.status, current_period_start);
+                }
+                
+            }
+        },
+        stripe::EventType::CustomerSubscriptionDeleted => {
+            println!("Processing customer.subscription.deleted event");
+            if let stripe::EventObject::Subscription(subscription) = event.data.object {
+                let customer_id = match subscription.customer {
+                    stripe::Expandable::Id(id) => id,
+                    stripe::Expandable::Object(customer) => customer.id,
+                };
+                
+                // Remove user's subscription tier (set to None)
+                if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
+                    state.user_repository.set_subscription_tier(
+                        user.id,
+                        None,
+                    ).ok();
+                    println!("Removed subscription tier for user {}", user.id);
+                }
+            }
+        },
         stripe::EventType::CheckoutSessionCompleted => {
             println!("Processing checkout.session.completed event");
             match event.data.object {
                 stripe::EventObject::CheckoutSession(session) => {
                     println!("Checkout session found: {}", session.id);
+                    
+                    // Skip processing if this is a subscription checkout
+                    if matches!(session.mode, stripe::CheckoutSessionMode::Subscription) {
+                        println!("Ignoring subscription checkout session");
+                        return Ok(StatusCode::OK);
+                    }
                     if let Some(customer) = &session.customer {
                         let customer_id = match customer {
                             stripe::Expandable::Id(id) => id.clone(),
