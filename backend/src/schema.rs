@@ -186,6 +186,7 @@ diesel::table! {
         msgs_left -> Integer,
         imap_general_checks -> Nullable<Text>,
         imap_proactive -> Bool,
+        matrix_device_id -> Nullable<Text>,
     }
 }
 

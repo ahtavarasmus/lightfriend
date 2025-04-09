@@ -1223,8 +1223,7 @@ impl UserRepository {
         Ok(())
     }
 
-<<<<<<< HEAD
-    pub fn set_matrix_credentials(&self, user_id: i32, username: &str, access_token: &str) -> Result<(), DieselError> {
+    pub fn set_matrix_credentials(&self, user_id: i32, username: &str, access_token: &str, device_id: &str) -> Result<(), DieselError> {
         use crate::utils::matrix_auth::MatrixAuth;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
@@ -1236,13 +1235,14 @@ impl UserRepository {
             .set((
                 users::matrix_username.eq(username),
                 users::encrypted_matrix_access_token.eq(encrypted_token),
+                users::matrix_device_id.eq(device_id),
             ))
             .execute(&mut conn)?;
 
         Ok(())
     }
 
-    pub fn get_matrix_credentials(&self, user_id: i32) -> Result<Option<(String, String)>, DieselError> {
+    pub fn get_matrix_credentials(&self, user_id: i32) -> Result<Option<(String, String, String)>, DieselError> {
         use crate::utils::matrix_auth::MatrixAuth;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
@@ -1250,11 +1250,11 @@ impl UserRepository {
             .find(user_id)
             .first::<User>(&mut conn)?;
 
-        match (user.matrix_username, user.encrypted_matrix_access_token) {
-            (Some(username), Some(encrypted_token)) => {
+        match (user.matrix_username, user.encrypted_matrix_access_token, user.matrix_device_id) {
+            (Some(username), Some(encrypted_token), Some(device_id)) => {
                 let token = MatrixAuth::decrypt_token(&encrypted_token)
                     .map_err(|_| DieselError::RollbackTransaction)?;
-                Ok(Some((username, token)))
+                Ok(Some((username, token, device_id)))
             },
             _ => Ok(None),
         }
@@ -1284,6 +1284,19 @@ impl UserRepository {
         Ok(())
     }
 
+    pub fn delete_whatsapp_bridge(&self, user_id: i32) -> Result<(), DieselError> {
+        use crate::schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::delete(bridges::table)
+            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::bridge_type.eq("whatsapp"))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+
     pub fn get_whatsapp_bridge(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
         use crate::schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1297,14 +1310,6 @@ impl UserRepository {
         Ok(bridge)
     }
 
-    pub fn delete_whatsapp_bridge(&self, user_id: i32) -> Result<(), DieselError> {
-        use crate::schema::bridges;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        diesel::delete(bridges::table)
-            .filter(bridges::user_id.eq(user_id))
-            .filter(bridges::bridge_type.eq("whatsapp"))
-=======
     // Mark an email as processed
     pub fn mark_email_as_processed(&self, user_id: i32, email_uid: &str) -> Result<(), DieselError> {
         use crate::schema::processed_emails;
@@ -1378,14 +1383,11 @@ impl UserRepository {
         diesel::delete(processed_emails::table)
             .filter(processed_emails::user_id.eq(user_id))
             .filter(processed_emails::email_uid.eq(email_uid))
->>>>>>> master
             .execute(&mut conn)?;
 
         Ok(())
     }
 
-<<<<<<< HEAD
-=======
     // Create a new email judgment
     pub fn create_email_judgment(&self, new_judgment: &crate::models::user_models::NewEmailJudgment) -> Result<(), DieselError> {
         use crate::schema::email_judgments;
@@ -1430,7 +1432,6 @@ impl UserRepository {
         Ok(judgments)
     }
 
->>>>>>> master
     pub fn create_gmail_connection(
         &self,
         user_id: i32,

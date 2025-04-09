@@ -45,6 +45,7 @@ pub struct User {
     pub msgs_left: i32,
     pub imap_general_checks: Option<String>,
     pub imap_proactive: bool,
+    pub matrix_device_id: Option<String>,
 }
 
 #[derive(Queryable, Selectable, Insertable)]
