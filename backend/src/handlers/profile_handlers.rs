@@ -54,9 +54,12 @@ pub struct ProfileResponse {
     stripe_payment_method_id: Option<String>,
     timezone: Option<String>,
     timezone_auto: Option<bool>,
+    sub_tier: Option<String>,
+    msgs_left: i32,
 }
 
 use crate::handlers::auth_middleware::AuthUser;
+
 
 pub async fn get_profile(
     State(state): State<Arc<AppState>>,
@@ -96,6 +99,8 @@ pub async fn get_profile(
                 stripe_payment_method_id: user.stripe_payment_method_id,
                 timezone: user.timezone,
                 timezone_auto: user.timezone_auto,
+                sub_tier: user.sub_tier,
+                msgs_left: user.msgs_left,
             }))
         }
         None => Err((
@@ -127,6 +132,8 @@ pub async fn update_preferred_number(
         std::env::var("FIN_PHONE").expect("FIN_PHONE must be set in environment"),
         std::env::var("NLD_PHONE").expect("NLD_PHONE must be set in environment"),
         std::env::var("CHZ_PHONE").expect("CHZ_PHONE must be set in environment"),
+        std::env::var("AUS_PHONE").expect("AUS_PHONE must be set in environment"),
+        std::env::var("GB_PHONE").expect("GB_PHONE must be set in environment"),
     ];
 
     if !allowed_numbers.contains(&request.preferred_number) {
@@ -203,17 +210,25 @@ pub async fn update_profile(
     auth_user: AuthUser,
     Json(update_req): Json<UpdateProfileRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-
-
-    // Validate phone number format
-    if !update_req.phone_number.starts_with('+') {
+ 
+    use regex::Regex;
+    let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
+    if !email_regex.is_match(&update_req.email) {
+        println!("Invalid email format: {}", update_req.email);
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Phone number must start with '+'" }))
+            Json(json!({"error": "Invalid email format"}))
         ));
     }
-
-
+    
+    let phone_regex = Regex::new(r"^\+[1-9]\d{1,14}$").unwrap();
+    if !phone_regex.is_match(&update_req.phone_number) {
+        println!("Invalid phone number format: {}", update_req.phone_number);
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Phone number must be in E.164 format (e.g., +1234567890)"}))
+        ));
+    }
 
     match state.user_repository.update_profile(
         auth_user.user_id,
@@ -248,6 +263,127 @@ pub async fn update_profile(
     Ok(Json(json!({
         "message": "Profile updated successfully"
     })))
+}
+
+#[derive(Deserialize)]
+pub struct ImapGeneralChecksRequest {
+    checks: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ImapGeneralChecksResponse {
+    checks: String,
+}
+
+pub async fn get_imap_general_checks(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<ImapGeneralChecksResponse>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_repository.get_imap_general_checks(auth_user.user_id) {
+        Ok(checks) => Ok(Json(ImapGeneralChecksResponse { checks })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to get IMAP general checks: {}", e)}))
+        )),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ImapProactiveRequest {
+    proactive: bool,
+}
+
+pub async fn update_imap_proactive(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<ImapProactiveRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_repository.update_imap_proactive(auth_user.user_id, request.proactive) {
+        Ok(_) => Ok(Json(json!({
+            "message": "IMAP proactive setting updated successfully"
+        }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to update IMAP proactive setting: {}", e)}))
+        )),
+    }
+}
+
+#[derive(Serialize)]
+pub struct ImapProactiveResponse {
+    proactive: bool,
+}
+
+pub async fn get_imap_proactive(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<ImapProactiveResponse>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_repository.get_imap_proactive(auth_user.user_id) {
+        Ok(proactive) => Ok(Json(ImapProactiveResponse { proactive })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to get IMAP proactive setting: {}", e)}))
+        )),
+    }
+}
+
+#[derive(Serialize)]
+pub struct EmailJudgmentResponse {
+    pub id: i32,
+    pub email_timestamp: i32,
+    pub processed_at: i32,
+    pub should_notify: bool,
+    pub score: i32,
+    pub reason: String,
+}
+
+pub async fn get_email_judgments(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<Vec<EmailJudgmentResponse>>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_repository.get_user_email_judgments(auth_user.user_id) {
+        Ok(judgments) => {
+            let responses: Vec<EmailJudgmentResponse> = judgments
+                .into_iter()
+                .map(|j| EmailJudgmentResponse {
+                    id: j.id.unwrap_or(0),
+                    email_timestamp: j.email_timestamp,
+                    processed_at: j.processed_at,
+                    should_notify: j.should_notify,
+                    score: j.score,
+                    reason: j.reason,
+                })
+                .collect();
+            Ok(Json(responses))
+        },
+        Err(e) => {
+            tracing::error!("Failed to get email judgments: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to get email judgments: {}", e)}))
+            ))
+        }
+    }
+}
+
+pub async fn update_imap_general_checks(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<ImapGeneralChecksRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Convert Option<String> to Option<&str>
+    let checks_ref: Option<&str> = request.checks.as_deref();
+
+    // Update the IMAP general checks
+    match state.user_repository.update_imap_general_checks(auth_user.user_id, checks_ref) {
+        Ok(_) => Ok(Json(json!({
+            "message": "IMAP general checks updated successfully"
+        }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to update IMAP general checks: {}", e)}))
+        )),
+    }
 }
 
 pub async fn delete_user(

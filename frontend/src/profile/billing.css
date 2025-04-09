@@ -411,6 +411,50 @@ input:checked + .slider:before {
     box-shadow: 0 6px 20px rgba(30, 144, 255, 0.4);
 }
 
+/* Subscription Tier Display */
+.subscription-tier {
+    background: rgba(30, 144, 255, 0.1);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.subscription-tier span {
+    color: #B3D1FF;
+    font-size: 0.95rem;
+}
+
+.tier-label {
+    color: #1E90FF !important;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+/* Payment Method Button */
+.subscription-tier {
+    background: rgba(30, 144, 255, 0.1);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.subscription-tier span {
+    color: #B3D1FF;
+    font-size: 0.95rem;
+}
+
+.tier-label {
+    color: #1E90FF !important;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
 /* Payment Method Button */
 .payment-method-button {
     background: linear-gradient(45deg, #1E90FF, #4169E1);

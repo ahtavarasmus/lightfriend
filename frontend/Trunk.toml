@@ -7,3 +7,15 @@ frontend = "/api/"
 source = "robots.txt"
 destination = "robots.txt"
 
+[build]
+target = "index.html"
+css = [
+    "assets/styles.css",
+    "src/profile/billing.css",
+    "src/profile/settings.css",
+    "src/pages/money.css",
+    "src/pages/home.css",
+    "src/auth/connect.css",
+    "src/auth/signup.css",
+    "src/admin/dashboard.css"
+]

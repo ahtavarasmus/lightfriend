@@ -44,7 +44,11 @@ mod handlers {
     pub mod imap_auth;
     pub mod auth_middleware;
     pub mod imap_handlers;
+<<<<<<< HEAD
     pub mod whatsapp_auth;
+=======
+    pub mod filter_handlers;
+>>>>>>> master
 }
 
 mod utils {
@@ -91,7 +95,11 @@ use handlers::gmail_auth;
 use handlers::gmail;
 use handlers::imap_auth;
 use handlers::imap_handlers;
+<<<<<<< HEAD
 use handlers::whatsapp_auth;
+=======
+use handlers::filter_handlers;
+>>>>>>> master
 use api::twilio_sms;
 use api::elevenlabs;
 use api::elevenlabs_webhook;
@@ -121,14 +129,19 @@ pub fn validate_env() {
     let required_vars = [
         "JWT_SECRET_KEY", "JWT_REFRESH_KEY", "DATABASE_URL", "PERPLEXITY_API_KEY",
         "ASSISTANT_ID", "ELEVENLABS_SERVER_URL_SECRET", "FIN_PHONE", "USA_PHONE",
-        "NLD_PHONE", "CHZ_PHONE", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN",
-        "ENVIRONMENT", "FRONTEND_URL", "OPENROUTER_API_KEY", "STRIPE_CREDITS_PRODUCT_ID",
+        "NLD_PHONE", "CHZ_PHONE", "AUS_PHONE", "GB_PHONE","TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN",
+        "ENVIRONMENT", "FRONTEND_URL", "STRIPE_SUBSCRIPTION_US_PRICE_ID", "STRIPE_CREDITS_PRODUCT_ID",
+        "STRIPE_SUBSCRIPTION_WORLD_PRICE_ID",
         "STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET",
         "MESSAGE_COST", "MESSAGE_COST_US", "VOICE_SECOND_COST", "CHARGE_BACK_THRESHOLD", 
         "SHAZAM_PHONE_NUMBER", "SHAZAM_EUROPE_PHONE_NUMBER","SHAZAM_API_KEY", "SERVER_URL", 
         "ENCRYPTION_KEY", "COMPOSIO_API_KEY", "GOOGLE_CALENDAR_CLIENT_ID", 
+<<<<<<< HEAD
         "GOOGLE_CALENDAR_CLIENT_SECRET", "MATRIX_HOMESERVER", "MATRIX_SHARED_SECRET",
         "WHATSAPP_BRIDGE_BOT",
+=======
+        "GOOGLE_CALENDAR_CLIENT_SECRET", "OPENROUTER_API_KEY",
+>>>>>>> master
     ];
     for var in required_vars.iter() {
         std::env::var(var).expect(&format!("{} must be set", var));
@@ -205,6 +218,7 @@ async fn main() {
         .route("/api/call/shazam", get(elevenlabs::handle_shazam_tool_call))
         .route("/api/call/calendar", get(elevenlabs::handle_calendar_tool_call))
         .route("/api/call/email", get(elevenlabs::handle_email_fetch_tool_call))
+        .route("/api/call/email/waiting_check", post(elevenlabs::handle_create_waiting_check_email_tool_call))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 
     let elevenlabs_webhook_routes = Router::new()
@@ -230,6 +244,8 @@ async fn main() {
         .route("/api/admin/preferred-number/{user_id}", post(admin_handlers::update_preferred_number_admin))
         .route("/api/admin/broadcast", post(admin_handlers::broadcast_message))
         .route("/api/admin/set-preferred-number-default/{user_id}", post(admin_handlers::set_preferred_number_default))
+        .route("/api/admin/subscription/{user_id}/{tier}", post(admin_handlers::update_subscription_tier))
+        .route("/api/admin/messages/{user_id}/{amount}", post(admin_handlers::update_user_messages))
         .route("/api/billing/reset-credits/{user_id}", post(billing_handlers::reset_credits))
         .route_layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::require_admin));
 
@@ -247,6 +263,7 @@ async fn main() {
         .route("/api/billing/update-auto-topup/{user_id}", post(billing_handlers::update_topup))
 
         .route("/api/stripe/checkout-session/{user_id}", post(stripe_handlers::create_checkout_session))
+        .route("/api/stripe/subscription-checkout/{user_id}", post(stripe_handlers::create_subscription_checkout))
         // TODO can use this on the topping up credits if user already has bought some before
         // .route("/api/stripe/automatic-charge/{user_id}", post(stripe_handlers::automatic_charge))
         .route("/api/stripe/customer-portal/{user_id}", get(stripe_handlers::create_customer_portal_session))
@@ -275,6 +292,29 @@ async fn main() {
         .route("/api/auth/whatsapp/status", get(whatsapp_auth::get_whatsapp_status))
         .route("/api/auth/whatsapp/connect", get(whatsapp_auth::start_whatsapp_connection))
         .route("/api/auth/whatsapp/disconnect", delete(whatsapp_auth::disconnect_whatsapp))
+        // Filter routes
+        .route("/api/filters/waiting-check/{service_type}", post(filter_handlers::create_waiting_check))
+        .route("/api/filters/waiting-check/{service_type}/{content}", delete(filter_handlers::delete_waiting_check))
+        .route("/api/filters/waiting-checks/{service_type}", get(filter_handlers::get_waiting_checks))
+
+        .route("/api/filters/priority-sender/{service_type}", post(filter_handlers::create_priority_sender))
+        .route("/api/filters/priority-sender/{service_type}/{sender}", delete(filter_handlers::delete_priority_sender))
+        .route("/api/filters/priority-senders/{service_type}", get(filter_handlers::get_priority_senders))
+
+        .route("/api/filters/keyword/{service_type}", post(filter_handlers::create_keyword))
+        .route("/api/filters/keyword/{service_type}/{keyword}", delete(filter_handlers::delete_keyword))
+        .route("/api/filters/keywords/{service_type}", get(filter_handlers::get_keywords))
+
+        .route("/api/filters/importance-priority/{service_type}", post(filter_handlers::create_importance_priority))
+        .route("/api/filters/importance-priority/{service_type}", delete(filter_handlers::delete_importance_priority))
+        .route("/api/filters/importance-priority/{service_type}", get(filter_handlers::get_importance_priority))
+        .route("/api/filters/connected-services", get(filter_handlers::get_connected_services))
+
+        .route("/api/profile/imap-general-checks", post(profile_handlers::update_imap_general_checks))
+        .route("/api/profile/imap-general-checks", get(profile_handlers::get_imap_general_checks))
+        .route("/api/profile/imap-proactive", post(profile_handlers::update_imap_proactive))
+        .route("/api/profile/imap-proactive", get(profile_handlers::get_imap_proactive))
+        .route("/api/profile/email-judgments", get(profile_handlers::get_email_judgments))
 
 
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));

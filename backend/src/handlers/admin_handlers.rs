@@ -45,6 +45,8 @@ pub async fn update_preferred_number_admin(
         std::env::var("FIN_PHONE").expect("FIN_PHONE must be set in environment"),
         std::env::var("NLD_PHONE").expect("NLD_PHONE must be set in environment"),
         std::env::var("CHZ_PHONE").expect("CHZ_PHONE must be set in environment"),
+        std::env::var("AUS_PHONE").expect("AUS_PHONE must be set in environment"),
+        std::env::var("GB_PHONE").expect("GB_PHONE must be set in environment"),
     ];
 
     // Validate that the preferred number is in the allowed list
@@ -173,6 +175,56 @@ async fn process_broadcast_messages(
 }
 
 
+
+pub async fn update_user_messages(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path((user_id, amount)): axum::extract::Path<(i32, i32)>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Get current user
+    let user = state.user_repository.find_by_id(user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        ))?
+        .ok_or_else(|| (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "User not found"}))
+        ))?;
+
+    // Calculate new messages count, ensuring it doesn't go below 0
+    let new_msgs = (user.msgs_left as i32 + amount).max(0);
+
+    // Update messages count
+    state.user_repository.update_messages_left(user_id, new_msgs)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to update messages: {}", e)}))
+        ))?;
+
+    println!("successfully updated messages for user");
+    Ok(Json(json!({
+        "message": "Messages updated successfully",
+        "new_count": new_msgs
+    })))
+}
+
+pub async fn update_subscription_tier(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path((user_id, tier)): axum::extract::Path<(i32, String)>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let tier = if tier == "tier 0" { None } else { Some(tier.as_str()) };
+    
+    // Update the subscription tier
+    state.user_repository.set_subscription_tier(user_id, tier).map_err(|e| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": format!("Database error: {}", e)}))
+    ))?;
+    tracing::info!("subscription tier set successfully");
+
+    Ok(Json(json!({
+        "message": "Subscription tier updated successfully"
+    })))
+}
 
 pub async fn set_preferred_number_default(
     State(state): State<Arc<AppState>>,
