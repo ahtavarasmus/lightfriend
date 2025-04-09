@@ -427,6 +427,8 @@ pub async fn handle_incoming_sms(
 
 async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (StatusCode, axum::Json<TwilioResponse>) {
 
+    let start_time = std::time::Instant::now(); // Track processing time
+
     let user = match state.user_repository.find_by_phone_number(&payload.from) {
         Ok(Some(user)) => {
             tracing::info!("Found user with ID: {} for phone number: {}", user.id, payload.from);
@@ -483,6 +485,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
             );
         }
     };
+
 
     // Fetch conversation messages
     let messages = match fetch_conversation_messages(&conversation.conversation_sid).await {
@@ -1179,6 +1182,26 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
             "I apologize, but something went wrong while processing your request. (you were not charged for this message)".to_string()
         }
     };
+
+    let processing_time_ms = start_time.elapsed().as_millis(); // Calculate processing time
+
+    let input = payload.body.clone(); // User's input
+    let output = final_response.clone(); // AI's response
+    let conversation_sid = conversation.conversation_sid.clone();
+    tokio::spawn(async move {
+        if let Err(e) = crate::api::langfuse::send_langfuse_trace(
+            conversation_sid,
+            Some(user.id.to_string()),
+            input,
+            output,
+            None, // Session ID optional
+            processing_time_ms,
+            fail, // is_error flag
+        ).await {
+            eprintln!("Error sending trace to Langfuse: {}", e);
+        }
+    });
+    
 
     // Send the final response to the conversation
     match crate::api::twilio_utils::send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number,&final_response).await {

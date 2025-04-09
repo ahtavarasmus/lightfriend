@@ -198,7 +198,7 @@ pub async fn start_whatsapp_connection(
     tracing::info!("Starting WhatsApp connection for user {}", auth_user.user_id);
 
     // Ensure user has Matrix credentials
-    let (username, access_token) = ensure_matrix_credentials(&state, auth_user.user_id).await?;
+    let (username, access_token, device_id) = ensure_matrix_credentials(&state, auth_user.user_id).await?;
 
     // Create Matrix client
     let homeserver_url = std::env::var("MATRIX_HOMESERVER")
@@ -223,8 +223,9 @@ pub async fn start_whatsapp_connection(
     // Set the access token by restoring a session
     let session = AuthSession::Matrix(MatrixSession {
         meta: MatrixSession {
-            user_id: 
-            device_id:
+            meta:
+            user_id: username,
+            device_id: device_id
         },
         tokens: MatrixSessionTokens {
             access_token: access_token.to_string(),

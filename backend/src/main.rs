@@ -39,16 +39,13 @@ mod handlers {
     //pub mod unipile_auth;
     pub mod google_calendar_auth;
     pub mod google_calendar;
-    pub mod gmail_auth;
-    pub mod gmail;
+    //pub mod gmail_auth;
+    //pub mod gmail;
     pub mod imap_auth;
     pub mod auth_middleware;
     pub mod imap_handlers;
-<<<<<<< HEAD
-    pub mod whatsapp_auth;
-=======
+    //pub mod whatsapp_auth;
     pub mod filter_handlers;
->>>>>>> master
 }
 
 mod utils {
@@ -65,6 +62,7 @@ mod api {
     pub mod elevenlabs;
     pub mod elevenlabs_webhook;
     pub mod shazam_call;
+    pub mod langfuse;
 }
 
 mod models {
@@ -91,15 +89,12 @@ use handlers::stripe_handlers;
 //use handlers::unipile_auth;
 use handlers::google_calendar_auth;
 use handlers::google_calendar;
-use handlers::gmail_auth;
-use handlers::gmail;
+//use handlers::gmail_auth;
+//use handlers::gmail;
 use handlers::imap_auth;
 use handlers::imap_handlers;
-<<<<<<< HEAD
-use handlers::whatsapp_auth;
-=======
+//use handlers::whatsapp_auth;
 use handlers::filter_handlers;
->>>>>>> master
 use api::twilio_sms;
 use api::elevenlabs;
 use api::elevenlabs_webhook;
@@ -136,12 +131,9 @@ pub fn validate_env() {
         "MESSAGE_COST", "MESSAGE_COST_US", "VOICE_SECOND_COST", "CHARGE_BACK_THRESHOLD", 
         "SHAZAM_PHONE_NUMBER", "SHAZAM_EUROPE_PHONE_NUMBER","SHAZAM_API_KEY", "SERVER_URL", 
         "ENCRYPTION_KEY", "COMPOSIO_API_KEY", "GOOGLE_CALENDAR_CLIENT_ID", 
-<<<<<<< HEAD
         "GOOGLE_CALENDAR_CLIENT_SECRET", "MATRIX_HOMESERVER", "MATRIX_SHARED_SECRET",
-        "WHATSAPP_BRIDGE_BOT",
-=======
-        "GOOGLE_CALENDAR_CLIENT_SECRET", "OPENROUTER_API_KEY",
->>>>>>> master
+        "WHATSAPP_BRIDGE_BOT", "GOOGLE_CALENDAR_CLIENT_SECRET", "OPENROUTER_API_KEY",
+        "LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_HOST_URL",
     ];
     for var in required_vars.iter() {
         std::env::var(var).expect(&format!("{} must be set", var));
@@ -227,8 +219,8 @@ async fn main() {
 
     let auth_built_in_webhook_routes = Router::new()
         .route("/api/stripe/webhook", post(stripe_handlers::stripe_webhook))
-        .route("/api/auth/google/calendar/callback", get(google_calendar_auth::google_callback))
-        .route("/api/auth/google/gmail/callback", get(gmail_auth::gmail_callback));
+        //.route("/api/auth/google/gmail/callback", get(gmail_auth::gmail_callback))
+        .route("/api/auth/google/calendar/callback", get(google_calendar_auth::google_callback));
 
 
     // Public routes that don't need authentication
@@ -274,6 +266,7 @@ async fn main() {
         .route("/api/auth/google/calendar/email", get(google_calendar::get_calendar_email))
         .route("/api/calendar/events", get(google_calendar::handle_calendar_fetching_route))
 
+        /*
         .route("/api/auth/google/gmail/login", get(gmail_auth::gmail_login))
         .route("/api/auth/google/gmail/delete_connection", delete(gmail_auth::delete_gmail_connection))
         .route("/api/auth/google/gmail/refresh", post(gmail_auth::refresh_gmail_token))
@@ -281,6 +274,7 @@ async fn main() {
         .route("/api/auth/google/gmail/status", get(gmail::gmail_status))
         .route("/api/gmail/previews", get(gmail::fetch_email_previews))
         .route("/api/gmail/message/{id}", get(gmail::fetch_single_email))
+        */
 
         .route("/api/auth/imap/login", post(imap_auth::imap_login))
         .route("/api/auth/imap/status", get(imap_auth::imap_status))
@@ -289,9 +283,11 @@ async fn main() {
         .route("/api/imap/message/{id}", get(imap_handlers::fetch_single_imap_email))
         .route("/api/imap/full_emails", get(imap_handlers::fetch_full_imap_emails))
 
+        /*
         .route("/api/auth/whatsapp/status", get(whatsapp_auth::get_whatsapp_status))
         .route("/api/auth/whatsapp/connect", get(whatsapp_auth::start_whatsapp_connection))
         .route("/api/auth/whatsapp/disconnect", delete(whatsapp_auth::disconnect_whatsapp))
+        */
         // Filter routes
         .route("/api/filters/waiting-check/{service_type}", post(filter_handlers::create_waiting_check))
         .route("/api/filters/waiting-check/{service_type}/{content}", delete(filter_handlers::delete_waiting_check))
