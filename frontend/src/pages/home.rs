@@ -654,22 +654,6 @@ pub fn landing() -> Html {
                     margin: 0 auto;
                 }
 
-                .hero h1 {
-                    font-size: 4rem;
-                    line-height: 1.1;
-                    margin-bottom: 1.5rem;
-                    background: linear-gradient(
-                        45deg,
-                        #fff,
-                        rgba(126, 178, 255, 0.8)
-                    );
-                    -webkit-background-clip: text;
-                    -webkit-text-fill-color: transparent;
-                    font-weight: 700;
-                    max-width: 800px;
-                    margin: 0 auto 1.5rem;
-                }
-
                 .main-features {
                     max-width: 1200px;
                     margin: 0 auto;
@@ -786,27 +770,6 @@ pub fn landing() -> Html {
                     }
                 }
 
-                @media (max-width: 768px) {
-                    .hero h1 {
-                        font-size: 2.5rem;
-                    }
-
-                    .hero {
-                        padding: 4rem 1rem;
-                    }
-
-                    .main-features {
-                        padding: 2rem 1rem;
-                    }
-
-                    .feature-block {
-                        margin-bottom: 3rem;
-                    }
-
-                    .feature-list li {
-                        font-size: 1rem;
-                    }
-                }
                     @media (max-width: 768px) {
                         .landing-page {
                             padding: 0;
@@ -818,7 +781,7 @@ pub fn landing() -> Html {
                         }
                         
                         .hero h1 {
-                            font-size: 2rem;
+                            font-size: 3.0rem !important;
                             padding: 0 1rem;
                         }
 
@@ -2582,25 +2545,6 @@ pub fn Home() -> Html {
                         box-sizing: border-box;
                     }
 
-                    .hero h1 {
-                        font-size: 4.5rem;
-                        line-height: 1.1;
-                        margin-bottom: 1.5rem;
-                        background: linear-gradient(
-                            45deg,
-                            #fff,
-                            rgba(126, 178, 255, 0.8)
-                        );
-                        -webkit-background-clip: text;
-                        -webkit-text-fill-color: transparent;
-                        font-weight: 700;
-                        max-width: 900px;
-                        position: relative;
-                        width: 100%;
-                        box-sizing: border-box;
-                        word-wrap: break-word;
-                    }
-
                     @media (max-width: 768px) {
                         .landing-page {
                             padding: 0;
@@ -2610,12 +2554,7 @@ pub fn Home() -> Html {
                             padding: 2rem 1rem;
                             padding-top: 100px;
                         }
-                        
-                        .hero h1 {
-                            font-size: 2rem;
-                            padding: 0 1rem;
-                        }
-
+                       
                         .hero-subtitle {
                             font-size: 1rem;
                             padding: 0 1rem;
