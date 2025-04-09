@@ -1293,7 +1293,9 @@ pub fn connected_services(props: &Props) -> Html {
                         html! {}
                     }
                 } else {
-                    html! {}
+                    html! {
+                        <p>{"Add some connections and they will appear here."}</p>
+                    }
                 }
             }
 
