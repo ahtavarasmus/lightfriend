@@ -107,12 +107,13 @@ pub fn is_logged_in() -> bool {
 #[function_component(Landing)]
 pub fn landing() -> Html {
     html! {
+
         <div class="landing-page">
             // Hero Section
             <header class="hero">
-                <h1>{"Stay Connected with lightfriend"}</h1>
+                <h1>{"Your AI Assistant for Dumbphones"}</h1>
                 <p class="hero-subtitle">
-                    {"Use your dumbphone smarter with AI-powered voice and text assistance—check messages and essential info when you need it, without endless scrolling or distractions."}
+                    {"Access your digital life through simple calls and texts - no smartphone needed."}
                 </p>
                 <Link<Route> to={Route::Register} classes="forward-link">
                     <button class="hero-cta">
@@ -121,117 +122,62 @@ pub fn landing() -> Html {
                 </Link<Route>>
             </header>
 
-            // Problem Section: User Challenges
-            <section class="problems">
-                <h2>{"Are You Facing These Challenges?"}</h2>
-                <div class="challenges-grid">
-                    <div class="challenge-item smartphone-addict">
-                        <h3>{"Smartphone Addict"}</h3>
-                        <p>{"Tired of endless scrolling and feeling overwhelmed by notifications? Spending hours watching endless feeds and regretting it after?"}</p>
+            // Main Features Section
+            <section class="main-features">
+                <div class="feature-block on-demand">
+                    <div class="feature-content">
+                        <h2>{"Ask Anything, Anytime"}</h2>
+                        <p>{"Need to check your email? Want to know your next meeting? Just ask lightfriend through a call or text."}</p>
+                        <ul class="feature-list">
+                            <li>{"Access emails, calendar and messaging apps"}</li>
+                            <li>{"Search the internet"}</li>
+                            <li>{"Check weather"}</li>
+                            <li>{"Identify songs with Shazam"}</li>
+                        </ul>
+                        <div class="demo-link-container">
+                            <a 
+                                href="https://www.youtube.com/shorts/KrVdJbHPB-o" 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                class="demo-link"
+                            >
+                                {"▶️ Watch Demo"}
+                            </a>
+                        </div>
                     </div>
-                    <div class="challenge-item dumbphone-basic">
-                        <h3>{"Basic Dumbphone User"}</h3>
-                        <p>{"Worried about missing important messages or updates because your dumbphone lacks app access? Standing alone at the meeting spot when your friends changed plans last minute on Telegram? Picking up a new package from postal office, but the code was sent to your email?"}</p>
-                    </div>
-                </div>
-            </section>
-
-            // Transformation Section: Lightfriend’s Benefits
-            <section class="transformation">
-                <h2>{"lightfriend Helps You Stay in the Loop, Simply"}</h2>
-                <p>{"See how lightfriend lets you access messages and key information on your dumbphone, keeping you connected when you need it — without turning it into a smartphone."}</p>
-                <div class="benefits-grid">
-                    <div class="benefit-item">
-                        <h3>{"For Smartphone Addicts"}</h3>
-                        <p>{"Break free from scrolling addiction and switch to a dumbphone with lightfriend’s minimal, on-demand tools. With lightfriend you can give up the algorithms while still staying connected when you need."}</p>
-                    </div>
-                    <div class="benefit-item">
-                        <h3>{"For Basic Dumbphone Users"}</h3>
-                        <p>{"Enjoy the simple, distraction-free life with lightfriend’s AI assistance when it matters. Access your email, calendar, messaging apps or just search internet answers when needed through natural voice calling or sms interface. Don't worry, it's not too convenient ;) - just enough to get the job done."}</p>
+                    <div class="feature-image">
+                        <img src="/assets/train.png" alt="On-demand assistance demo" />
                     </div>
                 </div>
-                <div class="video-demo">
-                    <p>{"Watch lightfriend in action:"}</p>
-                    <a 
-                        href="https://www.youtube.com/shorts/KrVdJbHPB-o" 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        class="demo-link"
-                    >
-                        {"▶️ See Demo"}
-                    </a>
-                </div>
 
-            </section>
-
-            // Features Section: Practical Tools
-            <section class="features">
-                <h2>{"Essential Tools, Minimal Distractions"}</h2>
-                <p>{"Access what you need with lightfriend’s AI-powered voice calls and SMS, keeping your dumbphone simple but functional."}</p>
-                <div class="features-grid">
-                    <div class="feature-item">
-                        <i class="calendar-icon"></i>
-                        <h3>{"Calendar Access"}</h3>
-                        <p>{"Check and manage your schedule when needed."}</p>
-                    </div>
-                    <div class="feature-item">
-                        <i class="email-icon"></i>
-                        <h3>{"Email Access"}</h3>
-                        <p>{"Check and manage important emails via voice or text when needed."}</p>
-                    </div>
-                    <div class="feature-item">
-                        <i class="message-icon"></i>
-                        <h3>{"Smart Messaging"}</h3>
-                        <p>{"Access key messages across platforms like Telegram and WhatsApp."}</p>
-                    </div>
-                    <div class="feature-item">
-                        <i class="search-icon"></i>
-                        <h3>{"Real-Time Internet Search"}</h3>
-                        <p>{"Ask questions or search the web via voice or text for quick answers from Perplexity."}</p>
-                    </div>
-                    <div class="feature-item">
-                        <i class="weather-icon"></i>
-                        <h3>{"Weather Updates"}</h3>
-                        <p>{"Get current weather info for your location with a simple call or text."}</p>
-                    </div>
-                    <div class="feature-item highlight">
-                        <i class="music-icon"></i>
-                        <h3>{"Shazam Integration"}</h3>
-                        <p>{"Identify songs with a simple call."}</p>
-                    </div>
-                </div>
-            </section>
-
-
-            <section class="shazam-showcase">
-                <h2>{"Identify Any Song, Anywhere"}</h2>
-                <div class="showcase-content">
-                    <div class="showcase-text">
-                        <h3>{"Simple Song Recognition:"}</h3>
-                        <ol>
-                            <li>{"Text or call lightfriend saying 'What song is this?' or simply 'shazam'"}</li>
-                            <li>{"lightfriend calls you back ready to listen"}</li>
-                            <li>{"Hold your phone near the music"}</li>
-                            <li>{"lightfriend sends you the song details by text"}</li>
-                        </ol>
-                        <p class="showcase-highlight">
-                            {"No app needed - just your basic phone and the music you want to identify!"}
-                        </p>
-                        <div class="video-demo">
-                            <p>{"Watch it in action:"}</p>
+                <div class="feature-block proactive">
+                    <div class="feature-content">
+                        <h2>{"Never Miss What Matters"}</h2>
+                        <p>{"Set up smart notifications for important emails and updates. lightfriend monitors your accounts and notifies you only when it matters."}</p>
+                        <ul class="feature-list">
+                            <li>{"Smart email filtering"}</li>
+                            <li>{"Custom keyword alerts"}</li>
+                            <li>{"Priority sender notifications"}</li>
+                            <li>{"Temporary waiting checks"}</li>
+                        </ul>
+                        <div class="demo-link-container">
+                        /*
                             <a 
                                 href="https://youtube.com/shorts/4ZYnhtm9dkk" 
                                 target="_blank" 
                                 rel="noopener noreferrer"
                                 class="demo-link"
                             >
-                                {"▶️ See Shazam Demo"}
+                                {"▶️ Watch Demo"}
                             </a>
+                        */
                         </div>
+                    </div>
+                    <div class="feature-image">
+                        <img src="/assets/delivery.png" alt="Proactive notifications demo" />
                     </div>
                 </div>
             </section>
-
             // ProductHunt Launch Demo section
             <section class="producthunt-demo">
                 <h2>{"Featured on ProductHunt"}</h2>
@@ -690,38 +636,177 @@ pub fn landing() -> Html {
                             font-size: 1rem;
                         }
                     }
+.landing-page {
+                    position: relative;
+                    min-height: 100vh;
+                    background-color: #1a1a1a;
+                    color: #ffffff;
+                    font-family: system-ui, -apple-system, sans-serif;
+                    margin: 0 auto;
+                    width: 100%;
+                    overflow-x: hidden;
+                    box-sizing: border-box;
+                }
 
-                    .landing-page {
-                        position: relative;
-                        min-height: 100vh;
-                        background-color: #1a1a1a;
-                        color: #ffffff;
-                        font-family: system-ui, -apple-system, sans-serif;
-                        margin: 0 auto;
-                        width: 100%;
-                        overflow-x: hidden;
-                        box-sizing: border-box;
+                .hero {
+                    text-align: center;
+                    padding: 6rem 2rem;
+                    margin: 0 auto;
+                }
+
+                .hero h1 {
+                    font-size: 4rem;
+                    line-height: 1.1;
+                    margin-bottom: 1.5rem;
+                    background: linear-gradient(
+                        45deg,
+                        #fff,
+                        rgba(126, 178, 255, 0.8)
+                    );
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    font-weight: 700;
+                    max-width: 800px;
+                    margin: 0 auto 1.5rem;
+                }
+
+                .main-features {
+                    max-width: 1200px;
+                    margin: 0 auto;
+                    padding: 4rem 2rem;
+                }
+
+                .feature-block {
+                    display: flex;
+                    align-items: center;
+                    gap: 4rem;
+                    margin-bottom: 6rem;
+                    background: rgba(30, 30, 30, 0.5);
+                    border: 1px solid rgba(30, 144, 255, 0.1);
+                    border-radius: 24px;
+                    padding: 3rem;
+                    transition: all 0.3s ease;
+                }
+
+                .feature-block:hover {
+                    transform: translateY(-5px);
+                    box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
+                    border-color: rgba(30, 144, 255, 0.3);
+                }
+
+                .feature-content {
+                    flex: 1;
+                }
+
+                .feature-image {
+                    flex: 1;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                }
+
+                .feature-image img {
+                    max-width: 100%;
+                    height: auto;
+                    border-radius: 12px;
+                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                }
+
+                .feature-block h2 {
+                    font-size: 2.5rem;
+                    margin-bottom: 1rem;
+                    background: linear-gradient(45deg, #fff, #7EB2FF);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                }
+
+                .feature-block p {
+                    color: #999;
+                    font-size: 1.1rem;
+                    line-height: 1.6;
+                    margin-bottom: 2rem;
+                }
+
+                .feature-list {
+                    list-style: none;
+                    padding: 0;
+                    margin: 0 0 2rem 0;
+                }
+
+                .feature-list li {
+                    color: #fff;
+                    font-size: 1.1rem;
+                    padding: 0.5rem 0;
+                    padding-left: 1.8rem;
+                    position: relative;
+                }
+
+                .feature-list li::before {
+                    content: "→";
+                    position: absolute;
+                    left: 0;
+                    color: #1E90FF;
+                }
+
+                .demo-link-container {
+                    margin-top: 2rem;
+                }
+
+                .demo-link {
+                    display: inline-flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                    padding: 0.8rem 1.5rem;
+                    background: linear-gradient(45deg, #1E90FF, #4169E1);
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 8px;
+                    font-size: 1rem;
+                    transition: all 0.3s ease;
+                }
+
+                .demo-link:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
+                }
+
+                @media (max-width: 1024px) {
+                    .feature-block {
+                        flex-direction: column;
+                        padding: 2rem;
+                        gap: 2rem;
                     }
 
+                    .feature-image {
+                        order: -1;
+                    }
+
+                    .feature-block h2 {
+                        font-size: 2rem;
+                    }
+                }
+
+                @media (max-width: 768px) {
                     .hero h1 {
-                        font-size: 4.5rem;
-                        line-height: 1.1;
-                        margin-bottom: 1.5rem;
-                        background: linear-gradient(
-                            45deg,
-                            #fff,
-                            rgba(126, 178, 255, 0.8)
-                        );
-                        -webkit-background-clip: text;
-                        -webkit-text-fill-color: transparent;
-                        font-weight: 700;
-                        max-width: 900px;
-                        position: relative;
-                        width: 100%;
-                        box-sizing: border-box;
-                        word-wrap: break-word;
+                        font-size: 2.5rem;
                     }
 
+                    .hero {
+                        padding: 4rem 1rem;
+                    }
+
+                    .main-features {
+                        padding: 2rem 1rem;
+                    }
+
+                    .feature-block {
+                        margin-bottom: 3rem;
+                    }
+
+                    .feature-list li {
+                        font-size: 1rem;
+                    }
+                }
                     @media (max-width: 768px) {
                         .landing-page {
                             padding: 0;
@@ -1893,6 +1978,7 @@ pub fn Home() -> Html {
 
                         <div class="feature-status">
                             <h3>{"Currently Available"}</h3>
+                            <h4>{"Proactive messaging (email)(subscription needed)"}</h4>
                             <h4>{"Tools"}</h4>
                             <ul>
                                 <li>{"Perplexity AI search"}</li>
@@ -1900,7 +1986,7 @@ pub fn Home() -> Html {
                                 <li>{"Dedicated Weather search"}</li>
                                 <li>{"Send info to you by sms during voice calls"}</li>
                                 <li>{"Shazam song recognition - Get a call, play the song, AI sends it to you by sms."}</li>
-                                <li>{"Proactive messages(notifications for critical messages)"}</li>
+                                <li>{"Set up waiting checks for proactive messaging (subscription needed)"}</li>
                             </ul>
                             <h4>{"Methods"}</h4>
                             <ul>
