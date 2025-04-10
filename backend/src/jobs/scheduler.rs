@@ -598,8 +598,8 @@ pub async fn start_scheduler(state: Arc<AppState>) {
             match state.user_repository.get_all_ongoing_usage() {
                 Ok(ongoing_logs) => {
                     for log in ongoing_logs {
-                        info!("Processing usage log for user {} with conversation_id {:?}", log.user_id, log.conversation_id);
-                        let conversation_id = match log.conversation_id {
+                        info!("Processing usage log for user {} with sid {:?}", log.user_id, log.sid);
+                        let sid= match log.sid {
                             Some(id) => id,
                             None => continue,
                         };
@@ -607,7 +607,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                         // Check conversation status from ElevenLabs
                         let status_url = format!(
                             "https://api.elevenlabs.io/v1/convai/conversations/{}",
-                            conversation_id
+                            sid 
                         );
 
                         let conversation_data = match client
@@ -683,7 +683,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                 // Update usage log with final status
                                 if let Err(e) = state.user_repository.update_usage_log_fields(
                                     log.user_id,
-                                    &conversation_id,
+                                    &sid,
                                     "done",
                                     credits_used,
                                     true,
@@ -702,7 +702,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     // Delete conversation
                                     let delete_url = format!(
                                         "https://api.elevenlabs.io/v1/convai/conversations/{}", 
-                                        conversation_id
+                                        sid 
                                     );
                                     
                                     if let Err(e) = client

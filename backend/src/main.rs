@@ -235,6 +235,7 @@ async fn main() {
         .route("/api/admin/verify/{user_id}", post(admin_handlers::verify_user))
         .route("/api/admin/preferred-number/{user_id}", post(admin_handlers::update_preferred_number_admin))
         .route("/api/admin/broadcast", post(admin_handlers::broadcast_message))
+        .route("/api/admin/usage-logs", get(admin_handlers::get_usage_logs))
         .route("/api/admin/set-preferred-number-default/{user_id}", post(admin_handlers::set_preferred_number_default))
         .route("/api/admin/subscription/{user_id}/{tier}", post(admin_handlers::update_subscription_tier))
         .route("/api/admin/messages/{user_id}/{amount}", post(admin_handlers::update_user_messages))

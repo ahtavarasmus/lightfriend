@@ -269,7 +269,7 @@ pub async fn process_audio_with_shazam(state: Arc<ShazamState>) {
 
                         match state.user_repository.find_by_phone_number(&to_number) {
                             Ok(Some(user)) => {
-                                match crate::twilio_sms::send_shazam_answer_to_user(state.clone(), user.id, &song_name).await {
+                                match crate::twilio_sms::send_shazam_answer_to_user(state.clone(), user.id, &song_name, true).await {
                                     Ok(_) => {
                                         println!("Successfully sent Shazam result to user {}: {}", user.id, song_name);
                                     }

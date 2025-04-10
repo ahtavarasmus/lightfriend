@@ -147,13 +147,14 @@ diesel::table! {
     usage_logs (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
-        conversation_id -> Nullable<Text>,
-        status -> Nullable<Text>,
+        sid -> Nullable<Text>,
         activity_type -> Text,
         credits -> Nullable<Float>,
         created_at -> Integer,
+        time_consumed -> Nullable<Integer>,
         success -> Nullable<Bool>,
-        summary -> Nullable<Text>,
+        reason -> Nullable<Text>,
+        status -> Nullable<Text>,
         recharge_threshold_timestamp -> Nullable<Integer>,
         zero_credits_timestamp -> Nullable<Integer>,
     }

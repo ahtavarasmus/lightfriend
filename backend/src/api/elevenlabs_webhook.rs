@@ -277,7 +277,7 @@ pub async fn elevenlabs_webhook(
             // Update the usage log with final values
             if let Err(e) = state.user_repository.update_usage_log_fields(
                 user_id,
-                &usage.conversation_id.unwrap_or_default(),
+                &usage.sid.unwrap_or_default(),
                 "done",
                 credits_used,
                 success,

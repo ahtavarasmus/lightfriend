@@ -252,11 +252,12 @@ pub async fn fetch_assistant(
             // log usage and start call
             if let Err(e) = state.user_repository.log_usage(
                 user.id,
-                "call",
-                None,
-                None,
-                None,
                 Some(call_sid),
+                "call".to_string(),
+                None,
+                None,
+                None,
+                None,
                 Some("ongoing".to_string()),
                 Some(recharge_threshold_timestamp),
                 Some(zero_credits_timestamp),

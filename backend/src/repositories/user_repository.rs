@@ -382,7 +382,7 @@ impl UserRepository {
     }
 
     // log the usage. activity_type either 'call' or 'sms'
-    pub fn log_usage(&self, user_id: i32, activity_type: &str, credits: Option<f32>, success: Option<bool>, possible_summary: Option<String>, conversation_id: Option<String>, status: Option<String>, recharge_threshold_timestamp: Option<i32>, zero_credits_timestamp: Option<i32>) -> Result<(), DieselError> {
+    pub fn log_usage(&self, user_id: i32, sid: Option<String>, activity_type: String, credits: Option<f32>, time_consumed: Option<i32>, success: Option<bool>, reason: Option<String>, status: Option<String>, recharge_threshold_timestamp: Option<i32>, zero_credits_timestamp: Option<i32>) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         let user = users::table
@@ -394,20 +394,15 @@ impl UserRepository {
             .unwrap()
             .as_secs() as i32;
 
-        // only store the summary if user has given permission
-        let summary = match user.debug_logging_permission {
-            true => possible_summary,
-            false => None,
-        };
-
         let new_log = NewUsageLog {
             user_id,
-            activity_type: activity_type.to_string(),
+            sid,
+            activity_type,
             credits,
             created_at: current_time,
+            time_consumed,
             success,
-            summary,
-            conversation_id,
+            reason,
             status,
             recharge_threshold_timestamp,
             zero_credits_timestamp,
@@ -449,7 +444,7 @@ impl UserRepository {
         
         // If there's an ongoing log, update its timestamps
         if let Some(log) = ongoing_log {
-            if let Some(conversation_id) = log.conversation_id {
+            if let Some(sid) = log.sid {
 
                 let charge_back_threshold= std::env::var("CHARGE_BACK_THRESHOLD")
                     .expect("CHARGE_BACK_THRESHOLD not set")
@@ -469,7 +464,7 @@ impl UserRepository {
                 let zero_credits_timestamp: i32 = (chrono::Utc::now().timestamp() as i32) + seconds_to_zero_credits as i32;
 
                 diesel::update(usage_logs::table)
-                    .filter(usage_logs::conversation_id.eq(conversation_id))
+                    .filter(usage_logs::sid.eq(sid))
                     .set((
                         usage_logs::recharge_threshold_timestamp.eq(recharge_threshold_timestamp),
                         usage_logs::zero_credits_timestamp.eq(zero_credits_timestamp), 
@@ -661,16 +656,16 @@ impl UserRepository {
         Ok(ongoing_log)
     }
 
-    pub fn update_usage_log_fields(&self, user_id: i32, conversation_id: &str, status: &str, credits: f32, success: bool, summary: &str) -> Result<(), DieselError> {
+    pub fn update_usage_log_fields(&self, user_id: i32, sid: &str, status: &str, credits: f32, success: bool, reason: &str) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(usage_logs::table)
             .filter(usage_logs::user_id.eq(user_id))
-            .filter(usage_logs::conversation_id.eq(conversation_id))
+            .filter(usage_logs::sid.eq(sid))
             .set((
-                usage_logs::status.eq(status),
                 usage_logs::credits.eq(credits),
                 usage_logs::success.eq(success),
-                usage_logs::summary.eq(summary),
+                usage_logs::reason.eq(reason),
+                usage_logs::status.eq(status),
             ))
             .execute(&mut conn)?;
         Ok(())
@@ -701,10 +696,21 @@ impl UserRepository {
         Ok(ongoing_logs)
     }
 
-    pub fn update_usage_log_timestamps(&self, conversation_id: &str, recharge_threshold_timestamp: Option<i32>, zero_credits_timestamp: Option<i32>) -> Result<(), DieselError> {
+    pub fn get_all_usage_logs(&self) -> Result<Vec<crate::models::user_models::UsageLog>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Get all usage logs ordered by creation time (newest first)
+        let logs = usage_logs::table
+            .order_by(usage_logs::created_at.desc())
+            .load::<crate::models::user_models::UsageLog>(&mut conn)?;
+        
+        Ok(logs)
+    }
+
+    pub fn update_usage_log_timestamps(&self, sid: &str, recharge_threshold_timestamp: Option<i32>, zero_credits_timestamp: Option<i32>) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(usage_logs::table)
-            .filter(usage_logs::conversation_id.eq(conversation_id))
+            .filter(usage_logs::sid.eq(sid))
             .set((
                 usage_logs::recharge_threshold_timestamp.eq(recharge_threshold_timestamp),
                 usage_logs::zero_credits_timestamp.eq(zero_credits_timestamp),

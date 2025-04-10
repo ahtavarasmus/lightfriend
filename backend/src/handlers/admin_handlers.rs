@@ -5,11 +5,26 @@ use axum::{
     http::StatusCode,
 };
 use serde_json::json;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 pub struct BroadcastMessageRequest {
     message: String,
+}
+
+#[derive(Serialize)]
+pub struct UsageLogResponse {
+    id: i32,
+    sid: Option<String>,
+    activity_type: String,
+    credits: Option<f32>,
+    timestamp: i32,
+    time_consumed: Option<i32>,
+    success: Option<bool>,
+    reason: Option<String>,
+    status: Option<String>,
+    recharge_threshold_timestamp: Option<i32>,
+    zero_credits_timestamp: Option<i32>,
 }
 
 use crate::AppState;
@@ -224,6 +239,42 @@ pub async fn update_subscription_tier(
     Ok(Json(json!({
         "message": "Subscription tier updated successfully"
     })))
+}
+
+pub async fn get_usage_logs(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<UsageLogResponse>>, (StatusCode, Json<serde_json::Value>)> {
+    tracing::info!("getting usage logs");
+    // Get all usage logs from the database
+    let logs = state.user_repository.get_all_usage_logs()
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        ))?;
+
+    // Transform the logs into the response format
+    let response_logs: Vec<UsageLogResponse> = logs.into_iter()
+        .map(|log| {
+
+            UsageLogResponse {
+                id: log.id.unwrap_or(0),
+
+                sid: log.sid,
+                activity_type: log.activity_type,
+                credits: log.credits,
+                timestamp: log.created_at,
+                time_consumed: log.time_consumed,
+                success: log.success,
+                reason: log.reason,
+                status: log.status,
+                recharge_threshold_timestamp: log.recharge_threshold_timestamp,
+                zero_credits_timestamp: log.zero_credits_timestamp,
+            }
+        })
+        .collect();
+
+    tracing::info!("returning response_logs");
+    Ok(Json(response_logs))
 }
 
 pub async fn set_preferred_number_default(
