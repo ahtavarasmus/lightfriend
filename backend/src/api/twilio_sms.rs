@@ -30,7 +30,7 @@ struct ChatMessage {
     content: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct TwilioMessageResponse {
     sid: String,
     conversation_sid: String,
@@ -124,6 +124,7 @@ pub async fn send_shazam_answer_to_user(
     state: Arc<crate::shazam_call::ShazamState>,
     user_id: i32,
     message: &str,
+    success: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Add check for user's subscription status
     tracing::info!("Checking subscription status for user {}", user_id);
@@ -199,48 +200,42 @@ pub async fn send_shazam_answer_to_user(
     tracing::info!("Retrieved conversation with SID: {}", conversation.conversation_sid);
 
     tracing::info!("Sending message to conversation {}", conversation.conversation_sid);
-    crate::api::twilio_utils::send_conversation_message(
+    match crate::api::twilio_utils::send_conversation_message(
         &conversation.conversation_sid,
         &conversation.twilio_number,
         message,
     )
-    .await
-    .map_err(|e| {
-        eprintln!("Failed to send message to {} (conversation {}): {}", user.phone_number, conversation.conversation_sid, e);
-        e
-    })?;
+    .await {
+        Ok(message_sid) => {
 
-    // Add a small delay to ensure message ordering
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            // Deduct credits for the message
+            if let Err(e) = state.user_repository
+                .update_user_credits(user.id, user.credits - message_credits_cost) {
+                eprintln!("Failed to update user credits after Shazam message: {}", e);
+                return Err("Failed to process credits points".into());
+            }
 
-    tracing::info!("Successfully sent Shazam answer to user {} at {} using conversation {} and number {}", 
-        user_id, 
-        user.phone_number, 
-        conversation.conversation_sid,
-        conversation.twilio_number
-    );
-
-    // Deduct credits for the message
-    if let Err(e) = state.user_repository
-        .update_user_credits(user.id, user.credits - message_credits_cost) {
-        eprintln!("Failed to update user credits after Shazam message: {}", e);
-        return Err("Failed to process credits points".into());
-    }
-
-    // Log the SMS usage
-    if let Err(e) = state.user_repository.log_usage(
-        user.id,
-        "sms",
-        Some(message_credits_cost),
-        Some(true),
-        Some("shazam".to_string()),
-        None,
-        None,
-        None,
-        None,
-    ) {
-        eprintln!("Failed to log Shazam SMS usage: {}", e);
-        // Continue execution even if logging fails
+            // Log the SMS usage
+            if let Err(e) = state.user_repository.log_usage(
+                user.id,
+                Some(message_sid),
+                "sms".to_string(),
+                Some(message_credits_cost),
+                None,
+                Some(success),
+                Some("shazam response".to_string()),
+                None,
+                None,
+                None,
+            ) {
+                eprintln!("Failed to log Shazam SMS usage: {}", e);
+                // Continue execution even if logging fails
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to send conversation message: {}", e);
+            return Err("Failed to send shazam response to the user".into());
+        }
     }
 
     /* TODO have to make this whole charging thing in a separate function at some point
@@ -538,7 +533,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
 
     // Only include conversation history if message starts with "forget"
     if !payload.body.to_lowercase().starts_with("forget") {
-        let mut history: Vec<ChatMessage> = messages.into_iter().map(|msg| {
+        let mut history: Vec<ChatMessage> = messages.clone().into_iter().map(|msg| {
             ChatMessage {
                 role: if msg.author == "lightfriend" { "assistant" } else { "user" }.to_string(),
                 content: msg.body,
@@ -1183,29 +1178,166 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         }
     };
 
-    let processing_time_ms = start_time.elapsed().as_millis(); // Calculate processing time
+    let processing_time_secs = start_time.elapsed().as_secs(); // Calculate processing time
 
-    let input = payload.body.clone(); // User's input
-    let output = final_response.clone(); // AI's response
-    let conversation_sid = conversation.conversation_sid.clone();
-    tokio::spawn(async move {
-        if let Err(e) = crate::api::langfuse::send_langfuse_trace(
-            conversation_sid,
-            Some(user.id.to_string()),
-            input,
-            output,
-            None, // Session ID optional
-            processing_time_ms,
-            fail, // is_error flag
-        ).await {
-            eprintln!("Error sending trace to Langfuse: {}", e);
+    // Create evaluation function properties
+    let mut eval_properties = HashMap::new();
+    eval_properties.insert(
+        "success".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some("Whether the response was successful and helpful".to_string()),
+            ..Default::default()
+        }),
+    );
+    eval_properties.insert(
+        "reason".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Reason for failure if success is false, explaining the issue without revealing conversation content".to_string()),
+            ..Default::default()
+        }),
+    );
+    // Define evaluation tool
+    let eval_tools = vec![
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: String::from("evaluate_response"),
+                description: Some(String::from(
+                    "Evaluates the quality and effectiveness of an AI response in a conversation. \
+                    Consider: context awareness, task completion, tool usage, response quality, and error handling."
+                )),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(eval_properties),
+                    required: Some(vec![String::from("success")]),
+                },
+            },
+        },
+    ];
+
+    // Create evaluation messages
+    let eval_messages = vec![
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::system,
+            content: chat_completion::Content::Text(
+                "You are a conversation quality evaluator. Analyze the latest AI response in the context \
+                of the entire conversation history and evaluate if it was successful, helpful, and maintained \
+                proper context. Use the evaluate_response function to provide structured feedback.\n\n\
+                Consider these aspects:\n\
+                1. Context awareness: Does the response consider previous messages?\n\
+                2. Task completion: Did it fulfill the user's request?\n\
+                3. Tool usage: Were appropriate tools used when needed?\n\
+                4. Response quality: Was it clear, concise, and helpful?\n\
+                5. Error handling: Were errors handled gracefully?\n\n\
+                For unsuccessful responses, provide a reason that helps improve the system without revealing \
+                sensitive details.".to_string()
+            ),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::user,
+            content: chat_completion::Content::Text(format!(
+                "Conversation history: {}\nLatest user message: {}\nAI response: {}",
+                messages.iter()
+                    .map(|msg| format!("[{}]: {}", 
+                        if msg.author == "lightfriend" { "AI" } else { "User" },
+                        if msg.body.len() > 50 { format!("{}...", &msg.body[..50]) } else { msg.body.clone() }
+                    ))
+                    .collect::<Vec<String>>()
+                    .join("\n"),
+                payload.body,
+                final_response
+            )),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+    ];
+
+    let eval_req = chat_completion::ChatCompletionRequest::new(
+        "meta-llama/llama-4-scout".to_string(),
+        eval_messages,
+    )
+    .tools(eval_tools)
+    .tool_choice(chat_completion::ToolChoiceType::Auto)
+    .max_tokens(150);
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum BoolValue {
+        Bool(bool),
+        String(String),
+    }
+
+    impl From<BoolValue> for bool {
+        fn from(value: BoolValue) -> Self {
+            match value {
+                BoolValue::Bool(b) => b,
+                BoolValue::String(s) => s.to_lowercase() == "true",
+            }
         }
-    });
-    
+    }
+
+    #[derive(Deserialize)]
+    struct EvalResponse {
+        #[serde(deserialize_with = "deserialize_bool")]
+        success: bool,
+        reason: Option<String>,
+    }
+
+    fn deserialize_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(BoolValue::deserialize(deserializer)?.into())
+    }
+
+    let (eval_result, eval_reason) = match client.chat_completion(eval_req).await {
+        Ok(result) => {
+            println!("Got evaluation response from model");
+            if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
+                println!("Found tool calls in evaluation response");
+                if let Some(first_call) = tool_calls.first() {
+                    println!("Processing first tool call");
+                    if let Some(args) = &first_call.function.arguments {
+                        println!("Tool call arguments: {}", args);
+                        match serde_json::from_str::<EvalResponse>(args) {
+                            Ok(eval) => {
+                                println!("Successfully parsed evaluation response: success={}, reason={:?}", eval.success, eval.reason);
+                                (eval.success, eval.reason)
+                            },
+                            Err(e) => {
+                                println!("Failed to parse evaluation response: {}, falling back to default", e);
+                                (!fail, Some("Failed to parse evaluation response".to_string()))
+                            },
+                        }
+                    } else {
+                        println!("No arguments found in tool call");
+                        (!fail, Some("Missing evaluation arguments".to_string()))
+                    }
+                } else {
+                    println!("No tool calls found in response");
+                    (!fail, Some("No evaluation tool calls found".to_string()))
+                }
+            } else {
+                println!("No tool calls section in response");
+                (!fail, Some("No evaluation tool calls received".to_string()))
+            }
+        }
+        Err(e) => {
+            println!("Failed to get evaluation response: {}", e);
+            (!fail, Some("Failed to get evaluation response".to_string()))
+        }
+    };
+
 
     // Send the final response to the conversation
     match crate::api::twilio_utils::send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number,&final_response).await {
-        Ok(_) => {
+        Ok(message_sid) => {
             if !fail {
                 // Deduct credits for the message
                 let message_credits_cost = if user.phone_number.starts_with("+1") {
@@ -1232,15 +1364,16 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     );
                 }
 
-                // Log the SMS usage
+                // Log the SMS usage metadata and eval(no content!)
                 if let Err(e) = state.user_repository.log_usage(
                     user.id,
-                    "sms",
-                    Some(message_credits_cost),  // credits points used
-                    Some(true), // Success
-                    Some("normal sms response".to_string()),
-                    None,
-                    None,
+                    Some(message_sid),
+                    "sms".to_string(),
+                    Some(message_credits_cost),
+                    Some(processing_time_secs as i32),
+                    Some(eval_result),
+                    eval_reason,
+                    None,  
                     None,
                     None,
                 ) {

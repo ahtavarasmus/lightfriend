@@ -182,28 +182,30 @@ pub struct NewSubscription {
 pub struct UsageLog {
     pub id: Option<i32>,
     pub user_id: i32,
-    pub conversation_id: Option<String>, // elevenlabs call id
-    pub status: Option<String>, // call is either 'ongoing' or 'done'
+    pub sid: Option<String>, // elevenlabs call id or twilio message id
     pub activity_type: String, // sms or call
-    pub credits: Option<f32>, // the amount of credits used
+    pub credits: Option<f32>, // the amount of credits used in euros
     pub created_at: i32, // int timestamp utc epoch
-    pub success: Option<bool>, // if call was successful judged by ai
-    pub summary: Option<String>, // if call was not successful store it if user gives permission
-    pub recharge_threshold_timestamp: Option<i32>, // timestamp when credits go below recharge threshold
-    pub zero_credits_timestamp: Option<i32>, // timestamp when credits reach zero
+    pub time_consumed: Option<i32>, // messsage response time or call duration in seconds
+    pub success: Option<bool>, // if call/message was successful judged by ai
+    pub reason: Option<String>, // if call/message was not successful, store the reason why (no sensitive content)
+    pub status: Option<String>, // call specific: 'ongoing' or 'done'
+    pub recharge_threshold_timestamp: Option<i32>, // call specific: timestamp when credits go below recharge threshold
+    pub zero_credits_timestamp: Option<i32>, // call specific: timestamp when credits reach zero
 }
 
 #[derive(Insertable)]
 #[diesel(table_name = usage_logs)]
 pub struct NewUsageLog {
     pub user_id: i32,
-    pub conversation_id: Option<String>,
-    pub status: Option<String>,
+    pub sid: Option<String>,
     pub activity_type: String,
     pub credits: Option<f32>,
     pub created_at: i32,
+    pub time_consumed: Option<i32>,
     pub success: Option<bool>,
-    pub summary: Option<String>,
+    pub reason: Option<String>,
+    pub status: Option<String>,
     pub recharge_threshold_timestamp: Option<i32>,
     pub zero_credits_timestamp: Option<i32>,
 }
