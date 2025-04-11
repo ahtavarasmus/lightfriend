@@ -7,6 +7,7 @@ use crate::config;
 use gloo_net::http::Request;
 use web_sys::UrlSearchParams;
 use web_sys::js_sys::Date;
+use crate::auth::whatsapp::WhatsappConnect;
 
 #[derive(Properties, PartialEq)]
 pub struct ConnectProps {
@@ -983,6 +984,8 @@ pub fn connect(props: &ConnectProps) -> Html {
                             <span class="coming-soon-tag">{"Coming Soon"}</span>
                         </h3>
                         <div class="service-list">
+
+                            <WhatsappConnect user_id={props.user_id} />
                             <div class="service-item coming-soon">
                                 <div class="service-header">
                                     <div class="service-name">

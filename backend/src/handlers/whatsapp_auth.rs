@@ -11,7 +11,7 @@ use matrix_sdk::{
         api::client::room::create_room::v3::Request as CreateRoomRequest,
         events::room::message::{RoomMessageEventContent, SyncRoomMessageEvent, MessageType},
         events::AnySyncTimelineEvent,
-        OwnedRoomId, OwnedUserId,
+        OwnedRoomId, OwnedUserId, OwnedDeviceId,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -59,7 +59,7 @@ async fn ensure_matrix_credentials(
         })?,
     );
 
-    let (username, access_token) = matrix_auth.register_user().await
+    let (username, access_token, device_id) = matrix_auth.register_user().await
         .map_err(|e| {
             tracing::error!("Failed to register Matrix user: {}", e);
             (
@@ -80,35 +80,36 @@ async fn ensure_matrix_credentials(
                 AxumJson(json!({"error": "Failed to initialize Matrix client"})),
             )
         })?;
-    client.restore_session(matrix_sdk::Session {
+    client.restore_session(matrix_sdk::AuthSession::Matrix(matrix_sdk::authentication::matrix::MatrixSession {
         meta: matrix_sdk::SessionMeta {
-            user_id: OwnedUserId::try_from(&full_user_id).map_err(|e| {
+            user_id: OwnedUserId::try_from(full_user_id.clone()).map_err(|e| {
                 tracing::error!("Invalid user_id format: {}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     AxumJson(json!({"error": "Invalid user_id format"})),
                 )
             })?,
-            device_id: None,
+            device_id: OwnedDeviceId::try_from(device_id.clone()).map_err(|e| {
+                tracing::error!("Invalid device_id format: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    AxumJson(json!({"error": "Invalid device_id format"})),
+                )
+            })?,
         },
-        tokens: matrix_sdk::SessionTokens {
+        tokens: matrix_sdk::authentication::matrix::MatrixSessionTokens {
             access_token: access_token.clone(),
             refresh_token: None,
         },
-    }).await.map_err(|e| {
+    }))
+    .await
+    .map_err(|e| {
         tracing::error!("Failed to restore session: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             AxumJson(json!({"error": "Failed to restore Matrix session"})),
         )
     })?;
-    let device_id = client.device_id().ok_or(anyhow!("No device_id")).map_err(|e| {
-        tracing::error!("No device_id available: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "No device_id available"})),
-        )
-    })?.to_string();
 
     state.user_repository.set_matrix_credentials(user_id, &username, &access_token, &device_id)
         .map_err(|e| {
@@ -121,7 +122,6 @@ async fn ensure_matrix_credentials(
 
     Ok((username, access_token, full_user_id, device_id))
 }
-
 
 
 async fn connect_whatsapp(
@@ -155,13 +155,12 @@ async fn connect_whatsapp(
                 if let Ok(event) = raw_event.deserialize() {
                     if event.sender() == bot_user_id {
                         if let AnySyncTimelineEvent::MessageLike(
-                            AnySyncMessageLikeEvent::RoomMessage(sync_event)
+                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event)
                         ) = event {
                             // Access the content field from SyncMessageLikeEvent
-                            let content: SyncMessageLikeEvent<RoomMessageEventContent> = sync_event.into();
-                            let event_content: RoomMessageEventContent = match content {
-                                SyncMessageLikeEvent::Original(original_event) => original_event.content,
-                                SyncMessageLikeEvent::Redacted(_) => panic!("Event was redacted, expected original content"),
+                            let event_content: RoomMessageEventContent = match sync_event {
+                                SyncRoomMessageEvent::Original(original_event) => original_event.content,
+                                SyncRoomMessageEvent::Redacted(_) => continue,
                             };
                             // Check if the message is an image
                             if let MessageType::Image(img_content) = event_content.msgtype {
@@ -195,10 +194,13 @@ pub async fn start_whatsapp_connection(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<WhatsappConnectionResponse>, (StatusCode, AxumJson<serde_json::Value>)> {
+    println!("🚀 Starting WhatsApp connection process for user {}", auth_user.user_id);
     tracing::info!("Starting WhatsApp connection for user {}", auth_user.user_id);
 
+    println!("📝 Ensuring Matrix credentials...");
     // Ensure user has Matrix credentials
-    let (username, access_token, device_id) = ensure_matrix_credentials(&state, auth_user.user_id).await?;
+    let (username, access_token, full_user_id, device_id) = ensure_matrix_credentials(&state, auth_user.user_id).await?;
+    println!("✅ Matrix credentials obtained for user: {}", username);
 
     // Create Matrix client
     let homeserver_url = std::env::var("MATRIX_HOMESERVER")
@@ -207,33 +209,41 @@ pub async fn start_whatsapp_connection(
         .expect("WHATSAPP_BRIDGE_BOT not set");
 
     let client = MatrixClient::builder()
-        .homeserver_url(homeserver_url)
+        .homeserver_url(&homeserver_url)
         .build()
+        .await
         .map_err(|e| {
-            tracing::error!("Failed to create Matrix client: {}", e);
+            tracing::error!("Failed to build Matrix client: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({"error": "Failed to create Matrix client"})),
+                AxumJson(json!({"error": "Failed to initialize Matrix client"})),
             )
         })?;
-    use matrix_sdk::authentication::matrix::MatrixSession;
-    use matrix_sdk::authentication::AuthSession;
-    use matrix_sdk::SessionMeta;
-    use matrix_sdk::authentication::matrix::MatrixSessionTokens;
-    // Set the access token by restoring a session
-    let session = AuthSession::Matrix(MatrixSession {
-        meta: MatrixSession {
-            meta:
-            user_id: username,
-            device_id: device_id
-        },
-        tokens: MatrixSessionTokens {
-            access_token: access_token.to_string(),
-            refresh_token: None, // Optional, if you have one
-        },
-    });
 
-    client.restore_session(session).await.map_err(|e| {
+    client.restore_session(matrix_sdk::AuthSession::Matrix(matrix_sdk::authentication::matrix::MatrixSession {
+        meta: matrix_sdk::SessionMeta {
+            user_id: OwnedUserId::try_from(full_user_id).map_err(|e| {
+                tracing::error!("Invalid user_id format: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    AxumJson(json!({"error": "Invalid user_id format"})),
+                )
+            })?,
+            device_id: OwnedDeviceId::try_from(device_id).map_err(|e| {
+                tracing::error!("Invalid device_id format: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    AxumJson(json!({"error": "Invalid device_id format"})),
+                )
+            })?,
+        },
+        tokens: matrix_sdk::authentication::matrix::MatrixSessionTokens {
+            access_token,
+            refresh_token: None,
+        },
+    }))
+    .await
+    .map_err(|e| {
         tracing::error!("Failed to restore session: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -242,6 +252,7 @@ pub async fn start_whatsapp_connection(
     })?;
 
 
+    println!("🔗 Connecting to WhatsApp bridge...");
     // Connect to WhatsApp bridge
     let (room_id, qr_url) = connect_whatsapp(&client, &bridge_bot)
         .await
@@ -310,6 +321,7 @@ pub async fn get_whatsapp_status(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
+    println!("📊 Checking WhatsApp status for user {}", auth_user.user_id);
     let bridge = state.user_repository.get_whatsapp_bridge(auth_user.user_id)
         .map_err(|e| {
             tracing::error!("Failed to get WhatsApp bridge status: {}", e);
@@ -330,6 +342,7 @@ pub async fn get_whatsapp_status(
         }))),
     }
 }
+                        
 
 async fn monitor_whatsapp_connection(
     client: &MatrixClient,
@@ -338,46 +351,63 @@ async fn monitor_whatsapp_connection(
     user_id: i32,
     state: Arc<AppState>,
 ) -> Result<(), anyhow::Error> {
+    println!("👀 Starting WhatsApp connection monitoring for user {}", user_id);
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
-    let mut sync_settings = MatrixSyncSettings::default();
-    sync_settings.timeout = Some(Duration::from_secs(30));
+
+    let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(30));
 
     for _ in 0..20 { // Try for about 10 minutes (20 * 30 seconds)
         client.sync_once(sync_settings.clone()).await?;
         
         if let Some(room) = client.get_room(room_id) {
-            let messages = room.messages().await?;
+            let options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
+            let messages = room.messages(options).await?;
             for msg in messages.chunk {
-                if msg.sender == bot_user_id {
-                    if let Some(SyncRoomMessageEvent::Text(text_msg)) = msg.event.as_message() {
-                        let content = text_msg.content.body.to_lowercase();
-                        
-                        // Check for successful connection messages
-                        if content.contains("successfully logged in") || content.contains("connected") {
-                            // Update bridge status to connected
-                            let current_time = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap()
-                                .as_secs() as i32;
-
-                            let new_bridge = NewBridge {
-                                user_id,
-                                bridge_type: "whatsapp".to_string(),
-                                status: "connected".to_string(),
-                                room_id: Some(room_id.to_string()),
-                                data: None,
-                                created_at: Some(current_time),
+                let raw_event = msg.raw();
+                if let Ok(event) = raw_event.deserialize() {
+                    if event.sender() == bot_user_id {
+                        if let AnySyncTimelineEvent::MessageLike(
+                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event)
+                        ) = event {
+                            // Access the content field from SyncMessageLikeEvent
+                            let event_content: RoomMessageEventContent = match sync_event {
+                                SyncRoomMessageEvent::Original(original_event) => original_event.content,
+                                SyncRoomMessageEvent::Redacted(_) => continue,
                             };
 
-                            state.user_repository.delete_whatsapp_bridge(user_id)?;
-                            state.user_repository.create_bridge(new_bridge)?;
-                            return Ok(());
-                        }
-                        
-                        // Check for error messages
-                        if content.contains("error") || content.contains("failed") || content.contains("timeout") {
-                            state.user_repository.delete_whatsapp_bridge(user_id)?;
-                            return Err(anyhow!("WhatsApp connection failed: {}", content));
+                            if let MessageType::Text(text_content) = event_content.msgtype {
+                                let content = text_content.body;
+        
+                                // Check for successful connection messages
+                                if content.contains("successfully logged in") || content.contains("connected") {
+                                    println!("🎉 WhatsApp successfully connected for user {}", user_id);
+                                    // Update bridge status to connected
+                                    let current_time = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .unwrap()
+                                        .as_secs() as i32;
+
+                                    let new_bridge = NewBridge {
+                                        user_id,
+                                        bridge_type: "whatsapp".to_string(),
+                                        status: "connected".to_string(),
+                                        room_id: Some(room_id.to_string()),
+                                        data: None,
+                                        created_at: Some(current_time),
+                                    };
+
+                                    state.user_repository.delete_whatsapp_bridge(user_id)?;
+                                    state.user_repository.create_bridge(new_bridge)?;
+                                    return Ok(());
+                                }
+ 
+                                // Check for error messages
+                                if content.contains("error") || content.contains("failed") || content.contains("timeout") {
+                                    println!("❌ WhatsApp connection failed for user {}: {}", user_id, content);
+                                    state.user_repository.delete_whatsapp_bridge(user_id)?;
+                                    return Err(anyhow!("WhatsApp connection failed: {}", content));
+                                }
+                            }
                         }
                     }
                 }
@@ -396,6 +426,7 @@ pub async fn disconnect_whatsapp(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
+    println!("🔌 Disconnecting WhatsApp for user {}", auth_user.user_id);
     // Delete the bridge record
     state.user_repository.delete_whatsapp_bridge(auth_user.user_id)
         .map_err(|e| {

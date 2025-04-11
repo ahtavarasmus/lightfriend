@@ -21,7 +21,8 @@ impl MatrixAuth {
         }
     }
 
-    pub async fn register_user(&self) -> Result<(String, String)> {
+    pub async fn register_user(&self) -> Result<(String, String, String)> {
+        println!("🔑 Starting Matrix user registration...");
         // Get registration nonce
         let nonce_res = self.http_client.get(format!("{}/_synapse/admin/v1/register", self.homeserver))
             .send()
@@ -29,18 +30,21 @@ impl MatrixAuth {
             .json::<serde_json::Value>()
             .await?;
         let nonce = nonce_res["nonce"].as_str().ok_or(anyhow!("No nonce"))?;
+        println!("📝 Got registration nonce: {}", nonce);
 
         // Generate unique username and password
         let username = format!("appuser_{}", Uuid::new_v4().to_string().replace("-", ""));
         let password = Uuid::new_v4().to_string();
+        println!("👤 Generated username: {}", username);
 
         // Calculate MAC
         let mut mac = Hmac::<Sha1>::new_from_slice(self.shared_secret.as_bytes())?;
         mac.update(format!("{}:{}:{}:{}", nonce, &username, &password, "false").as_bytes());
         let mac_result = hex::encode(mac.finalize().into_bytes());
+        println!("🔐 Generated MAC for registration");
 
         // Register user
-        println!("registering user post request");
+        println!("📡 Sending registration request to Matrix server...");
         let register_res = self.http_client.post(format!("{}/_synapse/admin/v1/register", self.homeserver))
             .json(&json!({
                 "nonce": nonce,
@@ -59,11 +63,14 @@ impl MatrixAuth {
             .as_str()
             .ok_or(anyhow!("No device_id in response"))?
             .to_string();
-        println!("device_id: {}", device_id);
-        Ok((username, access_token))
+        println!("✅ Matrix registration successful!");
+        println!("📱 Device ID: {}", device_id);
+        println!("🎫 Access token received (length: {})", access_token.len());
+        Ok((username, access_token, device_id))
     }
 
     pub fn encrypt_token(token: &str) -> Result<String> {
+        println!("🔒 Encrypting access token...");
         let encryption_key = std::env::var("ENCRYPTION_KEY")
             .map_err(|_| anyhow!("ENCRYPTION_KEY not set"))?;
         
@@ -72,6 +79,7 @@ impl MatrixAuth {
     }
 
     pub fn decrypt_token(encrypted_token: &str) -> Result<String> {
+        println!("🔓 Decrypting access token...");
         let encryption_key = std::env::var("ENCRYPTION_KEY")
             .map_err(|_| anyhow!("ENCRYPTION_KEY not set"))?;
         
