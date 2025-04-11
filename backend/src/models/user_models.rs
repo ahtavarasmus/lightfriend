@@ -128,12 +128,12 @@ pub struct NewEmailJudgment {
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct Bridge {
     pub id: Option<i32>, // Assuming auto-incrementing primary key
-    user_id: i32,
-    bridge_type: String, // whatsapp, telegram
-    status: String, // connected, disconnected
-    room_id: Option<String>,
-    data: Option<String>,
-    created_at: Option<i32>,
+    pub user_id: i32,
+    pub bridge_type: String, // whatsapp, telegram
+    pub status: String, // connected, disconnected
+    pub room_id: Option<String>,
+    pub data: Option<String>,
+    pub created_at: Option<i32>,
 }
 
 

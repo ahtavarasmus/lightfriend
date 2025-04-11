@@ -27,6 +27,7 @@ mod auth {
     pub mod verify;
     pub mod signup;
     pub mod oauth_flow;
+    pub mod whatsapp;
 }
 mod admin {
     pub mod dashboard;

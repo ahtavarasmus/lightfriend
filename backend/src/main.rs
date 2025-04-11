@@ -44,7 +44,7 @@ mod handlers {
     pub mod imap_auth;
     pub mod auth_middleware;
     pub mod imap_handlers;
-    //pub mod whatsapp_auth;
+    pub mod whatsapp_auth;
     pub mod filter_handlers;
 }
 
@@ -93,7 +93,7 @@ use handlers::google_calendar;
 //use handlers::gmail;
 use handlers::imap_auth;
 use handlers::imap_handlers;
-//use handlers::whatsapp_auth;
+use handlers::whatsapp_auth;
 use handlers::filter_handlers;
 use api::twilio_sms;
 use api::elevenlabs;
@@ -284,11 +284,10 @@ async fn main() {
         .route("/api/imap/message/{id}", get(imap_handlers::fetch_single_imap_email))
         .route("/api/imap/full_emails", get(imap_handlers::fetch_full_imap_emails))
 
-        /*
         .route("/api/auth/whatsapp/status", get(whatsapp_auth::get_whatsapp_status))
         .route("/api/auth/whatsapp/connect", get(whatsapp_auth::start_whatsapp_connection))
         .route("/api/auth/whatsapp/disconnect", delete(whatsapp_auth::disconnect_whatsapp))
-        */
+
         // Filter routes
         .route("/api/filters/waiting-check/{service_type}", post(filter_handlers::create_waiting_check))
         .route("/api/filters/waiting-check/{service_type}/{content}", delete(filter_handlers::delete_waiting_check))
