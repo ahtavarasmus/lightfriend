@@ -1,7 +1,8 @@
 use yew::prelude::*;
 use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
-use web_sys::window;
+use web_sys::{window, Event};
+use wasm_bindgen::JsCast;
 use crate::config;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::js_sys;
@@ -106,8 +107,14 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         .await
                     {
                         Ok(response) => {
+                            // Debug: Log the response status
+                            web_sys::console::log_1(&format!("Response status: {}", response.status()).into());
+                            
                             match response.json::<WhatsappConnectionResponse>().await {
                                 Ok(connection_response) => {
+                                    // Debug: Log the QR code URL
+                                    web_sys::console::log_1(&format!("Received QR code URL: {}", &connection_response.qr_code_url).into());
+                                    
                                     qr_code.set(Some(connection_response.qr_code_url));
                                     error.set(None);
 
@@ -247,7 +254,21 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                             if let Some(qr_url) = (*qr_code).clone() {
                                 <div class="qr-code-container">
                                     <p>{"Scan this QR code with WhatsApp to connect:"}</p>
-                                    <img src={qr_url} alt="WhatsApp QR Code" class="qr-code" />
+                                    <img 
+                                        src={qr_url.clone()} 
+                                        alt="WhatsApp QR Code" 
+                                        class="qr-code"
+                                        onload={Callback::from(|e: Event| {
+                                            web_sys::console::log_1(&"QR code image loaded successfully".into());
+                                        })}
+                                        onerror={Callback::from(|e: Event| {
+                                            web_sys::console::log_1(&"Error loading QR code image".into());
+                                        })}
+                                    />
+                                    <div class="debug-info">
+                                        <p>{"Data URL prefix: "}{&qr_url[..30]}{"..."}</p>
+                                        <p>{"Total URL length: "}{qr_url.len()}</p>
+                                    </div>
                                 </div>
                             } else {
                                 <p>{"Loading QR code..."}</p>
@@ -306,10 +327,32 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                     }
 
                     .qr-code {
+                        display: block;
                         max-width: 300px;
-                        margin: 1rem 0;
+                        width: 300px;
+                        height: 300px;
+                        margin: 1rem auto;
                         border-radius: 8px;
                         box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+                        background: white;
+                        padding: 8px;
+                        object-fit: contain;
+                        image-rendering: pixelated;
+                    }
+
+                    .debug-info {
+                        margin-top: 0.5rem;
+                        color: #666;
+                        font-family: monospace;
+                        font-size: 12px;
+                        background: rgba(0, 0, 0, 0.1);
+                        padding: 8px;
+                        border-radius: 4px;
+                    }
+
+                    .debug-info p {
+                        margin: 4px 0;
+                        word-break: break-all;
                     }
 
                     .connect-button, .disconnect-button {

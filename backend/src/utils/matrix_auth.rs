@@ -24,28 +24,40 @@ impl MatrixAuth {
     pub async fn register_user(&self) -> Result<(String, String, String)> {
         println!("🔑 Starting Matrix user registration...");
         // Get registration nonce
-        let nonce_res = self.http_client.get(format!("{}/_synapse/admin/v1/register", self.homeserver))
+        let nonce_res = self
+            .http_client
+            .get(format!("{}/_synapse/admin/v1/register", self.homeserver))
             .send()
-            .await?
+            .await
+            .map_err(|e| anyhow!("Failed to fetch nonce: {}", e))?
             .json::<serde_json::Value>()
-            .await?;
-        let nonce = nonce_res["nonce"].as_str().ok_or(anyhow!("No nonce"))?;
+            .await
+            .map_err(|e| anyhow!("Failed to parse nonce response: {}", e))?;
+        let nonce = nonce_res["nonce"]
+            .as_str()
+            .ok_or_else(|| anyhow!("No nonce in response"))?;
         println!("📝 Got registration nonce: {}", nonce);
 
         // Generate unique username and password
         let username = format!("appuser_{}", Uuid::new_v4().to_string().replace("-", ""));
         let password = Uuid::new_v4().to_string();
         println!("👤 Generated username: {}", username);
+        println!("🔑 Generated password: [hidden]");
 
         // Calculate MAC
-        let mut mac = Hmac::<Sha1>::new_from_slice(self.shared_secret.as_bytes())?;
-        mac.update(format!("{}:{}:{}:{}", nonce, &username, &password, "false").as_bytes());
+        let mac_content = format!("{}\0{}\0{}\0notadmin", nonce, username, password);
+        println!("🔒 MAC content: {}", mac_content);
+        let mut mac = Hmac::<Sha1>::new_from_slice(self.shared_secret.as_bytes())
+            .map_err(|e| anyhow!("Failed to create HMAC: {}", e))?;
+        mac.update(mac_content.as_bytes());
         let mac_result = hex::encode(mac.finalize().into_bytes());
-        println!("🔐 Generated MAC for registration");
+        println!("🔐 Generated MAC: {}", mac_result);
 
         // Register user
         println!("📡 Sending registration request to Matrix server...");
-        let register_res = self.http_client.post(format!("{}/_synapse/admin/v1/register", self.homeserver))
+        let response = self
+            .http_client
+            .post(format!("{}/_synapse/admin/v1/register", self.homeserver))
             .json(&json!({
                 "nonce": nonce,
                 "username": username,
@@ -54,20 +66,45 @@ impl MatrixAuth {
                 "mac": mac_result
             }))
             .send()
-            .await?
-            .json::<serde_json::Value>()
-            .await?;
+            .await
+            .map_err(|e| anyhow!("Failed to send registration request: {}", e))?;
 
-        let access_token = register_res["access_token"].as_str().ok_or(anyhow!("No access token"))?.to_string();
-        let device_id = register_res["device_id"]
-            .as_str()
-            .ok_or(anyhow!("No device_id in response"))?
-            .to_string();
-        println!("✅ Matrix registration successful!");
-        println!("📱 Device ID: {}", device_id);
-        println!("🎫 Access token received (length: {})", access_token.len());
-        Ok((username, access_token, device_id))
+        // Log status
+        let status = response.status();
+        println!("📡 Registration response status: {}", status);
+
+        // Get response body
+        let register_res = response
+            .text()
+            .await
+            .map_err(|e| anyhow!("Failed to read response body: {}", e))?;
+        println!("📡 Registration response body: {}", register_res);
+
+        let register_json: serde_json::Value = serde_json::from_str(&register_res)
+            .map_err(|e| anyhow!("Failed to parse registration response: {}", e))?;
+
+        if status.is_success() {
+            let access_token = register_json["access_token"]
+                .as_str()
+                .ok_or_else(|| anyhow!("No access_token in response: {}", register_res))?
+                .to_string();
+            let device_id = register_json["device_id"]
+                .as_str()
+                .ok_or_else(|| anyhow!("No device_id in response: {}", register_res))?
+                .to_string();
+            println!("✅ Matrix registration successful!");
+            println!("📱 Device ID: {}", device_id);
+            println!("🎫 Access token received (length: {})", access_token.len());
+            Ok((username, access_token, device_id))
+        } else {
+            let error = register_json["error"]
+                .as_str()
+                .unwrap_or("Unknown error");
+            Err(anyhow!("Registration failed: {} (status: {})", error, status))
+        }
     }
+
+    
 
     pub fn encrypt_token(token: &str) -> Result<String> {
         println!("🔒 Encrypting access token...");

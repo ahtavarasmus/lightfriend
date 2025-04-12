@@ -18,6 +18,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
+use reqwest;
+use base64;
 use tokio::time::{sleep, Duration};
 use crate::{
     AppState,
@@ -127,55 +129,225 @@ async fn ensure_matrix_credentials(
 async fn connect_whatsapp(
     client: &MatrixClient,
     bridge_bot: &str,
+    access_token: &str,
 ) -> Result<(OwnedRoomId, String)> {
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
     let request = CreateRoomRequest::new();
     let response = client.create_room(request).await?;
     let room_id = response.room_id();
 
+    println!("🏠 Created room with ID: {}", room_id);
     let room = client.get_room(&room_id).ok_or(anyhow!("Room not found"))?;
+    println!("🤖 Inviting bot user: {}", bot_user_id);
     room.invite_user_by_id(&bot_user_id).await?;
-    room.send(RoomMessageEventContent::text_plain("login qr")).await?;
+    println!("🤖 Waiting for bot to join...");
+    for _ in 0..5 {
+        let members = room.members(matrix_sdk::RoomMemberships::empty()).await?;
+        if members.iter().any(|m| m.user_id() == bot_user_id) {
+            println!("✅ Bot has joined the room");
+            break;
+        }
+        sleep(Duration::from_secs(1)).await;
+    }
+    if !room.members(matrix_sdk::RoomMemberships::empty()).await?.iter().any(|m| m.user_id() == bot_user_id) {
+        return Err(anyhow!("Bot {} failed to join room", bot_user_id));
+    }
+    // First send help command to verify bot is responsive
+    let help_command = "!wa login qr";
+    println!("📤 Sending help command to verify bot responsiveness: {}", help_command);
+    let help_result = room.send(RoomMessageEventContent::text_plain(help_command)).await;
+    match help_result {
+        Ok(event_id) => println!("✅ Help command sent successfully. Event ID: {:#?}", event_id),
+        Err(e) => println!("❌ Failed to send help command: {}", e),
+    };
 
+    // Wait for bot to process help command
+    println!("⏳ Waiting for bot to process help command...");
+    sleep(Duration::from_secs(1)).await;
+
+    // Send login command with correct prefix
+    // Send login command and wait for response
+    let login_command = "!wa login qr";
+    println!("📤 Sending WhatsApp login command: {}", login_command);
+    let message_result = room.send(RoomMessageEventContent::text_plain(login_command)).await;
+    
+    // Wait a bit longer for the bot to process the command
+    println!("⏳ Waiting for bot to process login command...");
+    sleep(Duration::from_secs(2)).await;
+    match message_result {
+        Ok(event_id) => println!("✅ Login command sent successfully. Event ID: {:#?}", event_id),
+        Err(e) => println!("❌ Failed to send login command: {}", e),
+    };
+    
+    // Wait longer for the bot to process the login command and generate QR
+    println!("⏳ Waiting for bot to process login command and generate QR...");
+    sleep(Duration::from_secs(1)).await;
+    
     let mut qr_url = None;
+    println!("⏳ Starting QR code monitoring");
     client.sync_once(MatrixSyncSettings::default()).await?;
 
     // Set up event handler for QR code
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(1));
 
-    for _ in 0..30 {
+    println!("🔄 Starting message polling loop");
+    for attempt in 1..=60 { // Increase number of attempts
+        println!("📡 Sync attempt #{}", attempt);
         client.sync_once(sync_settings.clone()).await?;
+        
+        // Add a small delay between syncs
+        sleep(Duration::from_millis(500)).await;
         
         // Check for new messages
         if let Some(room) = client.get_room(&room_id) {
-            let options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
+            println!("🏠 Found room, fetching messages");
+            let mut options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
             let messages = room.messages(options).await?;
+            println!("📨 Fetched {} messages", messages.chunk.len());
             for msg in messages.chunk {
                 let raw_event = msg.raw();
                 if let Ok(event) = raw_event.deserialize() {
+                    println!("📝 Processing event from sender: {}", event.sender());
+                    println!("🤖 Processing event from {}", event.sender());
                     if event.sender() == bot_user_id {
+                        println!("✅ Event from bridge bot: {:?}", event);
+                        println!("📝 Event type: {:?}", event.event_type());
                         if let AnySyncTimelineEvent::MessageLike(
                             matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event)
-                        ) = event {
-                            // Access the content field from SyncMessageLikeEvent
+                        ) = event.clone() {
+                            println!("📨 Room message event from {}: {:?}", event.sender(), sync_event);
                             let event_content: RoomMessageEventContent = match sync_event {
-                                SyncRoomMessageEvent::Original(original_event) => original_event.content,
+                                SyncRoomMessageEvent::Original(original_event) => {
+                                    println!("📄 Original content: {:?}", original_event.content);
+                                    original_event.content
+                                },
                                 SyncRoomMessageEvent::Redacted(_) => continue,
                             };
-                            // Check if the message is an image
-                            if let MessageType::Image(img_content) = event_content.msgtype {
-                                // Get the MXC URI from the MediaSource
-                                if let matrix_sdk::ruma::events::room::MediaSource::Plain(mxc_uri) = img_content.source {
-                                    qr_url = Some(format!(
-                                        "{}/_matrix/media/r0/download/{}", 
-                                        client.homeserver(), 
-                                        mxc_uri
-                                    ));
-                                    break;
-                                }
+
+                            println!("📨 Processing message event: {:?}", event_content);
+                            match event_content.msgtype {
+                                MessageType::Image(img_content) => {
+                                    println!("🖼️ Image message: {:?}", img_content);
+                                    if let matrix_sdk::ruma::events::room::MediaSource::Plain(mxc_uri) = img_content.source {
+                                        // Get the homeserver URL
+                                        let homeserver = client.homeserver().to_string().trim_end_matches('/').to_string();
+                                        
+                                        // Use the Matrix client's media API to construct the download URL
+                                        // Handle potential errors from server_name() and media_id()
+                                        let server_name = mxc_uri.server_name()
+                                            .map_err(|e| {
+                                                tracing::error!("Failed to get server name from MXC URI: {}", e);
+                                                anyhow!("Invalid MXC URI server name")
+                                            })?;
+                                        let media_id = mxc_uri.media_id()
+                                            .map_err(|e| {
+                                                tracing::error!("Failed to get media ID from MXC URI: {}", e);
+                                                anyhow!("Invalid MXC URI media ID")
+                                            })?;
+
+                                        // Ensure homeserver URL is properly formatted
+                                        let homeserver = if homeserver.starts_with("http://") || homeserver.starts_with("https://") {
+                                            homeserver.trim_end_matches('/').to_string()
+                                        } else {
+                                            format!("http://{}", homeserver.trim_end_matches('/'))
+                                        };
+
+                                        // Try both v3 and r0 endpoints
+                                        let v3_url = format!("{}/_matrix/media/v3/download/{}/{}",
+                                            homeserver,
+                                            server_name,
+                                            media_id
+                                        );
+                                        
+                                        let r0_url = format!("{}/_matrix/media/r0/download/{}/{}",
+                                            homeserver,
+                                            server_name,
+                                            media_id
+                                        );
+
+                                        // Create a new HTTP client
+                                        let http_client = reqwest::Client::new();
+                                        
+                                        // Try v3 endpoint first, then fallback to r0
+                                        let url = match http_client.get(&v3_url)
+                                            .header("Authorization", format!("Bearer {}", access_token))
+                                            .send()
+                                            .await 
+                                        {
+                                            Ok(response) if response.status().is_success() => v3_url,
+                                            _ => {
+                                                println!("⚠️ v3 endpoint failed, trying r0 endpoint");
+                                                r0_url
+                                            }
+                                        };
+                                        
+                                        // Add more detailed logging
+                                        tracing::info!(
+                                            "Constructing media URL from MXC URI: mxc://{}/{}", 
+                                            server_name, 
+                                            media_id
+                                        );
+                                        
+                                        println!("🎯 Fetching QR code from: {}", url);
+                                        
+                                        // Fetch the image
+                                        // Add authorization header to the request using the Matrix client's access token
+                                        let http_client = reqwest::Client::new();
+                                        match http_client.get(&url)
+                                            .header("Authorization", format!("Bearer {}", access_token))
+                                            .send()
+                                            .await 
+                                        {
+                                            Ok(response) => {
+                                                let status = response.status();
+                                                if status.is_success() {
+                                                    println!("✅ Successfully connected to media endpoint: {}", url);
+                                                    tracing::info!("Successfully fetched QR code image");
+                                                    match response.bytes().await {
+                                                        Ok(bytes) => {
+                                                            // Convert to base64
+                                                            let base64_image = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+                                                            let data_url = format!("data:image/png;base64,{}", base64_image);
+                                                            println!("🖼️ Generated data URL (first 50 chars): {}...", &data_url[..50]);
+                                                            qr_url = Some(data_url);
+                                                        },
+                                                        Err(e) => {
+                                                            println!("❌ Failed to read QR code bytes: {}", e);
+                                                            continue;
+                                                        }
+                                                    }
+                                                } else {
+                                                    let error_text = response.text().await.unwrap_or_default();
+                                                    tracing::error!(
+                                                        "Failed to fetch QR code from {}: HTTP {} - {}",
+                                                        url,
+                                                        status,
+                                                        error_text
+                                                    );
+                                                    println!("❌ Failed to fetch QR code from {}: HTTP {} - {}", url, status, error_text);
+                                                    continue;
+                                                }
+                                            },
+                                            Err(e) => {
+                                                println!("❌ Failed to fetch QR code: {}", e);
+                                                continue;
+                                            }
+                                        }
+                                    }
+                                },
+                                MessageType::Text(text_content) => {
+                                    println!("📝 Text message from {}: {}", event.sender(), text_content.body);
+                                    // Check if the text contains a URL or QR code data
+                                    if text_content.body.contains("http") || text_content.body.contains("mxc://") {
+                                        println!("🔗 Possible QR URL in text: {}", text_content.body);
+                                        qr_url = Some(text_content.body.clone());
+                                    }
+                                },
+                                _ => println!("ℹ️ Other message type: {:?}", event_content.msgtype),
                             }
                         }
                     }
+                    
                 }
             }
         }
@@ -198,6 +370,7 @@ pub async fn start_whatsapp_connection(
     tracing::info!("Starting WhatsApp connection for user {}", auth_user.user_id);
 
     println!("📝 Ensuring Matrix credentials...");
+    // TODO remove before prod
     // Ensure user has Matrix credentials
     let (username, access_token, full_user_id, device_id) = ensure_matrix_credentials(&state, auth_user.user_id).await?;
     println!("✅ Matrix credentials obtained for user: {}", username);
@@ -238,7 +411,7 @@ pub async fn start_whatsapp_connection(
             })?,
         },
         tokens: matrix_sdk::authentication::matrix::MatrixSessionTokens {
-            access_token,
+            access_token: access_token.clone(),
             refresh_token: None,
         },
     }))
@@ -254,7 +427,7 @@ pub async fn start_whatsapp_connection(
 
     println!("🔗 Connecting to WhatsApp bridge...");
     // Connect to WhatsApp bridge
-    let (room_id, qr_url) = connect_whatsapp(&client, &bridge_bot)
+    let (room_id, qr_url) = connect_whatsapp(&client, &bridge_bot, &access_token)
         .await
         .map_err(|e| {
             tracing::error!("Failed to connect to WhatsApp bridge: {}", e);
@@ -263,6 +436,10 @@ pub async fn start_whatsapp_connection(
                 AxumJson(json!({"error": "Failed to connect to WhatsApp bridge"})),
             )
         })?;
+
+    // Debug: Log the QR code URL
+    println!("Generated QR code URL: {}", &qr_url);
+    tracing::info!("Generated QR code URL: {}", &qr_url);
 
     // Create bridge record
     let current_time = std::time::SystemTime::now()
