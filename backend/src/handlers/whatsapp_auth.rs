@@ -30,7 +30,7 @@ use crate::{
 
 #[derive(Serialize)]
 pub struct WhatsappConnectionResponse {
-    qr_code_url: String,
+    pairing_code: String, 
 }
 
 
@@ -125,11 +125,11 @@ async fn ensure_matrix_credentials(
     Ok((username, access_token, full_user_id, device_id))
 }
 
-
 async fn connect_whatsapp(
     client: &MatrixClient,
     bridge_bot: &str,
     access_token: &str,
+    phone_number: &str, // Add phone number parameter
 ) -> Result<(OwnedRoomId, String)> {
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
     let request = CreateRoomRequest::new();
@@ -152,214 +152,73 @@ async fn connect_whatsapp(
     if !room.members(matrix_sdk::RoomMemberships::empty()).await?.iter().any(|m| m.user_id() == bot_user_id) {
         return Err(anyhow!("Bot {} failed to join room", bot_user_id));
     }
-    // First send help command to verify bot is responsive
-    let help_command = "!wa login qr";
-    println!("📤 Sending help command to verify bot responsiveness: {}", help_command);
-    let help_result = room.send(RoomMessageEventContent::text_plain(help_command)).await;
-    match help_result {
-        Ok(event_id) => println!("✅ Help command sent successfully. Event ID: {:#?}", event_id),
-        Err(e) => println!("❌ Failed to send help command: {}", e),
-    };
 
-    // Wait for bot to process help command
-    println!("⏳ Waiting for bot to process help command...");
-    sleep(Duration::from_secs(1)).await;
-
-    // Send login command with correct prefix
-    // Send login command and wait for response
-    let login_command = "!wa login qr";
+    // Send login command with phone number
+    let login_command = format!("!wa login phone {}", phone_number);
     println!("📤 Sending WhatsApp login command: {}", login_command);
-    let message_result = room.send(RoomMessageEventContent::text_plain(login_command)).await;
-    
-    // Wait a bit longer for the bot to process the command
-    println!("⏳ Waiting for bot to process login command...");
-    sleep(Duration::from_secs(2)).await;
-    match message_result {
-        Ok(event_id) => println!("✅ Login command sent successfully. Event ID: {:#?}", event_id),
-        Err(e) => println!("❌ Failed to send login command: {}", e),
-    };
-    
-    // Wait longer for the bot to process the login command and generate QR
-    println!("⏳ Waiting for bot to process login command and generate QR...");
-    sleep(Duration::from_secs(1)).await;
-    
-    let mut qr_url = None;
-    println!("⏳ Starting QR code monitoring");
+    room.send(RoomMessageEventContent::text_plain(&login_command)).await?;
+
+    // Wait for bot response with pairing code
+    let mut pairing_code = None;
+    println!("⏳ Starting pairing code monitoring");
     client.sync_once(MatrixSyncSettings::default()).await?;
 
-    // Set up event handler for QR code
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(1));
 
     println!("🔄 Starting message polling loop");
-    for attempt in 1..=60 { // Increase number of attempts
+    for attempt in 1..=60 {
         println!("📡 Sync attempt #{}", attempt);
         client.sync_once(sync_settings.clone()).await?;
         
-        // Add a small delay between syncs
         sleep(Duration::from_millis(500)).await;
         
-        // Check for new messages
         if let Some(room) = client.get_room(&room_id) {
             println!("🏠 Found room, fetching messages");
-            let mut options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
+            let options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
             let messages = room.messages(options).await?;
             println!("📨 Fetched {} messages", messages.chunk.len());
             for msg in messages.chunk {
                 let raw_event = msg.raw();
                 if let Ok(event) = raw_event.deserialize() {
                     println!("📝 Processing event from sender: {}", event.sender());
-                    println!("🤖 Processing event from {}", event.sender());
                     if event.sender() == bot_user_id {
-                        println!("✅ Event from bridge bot: {:?}", event);
-                        println!("📝 Event type: {:?}", event.event_type());
                         if let AnySyncTimelineEvent::MessageLike(
                             matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event)
                         ) = event.clone() {
-                            println!("📨 Room message event from {}: {:?}", event.sender(), sync_event);
                             let event_content: RoomMessageEventContent = match sync_event {
-                                SyncRoomMessageEvent::Original(original_event) => {
-                                    println!("📄 Original content: {:?}", original_event.content);
-                                    original_event.content
-                                },
+                                SyncRoomMessageEvent::Original(original_event) => original_event.content,
                                 SyncRoomMessageEvent::Redacted(_) => continue,
                             };
 
                             println!("📨 Processing message event: {:?}", event_content);
-                            match event_content.msgtype {
-                                MessageType::Image(img_content) => {
-                                    println!("🖼️ Image message: {:?}", img_content);
-                                    if let matrix_sdk::ruma::events::room::MediaSource::Plain(mxc_uri) = img_content.source {
-                                        // Get the homeserver URL
-                                        let homeserver = client.homeserver().to_string().trim_end_matches('/').to_string();
-                                        
-                                        // Use the Matrix client's media API to construct the download URL
-                                        // Handle potential errors from server_name() and media_id()
-                                        let server_name = mxc_uri.server_name()
-                                            .map_err(|e| {
-                                                tracing::error!("Failed to get server name from MXC URI: {}", e);
-                                                anyhow!("Invalid MXC URI server name")
-                                            })?;
-                                        let media_id = mxc_uri.media_id()
-                                            .map_err(|e| {
-                                                tracing::error!("Failed to get media ID from MXC URI: {}", e);
-                                                anyhow!("Invalid MXC URI media ID")
-                                            })?;
-
-                                        // Ensure homeserver URL is properly formatted
-                                        let homeserver = if homeserver.starts_with("http://") || homeserver.starts_with("https://") {
-                                            homeserver.trim_end_matches('/').to_string()
-                                        } else {
-                                            format!("http://{}", homeserver.trim_end_matches('/'))
-                                        };
-
-                                        // Try both v3 and r0 endpoints
-                                        let v3_url = format!("{}/_matrix/media/v3/download/{}/{}",
-                                            homeserver,
-                                            server_name,
-                                            media_id
-                                        );
-                                        
-                                        let r0_url = format!("{}/_matrix/media/r0/download/{}/{}",
-                                            homeserver,
-                                            server_name,
-                                            media_id
-                                        );
-
-                                        // Create a new HTTP client
-                                        let http_client = reqwest::Client::new();
-                                        
-                                        // Try v3 endpoint first, then fallback to r0
-                                        let url = match http_client.get(&v3_url)
-                                            .header("Authorization", format!("Bearer {}", access_token))
-                                            .send()
-                                            .await 
-                                        {
-                                            Ok(response) if response.status().is_success() => v3_url,
-                                            _ => {
-                                                println!("⚠️ v3 endpoint failed, trying r0 endpoint");
-                                                r0_url
-                                            }
-                                        };
-                                        
-                                        // Add more detailed logging
-                                        tracing::info!(
-                                            "Constructing media URL from MXC URI: mxc://{}/{}", 
-                                            server_name, 
-                                            media_id
-                                        );
-                                        
-                                        println!("🎯 Fetching QR code from: {}", url);
-                                        
-                                        // Fetch the image
-                                        // Add authorization header to the request using the Matrix client's access token
-                                        let http_client = reqwest::Client::new();
-                                        match http_client.get(&url)
-                                            .header("Authorization", format!("Bearer {}", access_token))
-                                            .send()
-                                            .await 
-                                        {
-                                            Ok(response) => {
-                                                let status = response.status();
-                                                if status.is_success() {
-                                                    println!("✅ Successfully connected to media endpoint: {}", url);
-                                                    tracing::info!("Successfully fetched QR code image");
-                                                    match response.bytes().await {
-                                                        Ok(bytes) => {
-                                                            // Convert to base64
-                                                            let base64_image = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
-                                                            let data_url = format!("data:image/png;base64,{}", base64_image);
-                                                            println!("🖼️ Generated data URL (first 50 chars): {}...", &data_url[..50]);
-                                                            qr_url = Some(data_url);
-                                                        },
-                                                        Err(e) => {
-                                                            println!("❌ Failed to read QR code bytes: {}", e);
-                                                            continue;
-                                                        }
-                                                    }
-                                                } else {
-                                                    let error_text = response.text().await.unwrap_or_default();
-                                                    tracing::error!(
-                                                        "Failed to fetch QR code from {}: HTTP {} - {}",
-                                                        url,
-                                                        status,
-                                                        error_text
-                                                    );
-                                                    println!("❌ Failed to fetch QR code from {}: HTTP {} - {}", url, status, error_text);
-                                                    continue;
-                                                }
-                                            },
-                                            Err(e) => {
-                                                println!("❌ Failed to fetch QR code: {}", e);
-                                                continue;
-                                            }
+                            if let MessageType::Notice(text_content) = event_content.msgtype {
+                                println!("📝 Text message from {}: {}", event.sender(), text_content.body);
+                                // Check for pairing code in the message (e.g., "FQWG-FHKC")
+                                if !text_content.body.contains("Input the pairing code") {
+                                    // Extract the pairing code (assumes format like "FQWG-FHKC")
+                                    let parts: Vec<&str> = text_content.body.split_whitespace().collect();
+                                    if let Some(code) = parts.last() {
+                                        if code.contains('-') { // Basic validation for code format
+                                            pairing_code = Some(code.to_string());
+                                            println!("🔑 Found pairing code: {}", code);
                                         }
                                     }
-                                },
-                                MessageType::Text(text_content) => {
-                                    println!("📝 Text message from {}: {}", event.sender(), text_content.body);
-                                    // Check if the text contains a URL or QR code data
-                                    if text_content.body.contains("http") || text_content.body.contains("mxc://") {
-                                        println!("🔗 Possible QR URL in text: {}", text_content.body);
-                                        qr_url = Some(text_content.body.clone());
-                                    }
-                                },
-                                _ => println!("ℹ️ Other message type: {:?}", event_content.msgtype),
+                                }
                             }
                         }
                     }
-                    
                 }
             }
         }
 
-        if qr_url.is_some() {
+        if pairing_code.is_some() {
             break;
         }
         sleep(Duration::from_secs(1)).await;
     }
 
-    let qr_url = qr_url.ok_or(anyhow!("QR code not received"))?;
-    Ok((room_id.into(), qr_url))
+    let pairing_code = pairing_code.ok_or(anyhow!("Pairing code not received"))?;
+    Ok((room_id.into(), pairing_code))
 }
 
 pub async fn start_whatsapp_connection(
@@ -368,6 +227,24 @@ pub async fn start_whatsapp_connection(
 ) -> Result<AxumJson<WhatsappConnectionResponse>, (StatusCode, AxumJson<serde_json::Value>)> {
     println!("🚀 Starting WhatsApp connection process for user {}", auth_user.user_id);
     tracing::info!("Starting WhatsApp connection for user {}", auth_user.user_id);
+
+    // Fetch user's phone number
+    let phone_number = state
+        .user_repository
+        .find_by_id(auth_user.user_id)
+        .map_err(|e| {
+            tracing::error!("Failed to fetch phone number: {}", e);
+            (
+                StatusCode::BAD_REQUEST,
+                AxumJson(json!({"error": "Phone number not found"})),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::BAD_REQUEST,
+                AxumJson(json!({"error": "Phone number not set"})),
+            )
+        })?.phone_number;
 
     println!("📝 Ensuring Matrix credentials...");
     // TODO remove before prod
@@ -427,7 +304,7 @@ pub async fn start_whatsapp_connection(
 
     println!("🔗 Connecting to WhatsApp bridge...");
     // Connect to WhatsApp bridge
-    let (room_id, qr_url) = connect_whatsapp(&client, &bridge_bot, &access_token)
+    let (room_id, pairing_code) = connect_whatsapp(&client, &bridge_bot, &access_token, &phone_number)
         .await
         .map_err(|e| {
             tracing::error!("Failed to connect to WhatsApp bridge: {}", e);
@@ -437,9 +314,9 @@ pub async fn start_whatsapp_connection(
             )
         })?;
 
-    // Debug: Log the QR code URL
-    println!("Generated QR code URL: {}", &qr_url);
-    tracing::info!("Generated QR code URL: {}", &qr_url);
+    // Debug: Log the pairing code
+    println!("Generated pairing code: {}", &pairing_code);
+    tracing::info!("Generated pairing code: {}", &pairing_code);
 
     // Create bridge record
     let current_time = std::time::SystemTime::now()
@@ -489,9 +366,7 @@ pub async fn start_whatsapp_connection(
         }
     });
 
-    Ok(AxumJson(WhatsappConnectionResponse {
-        qr_code_url: qr_url,
-    }))
+    Ok(AxumJson(WhatsappConnectionResponse { pairing_code }))
 }
 
 pub async fn get_whatsapp_status(
@@ -528,15 +403,21 @@ async fn monitor_whatsapp_connection(
     user_id: i32,
     state: Arc<AppState>,
 ) -> Result<(), anyhow::Error> {
+    println!("👀 Starting WhatsApp connection monitoring for user {} in room {}", user_id, room_id);
+    println!("🤖 Monitoring messages from bridge bot: {}", bridge_bot);
     println!("👀 Starting WhatsApp connection monitoring for user {}", user_id);
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
 
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(30));
 
-    for _ in 0..20 { // Try for about 10 minutes (20 * 30 seconds)
+    // Increase monitoring duration and frequency
+    for attempt in 1..40 { // Try for about 20 minutes (40 * 30 seconds)
+        println!("🔄 Monitoring attempt #{} for user {}", attempt, user_id);
         client.sync_once(sync_settings.clone()).await?;
         
+        println!("🔍 Checking messages in room {}", room_id);
         if let Some(room) = client.get_room(room_id) {
+            println!("📬 Found room, fetching messages...");
             let options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
             let messages = room.messages(options).await?;
             for msg in messages.chunk {
@@ -552,38 +433,82 @@ async fn monitor_whatsapp_connection(
                                 SyncRoomMessageEvent::Redacted(_) => continue,
                             };
 
-                            if let MessageType::Text(text_content) = event_content.msgtype {
-                                let content = text_content.body;
+                            let content = match event_content.msgtype {
+                                MessageType::Text(text_content) => text_content.body,
+                                MessageType::Notice(notice_content) => notice_content.body,
+                                _ => continue,
+                            };
         
-                                // Check for successful connection messages
-                                if content.contains("successfully logged in") || content.contains("connected") {
-                                    println!("🎉 WhatsApp successfully connected for user {}", user_id);
-                                    // Update bridge status to connected
-                                    let current_time = std::time::SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap()
-                                        .as_secs() as i32;
+                            // Check for successful connection messages
+                            // Debug log the message content
+                            println!("📱 WhatsApp bot message: {}", content);
 
-                                    let new_bridge = NewBridge {
-                                        user_id,
-                                        bridge_type: "whatsapp".to_string(),
-                                        status: "connected".to_string(),
-                                        room_id: Some(room_id.to_string()),
-                                        data: None,
-                                        created_at: Some(current_time),
-                                    };
+                            println!("message contains Successfully logged in as: {}",content.contains("Successfully logged in as"));
+                            // Check for successful login message first
+                            if content.contains("Successfully logged in as") {
+                                println!("🎉 WhatsApp successfully connected for user {} with phone number confirmation", user_id);
+                                // Update bridge status to connected
+                                let current_time = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_secs() as i32;
 
-                                    state.user_repository.delete_whatsapp_bridge(user_id)?;
-                                    state.user_repository.create_bridge(new_bridge)?;
-                                    return Ok(());
-                                }
- 
-                                // Check for error messages
-                                if content.contains("error") || content.contains("failed") || content.contains("timeout") {
-                                    println!("❌ WhatsApp connection failed for user {}: {}", user_id, content);
-                                    state.user_repository.delete_whatsapp_bridge(user_id)?;
-                                    return Err(anyhow!("WhatsApp connection failed: {}", content));
-                                }
+                                let new_bridge = NewBridge {
+                                    user_id,
+                                    bridge_type: "whatsapp".to_string(),
+                                    status: "connected".to_string(),
+                                    room_id: Some(room_id.to_string()),
+                                    data: None,
+                                    created_at: Some(current_time),
+                                };
+
+                                state.user_repository.delete_whatsapp_bridge(user_id)?;
+                                state.user_repository.create_bridge(new_bridge)?;
+                                return Ok(());
+                            }
+                            // Check for other success messages as fallback
+                            else if content.contains("successfully logged in") || 
+                               content.contains("connected") ||
+                               content.contains("WhatsApp connection successful") ||
+                               content.contains("Successfully connected to WhatsApp") ||
+                               content.contains("WhatsApp Web is running") {
+                                println!("🎉 WhatsApp successfully connected for user {}", user_id);
+                                // Update bridge status to connected
+                                let current_time = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_secs() as i32;
+
+                                let new_bridge = NewBridge {
+                                    user_id,
+                                    bridge_type: "whatsapp".to_string(),
+                                    status: "connected".to_string(),
+                                    room_id: Some(room_id.to_string()),
+                                    data: None,
+                                    created_at: Some(current_time),
+                                };
+
+                                state.user_repository.delete_whatsapp_bridge(user_id)?;
+                                state.user_repository.create_bridge(new_bridge)?;
+                                return Ok(());
+                            }
+
+                            // Check for various error messages
+                            let error_patterns = [
+                                "error",
+                                "failed",
+                                "timeout",
+                                "disconnected",
+                                "invalid code",
+                                "connection lost",
+                                "authentication failed"
+                            ];
+
+                            if error_patterns.iter().any(|&pattern| content.to_lowercase().contains(pattern)) {
+                                println!("❌ WhatsApp connection failed for user {}", user_id);
+                                println!("📄 Error message: {}", content);
+                                state.user_repository.delete_whatsapp_bridge(user_id)?;
+                                return Err(anyhow!("WhatsApp connection failed: {}", content));
                             }
                         }
                     }

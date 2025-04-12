@@ -15,7 +15,7 @@ struct WhatsappStatus {
 
 #[derive(Deserialize)]
 struct WhatsappConnectionResponse {
-    qr_code_url: String,
+    pairing_code: String,
 }
 
 #[derive(Properties, PartialEq)]
@@ -110,12 +110,12 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                             // Debug: Log the response status
                             web_sys::console::log_1(&format!("Response status: {}", response.status()).into());
                             
-                            match response.json::<WhatsappConnectionResponse>().await {
+                match response.json::<WhatsappConnectionResponse>().await {
                                 Ok(connection_response) => {
-                                    // Debug: Log the QR code URL
-                                    web_sys::console::log_1(&format!("Received QR code URL: {}", &connection_response.qr_code_url).into());
+                                    // Debug: Log that we received the verification code
+                                    web_sys::console::log_1(&format!("Received verification code: {}", &connection_response.pairing_code).into());
                                     
-                                    qr_code.set(Some(connection_response.qr_code_url));
+                                    qr_code.set(Some(connection_response.pairing_code));
                                     error.set(None);
 
                                     // Start polling for status
@@ -234,44 +234,42 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
 
     html! {
         <div class="whatsapp-connect">
-            <h3>{"WhatsApp Connection"}</h3>
+            <div class="service-header">
+                <div class="service-name">
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp"/>
+                    {"WhatsApp"}
+                </div>
+                if let Some(status) = (*connection_status).clone() {
+                    if status.connected {
+                        <span class="service-status">{"Connected ✓"}</span>
+                    }
+                }
+            </div>
             
             if let Some(status) = (*connection_status).clone() {
                 <div class="connection-status">
-                    <p>
-                        {"Status: "}
-                        <span class={classes!("status", if status.connected { "connected" } else { "disconnected" })}>
-                            {status.status}
-                        </span>
-                    </p>
-                    
                     if status.connected {
                         <button onclick={disconnect} class="disconnect-button">
                             {"Disconnect WhatsApp"}
                         </button>
                     } else {
                         if *is_connecting {
-                            if let Some(qr_url) = (*qr_code).clone() {
-                                <div class="qr-code-container">
-                                    <p>{"Scan this QR code with WhatsApp to connect:"}</p>
-                                    <img 
-                                        src={qr_url.clone()} 
-                                        alt="WhatsApp QR Code" 
-                                        class="qr-code"
-                                        onload={Callback::from(|e: Event| {
-                                            web_sys::console::log_1(&"QR code image loaded successfully".into());
-                                        })}
-                                        onerror={Callback::from(|e: Event| {
-                                            web_sys::console::log_1(&"Error loading QR code image".into());
-                                        })}
-                                    />
-                                    <div class="debug-info">
-                                        <p>{"Data URL prefix: "}{&qr_url[..30]}{"..."}</p>
-                                        <p>{"Total URL length: "}{qr_url.len()}</p>
+                            if let Some(pairing_code) = (*qr_code).clone() {
+                                <div class="verification-code-container">
+                                    <p>{"Enter this code in WhatsApp to connect:"}</p>
+                                    <div class="verification-code">
+                                        {pairing_code}
                                     </div>
+                                    <p class="instruction">{"1. Open WhatsApp on your phone"}</p>
+                                    <p class="instruction">{"2. Go to Settings > Linked Devices"}</p>
+                                    <p class="instruction">{"3. Tap 'Link a Device'"}</p>
+                                    <p class="instruction">{"4. When prompted, enter this code"}</p>
                                 </div>
                             } else {
-                                <p>{"Loading QR code..."}</p>
+                                <div class="loading-container">
+                                    <p>{"Generating connection code..."}</p>
+                                    <div class="loading-spinner"></div>
+                                </div>
                             }
                         } else {
                             <button onclick={start_connection} class="connect-button">
@@ -292,8 +290,27 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
 
             <style>
                 {r#"
+                    .loading-container {
+                        text-align: center;
+                        margin: 2rem 0;
+                    }
+
+                    .loading-spinner {
+                        display: inline-block;
+                        width: 40px;
+                        height: 40px;
+                        border: 4px solid rgba(30, 144, 255, 0.1);
+                        border-radius: 50%;
+                        border-top-color: #1E90FF;
+                        animation: spin 1s ease-in-out infinite;
+                        margin: 1rem auto;
+                    }
+
+                    @keyframes spin {
+                        to { transform: rotate(360deg); }
+                    }
                     .whatsapp-connect {
-                        background: rgba(30, 30, 30, 0.7);
+                        background: rgba(0, 0, 0, 0.2);
                         border: 1px solid rgba(30, 144, 255, 0.1);
                         border-radius: 12px;
                         padding: 1.5rem;
@@ -321,38 +338,29 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         color: #999;
                     }
 
-                    .qr-code-container {
+                    .verification-code-container {
                         margin: 1.5rem 0;
                         text-align: center;
                     }
 
-                    .qr-code {
-                        display: block;
-                        max-width: 300px;
-                        width: 300px;
-                        height: 300px;
+                    .verification-code {
+                        font-family: monospace;
+                        font-size: 2.5rem;
+                        font-weight: bold;
+                        letter-spacing: 4px;
+                        color: #1E90FF;
+                        background: rgba(30, 144, 255, 0.1);
+                        padding: 1rem 2rem;
                         margin: 1rem auto;
                         border-radius: 8px;
-                        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-                        background: white;
-                        padding: 8px;
-                        object-fit: contain;
-                        image-rendering: pixelated;
+                        display: inline-block;
+                        border: 2px solid rgba(30, 144, 255, 0.2);
                     }
 
-                    .debug-info {
-                        margin-top: 0.5rem;
-                        color: #666;
-                        font-family: monospace;
-                        font-size: 12px;
-                        background: rgba(0, 0, 0, 0.1);
-                        padding: 8px;
-                        border-radius: 4px;
-                    }
-
-                    .debug-info p {
-                        margin: 4px 0;
-                        word-break: break-all;
+                    .instruction {
+                        color: #999;
+                        margin-top: 1rem;
+                        font-size: 0.9rem;
                     }
 
                     .connect-button, .disconnect-button {
