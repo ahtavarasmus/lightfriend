@@ -338,8 +338,17 @@ async fn main() {
             CorsLayer::new()
                 .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::OPTIONS, axum::http::Method::DELETE])
                 .allow_origin(AllowOrigin::exact(std::env::var("FRONTEND_URL").expect("FRONTEND_URL must be set").parse().expect("Invalid FRONTEND_URL"))) // Restrict in production
-                .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::AUTHORIZATION])
-                .expose_headers([axum::http::header::CONTENT_TYPE])
+                .allow_headers([
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::header::AUTHORIZATION,
+                    axum::http::header::ACCEPT,
+                    axum::http::header::ORIGIN,
+                ])
+                .expose_headers([
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::header::CONTENT_LENGTH,
+                ])
+                .allow_credentials(true)
         )
         .with_state(state.clone());
 
