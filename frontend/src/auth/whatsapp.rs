@@ -249,9 +249,58 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
             if let Some(status) = (*connection_status).clone() {
                 <div class="connection-status">
                     if status.connected {
-                        <button onclick={disconnect} class="disconnect-button">
-                            {"Disconnect WhatsApp"}
-                        </button>
+                        <>
+                            <button onclick={disconnect} class="disconnect-button">
+                                {"Disconnect WhatsApp"}
+                            </button>
+                            <button onclick={{
+                                Callback::from(move |_| {
+                                    if let Some(token) = window()
+                                        .and_then(|w| w.local_storage().ok())
+                                        .flatten()
+                                        .and_then(|storage| storage.get_item("token").ok())
+                                        .flatten()
+                                    {
+                                        spawn_local(async move {
+                                    match Request::get(&format!("{}/api/whatsapp/test-messages", config::get_backend_url()))
+                                        .header("Authorization", &format!("Bearer {}", token))
+                                        .send()
+                                        .await
+                                    {
+                                        Ok(response) => {
+                                            web_sys::console::log_1(&format!("Response status: {}", response.status()).into());
+                                            // Log the raw response text first
+                                            match response.text().await {
+                                                Ok(text) => {
+                                                    web_sys::console::log_1(&format!("Raw response: {}", text).into());
+                                                    
+                                                    // Try to parse the text as JSON
+                                                    match serde_json::from_str::<serde_json::Value>(&text) {
+                                                        Ok(data) => {
+                                                            web_sys::console::log_1(&format!("Messages: {:?}", data).into());
+                                                            // You could also show this in the UI if desired
+                                                        }
+                                                        Err(e) => {
+                                                            web_sys::console::error_1(&format!("Failed to parse JSON: {}", e).into());
+                                                        }
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    web_sys::console::error_1(&format!("Failed to get response text: {}", e).into());
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            web_sys::console::error_1(&format!("Failed to fetch messages: {}", e).into());
+                                        }
+                                    }
+                                        });
+                                    }
+                                })
+                            }} class="test-button">
+                                {"Test Fetch Messages"}
+                            </button>
+                        </>
                     } else {
                         if *is_connecting {
                             if let Some(pairing_code) = (*qr_code).clone() {
@@ -290,6 +339,28 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
 
             <style>
                 {r#"
+                    .action-button:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
+                    }
+
+                    .test-button {
+                        background: linear-gradient(45deg, #4CAF50, #45a049);
+                        color: white;
+                        border: none;
+                        width: 100%;
+                        padding: 1rem;
+                        border-radius: 8px;
+                        font-size: 1rem;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        margin-top: 1rem;
+                    }
+
+                    .test-button:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 20px rgba(76, 175, 80, 0.3);
+                    }
                     .loading-container {
                         text-align: center;
                         margin: 2rem 0;

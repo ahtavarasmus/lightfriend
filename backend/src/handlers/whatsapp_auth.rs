@@ -27,6 +27,7 @@ use crate::{
     models::user_models::{NewBridge, Bridge},
     utils::matrix_auth::MatrixAuth,
 };
+use url::Url;
 
 #[derive(Serialize)]
 pub struct WhatsappConnectionResponse {
@@ -43,10 +44,21 @@ async fn ensure_matrix_credentials(
             StatusCode::INTERNAL_SERVER_ERROR,
             AxumJson(json!({"error": "MATRIX_HOMESERVER not set"})),
         ))?;
+    // Parse the homeserver URL to extract the domain
+    let parsed_url = Url::parse(&homeserver_url)
+        .map_err(|_| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": "Invalid MATRIX_HOMESERVER format"})),
+        ))?;
+    let domain = parsed_url.host_str()
+        .ok_or_else(|| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": "No host in MATRIX_HOMESERVER"})),
+        ))?;
 
     // Check if user already has Matrix credentials
     if let Ok(Some((username, access_token, device_id))) = state.user_repository.get_matrix_credentials(user_id) {
-        let full_user_id = format!("@{}:{}", username, homeserver_url.trim_start_matches("http://").trim_start_matches("https://"));
+        let full_user_id = format!("@{}:{}", username, domain);
         return Ok((username, access_token, full_user_id, device_id));
     }
 
@@ -69,7 +81,7 @@ async fn ensure_matrix_credentials(
                 AxumJson(json!({"error": "Failed to create Matrix credentials"})),
             )
         })?;
-    let full_user_id = format!("@{}:{}", username, homeserver_url.trim_start_matches("http://").trim_start_matches("https://"));
+    let full_user_id = format!("@{}:{}", username, domain);
 
     let client = MatrixClient::builder()
         .homeserver_url(&homeserver_url)
