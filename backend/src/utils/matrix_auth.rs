@@ -105,6 +105,78 @@ impl MatrixAuth {
     }
 
     
+    // New method to attempt login and validate credentials
+    pub async fn login_user(&self, username: &str, password: &str) -> Result<(String, String)> {
+        println!("🔑 Attempting Matrix user login for {}", username);
+        let response = self
+            .http_client
+            .post(format!("{}/_matrix/client/v3/login", self.homeserver))
+            .json(&json!({
+                "type": "m.login.password",
+                "identifier": {
+                    "type": "m.id.user",
+                    "user": username
+                },
+                "password": password,
+                "initial_device_display_name": "Bridge Device"
+            }))
+            .send()
+            .await
+            .map_err(|e| anyhow!("Failed to send login request: {}", e))?;
+
+        let status = response.status();
+        let login_res = response
+            .text()
+            .await
+            .map_err(|e| anyhow!("Failed to read login response: {}", e))?;
+        let login_json: serde_json::Value = serde_json::from_str(&login_res)
+            .map_err(|e| anyhow!("Failed to parse login response: {}", e))?;
+
+        if status.is_success() {
+            let access_token = login_json["access_token"]
+                .as_str()
+                .ok_or_else(|| anyhow!("No access_token in response: {}", login_res))?
+                .to_string();
+            let device_id = login_json["device_id"]
+                .as_str()
+                .ok_or_else(|| anyhow!("No device_id in response: {}", login_res))?
+                .to_string();
+            println!("✅ Matrix login successful for {}", username);
+            Ok((access_token, device_id))
+        } else {
+            let error = login_json["error"]
+                .as_str()
+                .unwrap_or("Unknown error");
+            Err(anyhow!("Login failed: {} (status: {})", error, status))
+        }
+    }
+
+    // New method to delete a device using the admin API
+    pub async fn delete_device(&self, user_id: &str, device_id: &str) -> Result<()> {
+        println!("🗑️ Deleting device {} for user {}", device_id, user_id);
+        let response = self
+            .http_client
+            .delete(format!(
+                "{}/_synapse/admin/v2/users/{}/devices/{}",
+                self.homeserver, user_id, device_id
+            ))
+            .header("Authorization", format!("Bearer {}", self.shared_secret))
+            .send()
+            .await
+            .map_err(|e| anyhow!("Failed to send device deletion request: {}", e))?;
+
+        let status = response.status();
+        if status.is_success() {
+            println!("✅ Device {} deleted successfully", device_id);
+            Ok(())
+        } else {
+            let error_res = response
+                .text()
+                .await
+                .map_err(|e| anyhow!("Failed to read deletion response: {}", e))?;
+            Err(anyhow!("Device deletion failed: {} (status: {})", error_res, status))
+        }
+    }
 
     pub fn encrypt_token(token: &str) -> Result<String> {
         println!("🔒 Encrypting access token...");

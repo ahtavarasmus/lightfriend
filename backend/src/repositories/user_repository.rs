@@ -1273,6 +1273,7 @@ impl UserRepository {
             .set((
                 users::matrix_username.eq::<Option<String>>(None),
                 users::encrypted_matrix_access_token.eq::<Option<String>>(None),
+                users::matrix_device_id.eq::<Option<String>>(None),
             ))
             .execute(&mut conn)?;
 

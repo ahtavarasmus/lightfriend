@@ -289,7 +289,7 @@ async fn main() {
         .route("/api/auth/whatsapp/status", get(whatsapp_auth::get_whatsapp_status))
         .route("/api/auth/whatsapp/connect", get(whatsapp_auth::start_whatsapp_connection))
         .route("/api/auth/whatsapp/disconnect", delete(whatsapp_auth::disconnect_whatsapp))
-        .route("/api/whatsapp/test-messages", get(whatsapp_handlers::fetch_whatsapp_messages))
+        .route("/api/whatsapp/test-messages", get(whatsapp_handlers::test_fetch_messages))
 
         // Filter routes
         .route("/api/filters/waiting-check/{service_type}", post(filter_handlers::create_waiting_check))
