@@ -34,11 +34,48 @@ pub struct WhatsappConnectionResponse {
     pairing_code: String, 
 }
 
-
 async fn ensure_matrix_credentials(
     state: &AppState,
     user_id: i32,
 ) -> Result<(String, String, String, String), (StatusCode, AxumJson<serde_json::Value>)> {
+    // Always create new credentials to avoid any device/signing key issues
+    println!("🔄 Creating fresh Matrix credentials for user {}", user_id);
+    
+    // Delete any existing Matrix credentials from database first
+    if let Ok(Some((username, _, device_id))) = state.user_repository.get_matrix_credentials(user_id) {
+        println!("🗑️ Removing old Matrix credentials for user {}", user_id);
+        let _ = state.user_repository.delete_matrix_credentials(user_id);
+        
+        // Try to delete the old device from Matrix server
+        let homeserver_url = std::env::var("MATRIX_HOMESERVER")
+            .map_err(|_| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "MATRIX_HOMESERVER not set"})),
+            ))?;
+        let parsed_url = Url::parse(&homeserver_url)
+            .map_err(|_| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "Invalid MATRIX_HOMESERVER format"})),
+            ))?;
+        let domain = parsed_url.host_str()
+            .ok_or_else(|| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "No host in MATRIX_HOMESERVER"})),
+            ))?;
+        
+        let full_user_id = format!("@{}:{}", username, domain);
+        let matrix_auth = MatrixAuth::new(
+            homeserver_url.clone(),
+            std::env::var("MATRIX_SHARED_SECRET").map_err(|_| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    AxumJson(json!({"error": "MATRIX_SHARED_SECRET not set"})),
+                )
+            })?,
+        );
+        
+        let _ = matrix_auth.delete_device(&full_user_id, &device_id).await;
+    }
     let homeserver_url = std::env::var("MATRIX_HOMESERVER")
         .map_err(|_| (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -56,11 +93,38 @@ async fn ensure_matrix_credentials(
             AxumJson(json!({"error": "No host in MATRIX_HOMESERVER"})),
         ))?;
 
-    // Check if user already has Matrix credentials
-    if let Ok(Some((username, access_token, device_id))) = state.user_repository.get_matrix_credentials(user_id) {
-        let full_user_id = format!("@{}:{}", username, domain);
-        return Ok((username, access_token, full_user_id, device_id));
-    }
+    // Create new Matrix credentials
+    let matrix_auth = MatrixAuth::new(
+        homeserver_url.clone(),
+        std::env::var("MATRIX_SHARED_SECRET").map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "MATRIX_SHARED_SECRET not set"})),
+            )
+        })?,
+    );
+
+    // Create new credentials
+    let (username, access_token, device_id) = matrix_auth.register_user().await
+        .map_err(|e| {
+            tracing::error!("Failed to register new Matrix user: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "Failed to create new Matrix credentials"})),
+            )
+        })?;
+
+    // Store new credentials in database
+    state.user_repository.set_matrix_credentials(user_id, &username, &access_token, &device_id)
+        .map_err(|e| {
+            tracing::error!("Failed to store new Matrix credentials: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "Failed to store new Matrix credentials"})),
+            )
+        })?;
+
+    let full_user_id = format!("@{}:{}", username, domain);
 
     // Create new Matrix credentials
     let matrix_auth = MatrixAuth::new(
@@ -476,6 +540,12 @@ async fn monitor_whatsapp_connection(
 
                                 state.user_repository.delete_whatsapp_bridge(user_id)?;
                                 state.user_repository.create_bridge(new_bridge)?;
+                                // Send the sync command for groups
+                                if let Some(room) = client.get_room(&room_id) {
+                                    room.send(RoomMessageEventContent::text_plain("!wa sync groups")).await?;
+                                    println!("Sent !wa sync groups to create WhatsApp group chat rooms for user {}", user_id);
+                                }
+
                                 return Ok(());
                             }
                             // Check for other success messages as fallback
@@ -502,6 +572,13 @@ async fn monitor_whatsapp_connection(
 
                                 state.user_repository.delete_whatsapp_bridge(user_id)?;
                                 state.user_repository.create_bridge(new_bridge)?;
+
+                                // Send the sync command for groups
+                                if let Some(room) = client.get_room(&room_id) {
+                                    room.send(RoomMessageEventContent::text_plain("!wa sync groups")).await?;
+                                    println!("Sent !wa sync groups to create WhatsApp group chat rooms for user {}", user_id);
+                                }
+                                
                                 return Ok(());
                             }
 

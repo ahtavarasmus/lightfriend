@@ -162,16 +162,7 @@ pub async fn fetch_whatsapp_messages(
                         .and_then(|ts| ts.as_u64())
                         .map(|ts| ts as i64 / 1000)
                         .unwrap_or(0);
-                    
-                    // Check time range
-                    if timestamp < start_time {
-                        found_older_messages = true;
-                        break;
-                    }
-                    
-                    if timestamp > end_time {
-                        continue;
-                    }
+
                     
                     // Get message content
                     let content = event.get("content");
