@@ -2,9 +2,10 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use matrix_sdk::{
     Client as MatrixClient,
+    room::Room,
     ruma::{
         events::room::message::{RoomMessageEventContent, SyncRoomMessageEvent, MessageType},
-        events::AnySyncTimelineEvent,
+        events::{AnyTimelineEvent, AnySyncTimelineEvent},
         OwnedRoomId, OwnedUserId, OwnedDeviceId,
     },
 };
@@ -21,6 +22,9 @@ pub struct WhatsAppMessage {
     pub room_name: String,
 }
 
+use std::time::Duration;
+use tokio::time::sleep;
+
 
 pub async fn fetch_whatsapp_messages(
     state: &AppState,
@@ -28,200 +32,121 @@ pub async fn fetch_whatsapp_messages(
     start_time: i64,
     end_time: i64,
 ) -> Result<Vec<WhatsAppMessage>> {
-    tracing::info!("Fetching messages for user {}", user_id);
-    
-    // Get user's Matrix credentials
-    let (username, access_token, device_id) = state.user_repository.get_matrix_credentials(user_id)?
+
+    let (username, access_token, device_id) = state.user_repository
+        .get_matrix_credentials(user_id)?
         .ok_or_else(|| anyhow!("Matrix credentials not found"))?;
 
-    // Get homeserver URL
     let homeserver_url = std::env::var("MATRIX_HOMESERVER")
-        .map_err(|_| anyhow!("MATRIX_HOMESERVER not set"))?;
+        .expect("MATRIX_HOMESERVER not set");
 
-    // Parse the homeserver URL to extract the domain
     let parsed_url = url::Url::parse(&homeserver_url)?;
-    let domain = parsed_url.host_str()
-        .ok_or_else(|| anyhow!("Invalid homeserver URL: missing host"))?;
-
+    let domain = parsed_url.host_str().ok_or_else(|| anyhow!("Invalid homeserver URL"))?;
     let full_user_id = format!("@{}:{}", username, domain);
 
-    // Initialize HTTP client for direct Matrix API access
-    let http_client = reqwest::Client::new();
-    
-    // Step 1: Get the list of all joined rooms using the /sync API
-    let sync_url = format!("{}/_matrix/client/v3/sync?timeout=10000", homeserver_url);
-    tracing::info!("Syncing with Matrix server to get room list: {}", sync_url);
-    
-    let response = http_client.get(&sync_url)
-        .header("Authorization", format!("Bearer {}", access_token))
-        .send()
-        .await?
-        .json::<serde_json::Value>()
-        .await?;
-    
-    // Extract the joined rooms from the sync response
-    let joined_rooms = match response.get("rooms").and_then(|r| r.get("join")) {
-        Some(rooms) => rooms.as_object().ok_or_else(|| anyhow!("Invalid rooms format"))?,
-        None => {
-            tracing::warn!("No joined rooms found in sync response");
-            return Ok(Vec::new());
-        }
-    };
-    
-    tracing::info!("Found {} joined rooms via direct API", joined_rooms.len());
-    let mut room_ids_and_names = Vec::new();
-    
-    // Get the basic info for each room
-    for (room_id, room_data) in joined_rooms {
-        let room_name = room_data
-            .get("state")
-            .and_then(|state| state.get("events"))
-            .and_then(|events| {
-                events.as_array().and_then(|arr| {
-                    arr.iter()
-                        .find(|event| {
-                            event.get("type").map_or(false, |t| t == "m.room.name")
-                        })
-                        .and_then(|event| event.get("content").and_then(|c| c.get("name")).and_then(|n| n.as_str()))
-                })
-            })
-            .unwrap_or_else(|| room_id.strip_prefix("!").unwrap_or(room_id));
-        
-        room_ids_and_names.push((room_id.to_string(), room_name.to_string()));
-        tracing::info!("Room: {} ({})", room_name, room_id);
-    }
-    
-    // Sort rooms by name for nicer output
-    room_ids_and_names.sort_by(|a, b| a.1.cmp(&b.1));
-    
-    let mut all_messages = Vec::new();
-    
-    // Step 2: For each room, fetch messages within the time range
-    for (room_id, room_name) in room_ids_and_names {
-        tracing::info!("Processing room: {} ({})", room_name, room_id);
-        
-        // URL for room messages
-        let messages_url = format!(
-            "{}/_matrix/client/v3/rooms/{}/messages?dir=b&limit=100",
-            homeserver_url,
-            urlencoding::encode(&room_id)
-        );
-        
-        tracing::debug!("Fetching messages from: {}", messages_url);
-        
-        let mut from_token: Option<String> = None;
-        
-        // Loop to paginate through messages
-        loop {
-            let mut url = messages_url.clone();
-            if let Some(token) = &from_token {
-                url = format!("{}&from={}", url, token);
-            }
-            
-            let response = match http_client.get(&url)
-                .header("Authorization", format!("Bearer {}", access_token))
-                .send()
-                .await
-            {
-                Ok(resp) => {
-                    if resp.status().is_success() {
-                        match resp.json::<serde_json::Value>().await {
-                            Ok(json) => json,
-                            Err(err) => {
-                                tracing::error!("Failed to parse message response: {}", err);
-                                break;
-                            }
-                        }
-                    } else {
-                        tracing::error!("Error response: {} {}", resp.status(), resp.text().await.unwrap_or_default());
-                        break;
-                    }
-                },
-                Err(err) => {
-                    tracing::error!("Failed to fetch messages: {}", err);
-                    break;
-                }
-            };
-            
-            // Extract messages
-            let chunk = response.get("chunk").and_then(|c| c.as_array());
-            let chunk_size = chunk.map(|c| c.len()).unwrap_or(0);
-            tracing::debug!("Received {} messages from room {}", chunk_size, room_id);
-            
-            if let Some(chunk) = chunk {
-                let mut found_older_messages = false;
-                
-                for event in chunk {
-                    // Get basic event info
-                    let event_type = event.get("type").and_then(|t| t.as_str());
-                    if event_type != Some("m.room.message") {
-                        continue;
-                    }
-                    
-                    let timestamp = event.get("origin_server_ts")
-                        .and_then(|ts| ts.as_u64())
-                        .map(|ts| ts as i64 / 1000)
-                        .unwrap_or(0);
+    // Setup SQLite store path
+    let store_path = format!(
+        "{}/{}",
+        std::env::var("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH")
+            .expect("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH not set"),
+        username
+    );
+    std::fs::create_dir_all(&store_path)?;
 
-                    
-                    // Get message content
-                    let content = event.get("content");
-                    let msgtype = content.and_then(|c| c.get("msgtype")).and_then(|t| t.as_str());
-                    let body = content.and_then(|c| c.get("body")).and_then(|b| b.as_str());
-                    
-                    if let (Some(msgtype), Some(body)) = (msgtype, body) {
-                        let message_type = match msgtype {
-                            "m.text" => "text",
-                            "m.image" => "image",
-                            "m.video" => "video",
-                            "m.audio" => "audio",
-                            "m.file" => "file",
-                            "m.notice" => "notice",
+    let client = MatrixClient::builder()
+        .homeserver_url(homeserver_url)
+        .sqlite_store(store_path.clone(), None)
+        .build()
+        .await?;
+
+    tracing::info!("checking invited rooms: {:#?}", client.invited_rooms());
+    for room in client.invited_rooms() {
+        tracing::info!("Joining invited room: {}", room.room_id());
+        client.join_room_by_id(room.room_id()).await?;
+    }
+    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+    tracing::info!("checking joined rooms: {:#?}", client.joined_rooms());
+    for room in client.joined_rooms() {
+        tracing::info!("✅ Joined room: {}", room.room_id());
+    }
+
+    let mut messages = Vec::new();
+
+    for room in client.joined_rooms() {
+        let room_id = room.room_id();
+        let room_name = room.display_name().await.unwrap_or_else(|_| matrix_sdk::RoomDisplayName::Named(room_id.to_string()));
+
+        let mut from_token = None;
+
+        loop {
+            let mut options = matrix_sdk::room::MessagesOptions::backward();
+            options.limit = matrix_sdk::ruma::UInt::new(100).unwrap();
+            if let Some(token) = from_token.clone() {
+                options.from = Some(token);
+            }
+
+            let response = room.messages(options).await?;
+            let chunk = response.chunk;
+            from_token = response.end;
+            if chunk.is_empty() {
+                break;
+            }
+
+            for event in chunk {
+                let raw_event = event.raw();
+                if let Ok(any_sync_event) = raw_event.deserialize() {
+                    if let AnySyncTimelineEvent::MessageLike(
+                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
+                        ) = any_sync_event.clone() {
+
+                        let (sender, timestamp, content) = match msg {
+                            matrix_sdk::ruma::events::room::message::SyncRoomMessageEvent::Original(e) => {
+                                let timestamp = i64::from(e.origin_server_ts.0) / 1000;
+
+                                (e.sender, timestamp, e.content)
+                            }
+                            matrix_sdk::ruma::events::room::message::SyncRoomMessageEvent::Redacted(_) => continue,
+                        };
+
+                        let (msgtype, body) = match content.msgtype {
+                            MessageType::Text(t) => ("text", t.body),
+                            MessageType::Notice(n) => ("notice", n.body),
+                            MessageType::Image(_) => ("image", "📎 IMAGE".into()),
+                            MessageType::Video(_) => ("video", "📎 VIDEO".into()),
+                            MessageType::File(_) => ("file", "📎 FILE".into()),
+                            MessageType::Audio(_) => ("audio", "📎 AUDIO".into()),
+                            MessageType::Location(_) => ("location", "📍 LOCATION".into()),
+                            MessageType::Emote(t) => ("emote", t.body),
                             _ => continue,
                         };
-                        
-                        let message_content = if message_type == "text" || message_type == "notice" {
-                            body.to_string()
-                        } else {
-                            format!("📎 {}", message_type.to_uppercase())
-                        };
-                        
-                        // Get sender info
-                        let sender_id = event.get("sender").and_then(|s| s.as_str()).unwrap_or("unknown");
-                        let sender_display_name = sender_id.strip_prefix("@").and_then(|s| s.split(':').next()).unwrap_or(sender_id);
-                        
-                        tracing::debug!("Found message in room {} from {}: {}", 
-                            room_name, sender_display_name, message_content.chars().take(30).collect::<String>());
-                        
-                        all_messages.push(WhatsAppMessage {
-                            sender: sender_id.to_string(),
-                            sender_display_name: sender_display_name.to_string(),
-                            content: message_content,
+
+                        if timestamp < start_time || timestamp > end_time {
+                            continue;
+                        }
+
+                        messages.push(WhatsAppMessage {
+                            sender: sender.to_string(),
+                            sender_display_name: sender.localpart().to_string(),
+                            content: body,
                             timestamp,
-                            message_type: message_type.to_string(),
-                            room_name: room_name.clone(),
+                            message_type: msgtype.to_string(),
+                            room_name: room_name.to_string(),
                         });
                     }
                 }
-                
-                // Break conditions
-                if found_older_messages {
-                    break;
-                }
             }
-            
-            // Check for end of pagination
-            from_token = response.get("end").and_then(|e| e.as_str()).map(|s| s.to_string());
+
             if from_token.is_none() {
                 break;
             }
+
+            // Optional: small delay to respect backpressure
+            sleep(Duration::from_millis(100)).await;
         }
     }
-    
-    tracing::info!("Found {} messages across all rooms", all_messages.len());
-    
-    // Sort messages by timestamp (newest first)
-    all_messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    
-    Ok(all_messages)
+
+    messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    Ok(messages)
 }
+

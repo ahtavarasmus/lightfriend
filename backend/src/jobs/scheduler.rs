@@ -53,7 +53,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
             // Process each subscribed user
             for user in users_with_subscription {
-                info!("Processing services for subscribed user {}", user.id);
 
                 // Check IMAP service
                 if let Ok(imap_users) = state.user_repository.get_active_imap_connection_users() {
@@ -61,7 +60,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                         info!("Checking IMAP messages for user {}", user.id);
                         match imap_handlers::fetch_emails_imap(&state, user.id, true, Some(10), true).await {
                             Ok(emails) => {
-                                info!("Successfully fetched {} new IMAP emails for user {}", emails.len(), user.id);
                                 
                                 match state.user_repository.get_processed_emails(user.id) {
                                     Ok(mut processed_emails) => {
@@ -567,7 +565,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 // Check if we should continue processing other services
                 match state.user_repository.has_valid_subscription_tier_with_messages(user.id, "tier 1") {
                     Ok(false) => {
-                        info!("Skipping remaining services for user {} due to no messages left", user.id);
                         continue;
                     },
                     Err(e) => {
@@ -575,7 +572,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                         continue;
                     },
                     Ok(true) => {
-                        info!("Continuing to process other services for user {}", user.id);
                     }
                 }
 
@@ -587,9 +583,9 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
     sched.add(message_monitor_job).await.expect("Failed to add message monitor job to scheduler");
 
-    // Create a job that runs every 5 seconds to handle ongoing usage logs
+    // Create a job that runs every minute to handle ongoing usage logs
     let state_clone = Arc::clone(&state);
-    let usage_monitor_job = Job::new_async("*/5 * * * * *", move |_, _| {
+    let usage_monitor_job = Job::new_async("0 * * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
             let api_key = env::var("ELEVENLABS_API_KEY").expect("ELEVENLABS_API_KEY must be set");
@@ -598,7 +594,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
             match state.user_repository.get_all_ongoing_usage() {
                 Ok(ongoing_logs) => {
                     for log in ongoing_logs {
-                        info!("Processing usage log for user {} with sid {:?}", log.user_id, log.sid);
                         let sid= match log.sid {
                             Some(id) => id,
                             None => continue,
@@ -633,13 +628,8 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                         // Handle recharge threshold timestamp
                         if let Some(threshold_timestamp) = log.recharge_threshold_timestamp {
-                            info!("Checking recharge threshold for user {}", log.user_id);
                             let current_timestamp = chrono::Utc::now().timestamp() as i32;
-                            info!("current: {}", current_timestamp);
-                            info!("threshold: {}", threshold_timestamp);
-                            info!("current_timestamp >= threshold_timestamp: {}", current_timestamp >= threshold_timestamp);
                             if current_timestamp >= threshold_timestamp {
-                                info!("current over threshold");
                                 match state.user_repository.has_auto_topup_enabled(log.user_id) {
                                     Ok(true) => {
                                         info!("has auto top up");
@@ -660,7 +650,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         }
                                     }
                                     Ok(false) => {
-                                        info!("User {} does not have auto top-up enabled", log.user_id);
                                     }
                                     Err(e) => error!("Failed to check auto top-up status: {}", e),
                                 }
@@ -669,7 +658,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                         // Handle zero credits timestamp
                         if let Some(zero_timestamp) = log.zero_credits_timestamp {
-                            info!("Checking zero credits timestamp for user {}", log.user_id);
                             let current_timestamp = chrono::Utc::now().timestamp() as i32;
                             if current_timestamp >= zero_timestamp {
                                 // Get final status and delete conversation

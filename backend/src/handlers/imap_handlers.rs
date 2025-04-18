@@ -249,7 +249,6 @@ pub async fn fetch_emails_imap(
         
         // Skip processed emails if unprocessed is true
         if unprocessed && is_processed {
-            tracing::info!("Skipping already processed email: {}", uid);
             continue;
         }
 
