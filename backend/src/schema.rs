@@ -66,6 +66,20 @@ diesel::table! {
 }
 
 diesel::table! {
+    google_tasks (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        encrypted_access_token -> Text,
+        encrypted_refresh_token -> Text,
+        status -> Text,
+        last_update -> Integer,
+        created_on -> Integer,
+        description -> Text,
+        expires_in -> Integer,
+    }
+}
+
+diesel::table! {
     imap_connection (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -188,6 +202,7 @@ diesel::table! {
         imap_general_checks -> Nullable<Text>,
         imap_proactive -> Bool,
         matrix_device_id -> Nullable<Text>,
+        credits_left -> Float,
     }
 }
 
@@ -219,6 +234,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     email_judgments,
     gmail,
     google_calendar,
+    google_tasks,
     imap_connection,
     importance_priorities,
     keywords,

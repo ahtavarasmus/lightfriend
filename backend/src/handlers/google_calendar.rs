@@ -144,6 +144,7 @@ impl std::fmt::Display for CalendarError {
         }
     }
 }
+
 pub async fn handle_calendar_fetching_route(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,

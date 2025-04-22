@@ -13,6 +13,11 @@ use crate::auth::whatsapp::WhatsappConnect;
 pub struct ConnectProps {
     pub user_id: i32,
 }
+/*
+pub struct Connect {
+    pub user_id: i32,
+}
+*/
 
 #[function_component(Connect)]
 pub fn connect(props: &ConnectProps) -> Html {
@@ -21,6 +26,8 @@ pub fn connect(props: &ConnectProps) -> Html {
     let calendar_connected = use_state(|| false);
     let gmail_connected = use_state(|| false);
     let imap_connected = use_state(|| false);
+    let tasks_connected = use_state(|| false);
+    let connecting_tasks = use_state(|| false);
     let all_calendars = use_state(|| false);
     let imap_email = use_state(|| String::new());
     let imap_password = use_state(|| String::new());
@@ -43,6 +50,7 @@ pub fn connect(props: &ConnectProps) -> Html {
         let gmail_connected = gmail_connected.clone();
         let imap_connected = imap_connected.clone();
         let connected_email = connected_email.clone();
+        let tasks_connected = tasks_connected.clone();
         use_effect_with_deps(
             move |_| {
                 if let Some(window) = web_sys::window() {
@@ -67,6 +75,30 @@ pub fn connect(props: &ConnectProps) -> Html {
                                             }
                                         } else {
                                             web_sys::console::log_1(&"Failed to check calendar status".into());
+                                        }
+                                    }
+                                });
+                            }
+
+                            // Google Tasks status
+                            {
+                                let tasks_connected = tasks_connected.clone();
+                                let token = token.clone();
+                                spawn_local(async move {
+                                    let request = Request::get(&format!("{}/api/auth/google/tasks/status", config::get_backend_url()))
+                                        .header("Authorization", &format!("Bearer {}", token))
+                                        .send()
+                                        .await;
+
+                                    if let Ok(response) = request {
+                                        if response.ok() {
+                                            if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                                    tasks_connected.set(connected);
+                                                }
+                                            }
+                                        } else {
+                                            web_sys::console::log_1(&"Failed to check tasks status".into());
                                         }
                                     }
                                 });
@@ -164,6 +196,125 @@ pub fn connect(props: &ConnectProps) -> Html {
     };
 
     // Handler for connecting IMAP
+    let onclick_tasks = {
+        let connecting_tasks = connecting_tasks.clone();
+        let error = error.clone();
+        let tasks_connected = tasks_connected.clone();
+        Callback::from(move |_: MouseEvent| {
+            let connecting_tasks = connecting_tasks.clone();
+            let error = error.clone();
+            let tasks_connected = tasks_connected.clone();
+
+            connecting_tasks.set(true);
+            error.set(None);
+
+            if let Some(window) = web_sys::window() {
+                if let Ok(Some(storage)) = window.local_storage() {
+                    if let Ok(Some(token)) = storage.get_item("token") {
+                        spawn_local(async move {
+                            let request = Request::get(&format!("{}/api/auth/google/tasks/login", config::get_backend_url()))
+                                .header("Authorization", &format!("Bearer {}", token))
+                                .send()
+                                .await;
+
+                            match request {
+                                Ok(response) => {
+                                    if response.status() == 200 {
+                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                            if let Some(auth_url) = data.get("auth_url").and_then(|u| u.as_str()) {
+                                                if let Some(window) = web_sys::window() {
+                                                    let _ = window.location().set_href(auth_url);
+                                                }
+                                            } else {
+                                                error.set(Some("Invalid response format".to_string()));
+                                            }
+                                        }
+                                    } else {
+                                        error.set(Some("Failed to initiate Google Tasks connection".to_string()));
+                                    }
+                                }
+                                Err(e) => {
+                                    error.set(Some(format!("Network error: {}", e)));
+                                }
+                            }
+                            connecting_tasks.set(false);
+                        });
+                    }
+                }
+            }
+        })
+    };
+
+    let onclick_delete_tasks = {
+        let tasks_connected = tasks_connected.clone();
+        let error = error.clone();
+        Callback::from(move |_: MouseEvent| {
+            let tasks_connected = tasks_connected.clone();
+            let error = error.clone();
+
+            if let Some(window) = web_sys::window() {
+                if let Ok(Some(storage)) = window.local_storage() {
+                    if let Ok(Some(token)) = storage.get_item("token") {
+                        spawn_local(async move {
+                            let request = Request::delete(&format!("{}/api/auth/google/tasks/connection", config::get_backend_url()))
+                                .header("Authorization", &format!("Bearer {}", token))
+                                .send()
+                                .await;
+
+                            match request {
+                                Ok(response) => {
+                                    if response.status() == 200 {
+                                        tasks_connected.set(false);
+                                        error.set(None);
+                                    } else {
+                                        error.set(Some("Failed to disconnect Google Tasks".to_string()));
+                                    }
+                                }
+                                Err(e) => {
+                                    error.set(Some(format!("Network error: {}", e)));
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+        })
+    };
+
+    let onclick_test_tasks = {
+        let error = error.clone();
+        Callback::from(move |_: MouseEvent| {
+            let error = error.clone();
+            if let Some(window) = web_sys::window() {
+                if let Ok(Some(storage)) = window.local_storage() {
+                    if let Ok(Some(token)) = storage.get_item("token") {
+                        spawn_local(async move {
+                            let request = Request::get(&format!("{}/api/tasks", config::get_backend_url()))
+                                .header("Authorization", &format!("Bearer {}", token))
+                                .send()
+                                .await;
+
+                            match request {
+                                Ok(response) => {
+                                    if response.status() == 200 {
+                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                            web_sys::console::log_1(&format!("Tasks: {:?}", data).into());
+                                        }
+                                    } else {
+                                        error.set(Some("Failed to fetch tasks".to_string()));
+                                    }
+                                }
+                                Err(e) => {
+                                    error.set(Some(format!("Network error: {}", e)));
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+        })
+    };
+
     let onclick_imap_connect = {
         let imap_email_value = imap_email.clone();
         let imap_password_value = imap_password.clone();
@@ -595,9 +746,129 @@ pub fn connect(props: &ConnectProps) -> Html {
                                     </div>
                                 }
                             </div>
-
                         </div>
                     </div>
+                    <div class="service-group">
+                        <h3 class="service-group-title">
+                            <i class="fas fa-calendar"></i>
+                            {"Memory Services"}
+                        </h3>
+                        <div class="service-list">
+                     
+                            // Google Tasks
+                            <div class={if props.user_id == 1 { "service-item" } else { "service-item coming-soon" }}>
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        <img src="https://upload.wikimedia.org/wikipedia/commons/5/5b/Google_Tasks_2021.svg" alt="Google Tasks"/>
+                                        {"Google Tasks"}
+                                        {if props.user_id != 1 {
+                                            html! {
+                                                <span class="coming-soon-tag">{"Coming Soon"}</span>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }}
+                                    </div>
+                                    if *tasks_connected && props.user_id == 1 {
+                                        <span class="service-status">{"Connected ✓"}</span>
+                                    }
+                                </div>
+                                <p class="service-description">
+                                    {"Create and manage tasks, reminders, and ideas through SMS or voice calls. "}
+                                    {"This integration creates a dedicated \"lightfriend\" list, keeping your existing task lists untouched. "}
+                                    {"Perfect for quick note-taking, setting reminders, or capturing ideas on the go."}
+                                </p>
+                                if *tasks_connected && props.user_id == 1 {
+                                    <div class="tasks-controls">
+                                        <button 
+                                            onclick={onclick_delete_tasks}
+                                            class="disconnect-button"
+                                        >
+                                            {"Disconnect"}
+                                        </button>
+                                        {
+                                            if props.user_id == 1 {
+                                                html! {
+                                                    <>
+                                                        <button 
+                                                            onclick={onclick_test_tasks}
+                                                            class="test-button"
+                                                        >
+                                                            {"Test Tasks"}
+                                                        </button>
+                                                        <button
+                                                            onclick={
+                                                                let error = error.clone();
+                                                                Callback::from(move |_: MouseEvent| {
+                                                                    let error = error.clone();
+                                                                    if let Some(window) = web_sys::window() {
+                                                                        if let Ok(Some(storage)) = window.local_storage() {
+                                                                            if let Ok(Some(token)) = storage.get_item("token") {
+                                                                                spawn_local(async move {
+                                                                                    let request = Request::post(&format!("{}/api/tasks/create", config::get_backend_url()))
+                                                                                        .header("Authorization", &format!("Bearer {}", token))
+                                                                                        .header("Content-Type", "application/json")
+                                                                                        .json(&json!({
+                                                                                            "title": format!("Test task created at {}", Date::new_0().to_iso_string()),
+                                                                                        }))
+                                                                                        .unwrap()
+                                                                                        .send()
+                                                                                        .await;
+
+                                                                                    match request {
+                                                                                        Ok(response) => {
+                                                                                            if response.status() == 200 {
+                                                                                                if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                                                                    web_sys::console::log_1(&format!("Created task: {:?}", data).into());
+                                                                                                }
+                                                                                            } else {
+                                                                                                error.set(Some("Failed to create task".to_string()));
+                                                                                            }
+                                                                                        }
+                                                                                        Err(e) => {
+                                                                                            error.set(Some(format!("Network error: {}", e)));
+                                                                                        }
+                                                                                    }
+                                                                                });
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                })
+                                                            }
+                                                            class="test-button"
+                                                        >
+                                                            {"Create Test Task"}
+                                                        </button>
+                                                    </>
+                                                }
+                                            } else {
+                                                html! {}
+                                            }
+                                        }
+                                    </div>
+                                } else if props.user_id == 1 {
+                                    <button 
+                                        onclick={onclick_tasks}
+                                        class="connect-button"
+                                    >
+                                        if *connecting_tasks {
+                                            {"Connecting..."}
+                                        } else {
+                                            {"Connect"}
+                                        }
+                                    </button>
+                                } else {
+                                    <button 
+                                        class="connect-button"
+                                        disabled=true
+                                    >
+                                        {"Connect"}
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+
 
                     // Email Services
                     <div class="service-group">
@@ -845,7 +1116,25 @@ pub fn connect(props: &ConnectProps) -> Html {
                         </h3>
                         <div class="service-list">
 
-                            <WhatsappConnect user_id={props.user_id} />
+                            if props.user_id == 1 {
+                                    <WhatsappConnect user_id={props.user_id} />
+                            } else {
+                                <div class="service-item coming-soon">
+                                    <div class="service-header">
+                                        <div class="service-name">
+                                            <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp"/>
+                                            {"WhatsApp"}
+                                            <span class="coming-soon-tag">{"Coming Soon"}</span>
+                                        </div>
+                                    </div>
+                                    <p class="service-description">
+                                        {"Send and receive WhatsApp messages through SMS or voice calls."}
+                                    </p>
+                                    <button class="connect-button" disabled=true>
+                                        {"Connect"}
+                                    </button>
+                                </div>
+                            }
                             <div class="service-item coming-soon">
                                 <div class="service-header">
                                     <div class="service-name">

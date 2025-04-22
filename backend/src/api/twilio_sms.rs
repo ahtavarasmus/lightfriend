@@ -15,6 +15,88 @@ use axum::{
 };
 use chrono::Utc;
 
+/// Checks if a user has sufficient credits to perform an action.
+/// Returns Ok(()) if the user has enough credits, or Err with an appropriate error message if not.
+/// Also handles automatic recharging if enabled.
+async fn check_user_credits(
+    state: &Arc<AppState>,
+    user: &crate::models::user_models::User,
+    required_credits: f32,
+) -> Result<(), String> {
+    // First check if user has monthly credits left
+    if user.credits_left > 0.00 {
+        // User has monthly credits, they can continue
+        return Ok(());
+    }
+
+    // No monthly credits left, check extra credits
+    if user.credits < required_credits {
+        return Err("Insufficient credits. You have used all your monthly credits and don't have enough extra credits.".to_string());
+    }
+
+    // Check credits threshold and handle automatic charging
+    match state.user_repository.is_credits_under_threshold(user.id) {
+        Ok(is_under) => {
+            if is_under && user.charge_when_under {
+                println!("User {} credits is under threshold, attempting automatic charge", user.id);
+                use axum::extract::{State, Path};
+                let state_clone = Arc::clone(state);
+                let user_id = user.id; // Clone the user ID
+                tokio::spawn(async move {
+                    let _ = crate::handlers::stripe_handlers::automatic_charge(
+                        State(state_clone),
+                        Path(user_id),
+                    ).await;
+                });
+                println!("Initiated automatic recharge for user");
+            }
+        },
+        Err(e) => eprintln!("Failed to check if user credits is under threshold: {}", e),
+    }
+
+    Ok(())
+}
+
+/// Deducts credits from a user's account, using monthly credits (credits_left) first before using regular credits.
+/// Returns Ok(()) if credits were successfully deducted, or Err with an appropriate error message if not.
+pub fn deduct_user_credits(
+    state: &Arc<AppState>,
+    user_id: i32,
+    credits_to_deduct: f32,
+) -> Result<(), String> {
+    let user = match state.user_repository.find_by_id(user_id) {
+        Ok(Some(user)) => user,
+        Ok(None) => return Err("User not found".to_string()),
+        Err(e) => {
+            eprintln!("Database error while finding user {}: {}", user_id, e);
+            return Err("Database error occurred".to_string());
+        }
+    };
+
+    // First try to use monthly credits (credits_left)
+    if user.credits_left > 0.00 {
+        let new_credits_left = user.credits_left - credits_to_deduct;
+        if new_credits_left >= 0.00 {
+            // We can cover the entire cost with monthly credits
+            if let Err(e) = state.user_repository.update_user_credits_left(user_id, new_credits_left) {
+                eprintln!("Failed to update user credits_left: {}", e);
+                return Err("Failed to process credits".to_string());
+            }
+            return Ok(());
+        }
+    }
+
+    // If we get here, we need to use regular credits
+    // (either no monthly credits left or not enough to cover the full cost)
+    let new_credits = user.credits - credits_to_deduct;
+    if let Err(e) = state.user_repository.update_user_credits(user_id, new_credits) {
+        eprintln!("Failed to update user credits: {}", e);
+        return Err("Failed to process credits".to_string());
+    }
+
+    Ok(())
+}
+
 
 use openai_api_rs::v1::{
     chat_completion,
@@ -330,39 +412,21 @@ pub async fn handle_incoming_sms(
             }
         };
 
-        // Check if user has enough credits
+        // Get message cost
         let message_credits_cost = std::env::var("MESSAGE_COST")
             .expect("MESSAGE_COST not set")
             .parse::<f32>()
             .unwrap_or(0.20);
 
-        if user.credits < message_credits_cost {
+        // Check if user has sufficient credits
+        if let Err(msg) = check_user_credits(&state, &user, message_credits_cost).await {
             return (
                 StatusCode::BAD_REQUEST,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(TwilioResponse {
-                    message: "Insufficient credits points to use Shazam.".to_string(),
+                    message: format!("Insufficient credits to use Shazam. {}", msg),
                 })
             );
-        }
-
-        // Check credits threshold and handle automatic charging
-        match state.user_repository.is_credits_under_threshold(user.id) {
-            Ok(is_under) => {
-                if is_under && user.charge_when_under {
-                    println!("User {} credits is under threshold, attempting automatic charge", user.id);
-                    use axum::extract::{State, Path};
-                    let state_clone = Arc::clone(&state);
-                    tokio::spawn(async move {
-                        let _ = crate::handlers::stripe_handlers::automatic_charge(
-                            State(state_clone),
-                            Path(user.id),
-                        ).await;
-                    });
-                    println!("Initiated automatic recharge for user");
-                }
-            },
-            Err(e) => eprintln!("Failed to check if user credits is under threshold: {}", e),
         }
 
         let user_id = user.id;
@@ -400,7 +464,7 @@ pub async fn handle_incoming_sms(
         }
     }
 
-    // Spawn a background task to handle the processing
+    // Process SMS in the background
     tokio::spawn(async move {
         let result = process_sms(state.clone(), payload.clone()).await;
         
@@ -409,6 +473,7 @@ pub async fn handle_incoming_sms(
             eprintln!("Error response: {:?}", result.1);
         }
     });
+    
 
     // Immediately return a success response to Twilio
     (
@@ -453,20 +518,6 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         is_admin: false,
     };
 
-    // Check if user has enough credits
-    let message_credits_cost = std::env::var("MESSAGE_COST")
-        .expect("MESSAGE_COST not set")
-        .parse::<f32>()
-        .unwrap_or(0.20);
-
-    if user.credits < message_credits_cost {
-        return (
-            StatusCode::BAD_REQUEST,
-            axum::Json(TwilioResponse {
-                message: "Insufficient credits points to send message.".to_string(),
-            })
-        );
-    }
 
     let conversation = match state.user_conversations.get_conversation(&user, payload.to).await {
         Ok(conv) => conv,
@@ -635,6 +686,42 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         }),
     );
 
+    let mut tasks_properties = HashMap::new();
+    tasks_properties.insert(
+        "param".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Can be anything, will fetch all tasks regardless".to_string()),
+            ..Default::default()
+        }),
+    );
+
+    let mut create_task_properties = HashMap::new();
+    create_task_properties.insert(
+        "title".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("The title of the task".to_string()),
+            ..Default::default()
+        }),
+    );
+    create_task_properties.insert(
+        "description".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Optional description of the task".to_string()),
+            ..Default::default()
+        }),
+    );
+    create_task_properties.insert(
+        "due_time".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Optional due time for the task in RFC3339 format (e.g. '2024-03-23T14:30:00Z')".to_string()),
+            ..Default::default()
+        }),
+    );
+
     let mut imap_properties = HashMap::new();
     imap_properties.insert(
         "param".to_string(),
@@ -742,7 +829,30 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                 },
             },
         },
-
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: String::from("fetch_tasks"),
+                description: Some(String::from("Fetches the user's Google Tasks. Use this when user asks about their tasks, reminders, or ideas.")),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(tasks_properties),
+                    required: None,
+                },
+            },
+        },
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: String::from("create_task"),
+                description: Some(String::from("Creates a new Google Task. Use this when user wants to add a task, reminder, or idea.")),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(create_task_properties),
+                    required: Some(vec![String::from("title")]),
+                },
+            },
+        },
     ];
 
     let api_key = match env::var("OPENROUTER_API_KEY") {
@@ -1082,6 +1192,107 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                             tool_answers.insert(tool_call_id, "Sorry, I couldn't set up the email monitoring. Please try again.".to_string());
                         }
                     }
+                } else if name == "create_task" {
+                    println!("Executing create_task tool call");
+                    #[derive(Deserialize)]
+                    struct CreateTaskArgs {
+                        title: String,
+                        description: Option<String>,
+                        due_time: Option<String>,
+                    }
+
+                    let args: CreateTaskArgs = match serde_json::from_str(arguments) {
+                        Ok(args) => args,
+                        Err(e) => {
+                            eprintln!("Failed to parse create task arguments: {}", e);
+                            tool_answers.insert(tool_call_id, "Failed to create task due to invalid arguments.".to_string());
+                            continue;
+                        }
+                    };
+
+                    // Convert due_time string to DateTime<Utc> if provided
+                    let due_time = if let Some(dt_str) = args.due_time {
+                        match chrono::DateTime::parse_from_rfc3339(&dt_str) {
+                            Ok(dt) => Some(dt.with_timezone(&chrono::Utc)),
+                            Err(e) => {
+                                eprintln!("Failed to parse due time: {}", e);
+                                None
+                            }
+                        }
+                    } else {
+                        None
+                    };
+
+                    let task_request = crate::handlers::google_tasks::CreateTaskRequest {
+                        title: args.title,
+                        description: args.description,
+                        due_time,
+                    };
+
+                    match crate::handlers::google_tasks::create_task(&state, user.id, &task_request).await {
+                        Ok(Json(response)) => {
+                            tool_answers.insert(tool_call_id, "Task created successfully.".to_string());
+                        }
+                        Err((status, Json(error))) => {
+                            let error_message = match status {
+                                StatusCode::UNAUTHORIZED => "You need to connect your Google Tasks first. Visit the website to set it up.",
+                                _ => "Failed to create task. Please try again later.",
+                            };
+                            tool_answers.insert(tool_call_id, error_message.to_string());
+                            eprintln!("Failed to create task: {:?}", error);
+                        }
+                    }
+                } else if name == "fetch_tasks" {
+                    println!("Executing fetch_tasks tool call");
+                    match crate::handlers::google_tasks::get_tasks(&state, user.id).await {
+                        Ok(Json(response)) => {
+                            if let Some(tasks) = response.get("tasks") {
+                                if let Some(tasks_array) = tasks.as_array() {
+                                    if tasks_array.is_empty() {
+                                        tool_answers.insert(tool_call_id, "You don't have any tasks in your list.".to_string());
+                                    } else {
+                                        let mut response = String::new();
+                                        for (i, task) in tasks_array.iter().enumerate() {
+                                            let title = task.get("title").and_then(|t| t.as_str()).unwrap_or("Untitled");
+                                            let status = task.get("status").and_then(|s| s.as_str()).unwrap_or("unknown");
+                                            let due = task.get("due").and_then(|d| d.as_str()).unwrap_or("");
+                                            let notes = task.get("notes").and_then(|n| n.as_str()).unwrap_or("");
+                                            
+                                            let status_emoji = if status == "completed" { "✅" } else { "📝" };
+                                            let due_text = if !due.is_empty() {
+                                                format!(" (due: {})", due)
+                                            } else {
+                                                String::new()
+                                            };
+                                            
+                                            if i == 0 {
+                                                response.push_str(&format!("{}. {} {}{}", i + 1, status_emoji, title, due_text));
+                                            } else {
+                                                response.push_str(&format!("\n{}. {} {}{}", i + 1, status_emoji, title, due_text));
+                                            }
+                                            
+                                            if !notes.is_empty() {
+                                                response.push_str(&format!("\n   Note: {}", notes));
+                                            }
+                                        }
+                                        tool_answers.insert(tool_call_id, response);
+                                    }
+                                } else {
+                                    tool_answers.insert(tool_call_id, "Failed to parse tasks list.".to_string());
+                                }
+                            } else {
+                                tool_answers.insert(tool_call_id, "No tasks found.".to_string());
+                            }
+                        }
+                        Err((status, Json(error))) => {
+                            let error_message = match status {
+                                StatusCode::UNAUTHORIZED => "You need to connect your Google Tasks first. Visit the website to set it up.",
+                                _ => "Failed to fetch tasks. Please try again later.",
+                            };
+                            tool_answers.insert(tool_call_id, error_message.to_string());
+                            eprintln!("Failed to fetch tasks: {:?}", error);
+                        }
+                    }
                 } else if name == "calendar" {
                     println!("Executing calendar tool call");
                     let c: CalendarTimeFrame = match serde_json::from_str(arguments) {
@@ -1352,10 +1563,8 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                         .unwrap_or(0.15)
                 };                
 
-                if let Err(e) = state.user_repository
-                    .update_user_credits(user.id, user.credits - message_credits_cost) {
-
-                    eprintln!("Failed to update user credits: {}", e);
+                if let Err(e) = deduct_user_credits(&state, user.id, message_credits_cost) {
+                    eprintln!("Failed to deduct user credits: {}", e);
                     return (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         axum::Json(TwilioResponse {

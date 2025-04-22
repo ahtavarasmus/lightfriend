@@ -47,6 +47,8 @@ mod handlers {
     pub mod whatsapp_auth;
     pub mod whatsapp_handlers;
     pub mod filter_handlers;
+    pub mod google_tasks;
+    pub mod google_tasks_auth;
 }
 
 mod utils {
@@ -91,6 +93,8 @@ use handlers::stripe_handlers;
 //use handlers::unipile_auth;
 use handlers::google_calendar_auth;
 use handlers::google_calendar;
+use handlers::google_tasks_auth;
+use handlers::google_tasks;
 //use handlers::gmail_auth;
 //use handlers::gmail;
 use handlers::imap_auth;
@@ -117,6 +121,7 @@ pub struct AppState {
     sessions: shazam_call::CallSessions,
     user_calls: shazam_call::UserCallMap,
     google_calendar_oauth_client: GoogleOAuthClient,
+    google_tasks_oauth_client: GoogleOAuthClient,
     gmail_oauth_client: GoogleOAuthClient,
     session_store: MemoryStore,
     login_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
@@ -167,6 +172,8 @@ async fn main() {
 
     let client_id = std::env::var("GOOGLE_CALENDAR_CLIENT_ID").expect("GOOGLE_CALENDAR_CLIENT_ID must be set");
     let client_secret = std::env::var("GOOGLE_CALENDAR_CLIENT_SECRET").expect("GOOGLE_CALENDAR_CLIENT_SECRET must be set");
+    let client_id_clone = client_id.clone();
+    let client_secret_clone = client_secret.clone();
     let server_url_oauth = std::env::var("SERVER_URL_OAUTH").expect("SERVER_URL_OAUTH must be set");
 
     let google_calendar_oauth_client = BasicClient::new(ClientId::new(client_id.clone()))
@@ -174,8 +181,8 @@ async fn main() {
         .set_auth_uri(AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).expect("Invalid auth URL"))
         .set_token_uri(TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).expect("Invalid token URL"))
         .set_redirect_uri(RedirectUrl::new(format!("{}/api/auth/google/calendar/callback", server_url_oauth)).expect("Invalid redirect URL"));
-    let gmail_oauth_client = BasicClient::new(ClientId::new(client_id))
-        .set_client_secret(ClientSecret::new(client_secret))
+    let gmail_oauth_client = BasicClient::new(ClientId::new(client_id_clone))
+        .set_client_secret(ClientSecret::new(client_secret_clone))
         .set_auth_uri(AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).expect("Invalid auth URL"))
         .set_token_uri(TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).expect("Invalid token URL"))
         .set_redirect_uri(RedirectUrl::new(format!("{}/api/auth/google/gmail/callback", server_url_oauth)).expect("Invalid redirect URL"));
@@ -186,6 +193,12 @@ async fn main() {
         .with_secure(is_prod)
         .with_same_site(tower_sessions::cookie::SameSite::Lax);
 
+    let google_tasks_oauth_client = BasicClient::new(ClientId::new(client_id))
+        .set_client_secret(ClientSecret::new(client_secret))
+        .set_auth_uri(AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).expect("Invalid auth URL"))
+        .set_token_uri(TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).expect("Invalid token URL"))
+        .set_redirect_uri(RedirectUrl::new(format!("{}/api/auth/google/tasks/callback", server_url_oauth)).expect("Invalid redirect URL"));
+
     let state = Arc::new(AppState {
         db_pool: pool,
         user_repository: user_repository.clone(),
@@ -193,6 +206,7 @@ async fn main() {
         sessions: Arc::new(Mutex::new(HashMap::new())),
         user_calls: Arc::new(Mutex::new(HashMap::new())),
         google_calendar_oauth_client,
+        google_tasks_oauth_client,
         gmail_oauth_client,
         session_store: session_store.clone(),
         login_limiter: {
@@ -214,6 +228,8 @@ async fn main() {
         .route("/api/call/calendar", get(elevenlabs::handle_calendar_tool_call))
         .route("/api/call/email", get(elevenlabs::handle_email_fetch_tool_call))
         .route("/api/call/email/waiting_check", post(elevenlabs::handle_create_waiting_check_email_tool_call))
+        .route("/api/call/tasks", get(elevenlabs::handle_tasks_fetching_tool_call))
+        .route("/api/call/tasks/create", post(elevenlabs::handle_tasks_creation_tool_call))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 
     let elevenlabs_webhook_routes = Router::new()
@@ -223,7 +239,8 @@ async fn main() {
     let auth_built_in_webhook_routes = Router::new()
         .route("/api/stripe/webhook", post(stripe_handlers::stripe_webhook))
         //.route("/api/auth/google/gmail/callback", get(gmail_auth::gmail_callback))
-        .route("/api/auth/google/calendar/callback", get(google_calendar_auth::google_callback));
+        .route("/api/auth/google/calendar/callback", get(google_calendar_auth::google_callback))
+        .route("/api/auth/google/tasks/callback", get(google_tasks_auth::google_tasks_callback));
 
 
     // Public routes that don't need authentication
@@ -269,6 +286,14 @@ async fn main() {
         .route("/api/auth/google/calendar/status", get(google_calendar::google_calendar_status))
         .route("/api/auth/google/calendar/email", get(google_calendar::get_calendar_email))
         .route("/api/calendar/events", get(google_calendar::handle_calendar_fetching_route))
+
+        // Google Tasks routes
+        .route("/api/auth/google/tasks/login", get(google_tasks_auth::google_tasks_login))
+        .route("/api/auth/google/tasks/connection", delete(google_tasks_auth::delete_google_tasks_connection))
+        .route("/api/auth/google/tasks/refresh", post(google_tasks_auth::refresh_google_tasks_token))
+        .route("/api/auth/google/tasks/status", get(google_tasks::google_tasks_status))
+        .route("/api/tasks", get(google_tasks::handle_tasks_fetching_route))
+        .route("/api/tasks/create", post(google_tasks::handle_tasks_creation_route))
 
         /*
         .route("/api/auth/google/gmail/login", get(gmail_auth::gmail_login))

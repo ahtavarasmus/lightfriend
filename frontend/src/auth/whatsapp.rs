@@ -262,38 +262,38 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                                         .flatten()
                                     {
                                         spawn_local(async move {
-                                    match Request::get(&format!("{}/api/whatsapp/test-messages", config::get_backend_url()))
-                                        .header("Authorization", &format!("Bearer {}", token))
-                                        .send()
-                                        .await
-                                    {
-                                        Ok(response) => {
-                                            web_sys::console::log_1(&format!("Response status: {}", response.status()).into());
-                                            // Log the raw response text first
-                                            match response.text().await {
-                                                Ok(text) => {
-                                                    web_sys::console::log_1(&format!("Raw response: {}", text).into());
-                                                    
-                                                    // Try to parse the text as JSON
-                                                    match serde_json::from_str::<serde_json::Value>(&text) {
-                                                        Ok(data) => {
-                                                            web_sys::console::log_1(&format!("Messages: {:?}", data).into());
-                                                            // You could also show this in the UI if desired
+                                            match Request::get(&format!("{}/api/whatsapp/test-messages", config::get_backend_url()))
+                                                .header("Authorization", &format!("Bearer {}", token))
+                                                .send()
+                                                .await
+                                            {
+                                                Ok(response) => {
+                                                    web_sys::console::log_1(&format!("Response status: {}", response.status()).into());
+                                                    // Log the raw response text first
+                                                    match response.text().await {
+                                                        Ok(text) => {
+                                                            web_sys::console::log_1(&format!("Raw response: {}", text).into());
+                                                            
+                                                            // Try to parse the text as JSON
+                                                            match serde_json::from_str::<serde_json::Value>(&text) {
+                                                                Ok(data) => {
+                                                                    web_sys::console::log_1(&format!("Messages: {:?}", data).into());
+                                                                    // You could also show this in the UI if desired
+                                                                }
+                                                                Err(e) => {
+                                                                    web_sys::console::error_1(&format!("Failed to parse JSON: {}", e).into());
+                                                                }
+                                                            }
                                                         }
                                                         Err(e) => {
-                                                            web_sys::console::error_1(&format!("Failed to parse JSON: {}", e).into());
+                                                            web_sys::console::error_1(&format!("Failed to get response text: {}", e).into());
                                                         }
                                                     }
                                                 }
                                                 Err(e) => {
-                                                    web_sys::console::error_1(&format!("Failed to get response text: {}", e).into());
+                                                    web_sys::console::error_1(&format!("Failed to fetch messages: {}", e).into());
                                                 }
                                             }
-                                        }
-                                        Err(e) => {
-                                            web_sys::console::error_1(&format!("Failed to fetch messages: {}", e).into());
-                                        }
-                                    }
                                         });
                                     }
                                 })

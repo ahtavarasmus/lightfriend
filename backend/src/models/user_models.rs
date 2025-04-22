@@ -15,6 +15,7 @@ use crate::schema::bridges;
 use crate::schema::imap_connection;
 use crate::schema::processed_emails;
 use crate::schema::email_judgments;
+use crate::schema::google_tasks;
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = users)]
@@ -27,7 +28,7 @@ pub struct User {
     pub nickname: Option<String>, // what user wants the ai to call them
     pub time_to_live: Option<i32>, // if user has not verified their account in some time it will be deleted
     pub verified: bool, 
-    pub credits: f32, // user credits
+    pub credits: f32, // user extra credits, will not expire, can be bought if user doesn't want to subscribe or subscription tier has ran out of messages
     pub notify: bool, // notify when new features
     pub info: Option<String>, // extra info about the user for the ai
     pub preferred_number: Option<String>, // number the user prefers lightfriend texting/calling them from
@@ -42,10 +43,11 @@ pub struct User {
     pub timezone: Option<String>,
     pub timezone_auto: Option<bool>,
     pub sub_tier: Option<String>,
-    pub msgs_left: i32,
+    pub msgs_left: i32, // proactive messages for the monthly sub, resets every month to bought amount
     pub imap_general_checks: Option<String>,
     pub imap_proactive: bool,
     pub matrix_device_id: Option<String>,
+    pub credits_left: f32, // free credits that reset every month while in the monthly sub. will always be consumed before one time credits
 }
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -262,6 +264,35 @@ pub struct NewUnipileConnection {
     pub created_on: i32,
     pub description: String,
 }
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = google_tasks)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct GoogleTasks {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub encrypted_access_token: String,
+    pub encrypted_refresh_token: String,
+    pub status: String, 
+    pub last_update: i32,
+    pub created_on: i32,
+    pub description: String,
+    pub expires_in: i32, // for access token
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = google_tasks)]
+pub struct NewGoogleTasks{
+    pub user_id: i32,
+    pub encrypted_access_token: String,
+    pub encrypted_refresh_token: String,
+    pub status: String,
+    pub last_update: i32,
+    pub created_on: i32,
+    pub description: String,
+    pub expires_in: i32,
+}
+
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = google_calendar)]

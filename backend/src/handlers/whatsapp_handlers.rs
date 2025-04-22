@@ -16,6 +16,7 @@ pub async fn test_fetch_messages(
     State(state): State<std::sync::Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<WhatsAppMessagesResponse>, String> {
+
     // Get bridge info first
     let bridge = state.user_repository.get_whatsapp_bridge(auth_user.user_id)
         .map_err(|e| format!("Failed to get bridge info: {}", e))?
@@ -36,7 +37,7 @@ pub async fn test_fetch_messages(
 
     match fetch_whatsapp_messages(&state, auth_user.user_id, start_time, end_time).await {
         Ok(messages) => {
-            tracing::info!("Found {} messages", messages.len());
+            tracing::info!("Founddd {} messages", messages.len());
             tracing::debug!("Messages: {:?}", messages);
             Ok(Json(WhatsAppMessagesResponse { messages }))
         }

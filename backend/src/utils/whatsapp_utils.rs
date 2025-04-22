@@ -25,13 +25,14 @@ pub struct WhatsAppMessage {
 use std::time::Duration;
 use tokio::time::sleep;
 
-
 pub async fn fetch_whatsapp_messages(
     state: &AppState,
     user_id: i32,
     start_time: i64,
     end_time: i64,
 ) -> Result<Vec<WhatsAppMessage>> {
+
+    println!("fetch whastapp messages");
 
     let (username, access_token, device_id) = state.user_repository
         .get_matrix_credentials(user_id)?
@@ -59,12 +60,83 @@ pub async fn fetch_whatsapp_messages(
         .build()
         .await?;
 
-    tracing::info!("checking invited rooms: {:#?}", client.invited_rooms());
+    println!("here");
+
+    use matrix_sdk::{
+        Client as MatrixClient,
+        AuthSession, SessionMeta, authentication::matrix::{MatrixSession, MatrixSessionTokens},
+    };
+    use matrix_sdk::ruma::{OwnedUserId, OwnedDeviceId};
+
+    let session = AuthSession::Matrix(MatrixSession {
+        meta: SessionMeta {
+            user_id:  OwnedUserId::try_from(full_user_id.clone())?,
+            device_id: OwnedDeviceId::try_from(device_id.clone())?,
+        },
+        tokens: MatrixSessionTokens {
+            access_token: access_token.clone(),
+            refresh_token: None,
+        },
+    });
+
+    client.restore_session(session).await?;
+
+    // Check if we're logged in first before doing any syncs
+    let bridge = state.user_repository.get_whatsapp_bridge(user_id)?;
+    if bridge.map(|b| b.status != "connected").unwrap_or(true) {
+        return Err(anyhow!("WhatsApp bridge is not connected. Please log in first."));
+    }
+
+    // Do a full sync first to ensure we have all rooms
+    println!("🔄 Performing full sync...");
+    let full_sync_settings = matrix_sdk::config::SyncSettings::default()
+        .timeout(Duration::from_secs(30))
+        .full_state(true);
+    client.sync_once(full_sync_settings).await?;
+
+    // Get the bridge room
+    if let Some(bridge) = state.user_repository.get_whatsapp_bridge(user_id)? {
+        if let Some(room_id) = bridge.room_id {
+            if let Some(room) = client.get_room(&OwnedRoomId::try_from(room_id)?) {
+                // Force a sync of all chats
+                println!("🔄 Forcing WhatsApp sync...");
+                room.send(RoomMessageEventContent::text_plain("!wa sync")).await?;
+                
+                // Wait a bit for the sync to complete
+                sleep(Duration::from_secs(5)).await;
+            }
+        }
+    }
+
+    // Do another quick sync to get the latest state
+    println!("🔄 Performing final sync...");
+    let quick_sync_settings = matrix_sdk::config::SyncSettings::default()
+        .timeout(Duration::from_secs(5))
+        .full_state(false);
+    client.sync_once(quick_sync_settings.clone()).await?;
+
+    // Second sync to get latest state
+
+    // Now the SDK store is populated
     for room in client.invited_rooms() {
         tracing::info!("Joining invited room: {}", room.room_id());
-        client.join_room_by_id(room.room_id()).await?;
+        // for remote rooms add their own domain as a hint
+        let servers: Vec<matrix_sdk::OwnedServerName> = if room.room_id().server_name().unwrap()
+            == client.user_id().unwrap().server_name()
+        {
+            Vec::new()                                // local → no hint
+        } else {
+            tracing::info!("remote room? {}", room.room_id().server_name().unwrap().as_str());
+            vec![matrix_sdk::OwnedServerName::try_from(room.room_id().server_name().unwrap().as_str()).unwrap()]
+        };
+
+        let _ = client.join_room_by_id_or_alias(<&matrix_sdk::ruma::RoomOrAliasId>::try_from(room.room_id()).unwrap(), &servers).await;
+
+        //sleep(Duration::from_millis(250)).await;
     }
-    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+    // Quick final sync to get latest state
+    client.sync_once(quick_sync_settings).await?;
 
     tracing::info!("checking joined rooms: {:#?}", client.joined_rooms());
     for room in client.joined_rooms() {
