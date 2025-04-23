@@ -20,6 +20,7 @@ use crate::{
         ImapConnection, NewImapConnection, Bridge, NewBridge, WaitingCheck, 
         NewWaitingCheck, PrioritySender, NewPrioritySender, Keyword, 
         NewKeyword, ImportancePriority, NewImportancePriority, NewGoogleTasks,
+        TaskNotification, NewTaskNotification,
     },
     handlers::auth_dtos::NewUser,
     schema::{
@@ -37,6 +38,47 @@ impl UserRepository {
     pub fn new(pool: DbPool) -> Self {
         Self { pool }
     }
+
+    pub fn get_task_notification(&self, user_id: i32, task_id: &str) -> Result<Option<TaskNotification>, diesel::result::Error> {
+        use crate::schema::task_notifications;
+        
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let result = task_notifications::table
+            .filter(task_notifications::user_id.eq(user_id))
+            .filter(task_notifications::task_id.eq(task_id))
+            .first::<TaskNotification>(&mut conn)
+            .optional()?;
+            
+        Ok(result)
+    }
+    
+    pub fn create_task_notification(&self, user_id: i32, task_id: &str, notified_at: i32) -> Result<(), diesel::result::Error> {
+        use crate::schema::task_notifications;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+
+        let new_notification = NewTaskNotification {
+            user_id,
+            task_id: task_id.to_string(),
+            notified_at,
+        };
+        
+        diesel::insert_into(task_notifications::table)
+            .values(&new_notification)
+            .execute(&mut conn)?;
+            
+        Ok(())
+    }
+
+    pub fn delete_old_task_notifications(&self, older_than_timestamp: i32) -> Result<usize, diesel::result::Error> {
+        use crate::schema::task_notifications;
+        
+        diesel::delete(task_notifications::table)
+            .filter(task_notifications::notified_at.lt(older_than_timestamp))
+            .execute(&mut self.pool.get().unwrap())
+    }
+
  
     pub fn set_imap_credentials(
         &self,

@@ -700,17 +700,42 @@ pub struct TaskCreatePayload {
     pub title: String,
     pub description: Option<String>,
     pub due_time: Option<String>,
-    pub user_id: i32,
 }
 
 pub async fn handle_tasks_creation_tool_call(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<TaskCreatePayload>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    Json(task_payload): axum::extract::Json<TaskCreatePayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Received task creation request for user: {}", payload.user_id);
+    
+    // Get user_id from query params
+    let user_id_str = match params.get("user_id") {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing user_id query parameter"
+                }))
+            ));
+        }
+    };
+
+    // Convert String to i32
+    let user_id: i32 = match user_id_str.parse() {
+        Ok(id) => id,
+        Err(_) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Invalid user_id format, must be an integer"
+                }))
+            ));
+        }
+    };
 
     // Convert due_time string to DateTime<Utc> if provided
-    let due_time = match payload.due_time {
+    let due_time = match task_payload.due_time {
         Some(time_str) => {
             match chrono::DateTime::parse_from_rfc3339(&time_str) {
                 Ok(dt) => Some(dt.with_timezone(&chrono::Utc)),
@@ -728,14 +753,14 @@ pub async fn handle_tasks_creation_tool_call(
     };
 
     let task_request = crate::handlers::google_tasks::CreateTaskRequest {
-        title: payload.title,
-        description: payload.description,
+        title: task_payload.title,
+        description: task_payload.description,
         due_time,
     };
 
-    match crate::handlers::google_tasks::create_task(&state, payload.user_id, &task_request).await {
+    match crate::handlers::google_tasks::create_task(&state, user_id, &task_request).await {
         Ok(response) => {
-            println!("Successfully created task for user: {}", payload.user_id);
+            println!("Successfully created task for user: {}", user_id);
             Ok(response)
         },
         Err(e) => {

@@ -145,6 +145,15 @@ diesel::table! {
 }
 
 diesel::table! {
+    task_notifications (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        task_id -> Text,
+        notified_at -> Integer,
+    }
+}
+
+diesel::table! {
     unipile_connection (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -241,6 +250,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     priority_senders,
     processed_emails,
     subscriptions,
+    task_notifications,
     unipile_connection,
     usage_logs,
     users,

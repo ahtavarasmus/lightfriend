@@ -16,6 +16,9 @@ use crate::schema::imap_connection;
 use crate::schema::processed_emails;
 use crate::schema::email_judgments;
 use crate::schema::google_tasks;
+use crate::schema::task_notifications;
+
+
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = users)]
@@ -48,6 +51,24 @@ pub struct User {
     pub imap_proactive: bool,
     pub matrix_device_id: Option<String>,
     pub credits_left: f32, // free credits that reset every month while in the monthly sub. will always be consumed before one time credits
+}
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = task_notifications)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct TaskNotification {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub task_id: String, // google task id
+    pub notified_at: i32, // due timestamp
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = task_notifications)]
+pub struct NewTaskNotification {
+    pub user_id: i32,
+    pub task_id: String,
+    pub notified_at: i32,
 }
 
 #[derive(Queryable, Selectable, Insertable)]

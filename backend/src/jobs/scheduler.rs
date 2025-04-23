@@ -15,6 +15,7 @@ use std::env;
 
 use crate::handlers::imap_handlers;
 use crate::api::twilio_utils;
+use crate::handlers::google_tasks::{self, Task};
 
 pub async fn start_scheduler(state: Arc<AppState>) {
     let sched = JobScheduler::new().await.expect("Failed to create scheduler");
@@ -712,6 +713,215 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     }).expect("Failed to create usage monitor job");
 
     sched.add(usage_monitor_job).await.expect("Failed to add usage monitor job to scheduler");
+
+    // Create a job that runs every minute to check for due tasks
+    let state_clone = Arc::clone(&state);
+    let task_monitor_job = Job::new_async("0 * * * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            info!("Running scheduled task check...");
+            
+            // Get all users with valid Google Tasks connection
+            let users = match state.user_repository.get_all_users() {
+                Ok(users) => users,
+                Err(e) => {
+                    error!("Failed to fetch users: {}", e);
+                    return;
+                }
+            };
+
+            for user in users {
+                // Check if user has messages left and valid subscription
+                match state.user_repository.has_valid_subscription_tier_with_messages(user.id, "tier 1") {
+                    Ok(true) => (),
+                    Ok(false) => {
+                        info!("User {} does not have valid subscription or messages left", user.id);
+                        continue;
+                    },
+                    Err(e) => {
+                        error!("Failed to check subscription status for user {}: {}", user.id, e);
+                        continue;
+                    }
+                }
+
+                // Check if user has active Google Tasks connection
+                match state.user_repository.has_active_google_tasks(user.id) {
+                    Ok(true) => (),
+                    Ok(false) => continue,
+                    Err(e) => {
+                        error!("Failed to check Google Tasks status for user {}: {}", user.id, e);
+                        continue;
+                    }
+                }
+
+                // Fetch user's tasks
+                let tasks = match google_tasks::get_tasks(&state, user.id).await {
+                    Ok(response) => {
+                        match response.0.get("tasks") {
+                            Some(tasks) => {
+                                match serde_json::from_value::<Vec<Task>>(tasks.clone()) {
+                                    Ok(tasks) => tasks,
+                                    Err(e) => {
+                                        error!("Failed to parse tasks for user {}: {}", user.id, e);
+                                        continue;
+                                    }
+                                }
+                            },
+                            None => {
+                                error!("No tasks field in response for user {}", user.id);
+                                continue;
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        error!("Failed to fetch tasks for user {}: {:?}", user.id, e);
+                        continue;
+                    }
+                };
+
+                let now = chrono::Utc::now();
+                let mut due_tasks = Vec::new();
+
+                // Check each task
+                for task in tasks {
+                    // Skip if task is already completed
+                    if task.status != "needsAction" {
+                        continue;
+                    }
+
+                    // Check if task has a due date and is due
+                    if let Some(ref due_str) = task.due_time {
+                        // Parse the due date string into a timestamp
+                        if let Ok(due_time) = chrono::DateTime::parse_from_rfc3339(&due_str) {
+                            let due_timestamp = due_time.timestamp();
+                            let current_timestamp = now.timestamp();
+                            let thirty_days_ago_timestamp = (now - chrono::Duration::days(30)).timestamp();
+                            
+                            // Compare timestamps directly
+                            if due_timestamp <= current_timestamp && due_timestamp > thirty_days_ago_timestamp {
+                                // Check if we've already notified about this task
+                                match state.user_repository.get_task_notification(user.id, &task.id) {
+                                    Ok(Some(_)) => continue, // Already notified
+                                    Ok(None) => due_tasks.push(task),
+                                    Err(e) => {
+                                        error!("Failed to check task notification status: {}", e);
+                                        continue;
+                                    }
+                                }
+                            }
+                        } else {
+                            error!("Failed to parse due date '{}' for task {}", due_str, task.id);
+                            continue;
+                        }
+                    }
+                }
+
+                if due_tasks.is_empty() {
+                    continue;
+                }
+
+                // Check if we should process this notification based on messages left
+                let should_continue = match state.user_repository.decrease_messages_left(user.id) {
+                    Ok(msgs_left) => {
+                        info!("User {} has {} messages left after decrease", user.id, msgs_left);
+                        msgs_left > 0
+                    },
+                    Err(e) => {
+                        error!("Failed to decrease messages left for user {}: {}", user.id, e);
+                        false
+                    }
+                };
+
+                if !should_continue {
+                    info!("Skipping further processing for user {} due to no messages left", user.id);
+                    continue;
+                }
+
+                // Get the user's preferred number or default
+                let sender_number = match user.preferred_number.clone() {
+                    Some(number) => {
+                        info!("Using user's preferred number: {}", number);
+                        number
+                    },
+                    None => {
+                        let number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set");
+                        info!("Using default SHAZAM_PHONE_NUMBER: {}", number);
+                        number
+                    },
+                };
+
+                // Get the conversation for the user
+                let conversation = match state.user_conversations.get_conversation(&user, sender_number).await {
+                    Ok(conv) => conv,
+                    Err(e) => {
+                        error!("Failed to ensure conversation exists: {}", e);
+                        continue;
+                    }
+                };
+
+                // Format notification message
+                let tasks_text = due_tasks.iter()
+                    .map(|task| {
+                        let desc = task.notes.as_deref().unwrap_or("").to_string();
+                        if desc.is_empty() {
+                            task.title.clone()
+                        } else {
+                            format!("{}: {}", task.title, desc)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+
+                let notification = format!(
+                    "You have {} overdue Google Tasks:\n\n{}",
+                    due_tasks.len(),
+                    tasks_text
+                );
+
+                // Send notification
+                match twilio_utils::send_conversation_message(
+                    &conversation.conversation_sid,
+                    &conversation.twilio_number,
+                    &notification
+                ).await {
+                    Ok(_) => {
+                        info!("Successfully sent task notification to user {}", user.id);
+                        
+                        // Record notifications
+                        let current_time = chrono::Utc::now().timestamp() as i32;
+                        for task in due_tasks {
+                            if let Err(e) = state.user_repository.create_task_notification(user.id, &task.id, current_time) {
+                                error!("Failed to record task notification: {}", e);
+                            }
+                        }
+                    },
+                    Err(e) => error!("Failed to send task notification: {}", e),
+                }
+            }
+        })
+    }).expect("Failed to create task monitor job");
+
+    sched.add(task_monitor_job).await.expect("Failed to add task monitor job to scheduler");
+
+    // Create a job that runs daily to clean up old task notifications
+    let state_clone = Arc::clone(&state);
+    let task_cleanup_job = Job::new_async("0 0 0 * * *", move |_, _| {  // Runs at midnight every day
+        let state = state_clone.clone();
+        Box::pin(async move {
+            info!("Running task notification cleanup...");
+            
+            // Calculate timestamp for 30 days ago
+            let thirty_days_ago = (chrono::Utc::now() - chrono::Duration::days(30)).timestamp() as i32;
+            
+            // Delete notifications for tasks that were due more than 30 days ago
+            match state.user_repository.delete_old_task_notifications(thirty_days_ago) {
+                Ok(count) => info!("Cleaned up {} old task notifications", count),
+                Err(e) => error!("Failed to clean up old task notifications: {}", e),
+            }
+        })
+    }).expect("Failed to create task cleanup job");
+
+    sched.add(task_cleanup_job).await.expect("Failed to add task cleanup job to scheduler");
     
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");

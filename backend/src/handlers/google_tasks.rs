@@ -34,6 +34,8 @@ pub struct Task {
     pub notes: Option<String>,
     #[serde(default)]
     pub due: Option<String>,
+    #[serde(default, rename = "due_time")]
+    pub due_time: Option<String>,
     pub status: String,
 }
 
@@ -175,7 +177,9 @@ async fn create_task_with_token(
     }
 
     if let Some(due) = task_request.due_time {
+        // Set both due (date) and due_time (specific time) parameters
         task_data["due"] = json!(due.to_rfc3339());
+        task_data["due_time"] = json!(due.to_rfc3339());
     }
 
     let response = client

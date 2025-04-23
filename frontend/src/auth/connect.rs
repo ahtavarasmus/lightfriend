@@ -776,7 +776,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                 <p class="service-description">
                                     {"Create and manage tasks, reminders, and ideas through SMS or voice calls. "}
                                     {"This integration creates a dedicated \"lightfriend\" list, keeping your existing task lists untouched. "}
-                                    {"Perfect for quick note-taking, setting reminders, or capturing ideas on the go."}
+                                    {"Perfect for quick note-taking, setting reminders, or capturing ideas on the go. (Tasks with due time will only know the date and be set to midnight regardless of the time set to it)"}
                                 </p>
                                 if *tasks_connected && props.user_id == 1 {
                                     <div class="tasks-controls">
