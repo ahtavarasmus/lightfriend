@@ -51,6 +51,9 @@ pub struct User {
     pub imap_proactive: bool,
     pub matrix_device_id: Option<String>,
     pub credits_left: f32, // free credits that reset every month while in the monthly sub. will always be consumed before one time credits
+    pub discount: bool, // if user can get discounted credits(for early adopters)
+    pub encrypted_matrix_password: Option<String>,
+    pub encrypted_matrix_secret_storage_recovery_key: Option<String>,
 }
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -215,6 +218,7 @@ pub struct UsageLog {
     pub status: Option<String>, // call specific: 'ongoing' or 'done'
     pub recharge_threshold_timestamp: Option<i32>, // call specific: timestamp when credits go below recharge threshold
     pub zero_credits_timestamp: Option<i32>, // call specific: timestamp when credits reach zero
+    pub call_duration: Option<i32>, // call specific: timestamp when credits reach zero
 }
 
 #[derive(Insertable)]

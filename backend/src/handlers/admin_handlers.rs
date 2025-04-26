@@ -210,7 +210,7 @@ pub async fn update_user_messages(
     let new_msgs = (user.msgs_left as i32 + amount).max(0);
 
     // Update messages count
-    state.user_repository.update_messages_left(user_id, new_msgs)
+    state.user_repository.update_proactive_messages_left(user_id, new_msgs)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to update messages: {}", e)}))

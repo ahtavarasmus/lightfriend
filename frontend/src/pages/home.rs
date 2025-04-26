@@ -84,6 +84,7 @@ struct UserProfile {
     preferred_number: Option<String>,
     notify: bool,
     sub_tier: Option<String>,
+    discount: bool,
 }
 
 #[derive(Clone, PartialEq)]
@@ -1940,22 +1941,91 @@ pub fn Home() -> Html {
                             }
 
                         <div class="feature-status">
-                            <h3>{"Currently Available"}</h3>
-                            <h4>{"Proactive messaging (email)(subscription needed)"}</h4>
+                            <h3>{"Your lightfriend's Capabilities"}</h3>
                             <h4>{"Tools"}</h4>
-                            <ul>
-                                <li>{"Perplexity AI search"}</li>
-                                <li>{"Email and calendar integration"}</li>
-                                <li>{"Dedicated Weather search"}</li>
-                                <li>{"Send info to you by sms during voice calls"}</li>
-                                <li>{"Shazam song recognition - Get a call, play the song, AI sends it to you by sms."}</li>
-                                <li>{"Set up waiting checks for proactive messaging (subscription needed)"}</li>
-                            </ul>
+                                {
+                                    if let Some(profile) = (*profile_data).as_ref() {
+                                        if profile.sub_tier.is_some() {
+                                            html! {
+                                                <>
+                                                <ul>
+                    
+                                                <li>{"Perplexity AI search"}</li>
+                                                <li>{"Dedicated Weather search"}</li>
+                                                <li>{"Send info to you by sms during voice calls"}</li>
+
+                                                <li>{"Email, Calendar and Tasks integration"}</li>
+                                                <li>{"Shazam song recognition - Get a call, play the song, AI sends it to you by sms."}</li>
+                                                <li>{"Set up waiting checks for proactive messaging"}</li>
+
+                                                </ul>
+                                                </>
+                                            }
+                                        } else {
+                                            html! {
+                                                <>
+                                                <ul>
+                                                <li>{"Perplexity AI search"}</li>
+                                                <li>{"Dedicated Weather search"}</li>
+                                                <li>{"Send info to you by sms during voice calls"}</li>
+
+                                                </ul>
+
+                                                <h4>{"Subscribe to Pro Plan to get the following tools:"}</h4>
+                                                <ul>
+                                                <li>{"Email, Calendar and Tasks integration"}</li>
+                                                <li>{"Shazam song recognition - Get a call, play the song, AI sends it to you by sms."}</li>
+                                                <li>{"Set up waiting checks for proactive messaging"}</li>
+                                                </ul>
+                                                </>
+                                            }
+                                        }
+                                    } else {
+                                        html! {
+                                        }
+                                    }
+                                }
+
                             <h4>{"Methods"}</h4>
+                                {
+                                    if let Some(profile) = (*profile_data).as_ref() {
+                                        if profile.sub_tier.is_some() {
+                                            html! {
+
+                                            <ul>
+                                                <li>{"Voice calling"}</li>
+                                                <li>{"Text messaging"}</li>
+                                                <li>{"Proactive Messaging"}</li>
+                                                </ul>
+                                            }
+                                        } else {
+                                            html! {
+                                                <>
+                                                <ul>
+                                                <li>{"Voice calling"}</li>
+                                                <li>{"Text messaging"}</li>
+                                                </ul>
+                                                <h4>{"Subscribe to Pro Plan to get the following method:"}</h4>
+                                                <ul>
+                                                <li>{"Proactive Messaging"}</li>
+                                                </ul>
+                                                </>
+                                            }
+                                        }
+                                    } else {
+                                        html! {}
+                                    }
+                                }
+                            <h3>{"Coming Soon"}</h3>
                             <ul>
-                                <li>{"Voice calling"}</li>
-                                <li>{"Text messaging"}</li>
+                                <li>{"WhatsApp and Telegram integration (Pro Plan)"}</li>
+                                <li>{"Camera functionality for photo translation and more (Pro Plan)"}</li>
                             </ul>
+                            
+                            <p class="feature-suggestion">
+                                {"Have a feature in mind? Email your suggestions to "}
+                                <a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>
+                            </p>
 
                             <h4>{"Tips"}</h4>
                             <ul>
@@ -1963,17 +2033,7 @@ pub fn Home() -> Html {
                                 <li>{"Start your message with 'forget' to make the assistant forget previous conversation context and start fresh. Note that this only applies to that one message - the next message will again remember previous context."}</li>
                                 <li>{"For Shazam song recognition, ask the assistant to use shazam or identify a song. Then assistant will make a call to you and it will listen to audio. Once recognized the song name will be texted to you and you can close the call."}</li>
                             </ul>
-                            <h3>{"Coming Soon"}</h3>
-                            <ul>
-                                <li>{"WhatsApp and Telegram integration"}</li>
-                                <li>{"Reminder setting"}</li>
-                                <li>{"Camera functionality for photo translation and more"}</li>
-                            </ul>
-                            
-                            <p class="feature-suggestion">
-                                {"Have a feature in mind? Email your suggestions to "}
-                                <a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>
-                            </p>
+
 
                         </div>
 

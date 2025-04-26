@@ -77,11 +77,11 @@ pub fn privacy_policy() -> Html {
 
             <section>
                 <h2>{"7. Google Tasks Integration and OAuth"}</h2>
-                <p>{"Lightfriend integrates with Google Tasks to allow you to manage your gmail via SMS or voice call commands. To provide this functionality, we use Google OAuth with the following details:"}</p>
+                <p>{"Lightfriend integrates with Google Tasks to allow you to manage your tasks via SMS or voice call commands. To provide this functionality, we use Google OAuth with the following details:"}</p>
                 <ul>
                     <li>{"Data We Access: We request access to your Google Tasks data only when you authorize it through OAuth."}</li>
                     <li>{"Tokens We Store: Upon your authorization, we store an access token and a refresh token in our secure database. These tokens enable Lightfriend to access your Google Tasks on your behalf when you use our SMS or voice call features. We encrypt these tokens to protect your data."}</li>
-                    <li>{"What We Don't Store: We do not store any additional Google account data, such as your calendar events, email, or personal details—only the encrypted tokens necessary for gmail access are retained."}</li>
+                    <li>{"What We Don't Store: We do not store any additional Google account data, such as your calendar events, email, or personal details—only the encrypted tokens necessary for tasks access are retained."}</li>
                     <li>{"Usage: The stored tokens are used exclusively to authenticate and access your Google Tasks when you request actions (e.g., checking or sending your tasks messages). Lightfriend does not retain user data obtained through Workspace APIs to develop, improve, or train generalized AI and/or ML models."}</li>
                     <li>{"Sharing: We do not share these tokens or your Google user data with third parties, except as required by law or to facilitate the Google API services you've authorized."}</li>
                 </ul>

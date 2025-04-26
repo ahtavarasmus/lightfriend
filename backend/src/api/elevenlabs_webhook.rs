@@ -263,11 +263,16 @@ pub async fn elevenlabs_webhook(
     match state.user_repository.get_ongoing_usage(user_id) {
         Ok(Some(usage)) => {
             // Handle the ongoing usage log
-            let voice_second_cost = std::env::var("VOICE_SECOND_COST")
-                .expect("VOICE_SECOND_COST not set")
-                .parse::<f32>()
-                .unwrap_or(0.0033);
-            let credits_used = call_duration_secs as f32 * voice_second_cost;
+            if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "voice", Some(call_duration_secs)) {
+                eprintln!("Failed to deduct user credits: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": "Failed to deduct user credits"
+                    }))
+                ));
+            }
+
             let success = match call_successful.as_str() {
                 "success" => true,
                 "failure" => false,
@@ -279,9 +284,9 @@ pub async fn elevenlabs_webhook(
                 user_id,
                 &usage.sid.unwrap_or_default(),
                 "done",
-                credits_used,
                 success,
-                &call_summary
+                &call_summary,
+                Some(call_duration_secs),
             ) {
                 error!("Failed to update usage log: {}", e);
                 return Err((
@@ -290,39 +295,6 @@ pub async fn elevenlabs_webhook(
                         "error": "Failed to update usage log"
                     }))
                 ));
-            }
-
-            // Decrease user's credits
-            if let Err(e) = state.user_repository.decrease_credits(user_id, credits_used) {
-                error!("Failed to decrease credits: {}", e);
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({
-                        "error": "Failed to decrease credits"
-                    }))
-                ));
-            }
-            println!("decreased user's credits by {}", credits_used);
-
-            match state.user_repository.is_credits_under_threshold(user_id) {
-                Ok(is_under) => {
-                    if is_under {
-                        tracing::info!("User {} credits is under threshold, attempting automatic charge", user_id);
-                        if user.charge_when_under {
-                            use axum::extract::{State, Path};
-                            let state_clone = Arc::clone(&state);
-                            tokio::spawn(async move {
-                                let _ = crate::handlers::stripe_handlers::automatic_charge(
-                                    State(state_clone),
-                                    Path(user.id),
-                                ).await;
-                                tracing::info!("Recharged the user successfully back up!");
-                            });                                                                            
-                            tracing::info!("recharged the user successfully back up!");
-                        }
-                    }
-                },
-                Err(e) => error!("Failed to check if user credits is under threshold: {}", e),
             }
         },
         Ok(None) => {

@@ -35,8 +35,30 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
 
     // Buy credits related states
     let show_buy_credits_modal = use_state(|| false);
-    let buy_credits_amount = use_state(|| MIN_TOPUP_AMOUNT_CREDITS); 
+    let buy_credits_amount = use_state(|| 5.00); 
     let show_confirmation_modal = use_state(|| false); // New state for confirmation modal
+
+    // Rate constants (replace with actual values from crate::profile::billing_models)
+    let voice_second_cost = crate::profile::billing_models::VOICE_SECOND_COST;
+    let message_cost = crate::profile::billing_models::MESSAGE_COST;
+
+    // Calculate usage estimates for one-time credits
+    let one_time_credits = user_profile.credits;
+    let one_time_minutes = if one_time_credits > 0.0 {
+        (one_time_credits / voice_second_cost / 60.0).floor()
+    } else {
+        0.0
+    };
+    let one_time_seconds = if one_time_credits > 0.0 {
+        (one_time_credits / voice_second_cost % 60.0).floor()
+    } else {
+        0.0
+    };
+    let one_time_messages = if one_time_credits > 0.0 {
+        (one_time_credits / message_cost).floor()
+    } else {
+        0.0
+    };
 
     // Function to update auto top-up settings and refresh the profile
     let update_auto_topup = {
@@ -416,35 +438,94 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
     };
 
     html! {
+        <>
         <div class="profile-info">
             <div class="billing-section">
                 {
                     html! {
                         <>
-                            <h3>{"Available credits"}</h3>
-                            <div class="iq-balance">
-                                <span class="iq-time">
-                                    {if user_profile.credits < 0.00 { 
-                                        format!("{:.2}€  (0 minutes/messages)", user_profile.credits)
-                                    } else { 
-                                        format!("{:.2}€ ({:.0}min {:.0}s or {:.0} messages)", user_profile.credits, user_profile.credits / crate::profile::billing_models::VOICE_SECOND_COST / 60.00, (user_profile.credits / crate::profile::billing_models::VOICE_SECOND_COST) % 60.0, user_profile.credits / crate::profile::billing_models::MESSAGE_COST)
-                                    }}
-                                </span>
+                            // Subscription or Discount Status
+                            <div class="section-container status-section">
+                                {
+                                    if let Some(sub_tier) = &user_profile.sub_tier {
+                                        html! {
+                                            <div class="status">
+                                                <div class="subscription-tier">
+                                                    <div class="field-label-group">
+                                                        <h3>{"Current Subscription"}</h3>
+                                                        <div class="tooltip">
+                                                            <span class="tooltip-icon">{"?"}</span>
+                                                            <span class="tooltip-text">
+                                                                {"Active subscription gives full capability to your lightfriend. Browse all the capabilities at home page."}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <span class="tier-label">{"Pro Plan"}</span>
+                                                </div>
+                                            </div>
+                                        }
+                                    } else if user_profile.discount {
+                                        html! {
+                                            <div class="status">
+                                                <div class="discount-status">
+                                                    <div class="field-label-group">
+                                                        <h3>{"Current Subscription"}</h3>
+                                                        <div class="tooltip">
+                                                            <span class="tooltip-icon">{"?"}</span>
+                                                            <span class="tooltip-text">
+                                                                {"Early adopters keep access to tools: Email, Calendar Regardless of their subscription status. Thank you for being interested!"}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <span>{"Early adopter"}</span>
+                                                </div>
+                                            </div>
+                                        }
+                                    } else {
+                                        html! {
+                                            <div class="status">
+                                                <div class="discount-status">
+                                                    <div class="field-label-group">
+                                                        <h3>{"Current Subscription"}</h3>
+                                                        <div class="tooltip">
+                                                            <span class="tooltip-icon">{"?"}</span>
+                                                            <span class="tooltip-text">
+                                                                {"Free Plan gives your lightfriend access to Perplexity Search and Weather tool. Upgrade to Pro Plan and get access to Email, Calendar and more!"}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <span>{"Free Plan"}</span>
+                                                </div>
+                                            </div>
+                                        }
+                                    }
+                                }
+                            </div>
+
+                            // Purchased Credits
+                            <div class="section-container">
+                                <div class="section-header">
+                                    <h3>{"Credits"}</h3>
+                                    <div class="tooltip">
+                                        <span class="tooltip-icon">{"?"}</span>
+                                        <span class="tooltip-text">
+                                            {"These are the credits you've purchased. They don't expire and can be used for voice calls or messages."}
+                                        </span>
+                                    </div>
+                                </div>
+                                <div class="one-time-credits">
+                                    <span>
+                                        {
+                                            if one_time_credits < 0.0 {
+                                                format!("{:.2}€ (0 minutes/messages)", one_time_credits)
+                                            } else {
+                                                format!("{:.2}€ ({:.0}min {:.0}s or {:.0} messages)", one_time_credits, one_time_minutes, one_time_seconds, one_time_messages)
+                                            }
+                                        }
+                                    </span>
+                                </div>
                             </div>
                             
-                            // Show subscription tier if it exists
-                            {
-                                if let Some(sub_tier) = &user_profile.sub_tier {
-                                    html! {
-                                        <div class="subscription-tier">
-                                            <span>{"Current Subscription: "}</span>
-                                            <span class="tier-label">{sub_tier}</span>
-                                        </div>
-                                    }
-                                } else {
-                                    html! {}
-                                }
-                            }
                             <div class="auto-topup-container">
                                 if user_profile.stripe_payment_method_id.is_some() {
                                     <button 
@@ -513,7 +594,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                     if *auto_topup_active {
                                                         html! {
                                                             <div class="topup-settings">
-                                                                <p>{"How much would you like to automatically top up when your balance drops below $2.00?"}</p>
+                                                                <p>{"How much would you like to automatically top up when your purchased credits drop below $2.00?"}</p>
                                                                 <div class="amount-input-container">
                                                                     <label for="amount">{"Amount ($)"}</label>
                                                                     <input 
@@ -718,5 +799,848 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                 <UsageGraph user_id={user_profile.id} />
             </div>
         </div>
+        <style>
+                {r#"
+
+/* Section Containers */
+.section-container {
+    margin-bottom: 2rem;
+}
+
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.section-header h3 {
+    margin: 0;
+}
+
+/* Credits Display Containers */
+.one-time-credits, .subscription-credits {
+    background: linear-gradient(to bottom, rgba(30, 144, 255, 0.05), rgba(30, 144, 255, 0.02));
+    border-radius: 16px;
+    padding: 2rem;
+
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    transition: all 0.3s ease;
+    backdrop-filter: blur(5px);
+}
+
+.one-time-credits:hover, .subscription-credits:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
+    border-color: rgba(30, 144, 255, 0.4);
+}
+
+.one-time-credits span, .subscription-credits span {
+    color: #e0e0e0;
+    font-size: 1.2rem;
+    font-weight: 500;
+    display: block;
+    line-height: 1.6;
+}
+
+/* Status Container */
+.status-section {
+    margin-bottom: 3rem;
+}
+
+.status {
+    padding: 0;
+    border-radius: 16px;
+
+    transition: all 0.3s ease;
+}
+
+/* Subscription Status */
+.subscription-tier, .discount-status, .no-subscription {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 2rem;
+    border-radius: 16px;
+    transition: all 0.3s ease;
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    backdrop-filter: blur(5px);
+}
+
+.subscription-tier:hover, .discount-status:hover, .no-subscription:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
+    border-color: rgba(30, 144, 255, 0.4);
+}
+
+
+.discount-status {
+    background: linear-gradient(to right, rgba(76, 175, 80, 0.1), rgba(76, 175, 80, 0.05));
+    border: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+
+.no-subscription {
+    background: linear-gradient(to right, rgba(255, 152, 0, 0.1), rgba(255, 152, 0, 0.05));
+    border: 1px solid rgba(255, 152, 0, 0.2);
+}
+
+.subscription-tier span, .discount-status span, .no-subscription span {
+    color: #e0e0e0;
+    font-size: 1.1rem;
+    line-height: 1.6;
+}
+
+.tier-label {
+    color: #1E90FF;
+    font-weight: 600;
+    font-size: 1.1rem;
+    text-transform: capitalize;
+}
+
+.subscription-tier:hover, .discount-status:hover, .no-subscription:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+/* Section Headers */
+h3 {
+    color: #7EB2FF;
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+}
+
+/* Auto Top-up Button (unchanged but included for context) */
+.auto-topup-button {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+    margin-top: 1rem;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    z-index: 100;
+}
+
+.auto-topup-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(30, 144, 255, 0.3);
+}
+
+                /* Auto Top-up Button (unchanged but included for context) */
+.auto-topup-button {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+    margin-top: 1rem;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    z-index: 100;
+}
+
+.auto-topup-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(30, 144, 255, 0.3);
+}
+
+/* Auto Top-up Modal (dark theme with your colors) */
+.auto-topup-modal {
+    position: absolute;
+    background: #222; /* Dark background for the modal */
+    border: 1px solid rgba(30, 144, 255, 0.1); /* Subtle blue border */
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-top: 0.5rem;
+    z-index: 90;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); /* Slightly stronger shadow for depth */
+    width: 340px; /* Matches width in your image */
+    color: #fff; /* White text for contrast against dark background */
+}
+
+/* Modal Header (Automatic Top-up title and toggle) */
+.auto-topup-modal h3 {
+    color: #7EB2FF; /* Blue accent for title, matching your app’s colors */
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+    font-weight: 500;
+}
+.toggle-status {
+    color: #B3D1FF; /* Lighter blue for readability on dark background */
+    font-size: 1rem;
+    margin-left: 1rem; /* Space between the toggle and the status label */
+    font-weight: 500;
+}
+
+.auto-topup-modal .message {
+    padding: 0.8rem;
+    border-radius: 8px;
+    margin-top: 1rem;
+    width: 100%;
+    text-align: center;
+}
+
+/* Toggle Switch Container */
+.auto-topup-toggle {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.2rem;
+}
+
+.auto-topup-toggle span {
+    color: #B3D1FF; /* Lighter blue for secondary text, readable on dark */
+    font-size: 1rem;
+}
+
+.notification-settings {
+    margin: 20px 0;
+    padding: 15px;
+    border-radius: 8px;
+    background-color: #f5f5f5;
+}
+
+.notify-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.notification-description {
+    color: #666;
+    font-size: 0.9em;
+    margin-top: 5px;
+}
+
+
+/* Switch Styling (matches image’s turquoise-blue toggle) */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 60px;
+    height: 34px;
+}
+
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #666; /* Dark gray for inactive state */
+    transition: .4s;
+    border-radius: 34px;
+    border: 1px solid rgba(255, 255, 255, 0.1); /* Subtle white border */
+}
+
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 26px;
+    width: 26px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+}
+
+input:checked + .slider {
+    background-color: #1E90FF; /* Blue from your app’s colors for active state */
+}
+
+input:checked + .slider:before {
+    transform: translateX(26px);
+}
+
+/* Current Balance */
+.current-balance {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1); /* Subtle white border */
+    margin-bottom: 1rem;
+}
+
+.current-balance span {
+    color: #B3D1FF; /* Lighter blue for secondary text */
+    font-size: 0.95rem;
+}
+
+.balance-amount {
+    color: #fff !important;
+    font-weight: 600;
+}
+
+/* Top-up Settings */
+.topup-settings p {
+    color: #fff;
+    font-size: 0.95rem;
+    margin: 1rem 0 0.8rem;
+    line-height: 1.4;
+}
+
+.amount-input-container {
+    margin-bottom: 1.2rem;
+}
+
+.amount-input-container label {
+    color: #B3D1FF;
+    font-size: 0.9rem;
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.amount-input {
+    width: 100%;
+    padding: 0.6rem;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: #333; /* Slightly lighter dark background for input */
+    color: #fff;
+    font-size: 0.9rem;
+    transition: border-color 0.3s ease;
+}
+
+.amount-input:focus {
+    border-color: #7EB2FF; /* Blue accent on focus, matching your app */
+    outline: none;
+    box-shadow: 0 0 5px rgba(126, 178, 255, 0.3);
+}
+
+.iq-equivalent {
+    color: #7EB2FF;
+    font-size: 0.9rem;
+    margin-top: 0.5rem;
+    display: block;
+    font-weight: 500;
+}
+
+/* Save Button (matches image’s turquoise-blue) */
+.save-button {
+    background: #1E90FF; /* Solid blue, matching your app’s colors */
+    color: white;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    width: 100%;
+    font-weight: 500;
+}
+
+.save-button:hover {
+    background: linear-gradient(45deg, #1E90FF, #4169E1); /* Gradient on hover, matching your app */
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(30, 144, 255, 0.4);
+}
+
+.customer-portal-button {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+    margin-top: 1rem;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    z-index: 100;
+    margin-left: 1rem; /* Space between this and the auto-topup button */
+}
+
+.customer-portal-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(30, 144, 255, 0.3);
+}
+
+/* New Buy Credits Button */
+.buy-credits-button {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+    margin-top: 1rem;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    z-index: 100;
+    margin-left: 1rem; /* Space between this and the auto-topup button */
+}
+
+.buy-credits-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(30, 144, 255, 0.3);
+}
+
+/* Buy Credits Modal */
+.buy-credits-modal {
+    position: absolute;
+    background: #222; /* Dark background for the modal */
+    border: 1px solid rgba(30, 144, 255, 0.1); /* Subtle blue border */
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-top: 0.5rem;
+    z-index: 90;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); /* Slightly stronger shadow for depth */
+    width: 340px; /* Matches width in your image */
+    color: #fff; /* White text for contrast against dark background */
+}
+
+.buy-credits-modal h3 {
+    color: #7EB2FF; /* Blue accent for title, matching your app’s colors */
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+    font-weight: 500;
+}
+
+.buy-credits-modal .message {
+    padding: 0.8rem;
+    border-radius: 8px;
+    margin-top: 1rem;
+    width: 100%;
+    text-align: center;
+}
+
+/* Modal Actions */
+.modal-actions {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.cancel-button {
+    background: #666; /* Dark gray for Cancel button */
+    color: white;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    flex: 1;
+}
+
+.cancel-button:hover {
+    background: #555; /* Slightly darker gray on hover */
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.buy-now-button {
+    background: #1E90FF; /* Blue for Buy Now button, matching your app’s colors */
+    color: white;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    flex: 1;
+}
+
+.buy-now-button:hover {
+    background: linear-gradient(45deg, #1E90FF, #4169E1); /* Gradient on hover, matching your app */
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(30, 144, 255, 0.4);
+}
+/* Confirmation Modal */
+.confirmation-modal {
+    position: absolute;
+    background: #222; /* Dark background for the modal */
+    border: 1px solid rgba(30, 144, 255, 0.1); /* Subtle blue border */
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-top: 0.5rem;
+    z-index: 90;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); /* Slightly stronger shadow for depth */
+    width: 340px; /* Matches width in your image */
+    color: #fff; /* White text for contrast against dark background */
+}
+
+.confirmation-modal h3 {
+    color: #7EB2FF; /* Blue accent for title, matching your app’s colors */
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+    font-weight: 500;
+}
+
+.confirmation-modal p {
+    color: #B3D1FF; /* Lighter blue for text, readable on dark */
+    font-size: 0.95rem;
+    margin-bottom: 1.5rem;
+    line-height: 1.4;
+}
+
+.confirmation-modal .message {
+    padding: 0.8rem;
+    border-radius: 8px;
+    margin-top: 1rem;
+    width: 100%;
+    text-align: center;
+}
+
+/* Modal Actions (shared with buy-credits-modal) */
+.modal-actions {
+    display: flex;
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+
+.cancel-button {
+    background: #666; /* Dark gray for Cancel button */
+    color: white;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    flex: 1;
+}
+
+.cancel-button:hover {
+    background: #555; /* Slightly darker gray on hover */
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.confirm-button {
+    background: #1E90FF; /* Blue for Confirm button, matching your app’s colors */
+    color: white;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    flex: 1;
+}
+
+.confirm-button:hover {
+    background: linear-gradient(45deg, #1E90FF, #4169E1); /* Gradient on hover, matching your app */
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(30, 144, 255, 0.4);
+}
+
+/* Subscription Tier Display */
+.subscription-tier {
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.subscription-tier span {
+    color: #B3D1FF;
+    font-size: 0.95rem;
+}
+
+.tier-label {
+    color: #1E90FF !important;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+/* Payment Method Button */
+.subscription-tier {
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.subscription-tier span {
+    color: #B3D1FF;
+    font-size: 0.95rem;
+}
+
+.tier-label {
+    color: #1E90FF !important;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+/* Payment Method Button */
+.payment-method-button {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
+    margin-left: 1rem; /* Space between this and other buttons */
+}
+
+.payment-method-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(30, 144, 255, 0.3);
+}
+
+/* Payment Method Container */
+.payment-method-container {
+    display: flex;
+    align-items: center;
+    margin-top: 1rem;
+}
+
+/* Stripe Modal */
+.stripe-modal {
+    position: absolute;
+    background: #222; /* Dark background for the modal */
+    border: 1px solid rgba(30, 144, 255, 0.1); /* Subtle blue border */
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-top: 0.5rem;
+    z-index: 90;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2); /* Slightly stronger shadow for depth */
+    width: 340px; /* Matches width in your image */
+    color: #fff; /* White text for contrast against dark background */
+}
+
+.stripe-modal p {
+    color: #B3D1FF; /* Lighter blue for text, readable on dark */
+    font-size: 0.95rem;
+    margin-bottom: 1rem;
+    line-height: 1.4;
+}
+
+.stripe-modal {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: white;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+}
+
+#card-element {
+    margin: 10px 0;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+#card-errors {
+    color: red;
+    font-size: 14px;
+    margin-top: 10px;
+}
+
+#payment-form button[type="submit"] {
+    margin-top: 10px;
+    padding: 8px 16px;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+#payment-form button[type="submit"]:hover {
+    background: #0056b3;
+}
+
+
+
+.close-button {
+    background: #666; /* Dark gray for Close button */
+    color: white;
+    padding: 0.8rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    width: 100%;
+}
+
+.close-button:hover {
+    background: #555; /* Slightly darker gray on hover */
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+/* Success Message */
+.success-message {
+    background: #4CAF50; /* Green for success */
+    color: white;
+    padding: 0.8rem;
+    border-radius: 8px;
+    margin-top: 1rem;
+    width: 100%;
+    text-align: center;
+}
+
+
+
+                /* Tooltip Styles */
+                .field-label-group {
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                }
+
+                .tooltip {
+                    position: relative;
+                    display: inline-block;
+                }
+
+                .tooltip-icon {
+                    display: inline-flex;
+                    align-items: center;
+                    justify-content: center;
+                    width: 18px;
+                    height: 18px;
+                    background-color: rgba(255, 255, 255, 0.1);
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    border-radius: 50%;
+                    font-size: 12px;
+                    cursor: help;
+                    color: #fff;
+                    transition: all 0.3s ease;
+                }
+
+                .tooltip:hover .tooltip-icon {
+                    background-color: rgba(255, 255, 255, 0.2);
+                    border-color: rgba(255, 255, 255, 0.3);
+                }
+
+                .tooltip-text {
+                    visibility: hidden;
+                    position: absolute;
+                    width: 300px;
+                    background-color: rgba(0, 0, 0, 0.9);
+                    color: white;
+                    text-align: left;
+                    padding: 12px;
+                    border-radius: 8px;
+                    font-size: 14px;
+                    line-height: 1.4;
+                    z-index: 1;
+                    bottom: 125%;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    opacity: 0;
+                    transition: all 0.3s ease;
+                    border: 1px solid rgba(30, 144, 255, 0.2);
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+                    backdrop-filter: blur(10px);
+                }
+
+                .tooltip:hover .tooltip-text {
+                    visibility: visible;
+                    opacity: 1;
+                    transform: translateX(-50%) translateY(-5px);
+                }
+
+                /* Add a small arrow at the bottom of the tooltip */
+                .tooltip-text::after {
+                    content: "";
+                    position: absolute;
+                    top: 100%;
+                    left: 50%;
+                    margin-left: -5px;
+                    border-width: 5px;
+                    border-style: solid;
+                    border-color: rgba(0, 0, 0, 0.9) transparent transparent transparent;
+                }
+
+                /* Adjust heading margins to account for tooltip */
+                h3 {
+                    margin: 0;
+                }
+
+                "#}
+        </style>
+        <style>
+            {r#"
+/* Rates Section Styling */
+.rates-section {
+    background: linear-gradient(to bottom, rgba(30, 144, 255, 0.05), rgba(30, 144, 255, 0.02));
+    border-radius: 16px;
+    padding: 2rem;
+    margin-top: 3rem;
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    transition: all 0.3s ease;
+}
+
+.rates-section:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
+    border-color: rgba(30, 144, 255, 0.4);
+}
+
+.rates-container {
+    margin-top: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.rate-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    transition: all 0.3s ease;
+}
+
+.rate-item:hover {
+    background: rgba(0, 0, 0, 0.3);
+    border-color: rgba(30, 144, 255, 0.2);
+}
+
+.rate-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #B3D1FF;
+    font-size: 1rem;
+}
+
+.rate-value {
+    color: #7EB2FF;
+    font-size: 1rem;
+    font-weight: 500;
+}
+            "#}
+        </style>
+        </>
     }
 }

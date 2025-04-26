@@ -36,6 +36,8 @@ pub struct UserProfile {
     pub timezone_auto: Option<bool>,
     pub sub_tier: Option<String>,
     pub msgs_left: i32,
+    pub credits_left: f32,
+    pub discount: bool,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]
@@ -45,7 +47,9 @@ pub struct StripeSetupIntentResponse {
 
 pub const MIN_TOPUP_AMOUNT_CREDITS: f32 = 3.00;
 pub const VOICE_SECOND_COST: f32 = 0.0033;
-pub const MESSAGE_COST: f32 = 0.20;
+pub const VOICE_SECOND_COST_DISCOUNTED: f32 = 0.0025;
+pub const MESSAGE_COST: f32 = 0.10;
+pub const MESSAGE_COST_DISCOUNTED: f32 = 0.10;
 
 pub fn format_timestamp(timestamp: i32) -> String {
     match Utc.timestamp_opt(timestamp as i64, 0) {

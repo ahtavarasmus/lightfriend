@@ -25,194 +25,21 @@ use crate::{
     AppState,
     handlers::auth_middleware::AuthUser,
     models::user_models::{NewBridge, Bridge},
-    utils::matrix_auth::MatrixAuth,
+    utils::matrix_auth,
 };
-use url::Url;
 
-use sha2::{Sha256, Digest};
-use base64::{engine::general_purpose, Engine as _}; // or use hex crate
-
-fn generate_matrix_password(user_id: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(user_id.as_bytes());
-    let hash = hasher.finalize();
-    // You can use base64 or hex depending on what you prefer
-    general_purpose::STANDARD.encode(hash)
-}
+// Using the centralized function from matrix_auth.rs instead
 
 #[derive(Serialize)]
 pub struct WhatsappConnectionResponse {
     pairing_code: String, 
 }
 
-async fn ensure_matrix_credentials(
-    state: &AppState,
-    user_id: i32,
-) -> Result<(String, String, String, String), (StatusCode, AxumJson<serde_json::Value>)> {
-    println!("🔄 ensuring Matrix credentials for user {}", user_id);
-
-    let homeserver_url = std::env::var("MATRIX_HOMESERVER")
-        .map_err(|_| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "MATRIX_HOMESERVER not set"})),
-        ))?;
-    let parsed_url = Url::parse(&homeserver_url)
-        .map_err(|_| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "Invalid MATRIX_HOMESERVER format"})),
-        ))?;
-    let domain = parsed_url.host_str().ok_or_else(|| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        AxumJson(json!({"error": "No host in MATRIX_HOMESERVER"})),
-    ))?;
-
-    // 1. ─────► reuse the credentials if we already have them
-    if let Some((username, access_token, device_id)) = state.user_repository.get_matrix_credentials(user_id).map_err(|e| {
-        tracing::error!("Failed to get Matrix credentials: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "Failed to get Matrix credentials"})),
-        )
-    })? {
-        let full_user_id = format!("@{}:{}", username, domain);
-        return Ok((username, access_token, full_user_id, device_id));
-    }
-
-    // 2. ─────► otherwise create them once and keep them forever
-    let matrix_auth = MatrixAuth::new(
-        homeserver_url.clone(),
-        std::env::var("MATRIX_SHARED_SECRET").map_err(|_| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "MATRIX_SHARED_SECRET not set"})),
-        ))?,
-    );
-
-    let (username, access_token, device_id) = matrix_auth.register_user().await.map_err(|e| {
-        tracing::error!("Failed to register new Matrix user: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "Failed to create new Matrix credentials"})),
-        )
-    })?;
-
-    let full_user_id = format!("@{}:{}", username, domain);
-
-    // Initialize Matrix client
-    let store_path = format!(
-        "{}/{}",
-        std::env::var("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH")
-            .expect("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH not set"),
-        username
-    );
-    std::fs::create_dir_all(&store_path).map_err(|e| {
-        tracing::error!("Failed to create store directory {}: {}", store_path, e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "Failed to create store directory"})),
-        )
-    })?;
-
-    let client = MatrixClient::builder()
-        .homeserver_url(&homeserver_url)
-        .sqlite_store(store_path, None)
-        .build()
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to build Matrix client: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({"error": "Failed to initialize Matrix client"})),
-            )
-        })?;
-
-    client.restore_session(matrix_sdk::AuthSession::Matrix(matrix_sdk::authentication::matrix::MatrixSession {
-        meta: matrix_sdk::SessionMeta {
-            user_id: OwnedUserId::try_from(full_user_id.clone()).map_err(|e| {
-                tracing::error!("Invalid user_id format: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    AxumJson(json!({"error": "Invalid user_id format"})),
-                )
-            })?,
-            device_id: OwnedDeviceId::try_from(device_id.clone()).map_err(|e| {
-                tracing::error!("Invalid device_id format: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    AxumJson(json!({"error": "Invalid device_id format"})),
-                )
-            })?,
-        },
-        tokens: matrix_sdk::authentication::matrix::MatrixSessionTokens {
-            access_token: access_token.clone(),
-            refresh_token: None,
-        },
-    }))
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to restore session: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "Failed to restore Matrix session"})),
-        )
-    })?;
-
-    let encryption = client.encryption();
-
-    if let Err(err) = encryption.bootstrap_cross_signing(None).await {
-        if let Some(response) = err.as_uiaa_response() {
-            let user_identifier = matrix_sdk::ruma::api::client::uiaa::UserIdentifier::UserIdOrLocalpart(username.clone());
-            let password = generate_matrix_password(&full_user_id);
-            let mut password_auth = matrix_sdk::ruma::api::client::uiaa::Password::new(user_identifier, password.to_owned());
-            password_auth.session = response.session.clone();
-
-            encryption.bootstrap_cross_signing(Some(matrix_sdk::ruma::api::client::uiaa::AuthData::Password(password_auth)))
-                .await
-                .map_err(|e| {
-                    tracing::error!("Failed to complete cross-signing setup: {}", e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        AxumJson(json!({"error": "Failed to bootstrap cross-signing"})),
-                    )
-                })?;
-        } else {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({"error": "Unexpected error during cross-signing"})),
-            ));
-        }
-    }
-
-    client.encryption()
-    .backups()
-    .create()
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to create key backup: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "Failed to create key backup"})),
-        )
-    })?;
-
-
-    state.user_repository.set_matrix_credentials(user_id, &username, &access_token, &device_id)
-        .map_err(|e| {
-            tracing::error!("Failed to store Matrix credentials: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({"error": "Failed to store Matrix credentials"})),
-            )
-        })?;
-
-    Ok((username, access_token, full_user_id, device_id))
-}
-
-
 
 async fn connect_whatsapp(
     client: &MatrixClient,
     bridge_bot: &str,
-    access_token: &str,
+
     phone_number: &str, // Add phone number parameter
 ) -> Result<(OwnedRoomId, String)> {
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
@@ -330,87 +157,33 @@ pub async fn start_whatsapp_connection(
             )
         })?.phone_number;
 
-    println!("📝 Ensuring Matrix credentials...");
-    // Ensure user has Matrix credentials
-    let (username, access_token, full_user_id, device_id) = ensure_matrix_credentials(&state, auth_user.user_id).await?;
-    println!("✅ Matrix credentials obtained for user: {}", username);
-
-    // Create Matrix client
-    let homeserver_url = std::env::var("MATRIX_HOMESERVER")
-        .expect("MATRIX_HOMESERVER not set");
-    let bridge_bot = std::env::var("WHATSAPP_BRIDGE_BOT")
-        .expect("WHATSAPP_BRIDGE_BOT not set");
-
-    let store_path = format!(
-        "{}/{}",
-        std::env::var("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH")
-            .expect("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH not set"),
-        username
-    );
-
-    std::fs::create_dir_all(&store_path).map_err(|e| {
-        tracing::error!("Failed to create store directory {}: {}", store_path, e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "Failed to create store directory"})),
-        )
-    })?;
-
-
-    let client = MatrixClient::builder()
-        .homeserver_url(&homeserver_url)
-        .sqlite_store(store_path, None)
-        .build()
+    println!("📝 Getting Matrix client...");
+    // Get or create Matrix client using the centralized function
+    let client = matrix_auth::get_or_create_matrix_client(auth_user.user_id, &state.user_repository)
         .await
         .map_err(|e| {
-            tracing::error!("Failed to build Matrix client: {}", e);
+            tracing::error!("Failed to get or create Matrix client: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({"error": "Failed to initialize Matrix client"})),
+                AxumJson(json!({"error": format!("Failed to initialize Matrix client: {}", e)})),
             )
         })?;
+    println!("✅ Matrix client obtained for user: {}", client.user_id().unwrap());
 
-    client.restore_session(matrix_sdk::AuthSession::Matrix(matrix_sdk::authentication::matrix::MatrixSession {
-        meta: matrix_sdk::SessionMeta {
-            user_id: OwnedUserId::try_from(full_user_id).map_err(|e| {
-                tracing::error!("Invalid user_id format: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    AxumJson(json!({"error": "Invalid user_id format"})),
-                )
-            })?,
-            device_id: OwnedDeviceId::try_from(device_id).map_err(|e| {
-                tracing::error!("Invalid device_id format: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    AxumJson(json!({"error": "Invalid device_id format"})),
-                )
-            })?,
-        },
-        tokens: matrix_sdk::authentication::matrix::MatrixSessionTokens {
-            access_token: access_token.clone(),
-            refresh_token: None,
-        },
-    }))
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to restore session: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "Failed to restore session"})),
-        )
-    })?;
+    // Get bridge bot from environment
+    let bridge_bot = std::env::var("WHATSAPP_BRIDGE_BOT")
+        .expect("WHATSAPP_BRIDGE_BOT not set");
 
 
     println!("🔗 Connecting to WhatsApp bridge...");
     // Connect to WhatsApp bridge
-    let (room_id, pairing_code) = connect_whatsapp(&client, &bridge_bot, &access_token, &phone_number)
+    let (room_id, pairing_code) = connect_whatsapp(&client, &bridge_bot, &phone_number)
         .await
         .map_err(|e| {
             tracing::error!("Failed to connect to WhatsApp bridge: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({"error": "Failed to connect to WhatsApp bridge"})),
+                AxumJson(json!({"error": format!("Failed to connect to WhatsApp bridge: {}", e)})),
             )
         })?;
 
@@ -500,9 +273,22 @@ async fn accept_room_invitations(client: MatrixClient, duration: Duration) -> Re
     println!("🔄 Starting room invitation acceptance loop");
     let end_time = Instant::now() + duration;
     let mut consecutive_no_invites = 0;
+    let max_consecutive_no_invites = 5; // Increased from 3 to 5
+    
+    // Ensure we have a recent sync before starting
+    println!("🔄 Performing initial sync to get current room state");
+    client.sync_once(MatrixSyncSettings::default()).await?;
 
-    while Instant::now() < end_time && consecutive_no_invites < 3 {
+    while Instant::now() < end_time && consecutive_no_invites < max_consecutive_no_invites {
         println!("👀 Checking for room invitations...");
+        
+        // Perform a quick sync to get latest invitations
+        let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(2));
+        if let Err(e) = client.sync_once(sync_settings).await {
+            println!("⚠️ Sync error: {}", e);
+            tracing::warn!("Sync error while checking for invitations: {}", e);
+            // Continue anyway, we might have some invitations from previous syncs
+        }
 
         let invited_rooms: Vec<_> = client
             .rooms()
@@ -512,9 +298,9 @@ async fn accept_room_invitations(client: MatrixClient, duration: Duration) -> Re
 
         if invited_rooms.is_empty() {
             consecutive_no_invites += 1;
-            println!("📭 No new invitations found (attempt {}/3)", consecutive_no_invites);
+            println!("📭 No new invitations found (attempt {}/{})", consecutive_no_invites, max_consecutive_no_invites);
         } else {
-            consecutive_no_invites = 0;
+            consecutive_no_invites = 0; // Reset counter when we find invitations
             println!("📬 Found {} room invitations", invited_rooms.len());
             for room in invited_rooms {
                 let room_id = room.room_id();
@@ -531,10 +317,25 @@ async fn accept_room_invitations(client: MatrixClient, duration: Duration) -> Re
                     }
                 }
             }
+            
+            // After joining rooms, do another sync to update room state
+            if let Err(e) = client.sync_once(MatrixSyncSettings::default()).await {
+                println!("⚠️ Post-join sync error: {}", e);
+                tracing::warn!("Sync error after joining rooms: {}", e);
+            }
         }
 
-        println!("💤 Waiting 5 seconds before next check...");
-        sleep(Duration::from_secs(5)).await;
+        // Adaptive wait time - wait longer as we find fewer invitations
+        let wait_time = if consecutive_no_invites == 0 {
+            // If we just processed invitations, check again quickly
+            Duration::from_secs(2)
+        } else {
+            // Otherwise, gradually increase wait time
+            Duration::from_secs(5 + consecutive_no_invites)
+        };
+        
+        println!("💤 Waiting {} seconds before next check...", wait_time.as_secs());
+        sleep(wait_time).await;
     }
 
     println!("🏁 Room invitation acceptance loop completed");
@@ -617,41 +418,46 @@ async fn monitor_whatsapp_connection(
                                 if let Some(room) = client.get_room(&room_id) {
 
                                     // First sync all contacts
-                                    room.send(RoomMessageEventContent::text_plain("!wa sync contacts")).await?;
-                                    println!("Sent !wa sync contacts for user {}", user_id);
+                                    room.send(RoomMessageEventContent::text_plain("!wa sync contacts --create-portals")).await?;
+                                    println!("Sent !wa sync contacts --create-portals for user {}", user_id);
                                     
                                     // Wait a bit for contacts to sync
                                     sleep(Duration::from_secs(2)).await;
                                     
                                     // Then sync all groups
-                                    room.send(RoomMessageEventContent::text_plain("!wa sync groups")).await?;
-                                    println!("Sent !wa sync groups for user {}", user_id);
+                                    room.send(RoomMessageEventContent::text_plain("!wa sync groups --create-portals")).await?;
+                                    println!("Sent !wa sync groups --create-portals for user {}", user_id);
                                     
                                     // Wait a bit for groups to sync
                                     sleep(Duration::from_secs(2)).await;
                                     
-                                    // List all portals to ensure they're created
-                                    room.send(RoomMessageEventContent::text_plain("!wa portal list")).await?;
-                                    println!("Sent !wa portal list for user {}", user_id);
-                                    
-                                    // Force a full sync of all chats
-                                    room.send(RoomMessageEventContent::text_plain("!wa sync")).await?;
-                                    println!("Sent !wa sync to force full synchronization for user {}", user_id);
                                 }
                                     
 
-                                println!("Starting to accpet room invitations");
-                                // Spawn invitation acceptance loop
-                                let client_clone = client.clone();
-                                tokio::spawn(async move {
-                                    if let Err(e) = accept_room_invitations(client_clone, Duration::from_secs(300)).await {
-                                        tracing::error!("Error in accept_room_invitations: {}", e);
-                                    }
-                                });
+                                println!("Starting continuous sync and room invitation acceptance");
+                                
+                                // First start the continuous sync so we can receive invitations
                                 let sync_client = client.clone();
                                 tokio::spawn(async move {
-                                    // continuous, so the bridge can deliver invites and room‑keys
+                                    // continuous sync so the bridge can deliver invites and room-keys
+                                    tracing::info!("Starting continuous sync for WhatsApp bridge");
                                     let _ = sync_client.sync(matrix_sdk::config::SyncSettings::default()).await;
+                                    tracing::info!("Continuous sync ended");
+                                });
+                                
+                                // Give the sync a moment to start up
+                                sleep(Duration::from_secs(2)).await;
+                                
+                                // Then start accepting invitations
+                                let client_clone = client.clone();
+                                tokio::spawn(async move {
+                                    // Wait a bit for initial invitations to arrive
+                                    sleep(Duration::from_secs(5)).await;
+                                    
+                                    // Run the invitation acceptance loop for 10 minutes
+                                    if let Err(e) = accept_room_invitations(client_clone, Duration::from_secs(600)).await {
+                                        tracing::error!("Error in accept_room_invitations: {}", e);
+                                    }
                                 });
 
 
@@ -712,102 +518,16 @@ pub async fn disconnect_whatsapp(
         })));
     };
 
-    // Get Matrix credentials
-    let Some((username, access_token, device_id)) = state.user_repository.get_matrix_credentials(auth_user.user_id)
-        .map_err(|e| {
-            tracing::error!("Failed to get Matrix credentials: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({"error": "Failed to get Matrix credentials"})),
-            )
-        })? else {
-            return Ok(AxumJson(json!({
-                "message": "No Matrix credentials found"
-            })));
-        };
-
-    // Create Matrix client
-    let homeserver_url = std::env::var("MATRIX_HOMESERVER")
-        .map_err(|_| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "MATRIX_HOMESERVER not set"})),
-        ))?;
-
-    let store_path = format!(
-        "{}/{}",
-        std::env::var("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH")
-            .expect("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH not set"),
-        username
-    );
-
-    std::fs::create_dir_all(&store_path).map_err(|e| {
-        tracing::error!("Failed to create store directory {}: {}", store_path, e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "Failed to create store directory"})),
-        )
-    })?;
-
-
-
-    let client = MatrixClient::builder()
-        .homeserver_url(&homeserver_url)
-        .sqlite_store(store_path, None)
-        .build()
+    // Get or create Matrix client using the centralized function
+    let client = matrix_auth::get_or_create_matrix_client(auth_user.user_id, &state.user_repository)
         .await
         .map_err(|e| {
-            tracing::error!("Failed to build Matrix client: {}", e);
+            tracing::error!("Failed to get or create Matrix client: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({"error": "Failed to initialize Matrix client"})),
+                AxumJson(json!({"error": format!("Failed to initialize Matrix client: {}", e)})),
             )
         })?;
-
-    // Parse the homeserver URL to extract the domain
-    let parsed_url = Url::parse(&homeserver_url)
-        .map_err(|_| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "Invalid MATRIX_HOMESERVER format"})),
-        ))?;
-    let domain = parsed_url.host_str()
-        .ok_or_else(|| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "No host in MATRIX_HOMESERVER"})),
-        ))?;
-
-    let full_user_id = format!("@{}:{}", username, domain);
-
-    // Restore Matrix session
-    client.restore_session(matrix_sdk::AuthSession::Matrix(matrix_sdk::authentication::matrix::MatrixSession {
-        meta: matrix_sdk::SessionMeta {
-            user_id: OwnedUserId::try_from(full_user_id).map_err(|e| {
-                tracing::error!("Invalid user_id format: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    AxumJson(json!({"error": "Invalid user_id format"})),
-                )
-            })?,
-            device_id: OwnedDeviceId::try_from(device_id).map_err(|e| {
-                tracing::error!("Invalid device_id format: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    AxumJson(json!({"error": "Invalid device_id format"})),
-                )
-            })?,
-        },
-        tokens: matrix_sdk::authentication::matrix::MatrixSessionTokens {
-            access_token,
-            refresh_token: None,
-        },
-    }))
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to restore session: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            AxumJson(json!({"error": "Failed to restore Matrix session"})),
-        )
-    })?;
 
     // Get the room
     let room_id = OwnedRoomId::try_from(bridge.room_id.unwrap_or_default())

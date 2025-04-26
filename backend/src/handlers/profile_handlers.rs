@@ -56,6 +56,8 @@ pub struct ProfileResponse {
     timezone_auto: Option<bool>,
     sub_tier: Option<String>,
     msgs_left: i32,
+    credits_left: f32,
+    discount: bool,
 }
 
 use crate::handlers::auth_middleware::AuthUser;
@@ -101,6 +103,8 @@ pub async fn get_profile(
                 timezone_auto: user.timezone_auto,
                 sub_tier: user.sub_tier,
                 msgs_left: user.msgs_left,
+                credits_left: user.credits_left,
+                discount: user.discount,
             }))
         }
         None => Err((

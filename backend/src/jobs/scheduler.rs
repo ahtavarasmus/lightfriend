@@ -674,9 +674,9 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     log.user_id,
                                     &sid,
                                     "done",
-                                    credits_used,
                                     true,
-                                    &format!("Call ended due to zero credits. Duration: {}s", call_duration)
+                                    &format!("Call ended due to zero credits. Duration: {}s", call_duration),
+                                    None,
                                 ) {
                                     error!("Failed to update usage log fields: {}", e);
                                 }
@@ -922,6 +922,109 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     }).expect("Failed to create task cleanup job");
 
     sched.add(task_cleanup_job).await.expect("Failed to add task cleanup job to scheduler");
+    
+    // Create a job that runs every 5 minutes to update Matrix clients
+    let state_clone = Arc::clone(&state);
+    let matrix_clients_update_job = Job::new_async("0 * * * * *", move |_, _| {  // Runs every 5 minutes
+        let state = state_clone.clone();
+        Box::pin(async move {
+            info!("Running Matrix clients update job...");
+            
+            match crate::utils::matrix_auth::update_matrix_user_clients(&state).await {
+                Ok(_) => info!("Successfully updated Matrix user clients"),
+                Err(e) => error!("Failed to update Matrix user clients: {}", e),
+            }
+        })
+    }).expect("Failed to create Matrix clients update job");
+
+    sched.add(matrix_clients_update_job).await.expect("Failed to add Matrix clients update job to scheduler");
+    
+    // Create a job that runs every 2 minutes to sync all Matrix clients and join invited rooms
+    let state_clone = Arc::clone(&state);
+    let matrix_sync_job = Job::new_async("0 * * * * *", move |_, _| {  // Runs every 2 minutes
+        let state = state_clone.clone();
+        Box::pin(async move {
+            info!("Running Matrix clients sync job...");
+            
+            // Get a copy of all user IDs with clients to avoid holding the lock during sync operations
+            let user_ids = {
+                let clients_map = state.matrix_user_clients.lock().await;
+                clients_map.keys().copied().collect::<Vec<i32>>()
+            };
+            
+            if user_ids.is_empty() {
+                info!("No Matrix clients to sync");
+                return;
+            }
+            
+            info!("Syncing {} Matrix clients", user_ids.len());
+            
+            // Create a vector to hold all sync tasks
+            let mut sync_tasks = Vec::new();
+            
+            // Spawn a task for each client
+            for user_id in user_ids {
+                let state = Arc::clone(&state);
+                let sync_task = tokio::spawn(async move {
+                    // Get the client from the map
+                    let client = {
+                        let clients_map = state.matrix_user_clients.lock().await;
+                        match clients_map.get(&user_id) {
+                            Some(client) => client.clone(),
+                            None => {
+                                // This can happen if a client was removed between getting the keys and here
+                                info!("Matrix client for user {} no longer exists, skipping sync", user_id);
+                                return Ok::<_, anyhow::Error>(());
+                            }
+                        }
+                    };
+                    
+                    // Perform the sync operation
+                    info!("Starting sync for Matrix client of user {}", user_id);
+                    let start_time = std::time::Instant::now();
+                    
+                    match client.sync_once(matrix_sdk::config::SyncSettings::default()).await {
+                        Ok(_) => {
+                            let duration = start_time.elapsed();
+                            info!("Successfully synced Matrix client for user {} in {:?}", user_id, duration);
+                            
+                            // After successful sync, check for and join any invited rooms
+                            match crate::utils::matrix_auth::join_invited_rooms(&client).await {
+                                Ok(joined_count) => {
+                                    if joined_count > 0 {
+                                        info!("User {} joined {} new rooms", user_id, joined_count);
+                                    }
+                                },
+                                Err(e) => {
+                                    error!("Failed to join invited rooms for user {}: {}", user_id, e);
+                                    // Continue anyway, this shouldn't fail the whole sync process
+                                }
+                            }
+                            
+                            Ok(())
+                        },
+                        Err(e) => {
+                            error!("Failed to sync Matrix client for user {}: {}", user_id, e);
+                            Err(anyhow::anyhow!("Sync failed for user {}: {}", user_id, e))
+                        }
+                    }
+                });
+                
+                sync_tasks.push(sync_task);
+            }
+            
+            // Wait for all sync tasks to complete
+            for task in sync_tasks {
+                if let Err(e) = task.await {
+                    error!("Matrix sync task panicked: {}", e);
+                }
+            }
+            
+            info!("Completed Matrix clients sync job");
+        })
+    }).expect("Failed to create Matrix sync job");
+
+    sched.add(matrix_sync_job).await.expect("Failed to add Matrix sync job to scheduler");
     
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");

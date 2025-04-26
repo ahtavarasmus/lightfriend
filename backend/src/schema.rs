@@ -180,6 +180,7 @@ diesel::table! {
         status -> Nullable<Text>,
         recharge_threshold_timestamp -> Nullable<Integer>,
         zero_credits_timestamp -> Nullable<Integer>,
+        call_duration -> Nullable<Integer>,
     }
 }
 
@@ -212,6 +213,9 @@ diesel::table! {
         imap_proactive -> Bool,
         matrix_device_id -> Nullable<Text>,
         credits_left -> Float,
+        discount -> Bool,
+        encrypted_matrix_password -> Nullable<Text>,
+        encrypted_matrix_secret_storage_recovery_key -> Nullable<Text>,
     }
 }
 

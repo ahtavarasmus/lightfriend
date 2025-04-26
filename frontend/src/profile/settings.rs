@@ -155,6 +155,8 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     stripe_payment_method_id: (*user_profile).stripe_payment_method_id.clone(),
                                     sub_tier: (*user_profile).sub_tier.clone(),
                                     msgs_left: (*user_profile).msgs_left,
+                                    credits_left: (*user_profile).credits_left,
+                                    discount: (*user_profile).discount,
                                 };
 
                                 // Notify parent component
@@ -217,6 +219,7 @@ let on_timezone_update = {
 };
 
     html! {
+        <>
         <div class="profile-info">
             <TimezoneDetector on_timezone_update={on_timezone_update} />
             {
@@ -457,5 +460,217 @@ let on_timezone_update = {
                 {if *is_editing { "Save Changes" } else { "Edit Profile" }}
             </button>
         </div>
+        <style>
+                {r#"
+
+
+.profile-input {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    border-radius: 8px;
+    padding: 0.75rem;
+    color: #ffffff;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+    width: 100%;
+}
+
+.profile-input:focus {
+    outline: none;
+    border-color: rgba(30, 144, 255, 0.5);
+    box-shadow: 0 0 0 2px rgba(30, 144, 255, 0.1);
+}
+
+.edit-button {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: 1rem;
+}
+
+.edit-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
+}
+
+.edit-button.confirming {
+    background: linear-gradient(45deg, #4CAF50, #45a049);
+}
+
+.field-label-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tooltip {
+    position: relative;
+    display: inline-block;
+}
+
+.tooltip-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    background-color: #e0e0e0;
+    border-radius: 50%;
+    font-size: 12px;
+    cursor: help;
+    color: #666;
+}
+
+.tooltip-text {
+    visibility: hidden;
+    position: absolute;
+    width: 300px;
+    background-color: #333;
+    color: white;
+    text-align: left;
+    padding: 8px;
+    border-radius: 4px;
+    font-size: 14px;
+    line-height: 1.4;
+    z-index: 1;
+    bottom: 125%;
+    left: 50%;
+    transform: translateX(-50%);
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.tooltip:hover .tooltip-text {
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Add a small arrow at the bottom of the tooltip */
+.tooltip-text::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    margin-left: -5px;
+    border-width: 5px;
+    border-style: solid;
+    border-color: #333 transparent transparent transparent;
+}
+
+/* Timezone section styling */
+.timezone-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+}
+
+.timezone-auto-checkbox {
+    margin-bottom: 8px;
+}
+
+.custom-checkbox {
+    display: flex;
+    align-items: center;
+    position: relative;
+    padding-left: 35px;
+    cursor: pointer;
+    font-size: 1rem;
+    user-select: none;
+    color: #ffffff;
+    opacity: 0.9;
+    transition: opacity 0.3s ease;
+}
+
+.custom-checkbox:hover {
+    opacity: 1;
+}
+
+.custom-checkbox input {
+    position: absolute;
+    opacity: 0;
+    cursor: pointer;
+    height: 0;
+    width: 0;
+}
+
+.checkmark {
+    position: absolute;
+    left: 0;
+    height: 22px;
+    width: 22px;
+    background: rgba(0, 0, 0, 0.2);
+    border: 2px solid rgba(30, 144, 255, 0.3);
+    border-radius: 4px;
+    transition: all 0.3s ease;
+}
+
+.custom-checkbox:hover .checkmark {
+    border-color: rgba(30, 144, 255, 0.5);
+    box-shadow: 0 0 0 2px rgba(30, 144, 255, 0.1);
+}
+
+.custom-checkbox input:checked ~ .checkmark {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    border-color: transparent;
+}
+
+.checkmark:after {
+    content: "";
+    position: absolute;
+    display: none;
+    left: 7px;
+    top: 3px;
+    width: 5px;
+    height: 10px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+.custom-checkbox input:checked ~ .checkmark:after {
+    display: block;
+}
+
+.custom-checkbox input:disabled ~ .checkmark {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.custom-checkbox input:disabled ~ .checkmark:hover {
+    border-color: rgba(30, 144, 255, 0.3);
+    box-shadow: none;
+}
+
+.timezone-display {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.auto-tag {
+    font-size: 0.85rem;
+    color: #1E90FF;
+    background: rgba(30, 144, 255, 0.1);
+    padding: 2px 8px;
+    border-radius: 12px;
+    border: 1px solid rgba(30, 144, 255, 0.2);
+}
+
+/* Disabled select styling */
+.profile-input:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+
+                "#}
+        </style>
+        </>
     }
 }

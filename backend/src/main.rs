@@ -125,6 +125,7 @@ pub struct AppState {
     gmail_oauth_client: GoogleOAuthClient,
     session_store: MemoryStore,
     login_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    matrix_user_clients: Arc<Mutex<HashMap<i32, matrix_sdk::Client>>>,
 }
 
 pub fn validate_env() {
@@ -141,12 +142,13 @@ pub fn validate_env() {
         "GOOGLE_CALENDAR_CLIENT_SECRET", "MATRIX_HOMESERVER", "MATRIX_SHARED_SECRET",
         "WHATSAPP_BRIDGE_BOT", "GOOGLE_CALENDAR_CLIENT_SECRET", "OPENROUTER_API_KEY",
         "LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY", "LANGFUSE_HOST_URL",
-        "MATRIX_HOMESERVER_PERSISTENT_STORE_PATH",
+        "MATRIX_HOMESERVER_PERSISTENT_STORE_PATH", "MESSAGE_COST_SUB", "VOICE_SECOND_COST_SUB",
     ];
     for var in required_vars.iter() {
         std::env::var(var).expect(&format!("{} must be set", var));
     }
 }
+
 
 #[tokio::main]
 async fn main() {
@@ -199,6 +201,7 @@ async fn main() {
         .set_token_uri(TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).expect("Invalid token URL"))
         .set_redirect_uri(RedirectUrl::new(format!("{}/api/auth/google/tasks/callback", server_url_oauth)).expect("Invalid redirect URL"));
 
+    let matrix_user_clients = Arc::new(Mutex::new(HashMap::new()));
     let state = Arc::new(AppState {
         db_pool: pool,
         user_repository: user_repository.clone(),
@@ -213,6 +216,7 @@ async fn main() {
             let mut map = DashMap::new();
             map
         },
+        matrix_user_clients,
     });
 
     let twilio_routes = Router::new()

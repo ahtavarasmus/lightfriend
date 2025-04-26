@@ -50,6 +50,8 @@ pub struct ProfileResponse {
     info: Option<String>,
     preferred_number: Option<String>,
     auto_topup: Option<AutoTopupInfo>,
+    credits_left: f32,
+    discount: bool,
 }
 #[derive(Deserialize)]
 pub struct UsageDataRequest {

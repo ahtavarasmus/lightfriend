@@ -15,88 +15,6 @@ use axum::{
 };
 use chrono::Utc;
 
-/// Checks if a user has sufficient credits to perform an action.
-/// Returns Ok(()) if the user has enough credits, or Err with an appropriate error message if not.
-/// Also handles automatic recharging if enabled.
-async fn check_user_credits(
-    state: &Arc<AppState>,
-    user: &crate::models::user_models::User,
-    required_credits: f32,
-) -> Result<(), String> {
-    // First check if user has monthly credits left
-    if user.credits_left > 0.00 {
-        // User has monthly credits, they can continue
-        return Ok(());
-    }
-
-    // No monthly credits left, check extra credits
-    if user.credits < required_credits {
-        return Err("Insufficient credits. You have used all your monthly credits and don't have enough extra credits.".to_string());
-    }
-
-    // Check credits threshold and handle automatic charging
-    match state.user_repository.is_credits_under_threshold(user.id) {
-        Ok(is_under) => {
-            if is_under && user.charge_when_under {
-                println!("User {} credits is under threshold, attempting automatic charge", user.id);
-                use axum::extract::{State, Path};
-                let state_clone = Arc::clone(state);
-                let user_id = user.id; // Clone the user ID
-                tokio::spawn(async move {
-                    let _ = crate::handlers::stripe_handlers::automatic_charge(
-                        State(state_clone),
-                        Path(user_id),
-                    ).await;
-                });
-                println!("Initiated automatic recharge for user");
-            }
-        },
-        Err(e) => eprintln!("Failed to check if user credits is under threshold: {}", e),
-    }
-
-    Ok(())
-}
-
-/// Deducts credits from a user's account, using monthly credits (credits_left) first before using regular credits.
-/// Returns Ok(()) if credits were successfully deducted, or Err with an appropriate error message if not.
-pub fn deduct_user_credits(
-    state: &Arc<AppState>,
-    user_id: i32,
-    credits_to_deduct: f32,
-) -> Result<(), String> {
-    let user = match state.user_repository.find_by_id(user_id) {
-        Ok(Some(user)) => user,
-        Ok(None) => return Err("User not found".to_string()),
-        Err(e) => {
-            eprintln!("Database error while finding user {}: {}", user_id, e);
-            return Err("Database error occurred".to_string());
-        }
-    };
-
-    // First try to use monthly credits (credits_left)
-    if user.credits_left > 0.00 {
-        let new_credits_left = user.credits_left - credits_to_deduct;
-        if new_credits_left >= 0.00 {
-            // We can cover the entire cost with monthly credits
-            if let Err(e) = state.user_repository.update_user_credits_left(user_id, new_credits_left) {
-                eprintln!("Failed to update user credits_left: {}", e);
-                return Err("Failed to process credits".to_string());
-            }
-            return Ok(());
-        }
-    }
-
-    // If we get here, we need to use regular credits
-    // (either no monthly credits left or not enough to cover the full cost)
-    let new_credits = user.credits - credits_to_deduct;
-    if let Err(e) = state.user_repository.update_user_credits(user_id, new_credits) {
-        eprintln!("Failed to update user credits: {}", e);
-        return Err("Failed to process credits".to_string());
-    }
-
-    Ok(())
-}
-
 
 use openai_api_rs::v1::{
     chat_completion,
@@ -411,15 +329,8 @@ pub async fn handle_incoming_sms(
                 );
             }
         };
-
-        // Get message cost
-        let message_credits_cost = std::env::var("MESSAGE_COST")
-            .expect("MESSAGE_COST not set")
-            .parse::<f32>()
-            .unwrap_or(0.20);
-
         // Check if user has sufficient credits
-        if let Err(msg) = check_user_credits(&state, &user, message_credits_cost).await {
+        if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "message").await {
             return (
                 StatusCode::BAD_REQUEST,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -1551,19 +1462,9 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         Ok(message_sid) => {
             if !fail {
                 // Deduct credits for the message
-                let message_credits_cost = if user.phone_number.starts_with("+1") {
-                    std::env::var("MESSAGE_COST_US")
-                        .unwrap_or_else(|_| std::env::var("MESSAGE_COST").expect("MESSAGE_COST not set"))
-                        .parse::<f32>()
-                        .unwrap_or(0.10)
-                } else {
-                    std::env::var("MESSAGE_COST")
-                        .expect("MESSAGE_COST not set")
-                        .parse::<f32>()
-                        .unwrap_or(0.15)
-                };                
 
-                if let Err(e) = deduct_user_credits(&state, user.id, message_credits_cost) {
+
+                if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
                     eprintln!("Failed to deduct user credits: {}", e);
                     return (
                         StatusCode::INTERNAL_SERVER_ERROR,
@@ -1578,7 +1479,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     user.id,
                     Some(message_sid),
                     "sms".to_string(),
-                    Some(message_credits_cost),
+                    None,
                     Some(processing_time_secs as i32),
                     Some(eval_result),
                     eval_reason,

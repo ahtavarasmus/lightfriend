@@ -34,7 +34,7 @@ pub async fn fetch_whatsapp_messages(
 
     println!("fetch whastapp messages");
 
-    let (username, access_token, device_id) = state.user_repository
+    let (username, access_token, device_id, password) = state.user_repository
         .get_matrix_credentials(user_id)?
         .ok_or_else(|| anyhow!("Matrix credentials not found"))?;
 
@@ -87,56 +87,7 @@ pub async fn fetch_whatsapp_messages(
         return Err(anyhow!("WhatsApp bridge is not connected. Please log in first."));
     }
 
-    // Do a full sync first to ensure we have all rooms
-    println!("🔄 Performing full sync...");
-    let full_sync_settings = matrix_sdk::config::SyncSettings::default()
-        .timeout(Duration::from_secs(30))
-        .full_state(true);
-    client.sync_once(full_sync_settings).await?;
-
-    // Get the bridge room
-    if let Some(bridge) = state.user_repository.get_whatsapp_bridge(user_id)? {
-        if let Some(room_id) = bridge.room_id {
-            if let Some(room) = client.get_room(&OwnedRoomId::try_from(room_id)?) {
-                // Force a sync of all chats
-                println!("🔄 Forcing WhatsApp sync...");
-                room.send(RoomMessageEventContent::text_plain("!wa sync")).await?;
-                
-                // Wait a bit for the sync to complete
-                sleep(Duration::from_secs(5)).await;
-            }
-        }
-    }
-
-    // Do another quick sync to get the latest state
-    println!("🔄 Performing final sync...");
-    let quick_sync_settings = matrix_sdk::config::SyncSettings::default()
-        .timeout(Duration::from_secs(5))
-        .full_state(false);
-    client.sync_once(quick_sync_settings.clone()).await?;
-
-    // Second sync to get latest state
-
-    // Now the SDK store is populated
-    for room in client.invited_rooms() {
-        tracing::info!("Joining invited room: {}", room.room_id());
-        // for remote rooms add their own domain as a hint
-        let servers: Vec<matrix_sdk::OwnedServerName> = if room.room_id().server_name().unwrap()
-            == client.user_id().unwrap().server_name()
-        {
-            Vec::new()                                // local → no hint
-        } else {
-            tracing::info!("remote room? {}", room.room_id().server_name().unwrap().as_str());
-            vec![matrix_sdk::OwnedServerName::try_from(room.room_id().server_name().unwrap().as_str()).unwrap()]
-        };
-
-        let _ = client.join_room_by_id_or_alias(<&matrix_sdk::ruma::RoomOrAliasId>::try_from(room.room_id()).unwrap(), &servers).await;
-
-        //sleep(Duration::from_millis(250)).await;
-    }
-
     // Quick final sync to get latest state
-    client.sync_once(quick_sync_settings).await?;
 
     tracing::info!("checking joined rooms: {:#?}", client.joined_rooms());
     for room in client.joined_rooms() {
@@ -222,3 +173,165 @@ pub async fn fetch_whatsapp_messages(
     Ok(messages)
 }
 
+
+use futures::future::join_all;
+use matrix_sdk::room::MessagesOptions;
+use tokio::sync::Mutex;
+use std::collections::HashMap;
+
+pub async fn get_recent_messages(
+    state: &AppState,
+    user_id: i32,
+    start_time: i64,
+    end_time: i64,
+) -> Result<Vec<WhatsAppMessage>> {
+    let limit_per_room = 10;
+    let total_limit = 100;
+    
+    // First, try to get the client from the state
+    let client = {
+        let clients = state.matrix_user_clients.lock().await;
+        match clients.get(&user_id) {
+            Some(client) => client.clone(),
+            None => {
+                // If client not found in state, try to initialize it
+                tracing::info!("Matrix client not found in state for user {}, attempting to initialize", user_id);
+                drop(clients); // Release the lock before async operation
+                
+                // Try to initialize the client
+                match crate::utils::matrix_auth::get_or_create_matrix_client(user_id, &state.user_repository).await {
+                    Ok(new_client) => {
+                        // Store the new client in the state for future use
+                        let mut clients = state.matrix_user_clients.lock().await;
+                        clients.insert(user_id, new_client.clone());
+                        new_client
+                    },
+                    Err(e) => {
+                        return Err(anyhow!("Failed to initialize Matrix client: {}", e));
+                    }
+                }
+            }
+        }
+    };
+    
+    // Get all rooms the user has joined
+    let rooms = client.joined_rooms();
+    tracing::info!("Found {} joined rooms for user {}", rooms.len(), user_id);
+    
+    if rooms.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    // Create concurrent tasks to fetch messages from each room
+    let fetch_tasks = rooms.into_iter().map(|room| {
+        let mut options = MessagesOptions::backward();
+        options.limit = matrix_sdk::ruma::UInt::new(limit_per_room).unwrap();
+            
+        async move {
+            match room.messages(options).await {
+                Ok(response) => {
+                    // Filter for message events only
+                    let messages = response
+                        .chunk
+                        .into_iter()
+                        .filter_map(|timeline_event| {
+                            if let Ok(any_sync_event) = timeline_event.raw().deserialize() {
+                                // Return the AnySyncTimelineEvent directly instead of extracting MessageLike events
+                                return Some(any_sync_event);
+                            }
+                            None
+                        })
+                        .collect::<Vec<AnySyncTimelineEvent>>();
+                    Ok(messages)
+                }
+                Err(e) => {
+                    tracing::error!("Failed to fetch messages for room {}: {}", room.room_id(), e);
+                    Err(anyhow!("Failed to fetch messages for room {}: {}", room.room_id(), e))
+                }
+            }
+        }
+    });
+
+    // Await all tasks concurrently and collect results
+    let results = join_all(fetch_tasks).await;
+    
+    // Combine successful results and log errors
+    let mut all_messages = Vec::new();
+    for result in results {
+        match result {
+            Ok(messages) => all_messages.extend(messages),
+            Err(e) => tracing::error!("Error fetching messages: {}", e),
+        }
+    }
+
+    // Sort messages by timestamp (most recent first)
+    all_messages.sort_by(|a, b| {
+        // origin_server_ts() returns MilliSecondsSinceUnixEpoch directly, not an Option
+        let ts_a = a.origin_server_ts().0;
+        let ts_b = b.origin_server_ts().0;
+        ts_b.cmp(&ts_a)
+    });
+
+    // Convert AnySyncTimelineEvent to WhatsAppMessage
+    let whatsapp_messages = all_messages
+        .into_iter()
+        .take(total_limit)
+        .filter_map(|event| {
+            if let AnySyncTimelineEvent::MessageLike(
+                matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
+            ) = event {
+                match msg {
+                    matrix_sdk::ruma::events::room::message::SyncRoomMessageEvent::Original(e) => {
+                        let timestamp = i64::from(e.origin_server_ts.0) / 1000;
+                        
+                        // Skip messages outside the time range
+                        if timestamp < start_time || timestamp > end_time {
+                            return None;
+                        }
+                        
+                        let (msgtype, body) = match &e.content.msgtype {
+                            MessageType::Text(t) => ("text", t.body.clone()),
+                            MessageType::Notice(n) => ("notice", n.body.clone()),
+                            MessageType::Image(_) => ("image", "📎 IMAGE".into()),
+                            MessageType::Video(_) => ("video", "📎 VIDEO".into()),
+                            MessageType::File(_) => ("file", "📎 FILE".into()),
+                            MessageType::Audio(_) => ("audio", "📎 AUDIO".into()),
+                            MessageType::Location(_) => ("location", "📍 LOCATION".into()),
+                            MessageType::Emote(t) => ("emote", t.body.clone()),
+                            _ => return None,
+                        };
+                        
+                        // Get room from client
+                        let client_ref = &client;
+                        // Access the room_id from the event
+                        
+                        // Get room name
+                        let room_name = "test".to_string();
+                        
+                        // Filter out bridge bot messages - only include messages from WhatsApp users
+                        // WhatsApp bridge messages typically come from a specific user or have specific patterns
+                        // This is a basic filter - you may need to adjust based on your bridge configuration
+                        if e.sender.localpart().contains("whatsappbot") || 
+                           e.sender.localpart().contains("whatsapp-bridge") {
+                            return None;
+                        }
+                        
+                        Some(WhatsAppMessage {
+                            sender: e.sender.to_string(),
+                            sender_display_name: e.sender.localpart().to_string(),
+                            content: body,
+                            timestamp,
+                            message_type: msgtype.to_string(),
+                            room_name,
+                        })
+                    },
+                    matrix_sdk::ruma::events::room::message::SyncRoomMessageEvent::Redacted(_) => None,
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Ok(whatsapp_messages)
+}

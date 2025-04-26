@@ -35,16 +35,43 @@ pub async fn test_fetch_messages(
 
     tracing::info!("Fetching messages from {} to {}", start_time, end_time);
 
-    match fetch_whatsapp_messages(&state, auth_user.user_id, start_time, end_time).await {
+    match crate::utils::whatsapp_utils::get_recent_messages(&state, auth_user.user_id, start_time, end_time).await {
         Ok(messages) => {
-            tracing::info!("Founddd {} messages", messages.len());
-            tracing::debug!("Messages: {:?}", messages);
+            tracing::info!("Found {} messages", messages.len());
+            
+            // Log some details about the messages to help debug
+            for (i, msg) in messages.iter().enumerate().take(5) {
+                tracing::info!(
+                    "Message {}: room={}, sender={}, content={}",
+                    i,
+                    msg.room_name,
+                    msg.sender,
+                    if msg.content.len() > 30 { 
+                        format!("{}...", &msg.content[..30]) 
+                    } else { 
+                        msg.content.clone() 
+                    }
+                );
+            }
+            
             Ok(Json(WhatsAppMessagesResponse { messages }))
         }
         Err(e) => {
             tracing::error!("Error fetching messages: {}", e);
-            // Return a proper error response with status code
-            Err(format!("Failed to fetch messages: {}", e))
+            
+            // Try to fall back to the older fetch_whatsapp_messages method
+            tracing::info!("Attempting fallback to fetch_whatsapp_messages method");
+            match fetch_whatsapp_messages(&state, auth_user.user_id, start_time, end_time).await {
+                Ok(fallback_messages) => {
+                    tracing::info!("Fallback successful, found {} messages", fallback_messages.len());
+                    Ok(Json(WhatsAppMessagesResponse { messages: fallback_messages }))
+                },
+                Err(fallback_err) => {
+                    tracing::error!("Fallback also failed: {}", fallback_err);
+                    // Return a proper error response with status code
+                    Err(format!("Failed to fetch messages: {}. Fallback also failed: {}", e, fallback_err))
+                }
+            }
         }
     }
 }

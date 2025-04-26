@@ -151,63 +151,49 @@ pub fn pricing(props: &PricingProps) -> Html {
     html! {
         <div class="pricing-container">
             <div class="pricing-header">
-                <h1>{"Simple, Usage-Based Pricing"}</h1>
-                <p>{"Pay by the message or subscribe to never miss that importance message."}</p>
+                <h1>{"Keep it Simple or Full Capability?"}</h1>
             </div>
 
-<div class="pricing-grid">
-                <div class="pricing-card subscription">
+            <div class="pricing-grid">
+                <div class="pricing-card free">
                     <div class="card-header">
-                        <h3>{"Proactive Messaging"}</h3>
-                        {
-                            if !props.is_logged_in {
-                                html! {
-                                    <div class="price-container">
-                                        <div class="price us-price">
-                                            <span class="region">{"US/Canada: "}</span>
-                                            <span class="amount">{"€5.00"}</span>
-                                            <span class="period">{"/month"}</span>
-                                        </div>
-                                        <div class="price other-price">
-                                            <span class="region">{"Other regions: "}</span>
-                                            <span class="amount">{"€10.00"}</span>
-                                            <span class="period">{"/month"}</span>
-                                        </div>
-                                    </div>
-                                }
-                            } else {
-                                let is_us_canada = props.phone_number
-                                    .as_ref()
-                                    .map(|phone| phone.starts_with("+1"))
-                                    .unwrap_or(false);
-                                
-                                if is_us_canada {
-                                    html! {
-                                        <div class="price">
-                                            <span class="amount">{"€5.00"}</span>
-                                            <span class="period">{"/month"}</span>
-                                            <div class="region-note">{"US/Canada pricing"}</div>
-                                        </div>
-                                    }
-                                } else {
-                                    html! {
-                                        <div class="price">
-                                            <span class="amount">{"€10.00"}</span>
-                                            <span class="period">{"/month"}</span>
-                                            <div class="region-note">{"international pricing"}</div>
-                                        </div>
-                                    }
-                                }
-                            }
-                        }
+                        <h3>{"Free Plan"}</h3>
+                        <div class="price">
+                            <span class="amount">{"€0"}</span>
+                            <span class="period">{"/forever"}</span>
+                        </div>
                     </div>
                     <ul>
-                        <li>{"24/7 automated monitoring"}</li>
+                        <li>{"Access to Perplexity Search and Weather tools"}</li>
+                        <li>{"Basic AI assistance"}</li>
+                    </ul>
+                    {
+                        if !props.is_logged_in {
+                            html! {
+                                <Link<Route> to={Route::Register} classes="forward-link">
+                                    <button class="iq-button"><b>{"Sign up now"}</b></button>
+                                </Link<Route>>
+                            }
+                        } else {
+                            html! {
+                                <button class="iq-button disabled" disabled=true><b>{"Current Plan"}</b></button>
+                            }
+                        }
+                    }
+                </div>
+
+                <div class="pricing-card subscription">
+                    <div class="card-header">
+                        <h3>{"Pro Plan"}</h3>
+                        <div class="price">
+                            <span class="amount">{"€10.00"}</span>
+                            <span class="period">{"/month"}</span>
+                        </div>
+                    </div>
+                    <ul>
+                        <li>{"Access to tools like Email, Calendar, Tasks, Shazam along with the Perplexity and Weather"}</li>
+                        <li>{"24/7 automated monitoring (optional)"}</li>
                         <li>{"up to 150 proactive notifications/month"}</li>
-                        <li>{"Configure AI to watch for keywords, senders or write custom instructions"}</li>
-                        <li>{"Temporary waiting checks for specific messages"}</li>
-                        <li>{"Email monitoring working, others coming soon"}</li>
-                        <li>{"Setup once, forget"}</li>
                     </ul>
                     {
                         if props.is_logged_in && props.sub_tier.is_none() {
@@ -227,75 +213,46 @@ pub fn pricing(props: &PricingProps) -> Html {
                         }
                     }
                 </div>
+            </div>
 
-                <div class="pricing-card main">
-                    <div class="card-header">
-                        <h3>{"Voice Calls"}</h3>
-                        <div class="price">
-                            <span class="amount">{"€0.20"}</span>
-                            <span class="period">{"/minute"}</span>
+            <div class="usage-pricing">
+                <h2>{"Talk & Text When You Need It"}</h2>
+                <p>{"Pay only for what you use with our flexible usage-based pricing"}</p>
+                
+                <div class="usage-grid">
+                    <div class="pricing-card main">
+                        <div class="card-header">
+                            <h3>{"Voice Calls"}</h3>
+                            <div class="price">
+                                <span class="amount">{"€0.20"}</span>
+                                <span class="period">{"/minute"}</span>
+                            </div>
                         </div>
+                        <ul>
+                            <li>{"High-quality AI assistant voice calls"}</li>
+                            <li>{"Charged only when you take initiative"}</li>
+                            <li>{"24/7 availability"}</li>
+                        </ul>
                     </div>
-                    <ul>
-                        <li>{"High-quality AI assistant voice calls"}</li>
-                        <li>{"All the tools available (email, calendar, shazam, perplexity, weather)"}</li>
-                        <li>{"Only pay when you take initiative"}</li>
-                        <li>{"24/7 availability"}</li>
-                    </ul>
-                </div>
 
-                <div class="pricing-card main">
-                    <div class="card-header">
-                        <h3>{"SMS Messages"}</h3>
-                        {
-                            if !props.is_logged_in {
-                                html! {
-                                    <div class="price-container">
-                                        <div class="price us-price">
-                                            <span class="region">{"US/Canada: "}</span>
-                                            <span class="amount">{"€0.10"}</span>
-                                            <span class="period">{"/message"}</span>
-                                        </div>
-                                        <div class="price other-price">
-                                            <span class="region">{"Other regions: "}</span>
-                                            <span class="amount">{"€0.15"}</span>
-                                            <span class="period">{"/message"}</span>
-                                        </div>
-                                    </div>
-                                }
-                            } else {
-                                let is_us_canada = props.phone_number
-                                    .as_ref()
-                                    .map(|phone| phone.starts_with("+1"))
-                                    .unwrap_or(false);
-                                
-                                if is_us_canada {
-                                    html! {
-                                        <div class="price">
-                                            <span class="amount">{"€0.10"}</span>
-                                            <span class="period">{"/message"}</span>
-                                        </div>
-                                    }
-                                } else {
-                                    html! {
-                                        <div class="price">
-                                            <span class="amount">{"€0.15"}</span>
-                                            <span class="period">{"/message"}</span>
-                                        </div>
-                                    }
-                                }
-                            }
-                        }
+
+                    <div class="pricing-card main">
+                        <div class="card-header">
+                            <h3>{"SMS Messages"}</h3>
+                            <div class="price">
+                                <span class="amount">{"€0.10"}</span>
+                                <span class="period">{"/message"}</span>
+                            </div>
+                        </div>
+                        <ul>
+                            <li>{"AI assistant chat responses"}</li>
+                            <li>{"Charged only when you take initiative"}</li>
+                            <li>{"24/7 availability"}</li>
+                        </ul>
                     </div>
-                    <ul>
-                        <li>{"AI assistant chat responses"}</li>
-                        <li>{"All the tools available (email, calendar, shazam, perplexity, weather)"}</li>
-                        <li>{"Only pay when you take initiative"}</li>
-                        <li>{"24/7 availability"}</li>
-                    </ul>
-                </div>
 
                 </div>
+            </div>
 
 
             <div class="pricing-faq">
@@ -357,6 +314,16 @@ pub fn pricing(props: &PricingProps) -> Html {
                     background: linear-gradient(145deg, rgba(30, 30, 30, 0.7), rgba(30, 144, 255, 0.1));
                 }
 
+                .pricing-card.free {
+                    background: linear-gradient(145deg, rgba(30, 30, 30, 0.8), rgba(76, 175, 80, 0.1));
+                    border: 1px solid rgba(76, 175, 80, 0.3);
+                }
+
+                .pricing-card.free:hover {
+                    border-color: rgba(76, 175, 80, 0.5);
+                    box-shadow: 0 8px 32px rgba(76, 175, 80, 0.25);
+                }
+
                 .pricing-card.subscription {
                     background: linear-gradient(145deg, rgba(30, 30, 30, 0.8), rgba(124, 77, 255, 0.2));
                     border: 1px solid rgba(124, 77, 255, 0.3);
@@ -400,9 +367,34 @@ pub fn pricing(props: &PricingProps) -> Html {
 
                 .pricing-grid {
                     display: grid;
-                    grid-template-columns: repeat(3, 1fr);
+                    grid-template-columns: repeat(2, 1fr);
                     gap: 2rem;
                     margin: 4rem 0;
+                }
+
+                .usage-pricing {
+                    margin: 6rem 0;
+                    text-align: center;
+                }
+
+                .usage-pricing h2 {
+                    font-size: 2.5rem;
+                    background: linear-gradient(45deg, #fff, #7EB2FF);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    margin-bottom: 1rem;
+                }
+
+                .usage-pricing p {
+                    color: #999;
+                    font-size: 1.2rem;
+                    margin-bottom: 3rem;
+                }
+
+                .usage-grid {
+                    display: grid;
+                    grid-template-columns: repeat(2, 1fr);
+                    gap: 2rem;
                 }
 
                 .pricing-card {
@@ -567,7 +559,11 @@ pub fn pricing(props: &PricingProps) -> Html {
 
                 @media (max-width: 968px) {
                     .pricing-grid {
-                        grid-template-columns: repeat(2, 1fr);
+                        grid-template-columns: 1fr;
+                    }
+
+                    .usage-grid {
+                        grid-template-columns: 1fr;
                     }
                     
                     .pricing-header h1 {

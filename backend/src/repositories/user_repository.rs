@@ -278,6 +278,7 @@ impl UserRepository {
         Ok(users_list)
     }
 
+
     // Check if a user is an admin (email is 'rasmus')
     pub fn is_admin(&self, user_id: i32) -> Result<bool, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -286,7 +287,8 @@ impl UserRepository {
             .first::<User>(&mut conn)?;
 
         Ok(user.email == "rasmus@ahtava.com")
-    }
+     }
+
     
     // Find a user by ID
     pub fn find_by_id(&self, user_id: i32) -> Result<Option<User>, DieselError> {
@@ -706,16 +708,16 @@ impl UserRepository {
         Ok(ongoing_log)
     }
 
-    pub fn update_usage_log_fields(&self, user_id: i32, sid: &str, status: &str, credits: f32, success: bool, reason: &str) -> Result<(), DieselError> {
+    pub fn update_usage_log_fields(&self, user_id: i32, sid: &str, status: &str, success: bool, reason: &str, call_duration: Option<i32>) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(usage_logs::table)
             .filter(usage_logs::user_id.eq(user_id))
             .filter(usage_logs::sid.eq(sid))
             .set((
-                usage_logs::credits.eq(credits),
                 usage_logs::success.eq(success),
                 usage_logs::reason.eq(reason),
                 usage_logs::status.eq(status),
+                usage_logs::call_duration.eq(call_duration),
             ))
             .execute(&mut conn)?;
         Ok(())
@@ -923,10 +925,17 @@ impl UserRepository {
     }
 
     // Set the user's subscription tier
-    pub fn update_messages_left(&self, user_id: i32, new_count: i32) -> Result<(), DieselError> {
+    pub fn update_proactive_messages_left(&self, user_id: i32, new_count: i32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table.find(user_id))
             .set(users::msgs_left.eq(new_count))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+    pub fn update_sub_credits(&self, user_id: i32, new_credits: f32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::credits_left.eq(new_credits))
             .execute(&mut conn)?;
         Ok(())
     }
@@ -1432,12 +1441,15 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn set_matrix_credentials(&self, user_id: i32, username: &str, access_token: &str, device_id: &str) -> Result<(), DieselError> {
-        use crate::utils::matrix_auth::MatrixAuth;
+    pub fn set_matrix_credentials(&self, user_id: i32, username: &str, access_token: &str, device_id: &str, password: &str) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Encrypt the access token before storing
-        let encrypted_token = MatrixAuth::encrypt_token(access_token)
+        let encrypted_token = crate::utils::matrix_auth::encrypt_token(access_token)
+            .map_err(|_| DieselError::RollbackTransaction)?;
+
+        // Encrypt the password before storing
+        let encrypted_password = crate::utils::matrix_auth::encrypt_token(password)
             .map_err(|_| DieselError::RollbackTransaction)?;
 
         diesel::update(users::table.find(user_id))
@@ -1445,29 +1457,63 @@ impl UserRepository {
                 users::matrix_username.eq(username),
                 users::encrypted_matrix_access_token.eq(encrypted_token),
                 users::matrix_device_id.eq(device_id),
+                users::encrypted_matrix_password.eq(encrypted_password),
             ))
             .execute(&mut conn)?;
 
         Ok(())
     }
 
-    pub fn get_matrix_credentials(&self, user_id: i32) -> Result<Option<(String, String, String)>, DieselError> {
-        use crate::utils::matrix_auth::MatrixAuth;
+    pub fn set_matrix_secret_storage_recovery_key(&self, user_id: i32, recovery_key: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Encrypt the password before storing
+        let encrypted_key= crate::utils::matrix_auth::encrypt_token(recovery_key)
+            .map_err(|_| DieselError::RollbackTransaction)?;
+
+        diesel::update(users::table.find(user_id))
+            .set(users::encrypted_matrix_secret_storage_recovery_key.eq(encrypted_key))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_matrix_secret_storage_recovery_key(&self, user_id: i32) -> Result<Option<String>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let encrypted_key= users::table
+            .find(user_id)
+            .select(users::encrypted_matrix_secret_storage_recovery_key)
+            .first::<Option<String>>(&mut conn)?;
+
+        match encrypted_key {
+            Some(key) => {
+                let rec_key= crate::utils::matrix_auth::decrypt_token(&key)
+                    .map_err(|_| DieselError::RollbackTransaction)?;
+                Ok(Some(rec_key))
+            },
+            _ => Ok(None),
+        }
+    }
+
+    pub fn get_matrix_credentials(&self, user_id: i32) -> Result<Option<(String, String, String, String)>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let user = users::table
             .find(user_id)
             .first::<User>(&mut conn)?;
 
-        match (user.matrix_username, user.encrypted_matrix_access_token, user.matrix_device_id) {
-            (Some(username), Some(encrypted_token), Some(device_id)) => {
-                let token = MatrixAuth::decrypt_token(&encrypted_token)
+        match (user.matrix_username, user.encrypted_matrix_access_token, user.matrix_device_id, user.encrypted_matrix_password) {
+            (Some(username), Some(encrypted_token), Some(device_id), Some(encrypted_password)) => {
+                let token = crate::utils::matrix_auth::decrypt_token(&encrypted_token)
                     .map_err(|_| DieselError::RollbackTransaction)?;
-                Ok(Some((username, token, device_id)))
+                let password= crate::utils::matrix_auth::decrypt_token(&encrypted_password)
+                    .map_err(|_| DieselError::RollbackTransaction)?;
+                Ok(Some((username, token, device_id, password)))
             },
             _ => Ok(None),
         }
     }
+
+
 
     pub fn delete_matrix_credentials(&self, user_id: i32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1519,6 +1565,20 @@ impl UserRepository {
 
         Ok(bridge)
     }
+    
+    pub fn get_users_with_matrix_bridge_connections(&self) -> Result<Vec<i32>, DieselError> {
+        use crate::schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Get distinct user_ids that have at least one bridge connection
+        let user_ids = bridges::table
+            .select(bridges::user_id)
+            .distinct()
+            .load::<i32>(&mut conn)?;
+            
+        Ok(user_ids)
+    }
+
 
     // Mark an email as processed
     pub fn mark_email_as_processed(&self, user_id: i32, email_uid: &str) -> Result<(), DieselError> {

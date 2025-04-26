@@ -144,35 +144,13 @@ pub async fn fetch_assistant(
         Ok(Some(user)) => {
             println!("Found user: {}, {}", user.email, user.phone_number);
             
-            if user.credits <= 0.00 {
-
-                match state.user_repository.is_credits_under_threshold(user.id) {
-                    Ok(is_under) => {
-                        if is_under {
-                            println!("User {} credits is under threshold, attempting automatic charge", user.id);
-                            // Get user information
-                            if user.charge_when_under {
-                                use axum::extract::{State, Path};
-                                let state_clone = Arc::clone(&state);
-                                tokio::spawn(async move {
-                                    let _ = crate::handlers::stripe_handlers::automatic_charge(
-                                        State(state_clone),
-                                        Path(user.id),
-                                    ).await;
-                                    println!("Recharged the user successfully back up!");
-                                });
-                                println!("recharged the user successfully back up!");
-                            }
-                        }
-                    },
-                    Err(e) => eprintln!("Failed to check if user credits is under threshold: {}", e),
-                }
-
+            // Check if user has sufficient credits
+            if let Err(_) = crate::utils::usage::check_user_credits(&state, &user, "voice").await {
                 return Err((
                     StatusCode::FORBIDDEN,
                     Json(json!({
                         "error": "Insufficient credits balance",
-                        "message": "Please add more credits to your account to continue on lightfriend website"
+                        "message": "Please add more credits to your account to continue on lightfriend website",
                     }))
                 ));
             }
