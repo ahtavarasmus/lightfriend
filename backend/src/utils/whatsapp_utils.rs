@@ -179,6 +179,7 @@ use matrix_sdk::room::MessagesOptions;
 use tokio::sync::Mutex;
 use std::collections::HashMap;
 
+/*
 pub async fn get_recent_messages(
     state: &AppState,
     user_id: i32,
@@ -196,20 +197,6 @@ pub async fn get_recent_messages(
             None => {
                 // If client not found in state, try to initialize it
                 tracing::info!("Matrix client not found in state for user {}, attempting to initialize", user_id);
-                drop(clients); // Release the lock before async operation
-                
-                // Try to initialize the client
-                match crate::utils::matrix_auth::get_or_create_matrix_client(user_id, &state.user_repository).await {
-                    Ok(new_client) => {
-                        // Store the new client in the state for future use
-                        let mut clients = state.matrix_user_clients.lock().await;
-                        clients.insert(user_id, new_client.clone());
-                        new_client
-                    },
-                    Err(e) => {
-                        return Err(anyhow!("Failed to initialize Matrix client: {}", e));
-                    }
-                }
             }
         }
     };
@@ -335,3 +322,4 @@ pub async fn get_recent_messages(
 
     Ok(whatsapp_messages)
 }
+*/

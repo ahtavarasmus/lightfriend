@@ -681,3 +681,190 @@ pub async fn get_or_create_matrix_client(user_id: i32, user_repository: &UserRep
     tracing::info!("Matrix client initialized successfully for user ID: {}", user_id);
     Ok(client)
 }
+
+
+// create client with the client sqlite store(that stores both state and encryption keys)
+
+pub async fn login_with_password(client: &MatrixClient, user_repository: &UserRepository, username: &str, password: &str, user_id: i32) ->Result<()> {
+    let res = client.matrix_auth()
+            .login_username(username, password)
+            .send()
+            .await;
+    if let Ok(response) = res {
+        // store the new device_id and access_token
+        user_repository.set_matrix_device_id_and_access_token(user_id, &response.access_token, &response.device_id.as_str())?;
+        // TODO delete old devices from client store and possibly from server also if we can
+    } else {
+        // TODO we should fail here and inform the user that new registration has to be created
+    }
+    Ok(())
+}
+
+
+pub async fn get_client(user_id: i32, user_repository: &UserRepository) -> Result<MatrixClient> {
+
+    // Get user profile from database
+    let user = user_repository.find_by_id(user_id).unwrap().unwrap();
+
+    // Initialize the Matrix client
+    let homeserver_url = std::env::var("MATRIX_HOMESERVER")
+        .map_err(|_| anyhow!("MATRIX_HOMESERVER not set"))?;
+    let shared_secret = std::env::var("MATRIX_SHARED_SECRET")
+        .map_err(|_| anyhow!("MATRIX_SHARED_SECRET not set"))?;
+    
+    let store_path = format!(
+        "{}/{}",
+        std::env::var("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH")
+            .map_err(|_| anyhow!("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH not set"))?,
+        user.matrix_username.unwrap()
+    );
+    
+    std::fs::create_dir_all(&store_path)
+        .map_err(|e| anyhow!("Failed to create store directory {}: {}", store_path, e))?;
+
+    // if matrix user doesn't exist, register one
+    if let Some(username) = user.matrix_username {
+        let (username, access_token, device_id, password) = register_user(&homeserver_url, &shared_secret).await?;
+        user_repository.set_matrix_credentials(user.id, &username, &access_token, &device_id, &password)?;
+    }
+    
+    let client = MatrixClient::builder()
+        .homeserver_url(&homeserver_url)
+        .sqlite_store(store_path, None)
+        .build()
+        .await
+        .unwrap();
+    
+    // logged_in checks if client store has device_id and access token stored
+    if !client.logged_in() {
+        if let Some(device_id) = user.matrix_device_id {
+            let access_token = decrypt_token(user.encrypted_matrix_access_token.unwrap().as_str()).unwrap();
+            let res = client.matrix_auth()
+                        .login_token(&access_token.as_str())
+                        .device_id(device_id.as_str())
+                        .send()
+                        .await;
+            if let Ok(response) = res {
+                // if client store tokens and device were different they will now at least get overriden
+            } else {
+                // if fails, we try logging in with username and password
+                let password = decrypt_token(user.encrypted_matrix_password.unwrap().as_str()).unwrap();
+                login_with_password(&client, user_repository, user.matrix_username.unwrap(), password, user.id);
+            }
+            
+            
+        } else {
+            // if not device_id was stored, let's try logging in with username and password
+            let password = decrypt_token(user.encrypted_matrix_password.unwrap()).unwrap();
+            login_with_password(&client, user_repository, user.matrix_username, password, user.id);
+        }
+    } else { // client store has some device id and access token already
+	    // call whoami to check if client store device id and access token are valid at the server also
+	    let res = client.whoami();
+        match res.device_id {
+            Some(owned_device_id) => {
+                if owned_device_id.as_str() != user.matrix_device_id.unwrap() {
+                    let password = decrypt_token(user.encrypted_matrix_password.unwrap()).unwrap();
+                    // we are lazy and just create new device if they don't match
+                    login_with_password(&client, user_repository, user.matrix_username, password, user.id);
+                } 
+            },
+            None => {
+                // create new device if none was found on the server
+                let password = decrypt_token(user.encrypted_matrix_password.unwrap()).unwrap();
+                login_with_password(&client, user_repository, user.matrix_username, password, user.id);
+            }
+        }
+    }
+    // here we should have client store, our db and server synced with the same device id and access token
+}
+/*
+
+if !user.matrix_password {
+	//register a new user and save tokens
+	res = register_user(user)
+	store_to_db(res.username, res.password, res.access_token, res.device_id)
+}
+if !user.logged_in() { // (client store does not have device id and access token)
+	// if we have still a stored device id in our db
+	if user.device_id { 
+		let res = client.login_token(user.access_token).device_id(user.device_id)
+		if res.success() {
+			// our db tokens were valid at the server and if client store ones differed 
+			// they will now be overriden to match our db.
+		} else { // (our db credentials were invalid)
+			// try logging in with username and password stored in our db
+			let res = client.login_username() // this creates a new device for the user
+			// store the new res.access_token and res.device_id to our db 
+			store_to_db(res.access_token, res.device_id)
+			// and they have also been overriden to client store
+			// Enforce single-device policy: delete other devices
+			client.delete_devices_except(res.device_id)
+		}
+	} else {
+		// try logging in with username and password stored in our db
+		let res = client.login_username() // this creates new device for user
+		// store the new res.access_token and res.device_id to our db 
+		store_to_db(res.access_token, res.device_id)
+		// and they have also been overriden to client store
+		// Enforce single-device policy: delete other devices
+		client.delete_devices_except(res.device_id)
+	}
+} else { // (client store has device id and access token) 
+	// call whoami to check if client store device id and access token are valid at the server also
+	let res = client.whoami();
+	if !res.device_id_exists or res.device_id != user.device_id {
+		// try logging in with username and password stored in our db
+		let res = client.login_username()
+		// store the new res.access_token and res.device_id to our db
+		store_to_db(res.access_token, res.device_id)
+		// and they have also been overriden to client store
+		// Enforce single-device policy: delete other devices
+		client.delete_devices_except(res.device_id)
+	}
+}
+// here we should have all synced up and logged in across(our db, client store and server)
+
+// Handle cross-signing keys 
+if !client.cross_signing_keys_exist() { 
+	if !user.secret_storage_key { 
+		client.secret_storage.create_secret_storage() // Save new recovery key to database 
+		store_to_db(secret_storage_key = bootstrap_result.recovery_key) 
+	} else {
+		// do we need to open the store here or?
+	}
+	if secret_storage.has_cross_signing_keys() 
+		try { 
+			// Restore cross-signing keys from Secret Storage
+			client.secret_storage.import_secrets(user.secret_storage_key) 
+		} catch (error) { 
+			// Restoration failed (e.g., key mismatch); bootstrap new keys 
+			bootstrap_result = client.encryption.bootstrap_cross_signing(None)
+			client.secret_storage.bootstrap_secret_storage() // Save new recovery key to database 
+			store_to_db(secret_storage_key = bootstrap_result.recovery_key) 
+		} 
+	} else { // No keys in Secret Storage or no SSK; bootstrap new keys 
+		bootstrap_result = client.encryption.bootstrap_cross_signing(true) 
+		// figure out if the keys will go automatically to the secret store
+	} 
+}
+
+// Handle room key backups 
+if !client.encryption.backup_enabled() { 
+	if user.secret_storage_key { 
+		client.secret_storage.create_secret_storage() // Save new recovery key to database 
+		store_to_db(secret_storage_key = bootstrap_result.recovery_key)
+	} else {
+		// do we need to open the store here or?
+	}
+	if secret_storage.has_backup_key() {
+		backup_key = client.secret_storage.get_secret("m.room_keys.backup") 
+		client.encryption.backup.restore_backup(backup_key) 
+	} else { // Enable backup and store key in Secret Storage 
+		backup_key = client.encryption.backup.enable() 
+		client.secret_storage.store_secret("m.room_keys.backup", backup_key) 
+	} 
+}
+// Sync client to initialize room state and E2EE metadata 
+client.sync_once()
+    */

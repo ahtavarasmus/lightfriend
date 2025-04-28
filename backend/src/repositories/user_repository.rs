@@ -1463,6 +1463,22 @@ impl UserRepository {
 
         Ok(())
     }
+    pub fn set_matrix_device_id_and_access_token(&self, user_id: i32, access_token: &str, device_id: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Encrypt the access token before storing
+        let encrypted_token = crate::utils::matrix_auth::encrypt_token(access_token)
+            .map_err(|_| DieselError::RollbackTransaction)?;
+
+        diesel::update(users::table.find(user_id))
+            .set((
+                users::encrypted_matrix_access_token.eq(encrypted_token),
+                users::matrix_device_id.eq(device_id),
+            ))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
 
     pub fn set_matrix_secret_storage_recovery_key(&self, user_id: i32, recovery_key: &str) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");

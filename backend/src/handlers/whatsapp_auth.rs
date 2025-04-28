@@ -431,6 +431,8 @@ async fn monitor_whatsapp_connection(
                                     // Wait a bit for groups to sync
                                     sleep(Duration::from_secs(2)).await;
                                     
+                                } else {
+                                    println!("NO WHATSAPP ROOM WAS FOUND AND NOT SYNC COMMANDS WERE SENT");
                                 }
                                     
 
