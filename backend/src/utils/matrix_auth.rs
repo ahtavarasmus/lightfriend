@@ -777,6 +777,71 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository) -> Resul
         }
     }
     // here we should have client store, our db and server synced with the same device id and access token
+
+    // handle keys now
+    let redo_secret_storage = false;
+    if let Some(status) = client.encryption().cross_signing_status().await {
+        if let Some(encrypted_key) = user.encrypted_matrix_secret_storage_recovery_key {
+            if client.encryption().secret_storage().is_enabled().await? {
+                let passphrase = decrypt_token(&encrypted_key.as_str()).unwrap();
+                let secret_store = client.encryption().secret_storage().open_secret_store(&passphrase.as_str()).await?;
+                secret_store.import_secrets().await?;
+            }
+        }
+        // check again
+        if let Some(status) = client.encryption().cross_signing_status().await {
+            // bootstrap cross signing keys here
+            if let Err(e) = client.encryption().bootstrap_cross_signing(None).await {
+                if let Some(response) = e.as_uiaa_response() {
+                    let user_id_str = client.user_id().unwrap().to_string();
+                    let username = user_id_str.strip_prefix('@')
+                        .and_then(|s| s.split(':').next())
+                        .ok_or_else(|| anyhow!("Invalid user ID format"))?;
+                    let password = generate_matrix_password(&user_id_str);
+                    let user_identifier = matrix_sdk::ruma::api::client::uiaa::UserIdentifier::UserIdOrLocalpart(username.to_string());
+                    let mut password_auth = matrix_sdk::ruma::api::client::uiaa::Password::new(user_identifier, password);
+                    password_auth.session = response.session.clone();
+                    
+                    client.encryption()
+                        .bootstrap_cross_signing(Some(matrix_sdk::ruma::api::client::uiaa::AuthData::Password(password_auth)))
+                        .await
+                        .expect("couldn't bootstrap cross signing");
+                } else {
+                    panic!("Error during cross signing bootstrap {:#?}", e);
+                }
+            }
+            redo_secret_storage = true;
+        }
+    }
+
+    if !client.encryption().backups().are_enabled().await {
+
+        if let Some(encrypted_key) = user.encrypted_matrix_secret_storage_recovery_key {
+            if client.encryption().secret_storage().is_enabled().await.unwrap() {
+                let passphrase = decrypt_token(&encrypted_key.as_str()).unwrap();
+                client.encryption().secret_storage().open_secret_store(&passphrase.as_str()).await?;
+                let secret_store = client.encryption().secret_storage().open_secret_store(&passphrase.as_str()).await?;
+                secret_store.import_secrets().await?;
+            }        
+        } else {
+            // we will just set the flag and backups get created anyways later
+            redo_secret_storage = true;
+        }
+    }
+
+    if redo_secret_storage {
+        // run secret storage create and cross signing keys + backup key will go there automatically.
+        if let Some(encrypted_key) = user.encrypted_matrix_secret_storage_recovery_key {
+            let passphrase = decrypt_token(&encrypted_key.as_str()).unwrap();
+            // recovery enable will create a new secret store and make sure backups enabled
+            client.encryption().recovery().enable().with_passphrase(passphrase).await;
+        } else {
+            // recovery enable will create a new secret store and make sure backups enabled
+            client.encryption().recovery().enable().await;
+            let new_key = client.encryption().secret_store().secret_storage_key();
+            user_repository.set_matrix_secret_storage_recovery_key(user.id, new_key)?;
+        }
+    }
 }
 /*
 
@@ -826,12 +891,125 @@ if !user.logged_in() { // (client store does not have device id and access token
 // here we should have all synced up and logged in across(our db, client store and server)
 
 // Handle cross-signing keys 
-if !client.cross_signing_keys_exist() { 
+
+
+// check cross signing status locally
+client.encryption().cross_signing_status()
+// check cross signing status of user on the server. not found means it is not setup
+client.encryption().request_user_identify(user_id)
+// Create and upload a new cross signing identity to the client and public keys to the server
+client.encryption().bootstrap_cross_signing()
+
+// Enable secret storage and backups. This method will create a new secret storage key and a new backup if one doesn’t already exist. 
+// It will then upload all the locally cached secrets, including the backup recovery key, to the new secret store.
+client.encryption().recovery().enable()
+// Reset the recovery key. This will rotate the secret storage key and re-upload all the secrets to the SecretStore.
+client.encryption().recovery().reset_key()
+// Recover all the secrets from the homeserver.
+client.encryption().recovery().recover(recovery_key)
+
+// check if backups exists at the server
+client.encryption().backups().fetch_exists_on_server()
+// check if we have active backup key on client and ready to upload room keys to server
+client.encryption().backups().are_enabled()
+// create new backup to server and a new recovery key locally as m.secret.send
+client.encryption().backups().create()
+
+// open secret store on the server so we can fetch or modify the keys there
+client.encryption().secret_storage().open_secret_store(secret_storage_key)
+// create new secret store. the passphrase can be fetched with client.encryption().secret_store().secret_storage_key()
+// if we have secrets on the client, they will be automatically sent to the secret store with this(cross signing keys, backups key)
+client.encryption().secret_storage().create_secret_store()
+// check is secret storage has been setup on the server
+client.encryption().secret_storage().is_enabled()
+
+// Retrieve and store well-known secrets locally (cross signing keys, backup key)
+client.encryption().secret_store().import_secrets()
+// store a key value pair in open secret storage
+client.encryption().secret_store().put_secret()
+// fetch a key value pair from open secret storage
+client.encryption().secret_store().get_secret()
+
+so...
+quick checks:
+client.encryption().cross_signing_status() // check cross signing status locally
+if client.encryption().backups().are_enabled() { // check if we have active backup key on client and ready to upload room keys to server
+    if client.encryption().backups().fetch_exists_on_server() { // check if backups exists at the server
+        
+    } else {
+        // creates new backup to server and saves new recovery key locally as m.secret.send
+        client.encryption().backups().create()
+    }
+}
+
+// TODO do moodle kandi things today
+    let redo_secret_storage = false;
+    if let Some(status) = client.encryption().cross_signing_status().await {
+        if user.secret_store_key and client.encryption().secret_storage().is_enabled() {
+            client.encryption().secret_storage().open_secret_store().await?;
+            client.encryption().secret_storage().import_secrets().await?;
+        }
+        // check again
+        if let Some(status) = client.encryption().cross_signing_status().await {
+            // bootstrap cross signing keys here
+            if let Err(e) = client.encryption().bootstrap_cross_signing(None).await {
+                if let Some(response) = e.as_uiaa_response() {
+                    let user_id_str = client.user_id().unwrap().to_string();
+                    let username = user_id_str.strip_prefix('@')
+                        .and_then(|s| s.split(':').next())
+                        .ok_or_else(|| anyhow!("Invalid user ID format"))?;
+                    let password = generate_matrix_password(&user_id_str);
+                    let user_identifier = matrix_sdk::ruma::api::client::uiaa::UserIdentifier::UserIdOrLocalpart(username.to_string());
+                    let mut password_auth = matrix_sdk::ruma::api::client::uiaa::Password::new(user_identifier, password);
+                    password_auth.session = uiaa_info.session.clone();
+                    
+                    client.encryption()
+                        .bootstrap_cross_signing(Some(matrix_sdk::ruma::api::client::uiaa::AuthData::Password(password_auth)))
+                        .await
+                        .expect("couldn't bootstrap cross signing");
+                } else {
+                    panic!("Error during cross signing bootstrap {:#?}", e);
+                }
+            }
+            redo_secret_storage = true;
+        }
+    }
+    if !backups okay {
+        if user.secret_store_key and client.encryption().secret_storage().is_enabled() {
+            client.encryption().secret_storage().open_secret_store().await?;
+            client.encryption().secret_storage().import_secrets().await?;
+        } else {
+            // we will just set the flag and backups get created anyways later
+            redo_secret_storage = true;
+        }
+    }
+
+    if redo_secret_storage {
+        // run secret storage create and cross signing keys + backup key will go there automatically.
+        if user.secret_store_key {
+            let passphrase = decrypt_token(user.encrypted_matrix_secret_storage_recovery_key.unwrap()).unwrap();
+            // recovery enable will create a new secret store and make sure backups enabled
+            client.encryption().recovery().enable().with_passphrase(passphrase).await;
+        } else {
+            // recovery enable will create a new secret store and make sure backups enabled
+            client.encryption().recovery().enable().await;
+            let new_key = client.encryption().secret_store().secret_storage_key();
+            user_repository.set_matrix_secret_storage_recovery_key(user.id, new_key)?;
+        }
+    }
+}
+
+
+
+
+let create_new_secret_store = true;
+if !client.cross_signing_keys_exist() || !client.encryption().backups().are_enabled() { 
 	if !user.secret_storage_key { 
-		client.secret_storage.create_secret_storage() // Save new recovery key to database 
+        // bootstrap new cross signing keys to client
+		client.secret_storage.create_secret_storage() // Save new recovery key to database
 		store_to_db(secret_storage_key = bootstrap_result.recovery_key) 
 	} else {
-		// do we need to open the store here or?
+		client.secret_storage.import_secrets(user.secret_storage_key) 
 	}
 	if secret_storage.has_cross_signing_keys() 
 		try { 
@@ -845,7 +1023,7 @@ if !client.cross_signing_keys_exist() {
 		} 
 	} else { // No keys in Secret Storage or no SSK; bootstrap new keys 
 		bootstrap_result = client.encryption.bootstrap_cross_signing(true) 
-		// figure out if the keys will go automatically to the secret store
+	/ 	// figure out if the keys will go automatically to the secret store
 	} 
 }
 
