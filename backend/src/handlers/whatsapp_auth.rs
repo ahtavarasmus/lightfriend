@@ -159,7 +159,7 @@ pub async fn start_whatsapp_connection(
 
     println!("📝 Getting Matrix client...");
     // Get or create Matrix client using the centralized function
-    let client = matrix_auth::get_or_create_matrix_client(auth_user.user_id, &state.user_repository)
+    let client = matrix_auth::get_client(auth_user.user_id, &state.user_repository)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);
@@ -272,35 +272,19 @@ pub async fn get_whatsapp_status(
 async fn accept_room_invitations(client: MatrixClient, duration: Duration) -> Result<()> {
     println!("🔄 Starting room invitation acceptance loop");
     let end_time = Instant::now() + duration;
-    let mut consecutive_no_invites = 0;
-    let max_consecutive_no_invites = 5; // Increased from 3 to 5
     
     // Ensure we have a recent sync before starting
     println!("🔄 Performing initial sync to get current room state");
     client.sync_once(MatrixSyncSettings::default()).await?;
 
-    while Instant::now() < end_time && consecutive_no_invites < max_consecutive_no_invites {
+    while Instant::now() < end_time {
         println!("👀 Checking for room invitations...");
-        
-        // Perform a quick sync to get latest invitations
-        let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(2));
-        if let Err(e) = client.sync_once(sync_settings).await {
-            println!("⚠️ Sync error: {}", e);
-            tracing::warn!("Sync error while checking for invitations: {}", e);
-            // Continue anyway, we might have some invitations from previous syncs
-        }
 
-        let invited_rooms: Vec<_> = client
-            .rooms()
-            .into_iter()
-            .filter(|room| room.state() == matrix_sdk::RoomState::Invited)
-            .collect();
+        let invited_rooms = client.invited_rooms();
 
         if invited_rooms.is_empty() {
-            consecutive_no_invites += 1;
-            println!("📭 No new invitations found (attempt {}/{})", consecutive_no_invites, max_consecutive_no_invites);
+            println!("📭 No new invitations found");
         } else {
-            consecutive_no_invites = 0; // Reset counter when we find invitations
             println!("📬 Found {} room invitations", invited_rooms.len());
             for room in invited_rooms {
                 let room_id = room.room_id();
@@ -317,25 +301,7 @@ async fn accept_room_invitations(client: MatrixClient, duration: Duration) -> Re
                     }
                 }
             }
-            
-            // After joining rooms, do another sync to update room state
-            if let Err(e) = client.sync_once(MatrixSyncSettings::default()).await {
-                println!("⚠️ Post-join sync error: {}", e);
-                tracing::warn!("Sync error after joining rooms: {}", e);
-            }
         }
-
-        // Adaptive wait time - wait longer as we find fewer invitations
-        let wait_time = if consecutive_no_invites == 0 {
-            // If we just processed invitations, check again quickly
-            Duration::from_secs(2)
-        } else {
-            // Otherwise, gradually increase wait time
-            Duration::from_secs(5 + consecutive_no_invites)
-        };
-        
-        println!("💤 Waiting {} seconds before next check...", wait_time.as_secs());
-        sleep(wait_time).await;
     }
 
     println!("🏁 Room invitation acceptance loop completed");
@@ -359,7 +325,7 @@ async fn monitor_whatsapp_connection(
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(30));
 
     // Increase monitoring duration and frequency
-    for attempt in 1..40 { // Try for about 20 minutes (40 * 30 seconds)
+    for attempt in 1..120 { // Try for about 10 minutes (120 * 5 seconds)
         println!("🔄 Monitoring attempt #{} for user {}", attempt, user_id);
 
         let _= client.sync_once(sync_settings.clone()).await?;
@@ -490,7 +456,7 @@ async fn monitor_whatsapp_connection(
             }
         }
 
-        sleep(Duration::from_secs(30)).await;
+        sleep(Duration::from_secs(5)).await;
     }
 
     // If we reach here, connection timed out
@@ -521,7 +487,7 @@ pub async fn disconnect_whatsapp(
     };
 
     // Get or create Matrix client using the centralized function
-    let client = matrix_auth::get_or_create_matrix_client(auth_user.user_id, &state.user_repository)
+    let client = matrix_auth::get_client(auth_user.user_id, &state.user_repository)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);

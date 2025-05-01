@@ -1448,9 +1448,11 @@ impl UserRepository {
         let encrypted_token = crate::utils::matrix_auth::encrypt_token(access_token)
             .map_err(|_| DieselError::RollbackTransaction)?;
 
+        println!("setting matrix credentials password: {}", password);
         // Encrypt the password before storing
         let encrypted_password = crate::utils::matrix_auth::encrypt_token(password)
             .map_err(|_| DieselError::RollbackTransaction)?;
+        println!("password after encrypting: {}", encrypted_password);
 
         diesel::update(users::table.find(user_id))
             .set((
@@ -1460,6 +1462,9 @@ impl UserRepository {
                 users::encrypted_matrix_password.eq(encrypted_password),
             ))
             .execute(&mut conn)?;
+        if let Some(user) = self.find_by_id(user_id)? {
+            println!("getting the password from user email: {:#?} and fetched encrypted password now is: {:#?}", user.email, user.encrypted_matrix_password);
+        }
 
         Ok(())
     }

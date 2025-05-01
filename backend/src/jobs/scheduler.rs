@@ -921,6 +921,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         })
     }).expect("Failed to create task cleanup job");
 
+    /*
     sched.add(task_cleanup_job).await.expect("Failed to add task cleanup job to scheduler");
     
     // Create a job that runs every 5 minutes to update Matrix clients
@@ -1025,6 +1026,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     }).expect("Failed to create Matrix sync job");
 
     sched.add(matrix_sync_job).await.expect("Failed to add Matrix sync job to scheduler");
+    */
     
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");

@@ -31,10 +31,10 @@ pub async fn fetch_whatsapp_messages(
     start_time: i64,
     end_time: i64,
 ) -> Result<Vec<WhatsAppMessage>> {
+    tracing::info!("Fetching WhatsApp messages for user {}", user_id);
 
-    println!("fetch whastapp messages");
-
-    let (username, access_token, device_id, password) = state.user_repository
+    // Get Matrix credentials from repository
+    let (username, access_token, device_id, _password) = state.user_repository
         .get_matrix_credentials(user_id)?
         .ok_or_else(|| anyhow!("Matrix credentials not found"))?;
 
@@ -60,7 +60,6 @@ pub async fn fetch_whatsapp_messages(
         .build()
         .await?;
 
-    println!("here");
 
     use matrix_sdk::{
         Client as MatrixClient,
@@ -70,7 +69,7 @@ pub async fn fetch_whatsapp_messages(
 
     let session = AuthSession::Matrix(MatrixSession {
         meta: SessionMeta {
-            user_id:  OwnedUserId::try_from(full_user_id.clone())?,
+            user_id: OwnedUserId::try_from(full_user_id.clone())?,
             device_id: OwnedDeviceId::try_from(device_id.clone())?,
         },
         tokens: MatrixSessionTokens {
@@ -87,89 +86,169 @@ pub async fn fetch_whatsapp_messages(
         return Err(anyhow!("WhatsApp bridge is not connected. Please log in first."));
     }
 
-    // Quick final sync to get latest state
+    // Perform a quick sync to get latest room state
+    client.sync_once(matrix_sdk::config::SyncSettings::default()).await?;
 
-    tracing::info!("checking joined rooms: {:#?}", client.joined_rooms());
-    for room in client.joined_rooms() {
-        tracing::info!("✅ Joined room: {}", room.room_id());
+    // Get all joined rooms
+    let joined_rooms = client.joined_rooms();
+    tracing::info!("Found {} joined rooms for user {}", joined_rooms.len(), user_id);
+
+    // Create a structure to hold room info with last activity timestamp
+    #[derive(Debug)]
+    struct RoomInfo {
+        room: Room,
+        last_activity: i64,
+        display_name: String,
     }
 
-    let mut messages = Vec::new();
-
-    for room in client.joined_rooms() {
+    // Collect room info with last activity time
+    let mut room_infos = Vec::new();
+    for room in joined_rooms {
         let room_id = room.room_id();
-        let room_name = room.display_name().await.unwrap_or_else(|_| matrix_sdk::RoomDisplayName::Named(room_id.to_string()));
+        
+        // Get room display name
+        let display_name = match room.display_name().await {
+            Ok(name) => name.to_string(),
+            Err(_) => room_id.to_string(),
+        };
+        
+        // Get last message timestamp (if any)
+        let mut options = matrix_sdk::room::MessagesOptions::backward();
+        options.limit = matrix_sdk::ruma::UInt::new(1).unwrap();
+        
+        let last_activity = match room.messages(options).await {
+            Ok(response) => {
+                if let Some(event) = response.chunk.first() {
+                    if let Ok(any_event) = event.raw().deserialize() {
+                        i64::from(any_event.origin_server_ts().0) / 1000
+                    } else {
+                        0
+                    }
+                } else {
+                    0
+                }
+            },
+            Err(_) => 0,
+        };
+        
+        room_infos.push(RoomInfo {
+            room,
+            last_activity,
+            display_name,
+        });
+    }
+    
+    // Sort rooms by last activity (most recent first)
+    room_infos.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+    
+    // Take the 50 most recent rooms
+    let room_limit = 50;
+    let recent_rooms = if room_infos.len() > room_limit {
+        room_infos.drain(..room_limit).collect::<Vec<_>>()
+    } else {
+        room_infos
+    };
+    
+    // Print room information
+    tracing::info!("Latest {} rooms:", recent_rooms.len());
+    for (i, room_info) in recent_rooms.iter().enumerate() {
+        let timestamp_str = if room_info.last_activity > 0 {
+            chrono::DateTime::<chrono::Utc>::from_timestamp(room_info.last_activity, 0)
+                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or_else(|| "unknown".to_string())
+        } else {
+            "no messages".to_string()
+        };
+        
+        tracing::info!(
+            "  {}. Room: {} ({}), Last activity: {}", 
+            i + 1, 
+            room_info.display_name, 
+            room_info.room.room_id(), 
+            timestamp_str
+        );
+    }
+    
+    // Fetch messages from the recent rooms
+    let mut messages = Vec::new();
+    let messages_per_room = 20; // Limit messages per room
+    
+    for room_info in recent_rooms {
+        let room = room_info.room;
+        let room_id = room.room_id();
+        let room_name = room_info.display_name;
+        
+        tracing::info!("Fetching messages from room: {} ({})", room_name, room_id);
+        
+        let mut options = matrix_sdk::room::MessagesOptions::backward();
+        options.limit = matrix_sdk::ruma::UInt::new(messages_per_room).unwrap();
+        
+        match room.messages(options).await {
+            Ok(response) => {
+                let chunk = response.chunk;
+                tracing::info!("Retrieved {} messages from room {}", chunk.len(), room_id);
+                
+                for event in chunk {
+                    let raw_event = event.raw();
+                    if let Ok(any_sync_event) = raw_event.deserialize() {
+                        if let AnySyncTimelineEvent::MessageLike(
+                                matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
+                            ) = any_sync_event.clone() {
 
-        let mut from_token = None;
+                            let (sender, timestamp, content) = match msg {
+                                matrix_sdk::ruma::events::room::message::SyncRoomMessageEvent::Original(e) => {
+                                    let timestamp = i64::from(e.origin_server_ts.0) / 1000;
+                                    (e.sender, timestamp, e.content)
+                                }
+                                matrix_sdk::ruma::events::room::message::SyncRoomMessageEvent::Redacted(_) => continue,
+                            };
 
-        loop {
-            let mut options = matrix_sdk::room::MessagesOptions::backward();
-            options.limit = matrix_sdk::ruma::UInt::new(100).unwrap();
-            if let Some(token) = from_token.clone() {
-                options.from = Some(token);
-            }
-
-            let response = room.messages(options).await?;
-            let chunk = response.chunk;
-            from_token = response.end;
-            if chunk.is_empty() {
-                break;
-            }
-
-            for event in chunk {
-                let raw_event = event.raw();
-                if let Ok(any_sync_event) = raw_event.deserialize() {
-                    if let AnySyncTimelineEvent::MessageLike(
-                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
-                        ) = any_sync_event.clone() {
-
-                        let (sender, timestamp, content) = match msg {
-                            matrix_sdk::ruma::events::room::message::SyncRoomMessageEvent::Original(e) => {
-                                let timestamp = i64::from(e.origin_server_ts.0) / 1000;
-
-                                (e.sender, timestamp, e.content)
+                            // Skip messages outside the time range
+                            if timestamp < start_time || timestamp > end_time {
+                                continue;
                             }
-                            matrix_sdk::ruma::events::room::message::SyncRoomMessageEvent::Redacted(_) => continue,
-                        };
 
-                        let (msgtype, body) = match content.msgtype {
-                            MessageType::Text(t) => ("text", t.body),
-                            MessageType::Notice(n) => ("notice", n.body),
-                            MessageType::Image(_) => ("image", "📎 IMAGE".into()),
-                            MessageType::Video(_) => ("video", "📎 VIDEO".into()),
-                            MessageType::File(_) => ("file", "📎 FILE".into()),
-                            MessageType::Audio(_) => ("audio", "📎 AUDIO".into()),
-                            MessageType::Location(_) => ("location", "📍 LOCATION".into()),
-                            MessageType::Emote(t) => ("emote", t.body),
-                            _ => continue,
-                        };
 
-                        if timestamp < start_time || timestamp > end_time {
-                            continue;
+                            let (msgtype, body) = match content.msgtype {
+                                MessageType::Text(t) => ("text", t.body),
+                                MessageType::Notice(n) => ("notice", n.body),
+                                MessageType::Image(_) => ("image", "📎 IMAGE".into()),
+                                MessageType::Video(_) => ("video", "📎 VIDEO".into()),
+                                MessageType::File(_) => ("file", "📎 FILE".into()),
+                                MessageType::Audio(_) => ("audio", "📎 AUDIO".into()),
+                                MessageType::Location(_) => ("location", "📍 LOCATION".into()),
+                                MessageType::Emote(t) => ("emote", t.body),
+                                _ => continue,
+                            };
+
+                            messages.push(WhatsAppMessage {
+                                sender: sender.to_string(),
+                                sender_display_name: sender.localpart().to_string(),
+                                content: body,
+                                timestamp,
+                                message_type: msgtype.to_string(),
+                                room_name: room_name.clone(),
+                            });
                         }
 
-                        messages.push(WhatsAppMessage {
-                            sender: sender.to_string(),
-                            sender_display_name: sender.localpart().to_string(),
-                            content: body,
-                            timestamp,
-                            message_type: msgtype.to_string(),
-                            room_name: room_name.to_string(),
-                        });
                     }
                 }
+            },
+            Err(e) => {
+                tracing::error!("Failed to fetch messages from room {}: {}", room_id, e);
+                // Continue with other rooms even if one fails
             }
 
-            if from_token.is_none() {
-                break;
-            }
-
-            // Optional: small delay to respect backpressure
-            sleep(Duration::from_millis(100)).await;
         }
+        
+        // Optional: small delay to respect backpressure
+        sleep(Duration::from_millis(100)).await;
     }
 
+    // Sort all messages by timestamp (most recent first)
     messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    
+    tracing::info!("Retrieved a total of {} messages across all rooms", messages.len());
     Ok(messages)
 }
 
