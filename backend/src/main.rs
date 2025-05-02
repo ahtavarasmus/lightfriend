@@ -125,7 +125,8 @@ pub struct AppState {
     gmail_oauth_client: GoogleOAuthClient,
     session_store: MemoryStore,
     login_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
-    matrix_user_clients: Arc<Mutex<HashMap<i32, matrix_sdk::Client>>>,
+    matrix_sync_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
+    matrix_invitation_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
 }
 
 pub fn validate_env() {
@@ -160,8 +161,23 @@ async fn main() {
         ..Default::default()
     }));
 
-    tracing_subscriber::fmt()
-        .with_max_level(Level::DEBUG)
+    use tracing_subscriber::{fmt, EnvFilter};
+    
+    // Create filter that sets Matrix SDK logs to WARN and keeps our app at DEBUG
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| {
+            EnvFilter::new("warn,lightfriend=debug")
+                .add_directive("matrix_sdk=warn".parse().unwrap())
+                .add_directive("ruma=warn".parse().unwrap())
+        });
+
+    fmt()
+        .with_env_filter(filter)
+        .with_target(true)
+        .with_thread_ids(true)
+        .with_thread_names(true)
+        .with_file(true)
+        .with_line_number(true)
         .init();
 
     let manager = ConnectionManager::<SqliteConnection>::new("database.db");
@@ -201,7 +217,8 @@ async fn main() {
         .set_token_uri(TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).expect("Invalid token URL"))
         .set_redirect_uri(RedirectUrl::new(format!("{}/api/auth/google/tasks/callback", server_url_oauth)).expect("Invalid redirect URL"));
 
-    let matrix_user_clients = Arc::new(Mutex::new(HashMap::new()));
+    let matrix_sync_tasks = Arc::new(Mutex::new(HashMap::new()));
+    let matrix_invitation_tasks = Arc::new(Mutex::new(HashMap::new()));
     let state = Arc::new(AppState {
         db_pool: pool,
         user_repository: user_repository.clone(),
@@ -216,7 +233,8 @@ async fn main() {
             let mut map = DashMap::new();
             map
         },
-        matrix_user_clients,
+        matrix_sync_tasks,
+        matrix_invitation_tasks,
     });
 
     let twilio_routes = Router::new()
@@ -234,6 +252,7 @@ async fn main() {
         .route("/api/call/email/waiting_check", post(elevenlabs::handle_create_waiting_check_email_tool_call))
         .route("/api/call/tasks", get(elevenlabs::handle_tasks_fetching_tool_call))
         .route("/api/call/tasks/create", post(elevenlabs::handle_tasks_creation_tool_call))
+        .route_layer(middleware::from_fn_with_state(state.clone(), elevenlabs::check_subscription_access))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 
     let elevenlabs_webhook_routes = Router::new()
@@ -319,7 +338,10 @@ async fn main() {
         .route("/api/auth/whatsapp/status", get(whatsapp_auth::get_whatsapp_status))
         .route("/api/auth/whatsapp/connect", get(whatsapp_auth::start_whatsapp_connection))
         .route("/api/auth/whatsapp/disconnect", delete(whatsapp_auth::disconnect_whatsapp))
+        .route("/api/auth/whatsapp/resync", post(whatsapp_auth::resync_whatsapp))
         .route("/api/whatsapp/test-messages", get(whatsapp_handlers::test_fetch_messages))
+        .route("/api/whatsapp/send", post(whatsapp_handlers::send_message))
+        .route("/api/whatsapp/search-rooms", post(whatsapp_handlers::search_whatsapp_rooms_handler))
 
         // Filter routes
         .route("/api/filters/waiting-check/{service_type}", post(filter_handlers::create_waiting_check))

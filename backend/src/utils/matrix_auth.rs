@@ -39,6 +39,184 @@ use base64::{engine::general_purpose, Engine as _}; // or use hex crate
 use tokio::sync::Mutex;
 use std::collections::HashMap;
 
+/// Sets up encryption backups for a Matrix client
+/// 
+/// # Arguments
+/// * `client` - The Matrix client to set up backups for
+/// * `encrypted_key` - Optional encrypted secret storage recovery key
+/// 
+/// # Returns
+/// * `Ok(bool)` - Whether secret storage needs to be updated
+/// * `Err` - Any error that occurred during setup
+async fn setup_backups(
+    client: &MatrixClient,
+    encrypted_key: Option<&String>
+) -> Result<bool> {
+    println!("🔄 Checking encryption backups");
+    let mut backups_enabled = client.encryption().backups().are_enabled().await;
+    println!("🔐 Initial backups status: {}", backups_enabled);
+    
+    let mut needs_secret_storage_update = false;
+    
+    if !backups_enabled {
+        println!("❌ Backups not enabled, attempting to restore");
+        if let Some(key) = encrypted_key {
+            println!("🔑 Found encrypted recovery key in database");
+            if client.encryption().secret_storage().is_enabled().await? {
+                println!("✅ Secret storage is enabled, importing secrets for backups");
+                let passphrase = decrypt_token(key)?;
+                println!("🔑 Decrypted recovery key (length: {})", passphrase.len());
+                let secret_store = client.encryption().secret_storage().open_secret_store(&passphrase).await?;
+                println!("🔓 Opened secret store, importing secrets");
+                secret_store.import_secrets().await?;
+                println!("✅ Successfully imported secrets");
+                
+                // Check if backups are now enabled after importing secrets
+                backups_enabled = client.encryption().backups().are_enabled().await;
+                println!("🔐 Backups status after import: {}", backups_enabled);
+                
+                if !backups_enabled {
+                    println!("❌ Backups still not enabled after importing secrets");
+                    needs_secret_storage_update = true;
+                }
+            } else {
+                println!("❌ Secret storage is not enabled despite having a recovery key");
+                needs_secret_storage_update = true;
+            }
+        } else {
+            println!("❓ No recovery key found, will create new secret storage");
+            needs_secret_storage_update = true;
+        }
+    }
+    
+    println!("✅ Backup setup complete. Needs storage update: {}", needs_secret_storage_update);
+    Ok(needs_secret_storage_update)
+}
+
+/// Sets up cross-signing for a Matrix client
+/// # Arguments
+/// * `client` - The Matrix client to set up cross-signing for
+/// * `username` - The username for authentication if needed
+/// * `password` - The password for authentication if needed
+/// * `encrypted_key` - Optional encrypted secret storage recovery key
+/// 
+/// # Returns
+/// * `Ok(bool)` - Whether secret storage needs to be updated
+/// * `Err` - Any error that occurred during setup
+async fn setup_cross_signing(
+    client: &MatrixClient,
+    username: &str,
+    password: &str,
+    encrypted_key: Option<&String>
+) -> Result<bool> {
+    let mut needs_secret_storage_update = false;
+
+    if let Some(cross_signing_status) = client.encryption().cross_signing_status().await {
+        println!("🔐 Cross-signing status: {:?}", cross_signing_status);
+        
+        if !cross_signing_status.has_master || !cross_signing_status.has_self_signing || !cross_signing_status.has_user_signing {
+            if let Some(encrypted_key) = encrypted_key {
+                println!("🔑 Found encrypted secret storage recovery key in database");
+                if client.encryption().secret_storage().is_enabled().await? {
+                    println!("✅ Secret storage is enabled, importing secrets");
+                    let passphrase = decrypt_token(encrypted_key)?;
+                    println!("🔑 Decrypted recovery key (length: {})", passphrase.len());
+                    let secret_store = client.encryption().secret_storage().open_secret_store(&passphrase).await?;
+                    println!("🔓 Opened secret store, importing secrets");
+                    secret_store.import_secrets().await?;
+                    println!("✅ Successfully imported secrets");
+
+                    // Check if we need to bootstrap after import
+                    if let Some(status) = client.encryption().cross_signing_status().await {
+                        if !status.has_master || !status.has_self_signing || !status.has_user_signing {
+                            println!("🔐 Cross-signing status after import: {:?}", status);
+                            needs_secret_storage_update = try_bootstrap_cross_signing(client, username, password).await?;
+                        }
+                    }
+                } else {
+                    println!("❌ Secret storage is not enabled despite having a recovery key");
+                    needs_secret_storage_update = true;
+                }
+            } else {
+                println!("❓ No secret storage recovery key found in database");
+                needs_secret_storage_update = try_bootstrap_cross_signing(client, username, password).await?;
+            }
+        } else {
+            println!("✅ Cross signing keys are found in local store. Moving on");
+        }
+    } else {
+        println!("ℹ️ No cross-signing status available");
+        needs_secret_storage_update = try_bootstrap_cross_signing(client, username, password).await?;
+    }
+
+    Ok(needs_secret_storage_update)
+}
+
+/// Attempts to bootstrap cross-signing, handling authentication if needed
+async fn try_bootstrap_cross_signing(
+    client: &MatrixClient,
+    username: &str,
+    password: &str,
+) -> Result<bool> {
+    println!("🔄 Bootstrapping cross-signing keys");
+    match client.encryption().bootstrap_cross_signing(None).await {
+        Ok(_) => {
+            println!("✅ Successfully bootstrapped cross-signing");
+            Ok(true)
+        },
+        Err(e) => {
+            if let Some(response) = e.as_uiaa_response() {
+                println!("⚠️ Bootstrap requires authentication");
+                println!("👤 Username: {}", username);
+                println!("🔑 Password: {}", password);
+                
+                let user_identifier = matrix_sdk::ruma::api::client::uiaa::UserIdentifier::UserIdOrLocalpart(username.to_string());
+                let mut password_auth = matrix_sdk::ruma::api::client::uiaa::Password::new(user_identifier, password.to_string());
+                password_auth.session = response.session.clone();
+                
+                println!("🔄 Retrying bootstrap with authentication");
+                match client.encryption()
+                    .bootstrap_cross_signing(Some(matrix_sdk::ruma::api::client::uiaa::AuthData::Password(password_auth)))
+                    .await 
+                {
+                    Ok(_) => {
+                        println!("✅ Successfully bootstrapped cross-signing with authentication");
+                        Ok(true)
+                    },
+                    Err(e) => {
+                        println!("❌ Error during cross signing bootstrap with auth: {}", e);
+                        if e.to_string().contains("M_INVALID_SIGNATURE") || e.to_string().contains("already exists") {
+                            println!("🔄 Detected {} error, attempting recovery...", 
+                                if e.to_string().contains("M_INVALID_SIGNATURE") { "invalid signature" } else { "duplicate key" });
+                            
+                            // Clear the client's store path
+                            let store_path = format!(
+                                "{}/{}",
+                                std::env::var("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH")
+                                    .map_err(|_| anyhow!("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH not set"))?,
+                                username
+                            );
+                            
+                            println!("🗑️ Clearing store directory: {}", store_path);
+                            if std::path::Path::new(&store_path).exists() {
+                                std::fs::remove_dir_all(&store_path)?;
+                                std::fs::create_dir_all(&store_path)?;
+                            }
+                            
+                            Err(anyhow!("Matrix client needs to be reinitialized. Please try again."))
+                        } else {
+                            Err(anyhow!("Failed to bootstrap cross-signing: {}", e))
+                        }
+                    }
+                }
+            } else {
+                println!("❌ Error during cross signing bootstrap: {:#?}", e);
+                Err(anyhow!("Failed to bootstrap cross-signing: {}", e))
+            }
+        }
+    }
+}
+
 pub async fn initialize_matrix_user_clients(
     user_repository: Arc<UserRepository>,
 ) -> Arc<Mutex<HashMap<i32, matrix_sdk::Client>>> {
@@ -46,7 +224,7 @@ pub async fn initialize_matrix_user_clients(
     let mut clients = HashMap::new();
 
     for user_id in user_ids {
-        match crate::utils::matrix_auth::get_client(user_id, &user_repository).await {
+    match crate::utils::matrix_auth::get_client(user_id, &user_repository, true).await {
             Ok(client) => {
                 clients.insert(user_id, client);
                 tracing::info!("Initialized Matrix client for user {}", user_id);
@@ -58,55 +236,6 @@ pub async fn initialize_matrix_user_clients(
     }
 
     Arc::new(Mutex::new(clients))
-}
-
-/// Updates the matrix_user_clients map based on current bridge connections
-pub async fn update_matrix_user_clients(
-    state: &AppState,
-) -> Result<(), anyhow::Error> {
-    tracing::info!("Updating Matrix user clients based on bridge connections");
-    
-    // Get users who should have Matrix clients
-    let users_with_bridges = state.user_repository.get_users_with_matrix_bridge_connections()?;
-    let mut clients_map = state.matrix_user_clients.lock().await;
-    
-    // Track which users we've processed to identify those to remove
-    let mut processed_users = std::collections::HashSet::new();
-    
-    // Add or update clients for users with bridges
-    for user_id in &users_with_bridges {
-        processed_users.insert(*user_id);
-        
-        // If user already has a client, skip
-        if clients_map.contains_key(user_id) {
-            continue;
-        }
-        
-        // Create new client for user
-        match get_client(*user_id, &state.user_repository).await {
-            Ok(client) => {
-                tracing::info!("Added new Matrix client for user {}", user_id);
-                clients_map.insert(*user_id, client);
-            },
-            Err(e) => {
-                tracing::error!("Failed to create Matrix client for user {}: {}", user_id, e);
-            }
-        }
-    }
-    
-    // Remove clients for users who no longer have bridges
-    let users_to_remove: Vec<i32> = clients_map.keys()
-        .filter(|user_id| !processed_users.contains(user_id))
-        .copied()
-        .collect();
-    
-    for user_id in users_to_remove {
-        clients_map.remove(&user_id);
-        tracing::info!("Removed Matrix client for user {} who no longer has bridge connections", user_id);
-    }
-    
-    tracing::info!("Matrix user clients updated. Total active clients: {}", clients_map.len());
-    Ok(())
 }
 
 /// Initializes a Matrix client with given credentials.
@@ -179,12 +308,8 @@ pub async fn join_invited_rooms(client: &MatrixClient) -> Result<usize> {
     tracing::info!("Checking for room invitations for user {}", client.user_id().unwrap_or(&OwnedUserId::try_from("@unknown:unknown").unwrap()));
     
     // Get all rooms where the user has been invited
-    let invited_rooms: Vec<_> = client
-        .rooms()
-        .into_iter()
-        .filter(|room| room.state() == matrix_sdk::RoomState::Invited)
-        .collect();
-    
+    let invited_rooms: Vec<_> = client.invited_rooms();
+
     if invited_rooms.is_empty() {
         tracing::info!("No room invitations found");
         return Ok(0);
@@ -207,6 +332,9 @@ pub async fn join_invited_rooms(client: &MatrixClient) -> Result<usize> {
                 // Continue with other rooms even if one fails
             }
         }
+
+        // Take a breath - wait 1 second between each room join
+        sleep(Duration::from_secs(1)).await;
     }
     
     tracing::info!("Joined {} rooms out of {} invitations", joined_count, invited_rooms.len());
@@ -579,7 +707,7 @@ pub async fn login_with_password(client: &MatrixClient, user_repository: &UserRe
 }
 
 
-pub async fn get_client(user_id: i32, user_repository: &UserRepository) -> Result<MatrixClient> {
+pub async fn get_client(user_id: i32, user_repository: &UserRepository, setup_encryption: bool) -> Result<MatrixClient> {
     println!("🔄 Starting get_client for user_id: {}", user_id);
 
     // Get user profile from database
@@ -594,6 +722,7 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository) -> Resul
     println!("🏠 Using Matrix homeserver: {}", homeserver_url);
 
     // if matrix user doesn't exist, register one
+    /*
     let mut username: String = "default".to_string();
     let mut password: String = "default".to_string();
     let mut device_id: Option<String> = Some("default".to_string());
@@ -614,6 +743,19 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository) -> Resul
         password = pass;
         device_id = user.matrix_device_id;
     }
+    */
+
+    // Get or register Matrix credentials
+    let (username, password, device_id, access_token) = if user.matrix_username.is_none() {
+        println!("🆕 Registering new Matrix user");
+        let (username, access_token, device_id, password) = register_user(&homeserver_url, &shared_secret).await?;
+        user_repository.set_matrix_credentials(user.id, &username, &access_token, &device_id, &password)?;
+        (username, password, Some(device_id), Some(access_token))
+    } else {
+        println!("✓ Matrix credentials: username={}, device_id={:?}", user.matrix_username.as_ref().unwrap(), user.matrix_device_id);
+        let access_token = user.encrypted_matrix_access_token.as_ref().map(|t| decrypt_token(t)).transpose()?;
+        (user.matrix_username.unwrap(), decrypt_token(user.encrypted_matrix_password.as_ref().unwrap())?, user.matrix_device_id, access_token)
+    };
  
     let store_path = format!(
         "{}/{}",
@@ -626,6 +768,14 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository) -> Resul
     std::fs::create_dir_all(&store_path)
         .map_err(|e| anyhow!("Failed to create store directory {}: {}", store_path, e))?;
 
+    // Get domain from homeserver URL
+    let url = Url::parse(&homeserver_url)
+        .map_err(|e| anyhow!("Invalid homeserver URL: {}", e))?;
+    let domain = url.host_str()
+        .ok_or_else(|| anyhow!("No host in homeserver URL"))?;
+    
+    let full_user_id = format!("@{}:{}", username, domain);
+
     println!("🔨 Building Matrix client");
     let client = MatrixClient::builder()
         .homeserver_url(&homeserver_url)
@@ -637,12 +787,80 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository) -> Resul
     
     // logged_in checks if client store has device_id and access token stored
     println!("🔑 Checking if client is logged in: {}", client.logged_in());
+
+    // Attempt to restore session
+    let mut session_restored = false;
+    if let Some(stored_session) = client.matrix_auth().session() {
+        println!("🔄 Found session in store, attempting to restore");
+        if let Err(e) = client.matrix_auth().restore_session(stored_session.clone()).await {
+            println!("⚠️ Failed to restore session from store: {}", e);
+        } else {
+            println!("✅ Session restored from store");
+            session_restored = true;
+            // Verify session validity
+            if let Ok(response) = client.whoami().await {
+                println!("🔍 Server reports user_id: {}, device_id: {:?}", response.user_id, response.device_id);
+                // Update database if credentials changed
+                user_repository.set_matrix_credentials(
+                    user.id,
+                    &username,
+                    &stored_session.tokens.access_token,
+                    &response.device_id.expect("default").as_str(),
+                    &password,
+                )?;
+            } else {
+                println!("❌ Restored session is invalid, will attempt re-authentication");
+                session_restored = false;
+            }
+        }
+    }
+
+    // If no valid session was restored, try token-based login or password login
+    if !session_restored {
+        println!("🔑 No valid session restored, attempting authentication");
+        if let Some(access_token) = access_token {
+            println!("🔄 Attempting token-based login");
+
+            let session = matrix_sdk::authentication::matrix::MatrixSession {
+                meta: matrix_sdk::SessionMeta {
+                    user_id: OwnedUserId::try_from(full_user_id.clone()).unwrap(),
+                    device_id: matrix_sdk::ruma::OwnedDeviceId::try_from(device_id.clone().unwrap()).unwrap(),
+                },
+                tokens: matrix_sdk::authentication::matrix::MatrixSessionTokens {
+                    access_token: access_token.clone(),
+                    refresh_token: None,
+                },
+            };
+            if let Ok(_) = client.matrix_auth().restore_session(session.clone()).await {
+                println!("✅ Token-based session restored");
+                // Verify session
+                if let Ok(response) = client.whoami().await {
+                    println!("🔍 Server reports user_id: {}, device_id: {:?}", response.user_id, response.device_id);
+                    user_repository.set_matrix_credentials(
+                        user.id,
+                        &username,
+                        &access_token.as_str(),
+                        &response.device_id.expect("default").as_str(),
+                        &password,
+                    )?;
+                    session_restored = true;
+                }
+            }
+        }
+
+        // Fallback to password login if token-based login fails
+        if !session_restored {
+            println!("🔄 Attempting password-based login");
+            login_with_password(&client, user_repository, &username, &password, device_id.as_deref(), user.id).await?;
+        }
+    }
+
+        /*
     if !client.logged_in() {
         println!("❌ Client not logged in, attempting authentication");
 
         println!("🔄 Attempting to login with username and password: {}, {}", username, password);
         login_with_password(&client, user_repository, username.as_str(), password.as_str(), device_id.as_deref(), user.id).await?;
-        /*
         if let Some(device_id) = user.matrix_device_id.clone() {
             println!("🔑 Found device_id in database: {}", device_id);
             let access_token = decrypt_token(user.encrypted_matrix_access_token.as_ref().unwrap().as_str()).unwrap();
@@ -678,7 +896,7 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository) -> Resul
             login_with_password(&client, user_repository, user.matrix_username.as_ref().unwrap().as_str(), password.as_str(), user.id).await?;
         }
         */
-    } else { // client store has some device id and access token already
+    //} else { // client store has some device id and access token already
         /*
         println!("✅ Client already logged in from store");
 	    // call whoami to check if client store device id and access token are valid at the server also
@@ -705,131 +923,76 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository) -> Resul
                 login_with_password(&client, user_repository, user.matrix_username.as_ref().unwrap().as_str(), password.as_str(), user.id).await?;
             }
         }
-        */
     }
+        */
     println!("✅ Authentication complete - client is logged already in");
     // here we should have client store, our db and server synced with the same device id and access token
 
     // handle keys now
-    println!("🔐 Setting up encryption keys and secret storage");
-    let mut redo_secret_storage = false;
-    if let Some(status) = client.encryption().cross_signing_status().await {
-        println!("🔐 Cross-signing status: {:?}", status);
-        if let Some(encrypted_key) = user.encrypted_matrix_secret_storage_recovery_key.clone() {
-            println!("🔑 Found encrypted secret storage recovery key in database");
-            if client.encryption().secret_storage().is_enabled().await? {
-                println!("✅ Secret storage is enabled, importing secrets");
+        if setup_encryption {
+            println!("🔐 Setting up encryption keys and secret storage");
+            let mut redo_secret_storage = false;
+            
+            // Handle cross-signing setup
+            match setup_cross_signing(&client, &username, &password, user.encrypted_matrix_secret_storage_recovery_key.as_ref()).await {
+                Ok(should_update_storage) => {
+                    if should_update_storage {
+                        redo_secret_storage = true;
+                        println!("🚩 Marked for secret storage update");
+                    }
+                },
+                Err(e) => return Err(e),
+            }
+
+        println!("🔄 Setting up encryption backups");
+        match setup_backups(&client, user.encrypted_matrix_secret_storage_recovery_key.as_ref()).await {
+            Ok(should_update_storage) => {
+                if should_update_storage {
+                    redo_secret_storage = true;
+                    println!("🚩 Marked for secret storage update from backups setup");
+                }
+            },
+            Err(e) => return Err(e),
+        }
+
+        if redo_secret_storage {
+            println!("🔄 Updating secret storage");
+            // run secret storage create and cross signing keys + backup key will go there automatically.
+            if let Some(encrypted_key) = user.encrypted_matrix_secret_storage_recovery_key.clone() {
+                println!("🔑 Using existing recovery key");
                 let passphrase = decrypt_token(&encrypted_key.as_str()).unwrap();
                 println!("🔑 Decrypted recovery key (length: {})", passphrase.len());
-                let secret_store = client.encryption().secret_storage().open_secret_store(&passphrase.as_str()).await?;
-                println!("🔓 Opened secret store, importing secrets");
-                secret_store.import_secrets().await?;
-                println!("✅ Successfully imported secrets");
+                // recovery enable will create a new secret store and make sure backups enabled
+                println!("🔄 Enabling recovery with existing passphrase");
+                client.encryption().recovery().enable().with_passphrase(&passphrase.as_str()).await?;
+                println!("✅ Successfully enabled recovery with existing passphrase");
             } else {
-                println!("❌ Secret storage is not enabled despite having a recovery key");
+                println!("🔑 Creating new recovery key");
+                // recovery enable will create a new secret store and make sure backups enabled
+                let recovery = client.encryption().recovery();
+                let enable = recovery
+                    .enable()
+                    .wait_for_backups_to_upload();
+
+                println!("🔄 Enabling recovery and waiting for backups");
+                let recovery_key = enable.await?;
+                println!("✅ Successfully created new recovery key");
+                println!("💾 Saving recovery key to database");
+                user_repository.set_matrix_secret_storage_recovery_key(user.id, &recovery_key)?;
+                println!("✅ Successfully saved recovery key");
             }
-        } else {
-            println!("❓ No secret storage recovery key found in database");
         }
+
+        // sync for rooms keys
+        println!("🔄 Performing initial sync to get room keys");
+        client.sync_once(matrix_sdk::config::SyncSettings::new()).await?;
+        println!("✅ Initial sync complete");
         
-        // check again
-        if let Some(status) = client.encryption().cross_signing_status().await {
-            println!("🔐 Cross-signing status after import: {:?}", status);
-            // bootstrap cross signing keys here
-            println!("🔄 Bootstrapping cross-signing keys");
-            if let Err(e) = client.encryption().bootstrap_cross_signing(None).await {
-                println!("⚠️ Bootstrap requires authentication");
-                if let Some(response) = e.as_uiaa_response() {
-                    println!("👤 Username: {}", username);
-                    println!("🔑 Password: {}", password);
-                    let user_identifier = matrix_sdk::ruma::api::client::uiaa::UserIdentifier::UserIdOrLocalpart(username.to_string());
-                    let mut password_auth = matrix_sdk::ruma::api::client::uiaa::Password::new(user_identifier, password);
-                    password_auth.session = response.session.clone();
-                    
-                    println!("🔄 Retrying bootstrap with authentication");
-                    client.encryption()
-                        .bootstrap_cross_signing(Some(matrix_sdk::ruma::api::client::uiaa::AuthData::Password(password_auth)))
-                        .await
-                        .expect("couldn't bootstrap cross signing");
-
-                    println!("✅ Successfully bootstrapped cross-signing with authentication");
-                } else {
-                    println!("❌ Error during cross signing bootstrap: {:#?}", e);
-                    panic!("Error during cross signing bootstrap {:#?}", e);
-                }
-            } else {
-                println!("✅ Successfully bootstrapped cross-signing");
-            }
-            redo_secret_storage = true;
-            println!("🚩 Marked for secret storage update");
-        }
-    } else {
-        println!("ℹ️ No cross-signing status available");
-    }
-
-    println!("🔄 Checking encryption backups");
-    let backups_enabled = client.encryption().backups().are_enabled().await;
-    println!("🔐 Backups enabled: {}", backups_enabled);
-    
-    if !backups_enabled {
-        println!("❌ Backups not enabled, attempting to set up");
-        if let Some(key) = user.encrypted_matrix_secret_storage_recovery_key.clone() {
-            println!("🔑 Found encrypted recovery key in database");
-            if client.encryption().secret_storage().is_enabled().await.unwrap() {
-                println!("✅ Secret storage is enabled, importing secrets for backups");
-                let passphrase = decrypt_token(&key.as_str()).unwrap();
-                println!("🔑 Decrypted recovery key (length: {})", passphrase.len());
-                let secret_store = client.encryption().secret_storage().open_secret_store(&passphrase.as_str()).await?;
-                println!("🔓 Opened secret store, importing secrets");
-                secret_store.import_secrets().await?;
-                println!("✅ Successfully imported secrets for backups");
-            } else {
-                println!("❌ Secret storage is not enabled despite having a recovery key");
-                redo_secret_storage = true;
-                println!("🚩 Marked for secret storage update");
-            }        
-        } else {
-            println!("❓ No recovery key found, will create new secret storage");
-            // we will just set the flag and backups get created anyways later
-            redo_secret_storage = true;
-            println!("🚩 Marked for secret storage update");
-        }
-    }
-
-    if redo_secret_storage {
-        println!("🔄 Updating secret storage");
-        // run secret storage create and cross signing keys + backup key will go there automatically.
-        if let Some(encrypted_key) = user.encrypted_matrix_secret_storage_recovery_key.clone() {
-            println!("🔑 Using existing recovery key");
-            let passphrase = decrypt_token(&encrypted_key.as_str()).unwrap();
-            println!("🔑 Decrypted recovery key (length: {})", passphrase.len());
-            // recovery enable will create a new secret store and make sure backups enabled
-            println!("🔄 Enabling recovery with existing passphrase");
-            client.encryption().recovery().enable().with_passphrase(&passphrase.as_str()).await?;
-            println!("✅ Successfully enabled recovery with existing passphrase");
-        } else {
-            println!("🔑 Creating new recovery key");
-            // recovery enable will create a new secret store and make sure backups enabled
-            let recovery = client.encryption().recovery();
-            let enable = recovery
-                .enable()
-                .wait_for_backups_to_upload();
-
-            println!("🔄 Enabling recovery and waiting for backups");
-            let recovery_key = enable.await?;
-            println!("✅ Successfully created new recovery key");
-            println!("💾 Saving recovery key to database");
-            user_repository.set_matrix_secret_storage_recovery_key(user.id, &recovery_key)?;
-            println!("✅ Successfully saved recovery key");
-        }
-    }
-
-    // sync for rooms keys
-    println!("🔄 Performing initial sync to get room keys");
-    client.sync_once(matrix_sdk::config::SyncSettings::new()).await?;
-    println!("✅ Initial sync complete");
-    
     // Return the fully initialized client
+    } else {
+        println!("⏩ Skipping encryption setup as it's not needed for this operation");
+    }
+    
     println!("✅ Matrix client fully initialized for user {}", user_id);
     Ok(client)
 }

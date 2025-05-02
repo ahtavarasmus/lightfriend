@@ -396,6 +396,48 @@ pub async fn handle_incoming_sms(
     )
 }
 
+// Helper function to check if a tool is accessible based on user's status
+fn requires_subscription(tool_name: &str, has_sub: bool, has_discount: bool) -> bool {
+    // Tools available to all users (free tier)
+    if matches!(tool_name, "ask_perplexity" | "get_weather") {
+        return false;
+    }
+
+    // Additional tools available to discount users
+    if has_discount {
+        return !matches!(tool_name,
+            "ask_perplexity" |
+            "get_weather" |
+            "use_shazam" |
+            "fetch_specific_email" |
+            "fetch_imap_emails" |
+            "calendar"
+        );
+    }
+
+    // Subscribed users get access to all tools
+    if has_sub {
+        return false;
+    }
+
+    // If none of the above conditions are met, tool requires subscription
+    true
+}
+
+
+// Helper function to get subscription error message
+fn get_subscription_error(tool_name: &str) -> String {
+    format!("This feature ({}) requires a subscription. Please visit our website to subscribe.", 
+        match tool_name {
+            "calendar" => "calendar integration",
+            "fetch_whatsapp_messages" | "fetch_whatsapp_room_messages" | 
+            "send_whatsapp_message" | "search_whatsapp_rooms" => "WhatsApp integration",
+            "fetch_tasks" | "create_task" => "tasks integration",
+            _ => "feature"
+        }
+    )
+}
+
 async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (StatusCode, axum::Json<TwilioResponse>) {
 
     let start_time = std::time::Instant::now(); // Track processing time
@@ -483,7 +525,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: format!("You are a friendly and helpful AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Be direct and natural in your answers. Since users are using SMS, keep responses clear and brief. Avoid suggesting actions requiring smartphones or internet. Do not ask for confirmation to use tools. If there is even slightest hint that they could be helpful, use them immediately. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages. Use simple language and focus on the most important information first. This is what the user wants to you to know: {}. The user's timezone is {} with offset {}. When using tools that require time information (like calendar or email): 1. Always use RFC3339/ISO8601 format (e.g. '2024-03-23T14:30:00Z') 2. If no specific time is mentioned, use the current time for start and 24 hours ahead for end 3. Always consider the user's timezone when interpreting time-related requests 4. For 'today' queries, use 00:00 of current day as start and 23:59 as end in user's timezone 5. For 'tomorrow' queries, use 00:00 to 23:59 of next day in user's timezone. 6. Unless user references the previous query's results, you should always use the tools to fetch the latest information before answering the question. When you use tools make sure to add relevant info about the user to the tool call so they can act accordingly.", Utc::now().format("%Y-%m-%d"), user_info, timezone_str, offset),
+        content: format!("You are a friendly and helpful AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Be direct and natural in your answers. Since users are using SMS, keep responses clear and brief. Avoid suggesting actions requiring smartphones or internet. Do not ask for confirmation to use tools. For WhatsApp messages: NEVER send a message without first confirming the recipient using search_whatsapp_rooms. Always search first, then confirm the recipient exists in the search results and is something user agrees with before sending. If there is even slightest hint that they could be helpful, use them immediately. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages. Use simple language and focus on the most important information first. This is what the user wants to you to know: {}. The user's timezone is {} with offset {}. When using tools that require time information (like calendar or email): 1. Always use RFC3339/ISO8601 format (e.g. '2024-03-23T14:30:00Z') 2. If no specific time is mentioned, use the current time for start and 24 hours ahead for end 3. Always consider the user's timezone when interpreting time-related requests 4. For 'today' queries, use 00:00 of current day as start and 23:59 as end in user's timezone 5. For 'tomorrow' queries, use 00:00 to 23:59 of next day in user's timezone. 6. Unless user references the previous query's results, you should always use the tools to fetch the latest information before answering the question. When you use tools make sure to add relevant info about the user to the tool call so they can act accordingly.", Utc::now().format("%Y-%m-%d"), user_info, timezone_str, offset),
     }];
     
     // Process the message body to remove "forget" if it exists at the start
@@ -597,15 +639,79 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         }),
     );
 
-    let mut tasks_properties = HashMap::new();
-    tasks_properties.insert(
-        "param".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Can be anything, will fetch all tasks regardless".to_string()),
-            ..Default::default()
-        }),
-    );
+let mut tasks_properties = HashMap::new();
+tasks_properties.insert(
+    "param".to_string(),
+    Box::new(types::JSONSchemaDefine {
+        schema_type: Some(types::JSONSchemaType::String),
+        description: Some("Can be anything, will fetch all tasks regardless".to_string()),
+        ..Default::default()
+    }),
+);
+
+let mut whatsapp_messages_properties = HashMap::new();
+whatsapp_messages_properties.insert(
+    "start".to_string(),
+    Box::new(types::JSONSchemaDefine {
+        schema_type: Some(types::JSONSchemaType::String),
+        description: Some("Start time from which we start fetching the messages. Should be in format: '2024-03-16T00:00:00Z'".to_string()),
+        ..Default::default()
+    }),
+);
+whatsapp_messages_properties.insert(
+    "end".to_string(),
+    Box::new(types::JSONSchemaDefine {
+        schema_type: Some(types::JSONSchemaType::String),
+        description: Some("End time for which we end fetching the messages from. Should be in format: '2024-03-16T00:00:00Z'".to_string()),
+        ..Default::default()
+    }),
+);
+
+let mut whatsapp_room_messages_properties = HashMap::new();
+whatsapp_room_messages_properties.insert(
+    "chat_name".to_string(),
+    Box::new(types::JSONSchemaDefine {
+        schema_type: Some(types::JSONSchemaType::String),
+        description: Some("The name of the WhatsApp chat/room to fetch messages from".to_string()),
+        ..Default::default()
+    }),
+);
+whatsapp_room_messages_properties.insert(
+    "limit".to_string(),
+    Box::new(types::JSONSchemaDefine {
+        schema_type: Some(types::JSONSchemaType::Number),
+        description: Some("Optional: Maximum number of messages to fetch (default: 20)".to_string()),
+        ..Default::default()
+    }),
+);
+
+let mut whatsapp_search_properties = HashMap::new();
+whatsapp_search_properties.insert(
+    "search_term".to_string(),
+    Box::new(types::JSONSchemaDefine {
+        schema_type: Some(types::JSONSchemaType::String),
+        description: Some("Search term to find WhatsApp rooms/contacts".to_string()),
+        ..Default::default()
+    }),
+);
+
+let mut whatsapp_send_properties = HashMap::new();
+whatsapp_send_properties.insert(
+    "chat_name".to_string(),
+    Box::new(types::JSONSchemaDefine {
+        schema_type: Some(types::JSONSchemaType::String),
+        description: Some("The exact chat name/room name to send the message to. Must be confirmed first using search_whatsapp_rooms.".to_string()),
+        ..Default::default()
+    }),
+);
+whatsapp_send_properties.insert(
+    "message".to_string(),
+    Box::new(types::JSONSchemaDefine {
+        schema_type: Some(types::JSONSchemaType::String),
+        description: Some("The message content to send".to_string()),
+        ..Default::default()
+    }),
+);
 
     let mut create_task_properties = HashMap::new();
     create_task_properties.insert(
@@ -656,6 +762,54 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
 
     // Define tools
     let tools = vec![
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: String::from("send_whatsapp_message"),
+                description: Some(String::from("Sends a WhatsApp message to a specific chat. IMPORTANT: Before using this, you MUST first use search_whatsapp_rooms to confirm the recipient exists and get their exact chat name. Never send a message without confirming the recipient first and getting the confirmation from the user!")),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(whatsapp_send_properties),
+                    required: Some(vec![String::from("chat_name"), String::from("message")]),
+                },
+            },
+        },
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: String::from("fetch_whatsapp_messages"),
+                description: Some(String::from("Fetches recent WhatsApp messages. Use this when user asks about their WhatsApp messages or conversations.")),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(whatsapp_messages_properties),
+                    required: Some(vec![String::from("start_time"), String::from("end_time")]),
+                },
+            },
+        },
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: String::from("fetch_whatsapp_room_messages"),
+                description: Some(String::from("Fetches messages from a specific WhatsApp chat/room. Use this when user asks about messages from a specific WhatsApp contact or group.")),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(whatsapp_room_messages_properties),
+                    required: Some(vec![String::from("chat_name")]),
+                },
+            },
+        },
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: String::from("search_whatsapp_rooms"),
+                description: Some(String::from("Searches for WhatsApp rooms/contacts by name. Always use this before sending any message and confirm that recipient is found and it is correct.")),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(whatsapp_search_properties),
+                    required: Some(vec![String::from("search_term")]),
+                },
+            },
+        },
         chat_completion::Tool {
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
@@ -895,6 +1049,14 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                         continue;
                     },
                 };
+
+                // Check if user has access to this tool
+                let has_sub = user.sub_tier.is_some();
+                if requires_subscription(name, has_sub, user.discount) {
+                    println!("User attempted to use subscription-only tool {} without proper subscription", name);
+                    tool_answers.insert(tool_call_id, get_subscription_error(name));
+                    continue;
+                }
                 let arguments = match &tool_call.function.arguments {
                     Some(args) => args,
                     None => continue,
@@ -1202,6 +1364,262 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                             };
                             tool_answers.insert(tool_call_id, error_message.to_string());
                             eprintln!("Failed to fetch tasks: {:?}", error);
+                        }
+                    }
+                } else if name == "send_whatsapp_message" {
+                    println!("Executing send_whatsapp_message tool call");
+                    #[derive(Deserialize)]
+                    struct WhatsAppSendArgs {
+                        chat_name: String,
+                        message: String,
+                    }
+
+                    let args: WhatsAppSendArgs = match serde_json::from_str(arguments) {
+                        Ok(args) => args,
+                        Err(e) => {
+                            eprintln!("Failed to parse WhatsApp send arguments: {}", e);
+                            tool_answers.insert(tool_call_id, "Failed to parse message sending request.".to_string());
+                            continue;
+                        }
+                    };
+
+                    match crate::utils::whatsapp_utils::send_whatsapp_message(
+                        &state,
+                        user.id,
+                        &args.chat_name,
+                        &args.message,
+                    ).await {
+                        Ok(_) => {
+                            tool_answers.insert(tool_call_id, 
+                                format!("Message sent successfully to {}", args.chat_name)
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to send WhatsApp message: {}", e);
+                            tool_answers.insert(tool_call_id, 
+                                format!("Failed to send WhatsApp message: {}. Please make sure you're connected to WhatsApp bridge and the recipient exists.", e)
+                            );
+                        }
+                    }
+                } else if name == "search_whatsapp_rooms" {
+                    println!("Executing search_whatsapp_rooms tool call");
+                    #[derive(Deserialize)]
+                    struct WhatsAppSearchArgs {
+                        search_term: String,
+                    }
+
+                    let args: WhatsAppSearchArgs = match serde_json::from_str(arguments) {
+                        Ok(args) => args,
+                        Err(e) => {
+                            eprintln!("Failed to parse WhatsApp search arguments: {}", e);
+                            tool_answers.insert(tool_call_id, "Failed to parse search request.".to_string());
+                            continue;
+                        }
+                    };
+
+                    match crate::utils::whatsapp_utils::search_whatsapp_rooms(
+                        &state,
+                        user.id,
+                        &args.search_term,
+                    ).await {
+                        Ok(rooms) => {
+                            if rooms.is_empty() {
+                                tool_answers.insert(tool_call_id, format!("No WhatsApp contacts found matching '{}'.", args.search_term));
+                            } else {
+                                let mut response = String::new();
+                                for (i, room) in rooms.iter().take(5).enumerate() {
+                                    let last_active = chrono::DateTime::<chrono::Utc>::from_timestamp(room.last_activity, 0)
+                                        .map(|dt| dt.format("%m/%d %H:%M").to_string())
+                                        .unwrap_or_else(|| "never".to_string());
+                                    
+                                    if i == 0 {
+                                        response.push_str(&format!("{}. {} (last active: {})", 
+                                            i + 1,
+                                            room.display_name.trim_end_matches(" (WA)"),
+                                            last_active
+                                        ));
+                                    } else {
+                                        response.push_str(&format!("\n{}. {} (last active: {})", 
+                                            i + 1,
+                                            room.display_name.trim_end_matches(" (WA)"),
+                                            last_active
+                                        ));
+                                    }
+                                }
+                                
+                                if rooms.len() > 5 {
+                                    response.push_str(&format!("\n\n(+ {} more contacts)", rooms.len() - 5));
+                                }
+                                
+                                tool_answers.insert(tool_call_id, response);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to search WhatsApp rooms: {}", e);
+                            tool_answers.insert(tool_call_id, 
+                                "Failed to search WhatsApp contacts. Please make sure you're connected to WhatsApp bridge.".to_string()
+                            );
+                        }
+                    }
+                } else if name == "fetch_whatsapp_room_messages" {
+                    println!("Executing fetch_whatsapp_room_messages tool call");
+                    #[derive(Deserialize)]
+                    struct WhatsAppRoomArgs {
+                        chat_name: String,
+                        limit: Option<u64>,
+                    }
+
+                    let args: WhatsAppRoomArgs = match serde_json::from_str(arguments) {
+                        Ok(args) => args,
+                        Err(e) => {
+                            eprintln!("Failed to parse WhatsApp room arguments: {}", e);
+                            tool_answers.insert(tool_call_id, "Failed to parse room message request.".to_string());
+                            continue;
+                        }
+                    };
+
+                    match crate::utils::whatsapp_utils::fetch_whatsapp_room_messages(
+                        &state,
+                        user.id,
+                        &args.chat_name,
+                        args.limit,
+                    ).await {
+                        Ok(messages) => {
+                            if messages.is_empty() {
+                                tool_answers.insert(tool_call_id, format!("No messages found in chat '{}'.", args.chat_name));
+                            } else {
+                                let mut response = String::new();
+                                for (i, msg) in messages.iter().take(5).enumerate() {
+                                    let timestamp = chrono::DateTime::<chrono::Utc>::from_timestamp(msg.timestamp, 0)
+                                        .map(|dt| dt.format("%m/%d %H:%M").to_string())
+                                        .unwrap_or_else(|| "unknown time".to_string());
+                                    
+                                    let content = if msg.content.len() > 100 {
+                                        format!("{}...", &msg.content[..97])
+                                    } else {
+                                        msg.content.clone()
+                                    };
+                                    
+                                    if i == 0 {
+                                        response.push_str(&format!("{}. {} at {}:\n{}", 
+                                            i + 1, 
+                                            msg.sender_display_name,
+                                            timestamp,
+                                            content
+                                        ));
+                                    } else {
+                                        response.push_str(&format!("\n\n{}. {} at {}:\n{}", 
+                                            i + 1, 
+                                            msg.sender_display_name,
+                                            timestamp,
+                                            content
+                                        ));
+                                    }
+                                }
+                                
+                                if messages.len() > 5 {
+                                    response.push_str(&format!("\n\n(+ {} more messages)", messages.len() - 5));
+                                }
+                                
+                                tool_answers.insert(tool_call_id, response);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to fetch WhatsApp room messages: {}", e);
+                            tool_answers.insert(tool_call_id, 
+                                format!("Failed to fetch messages from '{}'. Please make sure you're connected to WhatsApp bridge and the chat exists.", args.chat_name)
+                            );
+                        }
+                    }
+                } else if name == "fetch_whatsapp_messages" {
+                    println!("Executing fetch_whatsapp_messages tool call");
+                    #[derive(Deserialize)]
+                    struct WhatsAppTimeFrame {
+                        start: String,
+                        end: String,
+                    }
+
+                    let time_frame: WhatsAppTimeFrame = match serde_json::from_str(arguments) {
+                        Ok(tf) => tf,
+                        Err(e) => {
+                            eprintln!("Failed to parse WhatsApp time frame: {}", e);
+                            tool_answers.insert(tool_call_id, "Failed to parse time frame for WhatsApp messages.".to_string());
+                            continue;
+                        }
+                    };
+
+                    // Parse the RFC3339 timestamps into Unix timestamps
+                    let start_time = match chrono::DateTime::parse_from_rfc3339(&time_frame.start) {
+                        Ok(dt) => dt.timestamp(),
+                        Err(e) => {
+                            eprintln!("Failed to parse start time: {}", e);
+                            tool_answers.insert(tool_call_id, "Invalid start time format. Please use RFC3339 format.".to_string());
+                            continue;
+                        }
+                    };
+
+                    let end_time = match chrono::DateTime::parse_from_rfc3339(&time_frame.end) {
+                        Ok(dt) => dt.timestamp(),
+                        Err(e) => {
+                            eprintln!("Failed to parse end time: {}", e);
+                            tool_answers.insert(tool_call_id, "Invalid end time format. Please use RFC3339 format.".to_string());
+                            continue;
+                        }
+                    };
+
+                    match crate::utils::whatsapp_utils::fetch_whatsapp_messages(
+                        &state,
+                        user.id,
+                        start_time,
+                        end_time,
+                    ).await {
+                        Ok(messages) => {
+                            if messages.is_empty() {
+                                tool_answers.insert(tool_call_id, "No WhatsApp messages found for this time period.".to_string());
+                            } else {
+                                let mut response = String::new();
+                                for (i, msg) in messages.iter().take(5).enumerate() {
+                                    let timestamp = chrono::DateTime::<chrono::Utc>::from_timestamp(msg.timestamp, 0)
+                                        .map(|dt| dt.format("%m/%d %H:%M").to_string())
+                                        .unwrap_or_else(|| "unknown time".to_string());
+                                    
+                                    let content = if msg.content.len() > 100 {
+                                        format!("{}...", &msg.content[..97])
+                                    } else {
+                                        msg.content.clone()
+                                    };
+                                    
+                                    if i == 0 {
+                                        response.push_str(&format!("{}. {} in {} at {}:\n{}", 
+                                            i + 1, 
+                                            msg.sender_display_name,
+                                            msg.room_name,
+                                            timestamp,
+                                            content
+                                        ));
+                                    } else {
+                                        response.push_str(&format!("\n\n{}. {} in {} at {}:\n{}", 
+                                            i + 1, 
+                                            msg.sender_display_name,
+                                            msg.room_name,
+                                            timestamp,
+                                            content
+                                        ));
+                                    }
+                                }
+                                
+                                if messages.len() > 5 {
+                                    response.push_str(&format!("\n\n(+ {} more messages)", messages.len() - 5));
+                                }
+                                
+                                tool_answers.insert(tool_call_id, response);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to fetch WhatsApp messages: {}", e);
+                            tool_answers.insert(tool_call_id, 
+                                "Failed to fetch WhatsApp messages. Please make sure you're connected to WhatsApp bridge.".to_string()
+                            );
                         }
                     }
                 } else if name == "calendar" {

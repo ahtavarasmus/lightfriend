@@ -3,8 +3,13 @@ use axum::{
     http::StatusCode,
 };
 use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio::time::{sleep, Duration};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{info, error};
 use crate::AppState;
+
 //use crate::handlers::gmail;
 
 use openai_api_rs::v1::common::GPT4_O;
@@ -19,6 +24,182 @@ use crate::handlers::google_tasks::{self, Task};
 
 pub async fn start_scheduler(state: Arc<AppState>) {
     let sched = JobScheduler::new().await.expect("Failed to create scheduler");
+
+    // Function to run continuous sync for a user
+    async fn run_sync_task(state: Arc<AppState>, user_id: i32) {
+        tracing::info!("Starting sync task for user {}", user_id);
+        
+        loop {
+            match crate::utils::matrix_auth::get_client(user_id, &state.user_repository, false).await {
+                Ok(client) => {
+                    match client.sync_once(matrix_sdk::config::SyncSettings::default()).await {
+                        Ok(_) => {
+                            tracing::debug!("Sync completed successfully for user {}", user_id);
+                        },
+                        Err(e) => {
+                            tracing::error!("Sync failed for user {}: {}", user_id, e);
+                        }
+                    }
+                },
+                Err(e) => {
+                    tracing::error!("Failed to get Matrix client for user {}: {}", user_id, e);
+                }
+            }
+            
+            // Check if user still has active bridge before continuing
+            match state.user_repository.get_whatsapp_bridge(user_id) {
+                Ok(Some(_)) => {
+                    sleep(Duration::from_secs(30)).await; // Wait before next sync
+                    continue;
+                },
+                _ => {
+                    tracing::info!("WhatsApp bridge no longer active for user {}, stopping sync task", user_id);
+                    break;
+                }
+            }
+        }
+        
+        // Remove task handle when finished
+        let mut sync_tasks = state.matrix_sync_tasks.lock().await;
+        sync_tasks.remove(&user_id);
+    }
+
+    // Function to run continuous invitation check for a user
+    async fn run_invitation_task(state: Arc<AppState>, user_id: i32) {
+        tracing::info!("Starting invitation task for user {}", user_id);
+        
+        loop {
+            match crate::utils::matrix_auth::get_client(user_id, &state.user_repository, true).await {
+                Ok(client) => {
+                    match crate::utils::matrix_auth::join_invited_rooms(&client).await {
+                        Ok(count) => {
+                            if count > 0 {
+                                tracing::info!("Joined {} rooms for user {}", count, user_id);
+                            }
+                        },
+                        Err(e) => {
+                            tracing::error!("Failed to join rooms for user {}: {}", user_id, e);
+                        }
+                    }
+                },
+                Err(e) => {
+                    tracing::error!("Failed to get Matrix client for user {}: {}", user_id, e);
+                }
+            }
+            
+            // Check if user still has active bridge before continuing
+            match state.user_repository.get_whatsapp_bridge(user_id) {
+                Ok(Some(_)) => {
+                    sleep(Duration::from_secs(60)).await; // Check invitations every minute
+                    continue;
+                },
+                _ => {
+                    tracing::info!("WhatsApp bridge no longer active for user {}, stopping invitation task", user_id);
+                    break;
+                }
+            }
+        }
+        
+        // Remove task handle when finished
+        let mut invitation_tasks = state.matrix_invitation_tasks.lock().await;
+        invitation_tasks.remove(&user_id);
+    }
+
+    // Start WhatsApp bridge maintenance for existing users
+    let state_clone = Arc::clone(&state);
+    tokio::spawn(async move {
+        match state_clone.user_repository.get_users_with_matrix_bridge_connections() {
+            Ok(user_ids) => {
+                for user_id in user_ids {
+                    if let Ok(Some(_)) = state_clone.user_repository.get_whatsapp_bridge(user_id) {
+                        // Start sync task if not already running
+                        let mut sync_tasks = state_clone.matrix_sync_tasks.lock().await;
+                        if !sync_tasks.contains_key(&user_id) {
+                            let state_for_sync = Arc::clone(&state_clone);
+                            let sync_handle = tokio::spawn(async move {
+                                run_sync_task(state_for_sync, user_id).await;
+                            });
+                            sync_tasks.insert(user_id, sync_handle);
+                        }
+                        
+                        // Start invitation task if not already running
+                        let mut invitation_tasks = state_clone.matrix_invitation_tasks.lock().await;
+                        if !invitation_tasks.contains_key(&user_id) {
+                            let state_for_invitation = Arc::clone(&state_clone);
+                            let invitation_handle = tokio::spawn(async move {
+                                run_invitation_task(state_for_invitation, user_id).await;
+                            });
+                            invitation_tasks.insert(user_id, invitation_handle);
+                        }
+                    }
+                }
+            },
+            Err(e) => {
+                tracing::error!("Failed to get users with Matrix bridge connections: {}", e);
+            }
+        }
+    });
+
+    // Create a job that runs every 5 minutes to check and restart tasks if needed
+    let state_clone = Arc::clone(&state);
+    let whatsapp_maintenance_job = Job::new_async("0 */5 * * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            tracing::info!("Running WhatsApp bridge maintenance check...");
+            
+            // Clean up completed or failed tasks
+            let mut sync_tasks = state.matrix_sync_tasks.lock().await;
+            let mut invitation_tasks = state.matrix_invitation_tasks.lock().await;
+            
+            sync_tasks.retain(|&user_id, handle| {
+                if handle.is_finished() {
+                    tracing::info!("Removing completed sync task for user {}", user_id);
+                    false
+                } else {
+                    true
+                }
+            });
+            
+            invitation_tasks.retain(|&user_id, handle| {
+                if handle.is_finished() {
+                    tracing::info!("Removing completed invitation task for user {}", user_id);
+                    false
+                } else {
+                    true
+                }
+            });
+            
+            // Start tasks for users who need them
+            if let Ok(user_ids) = state.user_repository.get_users_with_matrix_bridge_connections() {
+                for user_id in user_ids {
+                    if let Ok(Some(_)) = state.user_repository.get_whatsapp_bridge(user_id) {
+                        // Start sync task if not running
+                        if !sync_tasks.contains_key(&user_id) {
+                            let state_for_sync = Arc::clone(&state);
+                            let sync_handle = tokio::spawn(async move {
+                                run_sync_task(state_for_sync, user_id).await;
+                            });
+                            sync_tasks.insert(user_id, sync_handle);
+                            tracing::info!("Started new sync task for user {}", user_id);
+                        }
+                        
+                        // Start invitation task if not running
+                        if !invitation_tasks.contains_key(&user_id) {
+                            let state_for_invitation = Arc::clone(&state);
+                            let invitation_handle = tokio::spawn(async move {
+                                run_invitation_task(state_for_invitation, user_id).await;
+                            });
+                            invitation_tasks.insert(user_id, invitation_handle);
+                            tracing::info!("Started new invitation task for user {}", user_id);
+                        }
+                    }
+
+                }
+            }
+        })
+    }).expect("Failed to create WhatsApp maintenance job");
+
+    sched.add(whatsapp_maintenance_job).await.expect("Failed to add WhatsApp maintenance job to scheduler");
 
     // Create a job that runs every minute to check for new messages across services
     let state_clone = Arc::clone(&state);
@@ -921,113 +1102,8 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         })
     }).expect("Failed to create task cleanup job");
 
-    /*
     sched.add(task_cleanup_job).await.expect("Failed to add task cleanup job to scheduler");
-    
-    // Create a job that runs every 5 minutes to update Matrix clients
-    let state_clone = Arc::clone(&state);
-    let matrix_clients_update_job = Job::new_async("0 * * * * *", move |_, _| {  // Runs every 5 minutes
-        let state = state_clone.clone();
-        Box::pin(async move {
-            info!("Running Matrix clients update job...");
-            
-            match crate::utils::matrix_auth::update_matrix_user_clients(&state).await {
-                Ok(_) => info!("Successfully updated Matrix user clients"),
-                Err(e) => error!("Failed to update Matrix user clients: {}", e),
-            }
-        })
-    }).expect("Failed to create Matrix clients update job");
-
-    sched.add(matrix_clients_update_job).await.expect("Failed to add Matrix clients update job to scheduler");
-    
-    // Create a job that runs every 2 minutes to sync all Matrix clients and join invited rooms
-    let state_clone = Arc::clone(&state);
-    let matrix_sync_job = Job::new_async("0 * * * * *", move |_, _| {  // Runs every 2 minutes
-        let state = state_clone.clone();
-        Box::pin(async move {
-            info!("Running Matrix clients sync job...");
-            
-            // Get a copy of all user IDs with clients to avoid holding the lock during sync operations
-            let user_ids = {
-                let clients_map = state.matrix_user_clients.lock().await;
-                clients_map.keys().copied().collect::<Vec<i32>>()
-            };
-            
-            if user_ids.is_empty() {
-                info!("No Matrix clients to sync");
-                return;
-            }
-            
-            info!("Syncing {} Matrix clients", user_ids.len());
-            
-            // Create a vector to hold all sync tasks
-            let mut sync_tasks = Vec::new();
-            
-            // Spawn a task for each client
-            for user_id in user_ids {
-                let state = Arc::clone(&state);
-                let sync_task = tokio::spawn(async move {
-                    // Get the client from the map
-                    let client = {
-                        let clients_map = state.matrix_user_clients.lock().await;
-                        match clients_map.get(&user_id) {
-                            Some(client) => client.clone(),
-                            None => {
-                                // This can happen if a client was removed between getting the keys and here
-                                info!("Matrix client for user {} no longer exists, skipping sync", user_id);
-                                return Ok::<_, anyhow::Error>(());
-                            }
-                        }
-                    };
-                    
-                    // Perform the sync operation
-                    info!("Starting sync for Matrix client of user {}", user_id);
-                    let start_time = std::time::Instant::now();
-                    
-                    match client.sync_once(matrix_sdk::config::SyncSettings::default()).await {
-                        Ok(_) => {
-                            let duration = start_time.elapsed();
-                            info!("Successfully synced Matrix client for user {} in {:?}", user_id, duration);
-                            
-                            // After successful sync, check for and join any invited rooms
-                            match crate::utils::matrix_auth::join_invited_rooms(&client).await {
-                                Ok(joined_count) => {
-                                    if joined_count > 0 {
-                                        info!("User {} joined {} new rooms", user_id, joined_count);
-                                    }
-                                },
-                                Err(e) => {
-                                    error!("Failed to join invited rooms for user {}: {}", user_id, e);
-                                    // Continue anyway, this shouldn't fail the whole sync process
-                                }
-                            }
-                            
-                            Ok(())
-                        },
-                        Err(e) => {
-                            error!("Failed to sync Matrix client for user {}: {}", user_id, e);
-                            Err(anyhow::anyhow!("Sync failed for user {}: {}", user_id, e))
-                        }
-                    }
-                });
-                
-                sync_tasks.push(sync_task);
-            }
-            
-            // Wait for all sync tasks to complete
-            for task in sync_tasks {
-                if let Err(e) = task.await {
-                    error!("Matrix sync task panicked: {}", e);
-                }
-            }
-            
-            info!("Completed Matrix clients sync job");
-        })
-    }).expect("Failed to create Matrix sync job");
-
-    sched.add(matrix_sync_job).await.expect("Failed to add Matrix sync job to scheduler");
-    */
-    
+       
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");
 

@@ -159,7 +159,7 @@ pub async fn start_whatsapp_connection(
 
     println!("📝 Getting Matrix client...");
     // Get or create Matrix client using the centralized function
-    let client = matrix_auth::get_client(auth_user.user_id, &state.user_repository)
+    let client = matrix_auth::get_client(auth_user.user_id, &state.user_repository, true)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);
@@ -281,27 +281,44 @@ async fn accept_room_invitations(client: MatrixClient, duration: Duration) -> Re
         println!("👀 Checking for room invitations...");
 
         let invited_rooms = client.invited_rooms();
+        let invitation_count = invited_rooms.len();
 
-        if invited_rooms.is_empty() {
-            println!("📭 No new invitations found");
-        } else {
-            println!("📬 Found {} room invitations", invited_rooms.len());
-            for room in invited_rooms {
-                let room_id = room.room_id();
-                println!("🚪 Attempting to join room: {}", room_id);
+        if invitation_count == 0 {
+            // Add a longer delay when no invitations are found to prevent tight loops
+            sleep(Duration::from_secs(5)).await;
+            continue;
+        }
 
-                match client.join_room_by_id(room_id).await {
-                    Ok(_) => {
-                        println!("✅ Successfully joined room: {}", room_id);
-                        tracing::info!("Joined room: {}", room_id);
-                    }
-                    Err(e) => {
-                        println!("❌ Failed to join room {}: {}", room_id, e);
-                        tracing::error!("Failed to join room {}: {}", room_id, e);
+        println!("📬 Found {} room invitations", invitation_count);
+        for (index, room) in invited_rooms.into_iter().enumerate() {
+            let room_id = room.room_id();
+            println!("🚪 Attempting to join room {}/{}: {}", index + 1, invitation_count, room_id);
+
+            match client.join_room_by_id(room_id).await {
+                Ok(_) => {
+                    println!("✅ Successfully joined room: {}", room_id);
+                    tracing::info!("Joined room: {}", room_id);
+                }
+                Err(e) => {
+                    println!("❌ Failed to join room {}: {}", room_id, e);
+                    tracing::error!("Failed to join room {}: {}", room_id, e);
+                    
+                    // If we hit a rate limit or server error, add a longer delay
+                    if e.to_string().contains("M_LIMIT_EXCEEDED") || e.to_string().contains("500") {
+                        println!("⏳ Rate limit or server error detected, waiting longer...");
+                        sleep(Duration::from_secs(5)).await;
                     }
                 }
             }
+
+            // Add a delay between each room join attempt
+            println!("⏳ Taking a breath before next room join...");
+            sleep(Duration::from_secs(1)).await;
         }
+
+        // Add a small delay between invitation check cycles
+        println!("😴 Resting before next invitation check...");
+        sleep(Duration::from_secs(15)).await;
     }
 
     println!("🏁 Room invitation acceptance loop completed");
@@ -464,6 +481,124 @@ async fn monitor_whatsapp_connection(
     Err(anyhow!("WhatsApp connection timed out"))
 }
 
+/// Spawns the necessary sync tasks for a WhatsApp bridge user
+pub async fn spawn_whatsapp_sync_tasks(client: &MatrixClient, user_id: i32) {
+    // First start the continuous sync so we can receive invitations
+    let sync_client = client.clone();
+    tokio::spawn(async move {
+        // continuous sync so the bridge can deliver invites and room-keys
+        tracing::info!("Starting continuous sync for WhatsApp bridge user {}", user_id);
+        let _ = sync_client.sync(matrix_sdk::config::SyncSettings::default()).await;
+        tracing::info!("Continuous sync ended for user {}", user_id);
+    });
+    
+    // Give the sync a moment to start up
+    sleep(Duration::from_secs(2)).await;
+    
+    // Then start accepting invitations
+    let client_clone = client.clone();
+    tokio::spawn(async move {
+        // Wait a bit for initial invitations to arrive
+        sleep(Duration::from_secs(5)).await;
+        
+        // Run the invitation acceptance loop for 10 minutes
+        if let Err(e) = accept_room_invitations(client_clone, Duration::from_secs(600)).await {
+            tracing::error!("Error in accept_room_invitations for user {}: {}", user_id, e);
+        }
+    });
+}
+
+pub async fn resync_whatsapp(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
+    println!("🔄 Starting WhatsApp resync process for user {}", auth_user.user_id);
+
+    // Get the bridge information first
+    let bridge = state.user_repository.get_whatsapp_bridge(auth_user.user_id)
+        .map_err(|e| {
+            tracing::error!("Failed to get WhatsApp bridge: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "Failed to get WhatsApp bridge info"})),
+            )
+        })?;
+
+    let Some(bridge) = bridge else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            AxumJson(json!({"error": "WhatsApp is not connected"})),
+        ));
+    };
+
+    // Get Matrix client using the centralized function
+    let client = matrix_auth::get_client(auth_user.user_id, &state.user_repository, false)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to get Matrix client: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": format!("Failed to initialize Matrix client: {}", e)})),
+            )
+        })?;
+
+    // Get the room
+    let room_id = OwnedRoomId::try_from(bridge.room_id.unwrap_or_default())
+        .map_err(|_| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": "Invalid room ID format"})),
+        ))?;
+
+    if let Some(room) = client.get_room(&room_id) {
+        println!("📱 Sending WhatsApp sync commands");
+        
+        // First sync all contacts
+        if let Err(e) = room.send(RoomMessageEventContent::text_plain("!wa sync contacts --create-portals")).await {
+            tracing::error!("Failed to send contacts sync command: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "Failed to send contacts sync command"})),
+            ));
+        }
+        println!("✅ Sent contacts sync command");
+        
+        // Wait a bit for contacts to sync
+        sleep(Duration::from_secs(2)).await;
+        
+        // Then sync all groups
+        if let Err(e) = room.send(RoomMessageEventContent::text_plain("!wa sync groups --create-portals")).await {
+            tracing::error!("Failed to send groups sync command: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": "Failed to send groups sync command"})),
+            ));
+        }
+        println!("✅ Sent groups sync command");
+
+        // Start accepting invitations for new rooms
+        let client_clone = client.clone();
+        tokio::spawn(async move {
+            // Wait a bit for initial invitations to arrive
+            sleep(Duration::from_secs(5)).await;
+            
+            // Run the invitation acceptance loop for 5 minutes
+            if let Err(e) = accept_room_invitations(client_clone, Duration::from_secs(300)).await {
+                tracing::error!("Error in accept_room_invitations: {}", e);
+            }
+        });
+
+        println!("✅ WhatsApp resync process completed for user {}", auth_user.user_id);
+        Ok(AxumJson(json!({
+            "message": "WhatsApp resync initiated successfully"
+        })))
+    } else {
+        Err((
+            StatusCode::NOT_FOUND,
+            AxumJson(json!({"error": "WhatsApp bridge room not found"})),
+        ))
+    }
+}
+
 pub async fn disconnect_whatsapp(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -487,7 +622,7 @@ pub async fn disconnect_whatsapp(
     };
 
     // Get or create Matrix client using the centralized function
-    let client = matrix_auth::get_client(auth_user.user_id, &state.user_repository)
+    let client = matrix_auth::get_client(auth_user.user_id, &state.user_repository, false)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);

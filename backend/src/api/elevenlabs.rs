@@ -2,9 +2,10 @@ use axum::{
     Json,
     extract::State,
     response::Response,
-    http::{StatusCode, Request, HeaderMap},
+    http::{StatusCode, Request, HeaderMap, Method},
     body::Body,
 };
+use std::future::{ready, Ready};
 use tracing::error;
 use axum::middleware;
 use std::sync::Arc;
@@ -58,6 +59,106 @@ pub struct AgentConfig {
     first_message: String,
 }
 
+
+// Helper function to check if a tool is accessible based on user's status
+fn requires_subscription(path: &str, has_sub: bool, has_discount: bool) -> bool {
+    // Extract the tool name from the path
+    let tool_name = path.split('/').last().unwrap_or("");
+    
+    // Tools available to all users (free tier)
+    if matches!(tool_name, "perplexity" | "weather" | "sms") {
+        return false;
+    }
+
+    // Additional tools available to discount users
+    if has_discount {
+        return !matches!(tool_name,
+            "perplexity" |
+            "weather" |
+            "sms" |
+            "shazam" |
+            "email" |
+            "calendar"
+        );
+    }
+
+    // Subscribed users get access to all tools
+    if has_sub {
+        return false;
+    }
+
+    // If none of the above conditions are met, tool requires subscription
+    true
+}
+
+pub async fn check_subscription_access(
+    State(state): State<Arc<AppState>>,
+    request: Request<Body>,
+    next: middleware::Next,
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    println!("\n=== Starting Subscription Access Check ===");
+
+    // Extract user_id from query parameters
+    let uri = request.uri();
+    let query_params: HashMap<String, String> = url::form_urlencoded::parse(uri.query().unwrap_or("").as_bytes())
+        .into_owned()
+        .collect();
+
+    let user_id = match query_params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            println!("❌ No valid user_id found in query parameters");
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing or invalid user_id"
+                }))
+            ));
+        }
+    };
+
+    // Get user from database
+    let user = match state.user_repository.find_by_id(user_id) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            println!("❌ User not found: {}", user_id);
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": "User not found"
+                }))
+            ));
+        }
+        Err(e) => {
+            println!("❌ Database error: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Internal server error"
+                }))
+            ));
+        }
+    };
+
+    // Check if the tool requires subscription
+    if requires_subscription(
+        request.uri().path(),
+        user.sub_tier.as_deref() == Some("tier 1"),
+        user.discount
+    ) {
+        println!("❌ Tool requires subscription, user doesn't have access");
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "This tool requires a subscription",
+                "message": "Please upgrade your subscription to access this feature"
+            }))
+        ));
+    }
+
+    println!("✅ Subscription access check passed");
+    Ok(next.run(request).await)
+}
 
 pub async fn validate_elevenlabs_secret(
     headers: HeaderMap,

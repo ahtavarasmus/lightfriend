@@ -499,7 +499,6 @@ pub async fn stripe_webhook(
                         Some("tier 1"),
                     ).ok();
                     state.user_repository.update_proactive_messages_left(user.id, 150).ok();
-                    state.user_repository.update_sub_credits(user.id, 10.00).ok();
                     // Enable proactive IMAP messaging for subscribed users
                     state.user_repository.update_imap_proactive(user.id, true).ok();
                     println!("Updated subscription tier to 'tier 1', set 150 messages, and enabled proactive IMAP for user {}", user.id);
@@ -529,7 +528,6 @@ pub async fn stripe_webhook(
                     println!("Subscription renewal detected for customer: {} at period start: {}", customer_id, current_period_start);
                     if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
                         state.user_repository.update_proactive_messages_left(user.id, 150).ok();
-                        state.user_repository.update_sub_credits(user.id, 10.00).ok();
                         println!("Reset to 150 messages for user {} on subscription renewal", user.id);
                     } else {
                         println!("No user found for customer ID: {}", customer_id);
@@ -555,7 +553,6 @@ pub async fn stripe_webhook(
                     ).ok();
 
                     state.user_repository.update_proactive_messages_left(user.id, 0).ok();
-                    state.user_repository.update_sub_credits(user.id, 0.00).ok();
                     println!("Removed subscription tier for user {}", user.id);
                 }
             }
