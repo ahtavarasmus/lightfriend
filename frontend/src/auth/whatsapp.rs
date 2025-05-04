@@ -7,10 +7,11 @@ use crate::config;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::js_sys;
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Clone, Debug)]
 struct WhatsappStatus {
     connected: bool,
     status: String,
+    created_at: i32,
 }
 
 #[derive(Deserialize)]
@@ -21,6 +22,8 @@ struct WhatsappConnectionResponse {
 #[derive(Properties, PartialEq)]
 pub struct WhatsappProps {
     pub user_id: i32,
+    pub sub_tier: Option<String>,
+    pub discount: bool,
 }
 
 #[function_component(WhatsappConnect)]
@@ -220,6 +223,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                             connection_status.set(Some(WhatsappStatus {
                                 connected: false,
                                 status: "not_connected".to_string(),
+                                created_at: (js_sys::Date::now() as i32),
                             }));
                             error.set(None);
                         }
@@ -248,63 +252,210 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
             
             if let Some(status) = (*connection_status).clone() {
                 <div class="connection-status">
-                    if status.connected {
-                        <>
-                            <button onclick={disconnect} class="disconnect-button">
-                                {"Disconnect WhatsApp"}
-                            </button>
-                            <button onclick={{
-                                Callback::from(move |_| {
-                                    if let Some(token) = window()
-                                        .and_then(|w| w.local_storage().ok())
-                                        .flatten()
-                                        .and_then(|storage| storage.get_item("token").ok())
-                                        .flatten()
-                                    {
-                                        spawn_local(async move {
-                                            match Request::get(&format!("{}/api/whatsapp/test-messages", config::get_backend_url()))
-                                                .header("Authorization", &format!("Bearer {}", token))
-                                                .send()
-                                                .await
-                                            {
-                                                Ok(response) => {
-                                                    web_sys::console::log_1(&format!("Response status: {}", response.status()).into());
-                                                    // Log the raw response text first
-                                                    match response.text().await {
-                                                        Ok(text) => {
-                                                            web_sys::console::log_1(&format!("Raw response: {}", text).into());
-                                                            
-                                                            // Try to parse the text as JSON
-                                                            match serde_json::from_str::<serde_json::Value>(&text) {
-                                                                Ok(data) => {
-                                                                    web_sys::console::log_1(&format!("Messages: {:?}", data).into());
-                                                                    // You could also show this in the UI if desired
+if status.connected {
+    <>
+        {
+            // Show sync indicator for 15 minutes after connection
+            if js_sys::Date::now() - (status.created_at as f64 * 1000.0) <= 900000.0 { // 15 minutes in milliseconds
+                html! {
+                    <div class="sync-indicator">
+                        <div class="sync-spinner"></div>
+                        <p>{"Syncing chats... This may take up to 15 minutes for all chats to fully propagate"}</p>
+                    </div>
+                }
+            } else {
+                html! {}
+            }
+        }
+        <div class="button-group">
+            <p class="service-description">
+                {"Send and receive WhatsApp messages through SMS or voice calls."}
+            </p>
+            <button onclick={disconnect} class="disconnect-button">
+                {"Disconnect WhatsApp"}
+            </button>
+            {
+                if props.user_id == 1 {
+                    html! {
+                        <button onclick={{
+                            let fetch_status = fetch_status.clone();
+                            Callback::from(move |_| {
+                                let fetch_status = fetch_status.clone();
+                                if let Some(token) = window()
+                                    .and_then(|w| w.local_storage().ok())
+                                    .flatten()
+                                    .and_then(|storage| storage.get_item("token").ok())
+                                    .flatten()
+                                {
+                                    spawn_local(async move {
+                                        match Request::post(&format!("{}/api/auth/whatsapp/resync", config::get_backend_url()))
+                                            .header("Authorization", &format!("Bearer {}", token))
+                                            .send()
+                                            .await
+                                        {
+                                            Ok(_) => {
+                                                web_sys::console::log_1(&"WhatsApp resync initiated".into());
+                                                // Refresh status after resync
+                                                fetch_status.emit(());
+                                            }
+                                            Err(e) => {
+                                                web_sys::console::error_1(&format!("Failed to resync WhatsApp: {}", e).into());
+                                            }
+                                        }
+                                    });
+                                }
+                            })
+                        }} class="resync-button">
+                            {"Resync WhatsApp"}
+                        </button>
+                    }
+                } else {
+                    html! {}
+                }
+            }
+        </div>
+                            {
+                                if props.user_id == 1 {
+                                    html! {
+                                        <>
+                                            <button onclick={{
+                                                Callback::from(move |_| {
+                                                    if let Some(token) = window()
+                                                        .and_then(|w| w.local_storage().ok())
+                                                        .flatten()
+                                                        .and_then(|storage| storage.get_item("token").ok())
+                                                        .flatten()
+                                                    {
+                                                        spawn_local(async move {
+                                                            match Request::get(&format!("{}/api/whatsapp/test-messages", config::get_backend_url()))
+                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                .send()
+                                                                .await
+                                                            {
+                                                                Ok(response) => {
+                                                                    web_sys::console::log_1(&format!("Response status: {}", response.status()).into());
+                                                                    match response.text().await {
+                                                                        Ok(text) => {
+                                                                            web_sys::console::log_1(&format!("Raw response: {}", text).into());
+                                                                            match serde_json::from_str::<serde_json::Value>(&text) {
+                                                                                Ok(data) => {
+                                                                                    web_sys::console::log_1(&format!("Messages: {:?}", data).into());
+                                                                                }
+                                                                                Err(e) => {
+                                                                                    web_sys::console::error_1(&format!("Failed to parse JSON: {}", e).into());
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                        Err(e) => {
+                                                                            web_sys::console::error_1(&format!("Failed to get response text: {}", e).into());
+                                                                        }
+                                                                    }
                                                                 }
                                                                 Err(e) => {
-                                                                    web_sys::console::error_1(&format!("Failed to parse JSON: {}", e).into());
+                                                                    web_sys::console::error_1(&format!("Failed to fetch messages: {}", e).into());
                                                                 }
                                                             }
-                                                        }
-                                                        Err(e) => {
-                                                            web_sys::console::error_1(&format!("Failed to get response text: {}", e).into());
-                                                        }
+                                                        });
                                                     }
-                                                }
-                                                Err(e) => {
-                                                    web_sys::console::error_1(&format!("Failed to fetch messages: {}", e).into());
-                                                }
-                                            }
-                                        });
+                                                })
+                                            }} class="test-button">
+                                                {"Test Fetch Messages"}
+                                            </button>
+                                            <button onclick={{
+                                                Callback::from(move |_| {
+                                                    if let Some(token) = window()
+                                                        .and_then(|w| w.local_storage().ok())
+                                                        .flatten()
+                                                        .and_then(|storage| storage.get_item("token").ok())
+                                                        .flatten()
+                                                    {
+                                                        spawn_local(async move {
+                                                            let request_body = serde_json::json!({
+                                                                "chat_name": "rasmus",
+                                                                "message": "rasmus testing matrix, sorry:)"
+                                                            });
+
+                                                            match Request::post(&format!("{}/api/whatsapp/send", config::get_backend_url()))
+                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                .header("Content-Type", "application/json")
+                                                                .body(serde_json::to_string(&request_body).unwrap())
+                                                                .send()
+                                                                .await
+                                                            {
+                                                                Ok(response) => {
+                                                                    web_sys::console::log_1(&format!("Send message response status: {}", response.status()).into());
+                                                                    match response.text().await {
+                                                                        Ok(text) => {
+                                                                            web_sys::console::log_1(&format!("Send message response: {}", text).into());
+                                                                        }
+                                                                        Err(e) => {
+                                                                            web_sys::console::error_1(&format!("Failed to get send message response text: {}", e).into());
+                                                                        }
+                                                                    }
+                                                                }
+                                                                Err(e) => {
+                                                                    web_sys::console::error_1(&format!("Failed to send test message: {}", e).into());
+                                                                }
+                                                            }
+                                                        });
+                                                    }
+                                                })
+                                            }} class="test-button test-send-button">
+                                                {"Test Send Message"}
+                                            </button>
+                                            <button onclick={{
+                                                Callback::from(move |_| {
+                                                    if let Some(token) = window()
+                                                        .and_then(|w| w.local_storage().ok())
+                                                        .flatten()
+                                                        .and_then(|storage| storage.get_item("token").ok())
+                                                        .flatten()
+                                                    {
+                                                        spawn_local(async move {
+                                                            let request_body = serde_json::json!({
+                                                                "search_term": "leevi"
+                                                            });
+
+                                                            match Request::post(&format!("{}/api/whatsapp/search-rooms", config::get_backend_url()))
+                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                .header("Content-Type", "application/json")
+                                                                .body(serde_json::to_string(&request_body).unwrap())
+                                                                .send()
+                                                                .await
+                                                            {
+                                                                Ok(response) => {
+                                                                    web_sys::console::log_1(&format!("Search rooms response status: {}", response.status()).into());
+                                                                    match response.text().await {
+                                                                        Ok(text) => {
+                                                                            web_sys::console::log_1(&format!("Search rooms response: {}", text).into());
+                                                                        }
+                                                                        Err(e) => {
+                                                                            web_sys::console::error_1(&format!("Failed to get search rooms response text: {}", e).into());
+                                                                        }
+                                                                    }
+                                                                }
+                                                                Err(e) => {
+                                                                    web_sys::console::error_1(&format!("Failed to search rooms: {}", e).into());
+                                                                }
+                                                            }
+                                                        });
+                                                    }
+                                                })
+                                            }} class="test-button test-search-button">
+                                                {"Test Search Rooms"}
+                                            </button>
+                                        </>
                                     }
-                                })
-                            }} class="test-button">
-                                {"Test Fetch Messages"}
-                            </button>
+                                } else {
+                                    html! {}
+                                }
+                            }
                         </>
                     } else {
-                        if *is_connecting {
-                            if let Some(pairing_code) = (*qr_code).clone() {
-                                <div class="verification-code-container">
+                        if let Some(_) = &props.sub_tier {
+                            if *is_connecting {
+                                if let Some(pairing_code) = (*qr_code).clone() {
+                                    <div class="verification-code-container">
                                     <p>{"Enter this code in WhatsApp to connect:"}</p>
                                     <div class="verification-code">
                                         {pairing_code}
@@ -313,6 +464,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                                     <p class="instruction">{"2. Go to Settings > Linked Devices"}</p>
                                     <p class="instruction">{"3. Tap 'Link a Device'"}</p>
                                     <p class="instruction">{"4. When prompted, enter this code"}</p>
+
                                 </div>
                             } else {
                                 <div class="loading-container">
@@ -320,10 +472,25 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                                     <div class="loading-spinner"></div>
                                 </div>
                             }
+                            } else {
+                                <p class="service-description">
+                                    {"Send and receive WhatsApp messages through SMS or voice calls."}
+                                </p>
+                                <button onclick={start_connection} class="connect-button">
+                                    {"Connect WhatsApp"}
+                                </button>
+                            }
                         } else {
-                            <button onclick={start_connection} class="connect-button">
-                                {"Connect WhatsApp"}
-                            </button>
+                            <div class="upgrade-prompt">
+                                <div class="upgrade-content">
+                                    <h3>{"Pro Plan Required"}</h3>
+                                    <p>{"WhatsApp integration is available exclusively for Pro Plan subscribers."}</p>
+                                    <p>{"Upgrade to Pro Plan to connect your WhatsApp account and enjoy seamless integration."}</p>
+                                    <a href="/pricing" class="upgrade-button">
+                                        {"Upgrade to Pro Plan"}
+                                    </a>
+                                </div>
+                            </div>
                         }
                     }
                 </div>
@@ -360,6 +527,52 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                     .test-button:hover {
                         transform: translateY(-2px);
                         box-shadow: 0 4px 20px rgba(76, 175, 80, 0.3);
+                    }
+
+                    .test-send-button {
+                        background: linear-gradient(45deg, #FF8C00, #FFA500);
+                        margin-top: 0.5rem;
+                    }
+
+                    .test-send-button:hover {
+                        box-shadow: 0 4px 20px rgba(255, 140, 0, 0.3);
+                    }
+
+                    .test-search-button {
+                        background: linear-gradient(45deg, #9C27B0, #BA68C8);
+                        margin-top: 0.5rem;
+                    }
+
+                    .test-search-button:hover {
+                        box-shadow: 0 4px 20px rgba(156, 39, 176, 0.3);
+                    }
+
+                    
+
+                    .button-group {
+                        display: flex;
+                        gap: 1rem;
+                        margin-bottom: 1rem;
+                    }
+
+                    .resync-button {
+                        background: linear-gradient(45deg, #2196F3, #03A9F4);
+                        color: white;
+                        border: none;
+                        padding: 0.8rem 1.5rem;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        flex: 1;
+                    }
+
+                    .resync-button:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 20px rgba(33, 150, 243, 0.3);
+                    }
+
+                    .disconnect-button {
+                        flex: 1;
                     }
                     .loading-container {
                         text-align: center;
@@ -461,6 +674,78 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         border-radius: 8px;
                         padding: 1rem;
                         margin-top: 1rem;
+                    }
+                    .sync-spinner {
+                        display: inline-block;
+                        width: 20px;
+                        height: 20px;
+                        border: 3px solid rgba(30, 144, 255, 0.1);
+                        border-radius: 50%;
+                        border-top-color: #1E90FF;
+                        animation: spin 1s ease-in-out infinite;
+                        margin-right: 10px;
+                    }
+
+                    .sync-indicator {
+                        display: flex;
+                        align-items: center;
+                        background: rgba(30, 144, 255, 0.1);
+                        border-radius: 8px;
+                        padding: 1rem;
+                        margin-bottom: 1rem;
+                        color: #1E90FF;
+                    }
+
+                    .sync-indicator p {
+                        margin: 0;
+                        font-size: 0.9rem;
+                    }
+
+                    .upgrade-prompt {
+                        background: rgba(30, 144, 255, 0.05);
+                        border: 1px solid rgba(30, 144, 255, 0.1);
+                        border-radius: 12px;
+                        padding: 2rem;
+                        text-align: center;
+                        margin: 1rem 0;
+                    }
+
+                    .upgrade-content {
+                        max-width: 400px;
+                        margin: 0 auto;
+                    }
+
+                    .upgrade-content h3 {
+                        color: #1E90FF;
+                        margin-bottom: 1rem;
+                        font-size: 1.5rem;
+                    }
+
+                    .upgrade-content p {
+                        color: #666;
+                        margin-bottom: 1rem;
+                        line-height: 1.5;
+                    }
+
+                    .upgrade-button {
+                        display: inline-block;
+                        background: linear-gradient(45deg, #1E90FF, #4169E1);
+                        color: white;
+                        text-decoration: none;
+                        padding: 1rem 2rem;
+                        border-radius: 8px;
+                        font-weight: bold;
+                        transition: all 0.3s ease;
+                        margin-top: 1rem;
+                    }
+
+                    .upgrade-button:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3);
+                    }
+
+                    @keyframes spin {
+                        to { transform: rotate(360deg); }
                     }
                 "#}
             </style>

@@ -983,6 +983,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
     sched.add(matrix_sync_job).await.expect("Failed to add matrix sync job to scheduler");
 
+    /*
     // Create a job that runs daily to manage Matrix invitation tasks
     let state_clone = Arc::clone(&state);
     let matrix_invitation_job = Job::new_async("0 * * * * *", move |_, _| {  // runs every fifteen minutes 
@@ -1038,6 +1039,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     }).expect("Failed to create matrix invitation job");
 
     sched.add(matrix_invitation_job).await.expect("Failed to add matrix invitation job to scheduler");
+    */
        
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");

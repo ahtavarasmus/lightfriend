@@ -446,6 +446,7 @@ async fn monitor_whatsapp_connection(
                                 // Give the sync a moment to start up
                                 sleep(Duration::from_secs(2)).await;
                                 
+                                /*
                                 // Then start accepting invitations
                                 let client_clone = client.clone();
                                 tokio::spawn(async move {
@@ -457,6 +458,7 @@ async fn monitor_whatsapp_connection(
                                         tracing::error!("Error in accept_room_invitations: {}", e);
                                     }
                                 });
+                                */
 
 
                                 return Ok(());
@@ -588,6 +590,7 @@ pub async fn resync_whatsapp(
         }
         println!("✅ Sent groups sync command");
 
+        /*
         // Start accepting invitations for new rooms
         let client_clone = client.clone();
         tokio::spawn(async move {
@@ -599,6 +602,7 @@ pub async fn resync_whatsapp(
                 tracing::error!("Error in accept_room_invitations: {}", e);
             }
         });
+        */
 
         println!("✅ WhatsApp resync process completed for user {}", auth_user.user_id);
         Ok(AxumJson(json!({

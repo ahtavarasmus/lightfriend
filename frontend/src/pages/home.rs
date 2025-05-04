@@ -128,12 +128,15 @@ pub fn landing() -> Html {
                 <div class="feature-block on-demand">
                     <div class="feature-content">
                         <h2>{"Ask Anything, Anytime"}</h2>
-                        <p>{"Need to check your email? Want to know your next meeting? Just ask lightfriend through a call or text."}</p>
+                        <p>{"Need to check your WhatsApp? Want to know your next meeting? Just ask lightfriend through a call or text."}</p>
                         <ul class="feature-list">
-                            <li>{"Access emails, calendar and messaging apps"}</li>
-                            <li>{"Search the internet"}</li>
-                            <li>{"Check weather"}</li>
-                            <li>{"Identify songs with Shazam"}</li>
+                            <li><img src="/assets/whatsapplogo.png" alt="WhatsApp" class="feature-logo" />{" Send and receive WhatsApp messages"}</li>
+                            <li>{"📧 Access your emails"}</li>
+                            <li>{"✅ Manage your tasks"}</li>
+                            <li>{"📅 Check your calendar"}</li>
+                            <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="perplexity-logo" />{" Search the internet with Perplexity"}</li>
+                            <li>{"☀️ Check weather"}</li>
+                            <li>{"🎵 Identify songs with Shazam"}</li>
                         </ul>
                         <div class="demo-link-container">
                             <a 
@@ -154,9 +157,9 @@ pub fn landing() -> Html {
                 <div class="feature-block proactive">
                     <div class="feature-content">
                         <h2>{"Never Miss What Matters"}</h2>
-                        <p>{"Set up smart notifications for important emails and updates. lightfriend monitors your accounts and notifies you only when it matters."}</p>
+                        <p>{"Set up smart notifications for important emails, messages and updates. lightfriend monitors your accounts and notifies you only when it matters."}</p>
                         <ul class="feature-list">
-                            <li>{"Smart email filtering"}</li>
+                            <li>{"Smart message filtering"}</li>
                             <li>{"Custom keyword alerts"}</li>
                             <li>{"Priority sender notifications"}</li>
                             <li>{"Temporary waiting checks"}</li>
@@ -727,11 +730,19 @@ pub fn landing() -> Html {
                 }
 
                 .feature-list li::before {
-                    content: "→";
+                    content: '•';
                     position: absolute;
-                    left: 0;
+                    left: 0.5rem;
                     color: #1E90FF;
                 }
+
+                    .perplexity-logo, .feature-logo {
+                        height: 1em;
+                        width: auto;
+                        vertical-align: middle;
+                        margin-right: 0.2em;
+                    }
+
 
                 .demo-link-container {
                     margin-top: 2rem;
@@ -1930,10 +1941,11 @@ pub fn Home() -> Html {
                             match *active_tab {
                                 DashboardTab::Connections => html! {
                                     <div class="connections-tab">
+                            
                             {
                                 if let Some(profile) = (*profile_data).as_ref() {
                                     html! {
-                                        <Connect user_id={profile.id} />
+                                        <Connect user_id={profile.id} sub_tier={profile.sub_tier.clone()} discount={profile.discount}/>
                                     }
                                 } else {
                                     html! {}
@@ -1954,7 +1966,7 @@ pub fn Home() -> Html {
                                                 <li>{"Dedicated Weather search"}</li>
                                                 <li>{"Send info to you by sms during voice calls"}</li>
 
-                                                <li>{"Email, Calendar and Tasks integration"}</li>
+                                                <li>{"Email, Calendar, Tasks and WhatsApp integration"}</li>
                                                 <li>{"Shazam song recognition - Get a call, play the song, AI sends it to you by sms."}</li>
                                                 <li>{"Set up waiting checks for proactive messaging"}</li>
 
@@ -1973,7 +1985,7 @@ pub fn Home() -> Html {
 
                                                 <h4>{"Subscribe to Pro Plan to get the following tools:"}</h4>
                                                 <ul>
-                                                <li>{"Email, Calendar and Tasks integration"}</li>
+                                                <li>{"Email, Calendar, Tasks and WhatsApp integration"}</li>
                                                 <li>{"Shazam song recognition - Get a call, play the song, AI sends it to you by sms."}</li>
                                                 <li>{"Set up waiting checks for proactive messaging"}</li>
                                                 </ul>
@@ -2018,7 +2030,7 @@ pub fn Home() -> Html {
                                 }
                             <h3>{"Coming Soon"}</h3>
                             <ul>
-                                <li>{"WhatsApp and Telegram integration (Pro Plan)"}</li>
+                                <li>{"Telegram integration (Pro Plan)"}</li>
                                 <li>{"Camera functionality for photo translation and more (Pro Plan)"}</li>
                             </ul>
                             
@@ -2036,6 +2048,7 @@ pub fn Home() -> Html {
 
 
                         </div>
+
 
                         <div class="notification-settings">
                                 {

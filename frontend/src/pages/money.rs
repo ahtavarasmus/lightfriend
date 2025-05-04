@@ -164,8 +164,9 @@ pub fn pricing(props: &PricingProps) -> Html {
                         </div>
                     </div>
                     <ul>
-                        <li>{"Access to Perplexity Search and Weather tools"}</li>
-                        <li>{"Basic AI assistance"}</li>
+                        <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="feature-logo" />{" Perplexity AI search"}</li>
+                        <li>{"☀️ Weather updates"}</li>
+                        <li>{"🤖 Basic AI assistance"}</li>
                     </ul>
                     {
                         if !props.is_logged_in {
@@ -183,6 +184,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                 </div>
 
                 <div class="pricing-card subscription">
+                    <div class="popular-tag">{"Most Popular"}</div>
                     <div class="card-header">
                         <h3>{"Pro Plan"}</h3>
                         <div class="price">
@@ -191,9 +193,15 @@ pub fn pricing(props: &PricingProps) -> Html {
                         </div>
                     </div>
                     <ul>
-                        <li>{"Access to tools like Email, Calendar, Tasks, Shazam along with the Perplexity and Weather"}</li>
-                        <li>{"24/7 automated monitoring (optional)"}</li>
-                        <li>{"up to 150 proactive notifications/month"}</li>
+                        <li><img src="/assets/whatsapplogo.png" alt="WhatsApp" class="feature-logo" />{" WhatsApp integration"}</li>
+                        <li>{"📧 Email access"}</li>
+                        <li>{"📅 Calendar management"}</li>
+                        <li>{"✅ Task management"}</li>
+                        <li>{"🎵 Shazam song recognition"}</li>
+                        <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="feature-logo" />{" Perplexity AI search"}</li>
+                        <li>{"☀️ Weather updates"}</li>
+                        <li>{"🔄 24/7 automated monitoring (optional)"}</li>
+                        <li>{"📱 Up to 150 proactive notifications/month"}</li>
                     </ul>
                     {
                         if props.is_logged_in && props.sub_tier.is_none() {
@@ -311,22 +319,23 @@ pub fn pricing(props: &PricingProps) -> Html {
             <style>
                 {r#"
                 .pricing-card.main {
-                    background: linear-gradient(145deg, rgba(30, 30, 30, 0.7), rgba(30, 144, 255, 0.1));
+                    background: rgba(30, 30, 30, 0.7);
                 }
 
                 .pricing-card.free {
-                    background: linear-gradient(145deg, rgba(30, 30, 30, 0.8), rgba(76, 175, 80, 0.1));
-                    border: 1px solid rgba(76, 175, 80, 0.3);
+                    background: rgba(30, 30, 30, 0.8);
+                    border: 1px solid rgba(30, 144, 255, 0.1);
+                    position: relative;
                 }
 
                 .pricing-card.free:hover {
-                    border-color: rgba(76, 175, 80, 0.5);
-                    box-shadow: 0 8px 32px rgba(76, 175, 80, 0.25);
+                    border-color: rgba(30, 144, 255, 0.3);
+                    box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
                 }
 
                 .pricing-card.subscription {
-                    background: linear-gradient(145deg, rgba(30, 30, 30, 0.8), rgba(124, 77, 255, 0.2));
-                    border: 1px solid rgba(124, 77, 255, 0.3);
+                    background: rgba(30, 144, 255, 0.15);
+                    border: 1px solid rgba(30, 144, 255, 0.3);
                     transform: scale(1.05);
                     position: relative;
                     overflow: hidden;
@@ -334,8 +343,28 @@ pub fn pricing(props: &PricingProps) -> Html {
 
                 .pricing-card.subscription:hover {
                     transform: scale(1.08);
-                    border-color: rgba(124, 77, 255, 0.5);
-                    box-shadow: 0 8px 32px rgba(124, 77, 255, 0.25);
+                    border-color: rgba(30, 144, 255, 0.5);
+                    box-shadow: 0 8px 32px rgba(30, 144, 255, 0.25);
+                    background: rgba(30, 144, 255, 0.2);
+                }
+
+                .popular-tag {
+                    position: absolute;
+                    top: 1rem;
+                    right: 1rem;
+                    background: linear-gradient(45deg, #1E90FF, #4169E1);
+                    color: white;
+                    padding: 0.5rem 1rem;
+                    border-radius: 20px;
+                    font-size: 0.9rem;
+                    font-weight: 600;
+                }
+
+                .feature-logo {
+                    height: 1em;
+                    width: auto;
+                    vertical-align: middle;
+                    margin-right: 0.2em;
                 }
 
                 .pricing-container {
@@ -500,12 +529,27 @@ pub fn pricing(props: &PricingProps) -> Html {
                     display: flex;
                     align-items: center;
                     gap: 0.75rem;
+                    font-size: 1.1rem;
                 }
 
-                .pricing-card li::before {
-                    content: "✓";
-                    color: #1E90FF;
-                    font-weight: bold;
+                .pricing-card li img {
+                    margin-right: 0.5rem;
+                }
+
+                .pricing-card.subscription li {
+                    border-bottom: 1px solid rgba(30, 144, 255, 0.1);
+                }
+
+                .pricing-card.subscription li:last-child {
+                    border-bottom: none;
+                }
+
+                .pricing-card.free li {
+                    border-bottom: 1px solid rgba(30, 144, 255, 0.1);
+                }
+
+                .pricing-card.free li:last-child {
+                    border-bottom: none;
                 }
 
                 .pricing-faq {
