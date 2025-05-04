@@ -473,7 +473,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                         <div class="tooltip">
                                                             <span class="tooltip-icon">{"?"}</span>
                                                             <span class="tooltip-text">
-                                                                {"Early adopters keep access to tools: Email, Calendar Regardless of their subscription status. Thank you for being interested!"}
+                                                                {"Early adopters keep access to tools: Email, Calendar, Shazam, Perplexity and Weather regardless of their subscription status. Thank you for taking interest!"}
                                                             </span>
                                                         </div>
                                                     </div>

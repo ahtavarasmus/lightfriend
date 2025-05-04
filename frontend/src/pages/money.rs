@@ -84,7 +84,7 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
     };
 
     html! {
-        <button class="iq-button" href="#" {onclick}><b>{"Subscribe Now"}</b></button>
+        <button class="iq-button signup-button pro-signup" href="#" {onclick}><b>{"Subscribe Now"}</b></button>
     }
 }
 
@@ -165,14 +165,14 @@ pub fn pricing(props: &PricingProps) -> Html {
                     </div>
                     <ul>
                         <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="feature-logo" />{" Perplexity AI search"}</li>
-                        <li>{"☀️ Weather updates"}</li>
+                        <li>{"☀️ Ask about the Weather"}</li>
                         <li>{"🤖 Basic AI assistance"}</li>
                     </ul>
                     {
                         if !props.is_logged_in {
                             html! {
-                                <Link<Route> to={Route::Register} classes="forward-link">
-                                    <button class="iq-button"><b>{"Sign up now"}</b></button>
+                                <Link<Route> to={Route::Register} classes="forward-link signup-link">
+                                    <button class="iq-button signup-button pro-signup"><b>{"Sign up now"}</b></button>
                                 </Link<Route>>
                             }
                         } else {
@@ -199,7 +199,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <li>{"✅ Task management"}</li>
                         <li>{"🎵 Shazam song recognition"}</li>
                         <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="feature-logo" />{" Perplexity AI search"}</li>
-                        <li>{"☀️ Weather updates"}</li>
+                        <li>{"☀️ Ask about the Weather"}</li>
                         <li>{"🔄 24/7 automated monitoring (optional)"}</li>
                         <li>{"📱 Up to 150 proactive notifications/month"}</li>
                     </ul>
@@ -210,8 +210,8 @@ pub fn pricing(props: &PricingProps) -> Html {
                             }
                         } else if !props.is_logged_in {
                             html! {
-                                <Link<Route> to={Route::Register} classes="forward-link">
-                                    <button class="iq-button"><b>{"Sign up now"}</b></button>
+                                <Link<Route> to={Route::Register} classes="forward-link signup-link">
+                                    <button class="iq-button signup-button pro-signup"><b>{"Sign up now"}</b></button>
                                 </Link<Route>>
                             }
                         } else {
@@ -318,6 +318,51 @@ pub fn pricing(props: &PricingProps) -> Html {
 
             <style>
                 {r#"
+                .signup-link {
+                    text-decoration: none;
+                    display: block;
+                    width: 100%;
+                }
+
+                .signup-button {
+                    width: 100%;
+                    background: linear-gradient(45deg, #1E90FF, #4169E1);
+                    border: none;
+                    color: white;
+                    padding: 0.8rem 1.5rem;
+                    border-radius: 8px;
+                    font-size: 1rem;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
+                }
+
+                .signup-button:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 4px 15px rgba(30, 144, 255, 0.4);
+                    background: linear-gradient(45deg, #4169E1, #1E90FF);
+                }
+
+                .signup-button:active {
+                    transform: translateY(1px);
+                }
+
+                .signup-button.pro-signup {
+                    padding: 1rem 2rem;
+                    font-size: 1.1rem;
+                    background: linear-gradient(45deg, #4169E1, #1E90FF);
+                    box-shadow: 0 4px 15px rgba(30, 144, 255, 0.2);
+                }
+
+                .signup-button.pro-signup:hover {
+                    background: linear-gradient(45deg, #1E90FF, #4169E1);
+                    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.5);
+                    transform: translateY(-3px);
+                }
+
+
+
                 .pricing-card.main {
                     background: rgba(30, 30, 30, 0.7);
                 }
@@ -442,14 +487,30 @@ pub fn pricing(props: &PricingProps) -> Html {
                 }
 
                 .iq-button.disabled {
-                    opacity: 0.6;
+                    opacity: 0.8;
                     cursor: not-allowed;
-                    background: rgba(128, 128, 128, 0.3);
+                    background: linear-gradient(45deg, #666, #888);
+                    border: none;
+                    color: white;
+                    padding: 0.8rem 1.5rem;
+                    border-radius: 8px;
+                    font-size: 1rem;
+                    text-transform: uppercase;
+                    letter-spacing: 1px;
+                    transition: all 0.3s ease;
+                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
                 }
 
                 .iq-button.disabled:hover {
                     transform: none;
-                    box-shadow: none;
+                    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+                    background: linear-gradient(45deg, #666, #888);
+                }
+
+                .pricing-card.subscription .iq-button.disabled {
+                    padding: 1rem 2rem;
+                    font-size: 1.1rem;
+                    background: linear-gradient(45deg, #555, #777);
                 }
 
                 .card-header {

@@ -33,7 +33,7 @@ pub fn Profile() -> Html {
             let query = location.query_str();
             if let Ok(params) = UrlSearchParams::new_with_str(query) {
                 if params.has("subscription") && params.get("subscription").unwrap_or_default() == "success" {
-                    success.set(Some("Subscription activated successfully! You can now configure your proactive filters in the dashboard 'Proavtive' tab.".to_string()));
+                    success.set(Some("Subscription activated successfully! You can now connect your services at the home and setup monitoring at the 'Proactive' tab if you'd like.".to_string()));
                     active_tab.set(ProfileTab::Settings);
                     
                     // Clean up the URL after showing the message
