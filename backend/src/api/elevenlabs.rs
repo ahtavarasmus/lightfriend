@@ -68,31 +68,42 @@ pub struct AgentConfig {
 
 // Helper function to check if a tool is accessible based on user's status
 fn requires_subscription(path: &str, has_sub: bool, has_discount: bool) -> bool {
+
     // Extract the tool name from the path
     let tool_name = path.split('/').last().unwrap_or("");
+    println!("\n=== Subscription Check Details ===");
+    println!("Tool name: {}", tool_name);
+    println!("Has subscription: {}", has_sub);
+    println!("Has discount: {}", has_discount);
+    
+    // Subscribed users get access to all tools
+    if has_sub {
+        println!("✅ User has subscription - granting access");
+        return false;
+    }
     
     // Tools available to all users (free tier)
     if matches!(tool_name, "perplexity" | "weather" | "sms") {
+        println!("✅ Tool is in free tier - granting access");
         return false;
     }
 
     // Additional tools available to discount users
     if has_discount {
-        return !matches!(tool_name,
+        let has_access = matches!(tool_name,
             "perplexity" |
             "weather" |
             "sms" |
             "shazam" |
             "email" |
-            "calendar"
+            "calendar" |
+            "whatsapp"
         );
+        println!("Discount user tool access check: {}", has_access);
+        return !has_access;
     }
 
-    // Subscribed users get access to all tools
-    if has_sub {
-        return false;
-    }
-
+    println!("❌ Tool requires subscription - denying access");
     // If none of the above conditions are met, tool requires subscription
     true
 }
