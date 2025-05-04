@@ -719,6 +719,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
     sched.add(usage_monitor_job).await.expect("Failed to add usage monitor job to scheduler");
 
+    /*
     // Create a job that runs every minute to check for due tasks
     let state_clone = Arc::clone(&state);
     let task_monitor_job = Job::new_async("0 * * * * *", move |_, _| {
@@ -907,6 +908,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     }).expect("Failed to create task monitor job");
 
     sched.add(task_monitor_job).await.expect("Failed to add task monitor job to scheduler");
+    */
 
     // Create a job that runs daily to clean up old task notifications
     let state_clone = Arc::clone(&state);

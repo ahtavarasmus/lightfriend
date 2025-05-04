@@ -398,6 +398,11 @@ pub async fn handle_incoming_sms(
 
 // Helper function to check if a tool is accessible based on user's status
 fn requires_subscription(tool_name: &str, has_sub: bool, has_discount: bool) -> bool {
+    // Subscribed users get access to all tools, regardless of discount status
+    if has_sub {
+        return false;
+    }
+
     // Tools available to all users (free tier)
     if matches!(tool_name, "ask_perplexity" | "get_weather") {
         return false;
@@ -415,10 +420,6 @@ fn requires_subscription(tool_name: &str, has_sub: bool, has_discount: bool) -> 
         );
     }
 
-    // Subscribed users get access to all tools
-    if has_sub {
-        return false;
-    }
 
     // If none of the above conditions are met, tool requires subscription
     true
