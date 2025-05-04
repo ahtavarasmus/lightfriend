@@ -791,7 +791,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
                 name: String::from("fetch_whatsapp_room_messages"),
-                description: Some(String::from("Fetches messages from a specific WhatsApp chat/room. Use this when user asks about messages from a specific WhatsApp contact or group.")),
+                description: Some(String::from("Fetches messages from a specific WhatsApp chat/room. Use this when user asks about messages from a specific WhatsApp contact or group. You should return the latest messages that person or chat has sent to the user.")),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
                     properties: Some(whatsapp_room_messages_properties),
