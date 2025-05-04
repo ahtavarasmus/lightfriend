@@ -241,11 +241,14 @@ async fn main() {
         .route("/api/sms/server", post(twilio_sms::handle_incoming_sms))
         .route_layer(middleware::from_fn(api::twilio_utils::validate_twilio_signature));
 
-    let elevenlabs_routes = Router::new()
+    let elevenlabs_free_routes = Router::new()
         .route("/api/call/assistant", post(elevenlabs::fetch_assistant))
-        .route("/api/call/perplexity", post(elevenlabs::handle_perplexity_tool_call))
-        .route("/api/call/sms", post(elevenlabs::handle_send_sms_tool_call))
         .route("/api/call/weather", post(elevenlabs::handle_weather_tool_call))
+        .route("/api/call/perplexity", post(elevenlabs::handle_perplexity_tool_call))
+        .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
+
+    let elevenlabs_routes = Router::new()
+        .route("/api/call/sms", post(elevenlabs::handle_send_sms_tool_call))
         .route("/api/call/shazam", get(elevenlabs::handle_shazam_tool_call))
         .route("/api/call/calendar", get(elevenlabs::handle_calendar_tool_call))
         .route("/api/call/email", get(elevenlabs::handle_email_fetch_tool_call))
@@ -382,6 +385,7 @@ async fn main() {
         .route("/api/listen/{call_sid}", get(shazam_call::listen_handler))
         .merge(twilio_routes)
         .merge(elevenlabs_routes)
+        .merge(elevenlabs_free_routes)
         .merge(elevenlabs_webhook_routes)
         // Serve static files (robots.txt, sitemap.xml) at the root
         .layer(session_layer)
