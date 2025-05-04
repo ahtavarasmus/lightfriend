@@ -270,6 +270,134 @@ pub async fn validate_twilio_signature(
     Ok(next.run(request).await)
 }
 
+use openai_api_rs::v1::{
+    chat_completion,
+    types,
+    api::OpenAIClient,
+    common::GPT4_O,
+};
+
+// Function to redact sensitive information from the message body
+async fn redact_sensitive_info(body: &str) -> String {
+    // First apply regex-based redaction for basic PII
+    let re_email = regex::Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap();
+    let re_phone = regex::Regex::new(r"\b\d{3}-\d{3}-\d{4}\b").unwrap();
+    
+    let redacted = re_email.replace_all(body, "[EMAIL_REDACTED]");
+    let redacted = re_phone.replace_all(&redacted, "[PHONE_REDACTED]");
+    let initial_redacted = redacted.into_owned();
+
+    // Use LLM for advanced content redaction
+    let api_key = match std::env::var("OPENROUTER_API_KEY") {
+        Ok(key) => key,
+        Err(e) => {
+            eprintln!("Failed to get OpenRouter API key: {}", e);
+            return initial_redacted;
+        }
+    };
+
+    let client = match OpenAIClient::builder()
+        .with_endpoint("https://openrouter.ai/api/v1")
+        .with_api_key(api_key)
+        .build() {
+            Ok(client) => client,
+            Err(e) => {
+                eprintln!("Failed to build OpenAI client for redaction: {}", e);
+                return initial_redacted;
+            }
+        };
+
+    let system_prompt = "You are a privacy-focused content redaction system. Your task is to identify and redact sensitive information while preserving the context and meaning of messages. 
+
+    Redact the following types of content:
+    1. Personal identifiable information (PII)
+    2. Private message content from WhatsApp or other messaging platforms
+    3. Specific email content or details
+    4. Calendar event details (except general timing)
+    5. Task/todo content details
+    6. Location information (except general areas)
+    7. Financial information
+    8. Medical information
+    9. Personal relationships and private life details
+    10. Credentials or access-related information
+
+    Guidelines:
+    - Replace sensitive content with descriptive placeholders like [WHATSAPP_MESSAGE_REDACTED], [CALENDAR_EVENT_REDACTED], etc.
+    - Preserve general context and conversation flow
+    - Keep non-sensitive words and general topics intact
+    - Maintain message structure and readability
+    - When in doubt, err on the side of privacy
+    
+    Example:
+    Input: 'WhatsApp message from John: I'll meet you at 123 Main St at 3pm tomorrow for the doctor's appointment about my knee surgery'
+    Output: 'WhatsApp message from [NAME_REDACTED]: I'll meet you at [LOCATION_REDACTED] at 3pm tomorrow for [MEDICAL_APPOINTMENT_REDACTED]'";
+
+    let messages = vec![
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::system,
+            content: chat_completion::Content::Text(system_prompt.to_string()),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::user,
+            content: chat_completion::Content::Text(initial_redacted),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+    ];
+
+    let req = chat_completion::ChatCompletionRequest::new(
+        GPT4_O.to_string(),
+        messages,
+    )
+    .max_tokens(150);
+
+    match client.chat_completion(req).await {
+        Ok(result) => {
+            result.choices[0].message.content.clone().unwrap_or(initial_redacted)
+        },
+        Err(e) => {
+            eprintln!("Failed to get LLM redaction: {}", e);
+            initial_redacted
+        }
+    }
+}
+
+// Function to update (redact) a message in Twilio
+async fn redact_message(
+    conversation_sid: &str,
+    message_sid: &str,
+    redacted_body: &str,
+) -> Result<(), Box<dyn Error>> {
+    let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
+    let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
+    let client = Client::new();
+
+    let form_data = vec![("Body", redacted_body)];
+
+    let response = client
+        .post(format!(
+            "https://conversations.twilio.com/v1/Conversations/{}/Messages/{}",
+            conversation_sid, message_sid
+        ))
+        .basic_auth(&account_sid, Some(&auth_token))
+        .form(&form_data)
+        .send()
+        .await?;
+
+    if response.status().is_success() {
+        tracing::info!("Message {} redacted successfully", message_sid);
+    } else {
+        tracing::error!("Failed to redact message {}: {}", message_sid, response.status());
+        return Err(format!("Failed to redact message: {}", response.status()).into());
+    }
+
+    Ok(())
+}
+
 pub async fn send_conversation_message(
     conversation_sid: &str, 
     twilio_number: &String,
@@ -301,33 +429,14 @@ pub async fn send_conversation_message(
     tracing::info!("Message sent successfully to conversation {} with message SID: {}", conversation_sid, response.sid);
     println!("successfully sent the conversation message with SID: {}", response.sid);
     tracing::info!("Message sent successfully to conversation {} with message SID: {}", conversation_sid, response.sid);
-    //redact_message(conversation_sid, &response.sid).await?;
+
+    // Redact sensitive information using enhanced LLM-based redaction
+    let redacted_body = redact_sensitive_info(&body).await;
+    
+    // Update the message with the redacted body
+    redact_message(conversation_sid, &response.sid, &redacted_body).await?;
 
     Ok(response.sid)
 }
 
-// TODO 
-pub async fn redact_message(
-    conversation_sid: &str,
-    message_sid: &str,
-) -> Result<(), Box<dyn Error>> {
-    let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
-    let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
-    let client = Client::new();
-
-    let form_data = vec![("Body", "")]; // Set body to empty to redact
-
-    client
-        .post(format!(
-            "https://conversations.twilio.com/v1/Conversations/{}/Messages/{}",
-            conversation_sid, message_sid
-        ))
-        .basic_auth(&account_sid, Some(&auth_token))
-        .form(&form_data)
-        .send()
-        .await?;
-
-    tracing::info!("Message {} in conversation {} redacted", message_sid, conversation_sid);
-    Ok(())
-}
 
