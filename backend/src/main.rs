@@ -166,9 +166,10 @@ async fn main() {
     // Create filter that sets Matrix SDK logs to WARN and keeps our app at DEBUG
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| {
-            EnvFilter::new("warn,lightfriend=debug")
+            EnvFilter::new("debug,lightfriend=debug")
                 .add_directive("matrix_sdk=warn".parse().unwrap())
                 .add_directive("ruma=warn".parse().unwrap())
+                .add_directive("eyeball=warn".parse().unwrap())
         });
 
     fmt()
@@ -252,6 +253,7 @@ async fn main() {
         .route("/api/call/email/waiting_check", post(elevenlabs::handle_create_waiting_check_email_tool_call))
         .route("/api/call/tasks", get(elevenlabs::handle_tasks_fetching_tool_call))
         .route("/api/call/tasks/create", post(elevenlabs::handle_tasks_creation_tool_call))
+        .route("/api/call/whatsapp", get(elevenlabs::handle_whatsapp_fetch_tool_call))
         .route_layer(middleware::from_fn_with_state(state.clone(), elevenlabs::check_subscription_access))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 

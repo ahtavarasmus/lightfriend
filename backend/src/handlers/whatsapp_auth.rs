@@ -261,21 +261,33 @@ pub async fn get_whatsapp_status(
         Some(bridge) => Ok(AxumJson(json!({
             "connected": bridge.status == "connected",
             "status": bridge.status,
+            "created_at": bridge.created_at.unwrap_or(0), // Remove millisecond conversion
         }))),
         None => Ok(AxumJson(json!({
             "connected": false,
             "status": "not_connected",
+            "created_at": 0,
         }))),
     }
 }
 
-async fn accept_room_invitations(client: MatrixClient, duration: Duration) -> Result<()> {
+pub async fn accept_room_invitations(client: MatrixClient, duration: Duration) -> Result<()> {
     println!("🔄 Starting room invitation acceptance loop");
-    let end_time = Instant::now() + duration;
+    // Enforce maximum duration of 15 minutes
+    let max_duration = Duration::from_secs(900); // 15 minutes
+    let actual_duration = if duration > max_duration {
+        println!("⚠️ Requested duration exceeds maximum, capping at 15 minutes");
+        max_duration
+    } else {
+        duration
+    };
+    let end_time = Instant::now() + actual_duration;
     
     // Ensure we have a recent sync before starting
     println!("🔄 Performing initial sync to get current room state");
     client.sync_once(MatrixSyncSettings::default()).await?;
+    println!("😴 Waiting a little for room invitations to come in...");
+    sleep(Duration::from_secs(15)).await;
 
     while Instant::now() < end_time {
         println!("👀 Checking for room invitations...");
@@ -292,7 +304,8 @@ async fn accept_room_invitations(client: MatrixClient, duration: Duration) -> Re
         println!("📬 Found {} room invitations", invitation_count);
         for (index, room) in invited_rooms.into_iter().enumerate() {
             let room_id = room.room_id();
-            println!("🚪 Attempting to join room {}/{}: {}", index + 1, invitation_count, room_id);
+            let room_name = room.name();
+            println!("🚪 Attempting to join room {}/{}: {} {:#?}", index + 1, invitation_count, room_id, room_name);
 
             match client.join_room_by_id(room_id).await {
                 Ok(_) => {
@@ -312,8 +325,8 @@ async fn accept_room_invitations(client: MatrixClient, duration: Duration) -> Re
             }
 
             // Add a delay between each room join attempt
-            println!("⏳ Taking a breath before next room join...");
-            sleep(Duration::from_secs(1)).await;
+            println!("⏳ Taking a small breath before next room join...");
+            sleep(Duration::from_millis(10)).await;
         }
 
         // Add a small delay between invitation check cycles
@@ -581,8 +594,8 @@ pub async fn resync_whatsapp(
             // Wait a bit for initial invitations to arrive
             sleep(Duration::from_secs(5)).await;
             
-            // Run the invitation acceptance loop for 5 minutes
-            if let Err(e) = accept_room_invitations(client_clone, Duration::from_secs(300)).await {
+            // Run the invitation acceptance loop for 15 minutes
+            if let Err(e) = accept_room_invitations(client_clone, Duration::from_secs(900)).await {
                 tracing::error!("Error in accept_room_invitations: {}", e);
             }
         });

@@ -64,6 +64,7 @@ pub async fn fetch_whatsapp_messages(
     let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
         .unwrap_or_else(|_| "@whatsappbot:".to_string());
 
+
     // Create a structure to hold room info with last activity timestamp
     #[derive(Debug)]
     struct RoomInfo {
@@ -83,17 +84,24 @@ pub async fn fetch_whatsapp_messages(
             Err(_) => room_id.to_string(),
         };
 
-        // Skip bridge management rooms and non-WhatsApp rooms
-        let is_bridge_management = display_name.contains(&bridge_bot_username) || 
-                                 display_name.contains("whatsappbot") ||
+        // Get room members
+        let members = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
+            Ok(members) => members,
+            Err(_) => continue,
+        };
+
+        // Check if bridge bot is a member of the room
+        let has_bridge_bot = members.iter().any(|member| 
+            member.user_id().to_string().contains(&bridge_bot_username)
+        );
+
+        // Skip bridge management rooms
+        let is_bridge_management = display_name.contains("whatsappbot") ||
                                  display_name.contains("whatsapp-bridge") ||
                                  display_name == "WhatsApp Bridge" ||
                                  display_name == "WhatsApp bridge bot";
 
-        // Strict WhatsApp room detection - only rooms with (WA)
-        let is_whatsapp_room = display_name.contains("(WA)");
-
-        if !is_bridge_management && is_whatsapp_room {
+        if !is_bridge_management {
         
             // Get last message timestamp (if any)
             let mut options = matrix_sdk::room::MessagesOptions::backward();
@@ -179,7 +187,7 @@ pub async fn fetch_whatsapp_messages(
                             };
 
                             // Skip messages outside the time range
-                            if timestamp < start_time || timestamp > end_time {
+                            if timestamp < start_time {
                                 continue;
                             }
 
@@ -203,7 +211,7 @@ pub async fn fetch_whatsapp_messages(
                             }
 
                             // Strict filtering - only allow messages from whatsapp_ senders in (WA) rooms
-                            if sender.localpart().starts_with("whatsapp_") && room_name.contains("(WA)") {
+                            //if sender.localpart().starts_with("whatsapp_") && room_name.contains("(WA)") {
                                 messages.push(WhatsAppMessage {
                                     sender: sender.to_string(),
                                     sender_display_name: sender.localpart().to_string(),
@@ -212,7 +220,7 @@ pub async fn fetch_whatsapp_messages(
                                     message_type: msgtype.to_string(),
                                     room_name: room_name.clone(),
                                 });
-                            }
+                            //}
                         }
 
                     }
@@ -279,6 +287,9 @@ pub async fn send_whatsapp_message(
     chat_name: &str,
     message: &str,
 ) -> Result<WhatsAppMessage> {
+    // Get bridge bot username from environment variable or use default pattern
+    let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
+        .unwrap_or_else(|_| "@whatsappbot:".to_string());
     tracing::info!("Sending WhatsApp message for user {} to room_name {}", user_id, chat_name);
 
     // Normalize phone number format
@@ -314,8 +325,18 @@ pub async fn send_whatsapp_message(
         let room_name = room.display_name().await?.to_string();
         
         
-        // Check if room name matches the "<number> (WA)" format
-        if room_name.to_lowercase().contains(&chat_name.to_lowercase()){
+    // Get room members
+    let members = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
+        Ok(members) => members,
+        Err(_) => continue,
+    };
+
+        // Check if bridge bot is a member of the room
+        let has_bridge_bot = members.iter().any(|member| 
+            member.user_id().to_string().contains(&bridge_bot_username)
+        );
+
+        if has_bridge_bot && room_name.to_lowercase().contains(&chat_name.to_lowercase()) {
             target_room = Some(room);
             tracing::info!("Found matching room by room name: {}", room_name);
             break;
@@ -334,6 +355,7 @@ pub async fn send_whatsapp_message(
     let txn_id = matrix_sdk::ruma::TransactionId::new();
     println!("sending message: {:#?} to user: {:#?}", content.clone(), target_room.clone());
     room.send(content.clone()).with_transaction_id(txn_id).await?;
+    println!("just sent the message");
 
     // Return the sent message details
     Ok(WhatsAppMessage {
@@ -515,6 +537,9 @@ pub async fn search_whatsapp_rooms(
     user_id: i32,
     search_term: &str,
 ) -> Result<Vec<WhatsAppRoom>> {
+    // Get bridge bot username from environment variable or use default pattern
+    let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
+        .unwrap_or_else(|_| "@whatsappbot:".to_string());
     tracing::info!("Searching WhatsApp rooms for user {} with term: {}", user_id, search_term);
 
     // Get Matrix client using get_client function
@@ -540,10 +565,21 @@ pub async fn search_whatsapp_rooms(
     for room in joined_rooms {
         let room_name = room.display_name().await?.to_string();
         
-        // Only include WhatsApp rooms (marked with WA)
-        if !room_name.contains("(WA)") {
-            continue;
-        }
+    // Get room members
+    let members = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
+        Ok(members) => members,
+        Err(_) => continue,
+    };
+
+    // Check if bridge bot is a member of the room
+    let has_bridge_bot = members.iter().any(|member| 
+        member.user_id().to_string().contains(&bridge_bot_username)
+    );
+
+    // Skip if bridge bot is not a member
+    if !has_bridge_bot {
+        continue;
+    }
 
         // Check if room name matches search term (case insensitive)
         if room_name.to_lowercase().contains(&search_term_lower) {

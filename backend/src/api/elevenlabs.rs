@@ -30,6 +30,12 @@ pub struct GmailFetchPayload {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct WhatsAppFetchPayload {
+    start_time: String,  // RFC3339 format: "2024-03-16T00:00:00Z"
+    end_time: String,    // RFC3339 format: "2024-03-16T00:00:00Z"
+}
+
+#[derive(Debug, Deserialize)]
 pub struct MessageCallPayload {
     message: String,
 }
@@ -696,6 +702,7 @@ pub async fn handle_shazam_tool_call(
 
 pub async fn handle_perplexity_tool_call(
     State(_state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<MessageCallPayload>,
 ) -> Json<serde_json::Value> {
     println!("Received message: {}", payload.message);
@@ -880,8 +887,113 @@ pub async fn handle_tasks_fetching_tool_call(
     }
 }
 
+pub async fn handle_whatsapp_fetch_tool_call(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Starting WhatsApp message fetch with time range");
+
+    // Extract user_id from query parameters
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing or invalid user_id"
+                }))
+            ));
+        }
+    };
+
+    // Extract and parse start_time from query parameters
+    let start_timestamp = match params.get("start_time").and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()) {
+        Some(dt) => dt.timestamp(),
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing or invalid start_time. Expected RFC3339 format (e.g., '2024-03-16T00:00:00Z')"
+                }))
+            ));
+        }
+    };
+
+    // Extract and parse end_time from query parameters
+    let end_timestamp = match params.get("end_time").and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()) {
+        Some(dt) => dt.timestamp(),
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing or invalid end_time. Expected RFC3339 format (e.g., '2024-03-16T00:00:00Z')"
+                }))
+            ));
+        }
+    };
+
+    // Fetch messages using the existing utility function
+    match crate::utils::whatsapp_utils::fetch_whatsapp_messages(&state, user_id, start_timestamp, end_timestamp).await {
+        Ok(messages) => {
+            if messages.is_empty() {
+                return Ok(Json(json!({
+                    "response": "No WhatsApp messages found for the specified time range.",
+                    "messages": []
+                })));
+            }
+
+            // Format messages for voice response
+            let mut response_text = format!(
+                "Found {} WhatsApp messages. Here are the highlights: ",
+                messages.len()
+            );
+
+            // Add up to 5 most recent messages to the voice response
+            for (i, msg) in messages.iter().take(20).enumerate() {
+                let datetime = chrono::DateTime::<chrono::Utc>::from_timestamp(msg.timestamp, 0)
+                    .map(|dt| dt.format("%B %d at %H:%M").to_string())
+                    .unwrap_or_else(|| "unknown time".to_string());
+
+                response_text.push_str(&format!(
+                    "Message {} from {} in chat {}, sent on {}: {}. ",
+                    i + 1,
+                    msg.sender_display_name,
+                    msg.room_name,
+                    datetime,
+                    msg.content
+                ));
+            }
+
+            if messages.len() > 20 {
+                response_text.push_str(&format!(
+                    "And {} more messages. ",
+                    messages.len() - 20 
+                ));
+            }
+
+            Ok(Json(json!({
+                "response": response_text,
+                "messages": messages,
+                "total_count": messages.len()
+            })))
+        },
+        Err(e) => {
+            error!("Failed to fetch WhatsApp messages: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to fetch WhatsApp messages",
+                    "details": e.to_string()
+                }))
+            ))
+        }
+    }
+}
+
 pub async fn handle_weather_tool_call(
     State(_state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<LocationCallPayload>,
 ) -> Json<serde_json::Value> {
     println!("Received weather request for location: {}, using: {}", payload.location, payload.units);

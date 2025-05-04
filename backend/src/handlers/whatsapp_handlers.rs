@@ -86,7 +86,7 @@ pub async fn test_fetch_messages(
     // Get a wider time range - last 24 hours
     let now = Utc::now().naive_utc();
     let start_time = (now - chrono::Duration::hours(24)).timestamp();
-    let end_time = now.timestamp();
+    let end_time = now.timestamp()+1000000;
 
     tracing::info!("Fetching messages from {} to {}", start_time, end_time);
 

@@ -639,79 +639,79 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         }),
     );
 
-let mut tasks_properties = HashMap::new();
-tasks_properties.insert(
-    "param".to_string(),
-    Box::new(types::JSONSchemaDefine {
-        schema_type: Some(types::JSONSchemaType::String),
-        description: Some("Can be anything, will fetch all tasks regardless".to_string()),
-        ..Default::default()
-    }),
-);
+    let mut tasks_properties = HashMap::new();
+    tasks_properties.insert(
+        "param".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Can be anything, will fetch all tasks regardless".to_string()),
+            ..Default::default()
+        }),
+    );
 
-let mut whatsapp_messages_properties = HashMap::new();
-whatsapp_messages_properties.insert(
-    "start".to_string(),
-    Box::new(types::JSONSchemaDefine {
-        schema_type: Some(types::JSONSchemaType::String),
-        description: Some("Start time from which we start fetching the messages. Should be in format: '2024-03-16T00:00:00Z'".to_string()),
-        ..Default::default()
-    }),
-);
-whatsapp_messages_properties.insert(
-    "end".to_string(),
-    Box::new(types::JSONSchemaDefine {
-        schema_type: Some(types::JSONSchemaType::String),
-        description: Some("End time for which we end fetching the messages from. Should be in format: '2024-03-16T00:00:00Z'".to_string()),
-        ..Default::default()
-    }),
-);
+    let mut whatsapp_messages_properties = HashMap::new();
+    whatsapp_messages_properties.insert(
+        "start".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Start time from which we start fetching the messages. Should be in format: 'YYYY-MM-DDT00:00:00Z'".to_string()),
+            ..Default::default()
+        }),
+    );
+    whatsapp_messages_properties.insert(
+        "end".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("End time for which we end fetching the messages from. Should be in format: 'YYYY-MM-DDT00:00:00Z'".to_string()),
+            ..Default::default()
+        }),
+    );
 
-let mut whatsapp_room_messages_properties = HashMap::new();
-whatsapp_room_messages_properties.insert(
-    "chat_name".to_string(),
-    Box::new(types::JSONSchemaDefine {
-        schema_type: Some(types::JSONSchemaType::String),
-        description: Some("The name of the WhatsApp chat/room to fetch messages from".to_string()),
-        ..Default::default()
-    }),
-);
-whatsapp_room_messages_properties.insert(
-    "limit".to_string(),
-    Box::new(types::JSONSchemaDefine {
-        schema_type: Some(types::JSONSchemaType::Number),
-        description: Some("Optional: Maximum number of messages to fetch (default: 20)".to_string()),
-        ..Default::default()
-    }),
-);
+    let mut whatsapp_room_messages_properties = HashMap::new();
+    whatsapp_room_messages_properties.insert(
+        "chat_name".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("The name of the WhatsApp chat/room to fetch messages from".to_string()),
+            ..Default::default()
+        }),
+    );
+    whatsapp_room_messages_properties.insert(
+        "limit".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Number),
+            description: Some("Optional: Maximum number of messages to fetch (default: 20)".to_string()),
+            ..Default::default()
+        }),
+    );
 
-let mut whatsapp_search_properties = HashMap::new();
-whatsapp_search_properties.insert(
-    "search_term".to_string(),
-    Box::new(types::JSONSchemaDefine {
-        schema_type: Some(types::JSONSchemaType::String),
-        description: Some("Search term to find WhatsApp rooms/contacts".to_string()),
-        ..Default::default()
-    }),
-);
+    let mut whatsapp_search_properties = HashMap::new();
+    whatsapp_search_properties.insert(
+        "search_term".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Search term to find WhatsApp rooms/contacts".to_string()),
+            ..Default::default()
+        }),
+    );
 
-let mut whatsapp_send_properties = HashMap::new();
-whatsapp_send_properties.insert(
-    "chat_name".to_string(),
-    Box::new(types::JSONSchemaDefine {
-        schema_type: Some(types::JSONSchemaType::String),
-        description: Some("The exact chat name/room name to send the message to. Must be confirmed first using search_whatsapp_rooms.".to_string()),
-        ..Default::default()
-    }),
-);
-whatsapp_send_properties.insert(
-    "message".to_string(),
-    Box::new(types::JSONSchemaDefine {
-        schema_type: Some(types::JSONSchemaType::String),
-        description: Some("The message content to send".to_string()),
-        ..Default::default()
-    }),
-);
+    let mut whatsapp_send_properties = HashMap::new();
+    whatsapp_send_properties.insert(
+        "chat_name".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("The exact chat name/room name to send the message to. Must be confirmed first using search_whatsapp_rooms.".to_string()),
+            ..Default::default()
+        }),
+    );
+    whatsapp_send_properties.insert(
+        "message".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("The message content to send".to_string()),
+            ..Default::default()
+        }),
+    );
 
     let mut create_task_properties = HashMap::new();
     create_task_properties.insert(

@@ -238,65 +238,6 @@ pub async fn initialize_matrix_user_clients(
     Arc::new(Mutex::new(clients))
 }
 
-/// Initializes a Matrix client with given credentials.
-async fn initialize_client(username: &str, access_token: &str, device_id: &str) -> Result<MatrixClient> {
-    tracing::info!("Initializing Matrix client for user {}", username);
-    
-    // Get homeserver URL from environment
-    let homeserver = std::env::var("MATRIX_HOMESERVER")
-        .map_err(|_| anyhow!("MATRIX_HOMESERVER not set"))?;
-    
-    // Get domain from homeserver URL
-    let url = Url::parse(&homeserver)
-        .map_err(|e| anyhow!("Invalid homeserver URL: {}", e))?;
-    let domain = url.host_str()
-        .ok_or_else(|| anyhow!("No host in homeserver URL"))?;
-    
-    let full_user_id = format!("@{}:{}", username, domain);
-    
-    // Initialize Matrix client with persistent store
-    let store_path = format!(
-        "{}/{}",
-        std::env::var("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH")
-            .map_err(|_| anyhow!("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH not set"))?,
-        username
-    );
-    
-    std::fs::create_dir_all(&store_path)
-        .map_err(|e| anyhow!("Failed to create store directory {}: {}", store_path, e))?;
-    
-    let client = MatrixClient::builder()
-        .homeserver_url(&homeserver)
-        .sqlite_store(store_path, None)
-        .build()
-        .await
-        .map_err(|e| anyhow!("Failed to build Matrix client: {}", e))?;
-    
-    // Restore session with access token
-    client.restore_session(matrix_sdk::AuthSession::Matrix(matrix_sdk::authentication::matrix::MatrixSession {
-        meta: matrix_sdk::SessionMeta {
-            user_id: OwnedUserId::try_from(full_user_id.clone())
-                .map_err(|e| anyhow!("Invalid user_id format: {}", e))?,
-            device_id: OwnedDeviceId::try_from(device_id)
-                .map_err(|e| anyhow!("Invalid device_id format: {}", e))?,
-        },
-        tokens: matrix_sdk::authentication::matrix::MatrixSessionTokens {
-            access_token: access_token.to_string(),
-            refresh_token: None,
-        },
-    }))
-    .await
-    .map_err(|e| anyhow!("Failed to restore session: {}", e))?;
-    
-    // Perform initial sync to get room state
-    client.sync_once(MatrixSyncSettings::default())
-        .await
-        .map_err(|e| anyhow!("Failed to perform initial sync: {}", e))?;
-    
-    tracing::info!("Matrix client initialized successfully for {}", username);
-    Ok(client)
-}
-
 /// Checks for and joins any rooms the user has been invited to
 /// 
 /// # Arguments
@@ -340,7 +281,6 @@ pub async fn join_invited_rooms(client: &MatrixClient) -> Result<usize> {
     tracing::info!("Joined {} rooms out of {} invitations", joined_count, invited_rooms.len());
     Ok(joined_count)
 }
-
 
 
 pub async fn register_user(homeserver: &str, shared_secret: &str) -> Result<(String, String, String, String)> {
@@ -448,103 +388,7 @@ fn generate_matrix_password(user_id: &str) -> String {
 
 
 
-/// Attempts to login a Matrix user with the provided credentials
-/// 
-/// # Arguments
-/// * `homeserver` - The URL of the Matrix homeserver
-/// * `username` - The username to login with
-/// * `password` - The password for authentication
-/// 
-/// # Returns
-/// A tuple containing the access token and device ID on success
-// TODO delete i think
-pub async fn login_user(homeserver: &str, username: &str, password: &str) -> Result<(String, String)> {
-    println!("🔑 Attempting Matrix user login for {}", username);
-    // Create HTTP client
-    let http_client = HttpClient::new();
-    
-    let response = http_client
-        .post(format!("{}/_matrix/client/v3/login", homeserver))
-        .json(&json!({
-            "type": "m.login.password",
-            "identifier": {
-                "type": "m.id.user",
-                "user": username
-            },
-            "password": password,
-            "initial_device_display_name": "Bridge Device"
-        }))
-        .send()
-        .await
-        .map_err(|e| anyhow!("Failed to send login request: {}", e))?;
-
-    let status = response.status();
-    let login_res = response
-        .text()
-        .await
-        .map_err(|e| anyhow!("Failed to read login response: {}", e))?;
-    let login_json: serde_json::Value = serde_json::from_str(&login_res)
-        .map_err(|e| anyhow!("Failed to parse login response: {}", e))?;
-
-    if status.is_success() {
-        let access_token = login_json["access_token"]
-            .as_str()
-            .ok_or_else(|| anyhow!("No access_token in response: {}", login_res))?
-            .to_string();
-        let device_id = login_json["device_id"]
-            .as_str()
-            .ok_or_else(|| anyhow!("No device_id in response: {}", login_res))?
-            .to_string();
-        println!("✅ Matrix login successful for {}", username);
-        Ok((access_token, device_id))
-    } else {
-        let error = login_json["error"]
-            .as_str()
-            .unwrap_or("Unknown error");
-        Err(anyhow!("Login failed: {} (status: {})", error, status))
-    }
-}
-
-/// Deletes a Matrix device using the admin API
-/// 
-/// # Arguments
-/// * `homeserver` - The URL of the Matrix homeserver
-/// * `shared_secret` - The shared secret for admin API authentication
-/// * `user_id` - The Matrix user ID whose device should be deleted
-/// * `device_id` - The device ID to delete
-/// 
-/// # Returns
-/// Success or error result
-// TODO remove i think
-pub async fn delete_device(homeserver: &str, shared_secret: &str, user_id: &str, device_id: &str) -> Result<()> {
-    println!("🗑️ Deleting device {} for user {}", device_id, user_id);
-    // Create HTTP client
-    let http_client = HttpClient::new();
-    
-    let response = http_client
-        .delete(format!(
-            "{}/_synapse/admin/v2/users/{}/devices/{}",
-            homeserver, user_id, device_id
-        ))
-        .header("Authorization", format!("Bearer {}", shared_secret))
-        .send()
-        .await
-        .map_err(|e| anyhow!("Failed to send device deletion request: {}", e))?;
-
-    let status = response.status();
-    if status.is_success() {
-        println!("✅ Device {} deleted successfully", device_id);
-        Ok(())
-    } else {
-        let error_res = response
-            .text()
-            .await
-            .map_err(|e| anyhow!("Failed to read deletion response: {}", e))?;
-        Err(anyhow!("Device deletion failed: {} (status: {})", error_res, status))
-    }
-}
-
-/// Encrypts a Matrix access token for secure storage
+/// Encrypts a token for secure storage
 /// 
 /// # Arguments
 /// * `token` - The token to encrypt
@@ -552,7 +396,7 @@ pub async fn delete_device(homeserver: &str, shared_secret: &str, user_id: &str,
 /// # Returns
 /// The encrypted token as a base64 string
 pub fn encrypt_token(token: &str) -> Result<String> {
-    println!("🔒 Encrypting access token...");
+    println!("🔒 Encrypting token...");
     let encryption_key = std::env::var("ENCRYPTION_KEY")
         .map_err(|_| anyhow!("ENCRYPTION_KEY not set"))?;
     
@@ -560,7 +404,7 @@ pub fn encrypt_token(token: &str) -> Result<String> {
     Ok(cipher.encrypt_str_to_base64(token))
 }
 
-/// Decrypts a previously encrypted Matrix access token
+/// Decrypts a previously encrypted token
 /// 
 /// # Arguments
 /// * `encrypted_token` - The encrypted token in base64 format
@@ -568,85 +412,13 @@ pub fn encrypt_token(token: &str) -> Result<String> {
 /// # Returns
 /// The decrypted token as a string
 pub fn decrypt_token(encrypted_token: &str) -> Result<String> {
-    println!("🔓 Decrypting access token...{}", encrypted_token);
+    println!("🔓 Decrypting token...{}", encrypted_token);
     let encryption_key = std::env::var("ENCRYPTION_KEY")
         .map_err(|_| anyhow!("ENCRYPTION_KEY not set"))?;
     
     let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
     cipher.decrypt_base64_to_string(encrypted_token)
         .map_err(|e| anyhow!("Failed to decrypt token: {}", e))
-}
-
-/// Deletes all Matrix devices except the current one
-/// 
-/// This is important for security as it ensures only one device has access
-/// to the user's Matrix account at a time.
-/// 
-/// # Arguments
-/// * `client` - The Matrix client
-/// * `current_device_id` - The device ID to keep
-/// 
-/// # Returns
-/// The number of devices deleted, or an error
-pub async fn delete_other_devices(client: &MatrixClient, current_device_id: &str) -> Result<usize> {
-    tracing::info!("Checking for other devices to delete for user {}", client.user_id().unwrap_or(&OwnedUserId::try_from("@unknown:unknown").unwrap()));
-    
-    // Get all devices
-    let response = client.devices().await
-        .map_err(|e| anyhow!("Failed to get devices: {}", e))?;
-    
-    // Filter out the current device
-    let devices_to_delete: Vec<OwnedDeviceId> = response.devices
-        .into_iter()
-        .filter(|device| device.device_id.as_str() != current_device_id)
-        .map(|device| device.device_id)
-        .collect();
-    
-    if devices_to_delete.is_empty() {
-        tracing::info!("No other devices to delete");
-        return Ok(0);
-    }
-    
-    tracing::info!("Found {} other devices to delete", devices_to_delete.len());
-    
-    // Try to delete devices
-    match client.delete_devices(&devices_to_delete, None).await {
-        Ok(_) => {
-            tracing::info!("Successfully deleted {} devices", devices_to_delete.len());
-            Ok(devices_to_delete.len())
-        },
-        Err(e) => {
-            // Handle UIAA (User Interactive Authentication API) response
-            if let Some(uiaa_info) = e.as_uiaa_response() {
-                // Get user ID and generate password
-                let user_id_str = client.user_id().unwrap().to_string();
-                let username = user_id_str.strip_prefix('@')
-                    .and_then(|s| s.split(':').next())
-                    .ok_or_else(|| anyhow!("Invalid user ID format"))?;
-                let password = generate_matrix_password(&user_id_str);
-                
-                // Create authentication data
-                let user_identifier = matrix_sdk::ruma::api::client::uiaa::UserIdentifier::UserIdOrLocalpart(username.to_string());
-                let mut password_auth = matrix_sdk::ruma::api::client::uiaa::Password::new(user_identifier, password);
-                password_auth.session = uiaa_info.session.clone();
-                
-                // Try again with authentication
-                match client.delete_devices(&devices_to_delete, Some(matrix_sdk::ruma::api::client::uiaa::AuthData::Password(password_auth))).await {
-                    Ok(_) => {
-                        tracing::info!("Successfully deleted {} devices after authentication", devices_to_delete.len());
-                        Ok(devices_to_delete.len())
-                    },
-                    Err(e) => {
-                        tracing::error!("Failed to delete devices after authentication: {}", e);
-                        Err(anyhow!("Failed to delete devices after authentication: {}", e))
-                    }
-                }
-            } else {
-                tracing::error!("Failed to delete devices: {}", e);
-                Err(anyhow!("Failed to delete devices: {}", e))
-            }
-        }
-    }
 }
 
 
@@ -679,25 +451,6 @@ pub async fn login_with_password(client: &MatrixClient, user_repository: &UserRe
         user_repository.set_matrix_device_id_and_access_token(user_id, &response.access_token, &response.device_id.as_str())?;
         println!("✅ Successfully saved credentials");
         
-        /*
-        // Delete other devices for security
-        println!("🔄 Checking for other devices to delete");
-        match delete_other_devices(client, &response.device_id.as_str()).await {
-            Ok(count) => {
-                if count > 0 {
-                    println!("🗑️ Deleted {} other devices for user {}", count, user_id);
-                    tracing::info!("Deleted {} other devices for user {}", count, user_id);
-                } else {
-                    println!("✅ No other devices to delete");
-                }
-            },
-            Err(e) => {
-                println!("⚠️ Failed to delete other devices: {}", e);
-                tracing::warn!("Failed to delete other devices for user {}: {}", user_id, e);
-                // Continue anyway as this is not critical
-            }
-        }
-        */
     } else {
         println!("❌ Login failed: {:?}", res.err());
         return Err(anyhow!("Failed to login with username and password. User may need to be re-registered."));
@@ -720,30 +473,6 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository, setup_en
     let shared_secret = std::env::var("MATRIX_SHARED_SECRET")
         .map_err(|_| anyhow!("MATRIX_SHARED_SECRET not set"))?;
     println!("🏠 Using Matrix homeserver: {}", homeserver_url);
-
-    // if matrix user doesn't exist, register one
-    /*
-    let mut username: String = "default".to_string();
-    let mut password: String = "default".to_string();
-    let mut device_id: Option<String> = Some("default".to_string());
-    if user.matrix_username.is_none() {
-        println!("🆕 No Matrix username found, registering new Matrix user");
-        let (new_username, new_access_token, new_device_id, new_password) = register_user(&homeserver_url, &shared_secret).await?;
-        println!("✅ Successfully registered new Matrix user: {}, with password: {}", new_username, new_password);
-        user_repository.set_matrix_credentials(user.id, &new_username, &new_access_token, &new_device_id, &new_password)?;
-        username = new_username;
-        password = new_password;
-        device_id = Some(new_device_id);
-        println!("💾 Saved Matrix credentials to database and here is the username from db {:#?}, password: {:#?}, device_id: {:#?}", username, password, device_id);
-    } else {
-        println!("✓ Matrix username exists: {}", user.matrix_username.clone().unwrap());
-        println!("✓ Matrix password exists: {}", user.encrypted_matrix_password.clone().unwrap());
-        username = user.matrix_username.clone().unwrap();
-        let pass = decrypt_token(user.encrypted_matrix_password.as_ref().unwrap().as_str()).unwrap();
-        password = pass;
-        device_id = user.matrix_device_id;
-    }
-    */
 
     // Get or register Matrix credentials
     let (username, password, device_id, access_token) = if user.matrix_username.is_none() {
@@ -854,84 +583,17 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository, setup_en
             login_with_password(&client, user_repository, &username, &password, device_id.as_deref(), user.id).await?;
         }
     }
-
-        /*
-    if !client.logged_in() {
-        println!("❌ Client not logged in, attempting authentication");
-
-        println!("🔄 Attempting to login with username and password: {}, {}", username, password);
-        login_with_password(&client, user_repository, username.as_str(), password.as_str(), device_id.as_deref(), user.id).await?;
-        if let Some(device_id) = user.matrix_device_id.clone() {
-            println!("🔑 Found device_id in database: {}", device_id);
-            let access_token = decrypt_token(user.encrypted_matrix_access_token.as_ref().unwrap().as_str()).unwrap();
-            println!("🔑 Decrypted access token (length: {}): {}", access_token.clone().len(), access_token.clone());
-            println!("🔄 Attempting to login with token and device_id");
-            let res = client.matrix_auth()
-                        .login_token(&access_token.as_str())
-                        .device_id(device_id.as_str())
-                        .send()
-                        .await;
-            if let Ok(response) = res {
-                println!("✅ Successfully logged in with token and device_id");
-                // if client store tokens and device were different they will now at least get overriden
-            } else {
-                println!("❌ Token login failed, falling back to username/password");
-                // if fails, we try logging in with username and password
-                let password = decrypt_token(user.encrypted_matrix_password.as_ref().unwrap().as_str()).unwrap();
-                println!("🔑 Decrypted password (length: {})", password.len());
-                println!("🔄 Attempting to login with username and password");
-                login_with_password(&client, user_repository, user.matrix_username.as_ref().unwrap().as_str(), password.as_str(), user.id).await?;
-            }
-            
-            
-        } else {
-            println!("❓ No device_id found in database");
-            // if not device_id was stored, let's try logging in with username and password
-            let encrypted_stored_password = user.encrypted_matrix_password.clone();
-
-
-            let password = decrypt_token(user.encrypted_matrix_password.as_ref().unwrap().as_str()).unwrap();
-            println!("🔑 Decrypted password (length: {})", password.len());
-            println!("🔄 Attempting to login with username and password");
-            login_with_password(&client, user_repository, user.matrix_username.as_ref().unwrap().as_str(), password.as_str(), user.id).await?;
-        }
-        */
-    //} else { // client store has some device id and access token already
-        /*
-        println!("✅ Client already logged in from store");
-	    // call whoami to check if client store device id and access token are valid at the server also
-	    println!("🔍 Verifying client credentials with whoami");
-	    let res = client.whoami().await.unwrap();
-        match res.device_id {
-            Some(owned_device_id) => {
-                println!("🔍 Server reports device_id: {}", owned_device_id.as_str());
-                if user.matrix_device_id.is_none() || owned_device_id.as_str() != user.matrix_device_id.as_ref().unwrap() {
-                    println!("❌ Device ID mismatch between server and database");
-                    let password = decrypt_token(user.encrypted_matrix_password.as_ref().unwrap().as_str()).unwrap();
-                    println!("🔄 Creating new device with username/password login");
-                    // we are lazy and just create new device if they don't match
-                    login_with_password(&client, user_repository, user.matrix_username.as_ref().unwrap().as_str(), password.as_str(), user.id).await?;
-                } else {
-                    println!("✅ Device ID matches between server and database");
-                }
-            },
-            None => {
-                println!("❌ No device ID found on server");
-                // create new device if none was found on the server
-                let password = decrypt_token(user.encrypted_matrix_password.as_ref().unwrap().as_str()).unwrap();
-                println!("🔄 Creating new device with username/password login");
-                login_with_password(&client, user_repository, user.matrix_username.as_ref().unwrap().as_str(), password.as_str(), user.id).await?;
-            }
-        }
-    }
-        */
     println!("✅ Authentication complete - client is logged already in");
     // here we should have client store, our db and server synced with the same device id and access token
 
     // handle keys now
-        if setup_encryption {
-            println!("🔐 Setting up encryption keys and secret storage");
-            let mut redo_secret_storage = false;
+    if setup_encryption {
+        println!("🔐 Setting up encryption keys and secret storage");
+        let mut redo_secret_storage = false;
+
+        // Get bridge bot username from environment variable or use default pattern
+        let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
+            .unwrap_or_else(|_| "@whatsappbot:".to_string());
             
             // Handle cross-signing setup
             match setup_cross_signing(&client, &username, &password, user.encrypted_matrix_secret_storage_recovery_key.as_ref()).await {
@@ -987,7 +649,7 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository, setup_en
         println!("🔄 Performing initial sync to get room keys");
         client.sync_once(matrix_sdk::config::SyncSettings::new()).await?;
         println!("✅ Initial sync complete");
-        
+
     // Return the fully initialized client
     } else {
         println!("⏩ Skipping encryption setup as it's not needed for this operation");
