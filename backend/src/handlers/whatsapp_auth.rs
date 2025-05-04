@@ -28,7 +28,66 @@ use crate::{
     utils::matrix_auth,
 };
 
-// Using the centralized function from matrix_auth.rs instead
+use tokio::fs;
+use std::path::Path;
+
+
+// Helper function to detect the one-time key conflict error
+fn is_one_time_key_conflict(error: &anyhow::Error) -> bool {
+    if let Some(http_err) = error.downcast_ref::<matrix_sdk::HttpError>() {
+        let error_str = http_err.to_string();
+        return error_str.contains("One time key") && error_str.contains("already exists");
+    }
+    false
+}
+
+// Helper function to get the store path
+fn get_store_path(username: &str) -> Result<String> {
+    let persistent_store_path = std::env::var("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH")
+        .map_err(|_| anyhow!("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH not set"))?;
+    Ok(format!("{}/{}", persistent_store_path, username))
+}
+
+// Wrapper function with retry logic
+async fn connect_whatsapp_with_retry(
+    client: &mut MatrixClient,
+    bridge_bot: &str,
+    phone_number: &str,
+    user_id: i32,
+    user_repository: &crate::repositories::user_repository::UserRepository,
+) -> Result<(OwnedRoomId, String)> {
+    let mut retry_count = 0;
+    let username = client.user_id()
+        .ok_or_else(|| anyhow!("User ID not available"))?
+        .localpart()
+        .to_string();
+
+    loop {
+        match connect_whatsapp(client, bridge_bot, phone_number).await {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                if retry_count < 1 && is_one_time_key_conflict(&e) {
+                    tracing::warn!("One-time key conflict detected for user {}, resetting client store", user_id);
+                    // Clear the store
+                    let store_path = get_store_path(&username)?;
+                    if Path::new(&store_path).exists() {
+                        fs::remove_dir_all(&store_path).await?;
+                        fs::create_dir_all(&store_path).await?;
+                        tracing::info!("Cleared store directory: {}", store_path);
+                    }
+                    // Reinitialize client
+                    let new_client = matrix_auth::get_client(user_id, user_repository, true).await?;
+                    *client = new_client; // Update the client reference
+                    retry_count += 1;
+                    tracing::info!("Client reinitialized, retrying operation");
+                    continue;
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+    }
+}
 
 #[derive(Serialize)]
 pub struct WhatsappConnectionResponse {
@@ -157,7 +216,7 @@ pub async fn start_whatsapp_connection(
 
     println!("📝 Getting Matrix client...");
     // Get or create Matrix client using the centralized function
-    let client = matrix_auth::get_client(auth_user.user_id, &state.user_repository, true)
+    let mut client = matrix_auth::get_client(auth_user.user_id, &state.user_repository, true)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);
@@ -175,15 +234,22 @@ pub async fn start_whatsapp_connection(
 
     println!("🔗 Connecting to WhatsApp bridge...");
     // Connect to WhatsApp bridge
-    let (room_id, pairing_code) = connect_whatsapp(&client, &bridge_bot, &phone_number)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to connect to WhatsApp bridge: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({"error": format!("Failed to connect to WhatsApp bridge: {}", e)})),
-            )
-        })?;
+    let (room_id, pairing_code) = connect_whatsapp_with_retry(
+        &mut client,
+        &bridge_bot,
+        &phone_number,
+        auth_user.user_id,
+        &state.user_repository,
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to connect to WhatsApp bridge: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": format!("Failed to connect to WhatsApp bridge: {}", e)})),
+        )
+    })?;
+
 
     // Debug: Log the pairing code
     println!("Generated pairing code");
@@ -632,7 +698,7 @@ pub async fn disconnect_whatsapp(
         }
 
         // Wait a moment for the logout to process
-        sleep(Duration::from_secs(2)).await;
+        sleep(Duration::from_secs(5)).await;
 
         println!("🧹 Cleaning up WhatsApp portals");
         // Send command to delete all portals
@@ -641,13 +707,14 @@ pub async fn disconnect_whatsapp(
         }
 
         // Wait a moment for the cleanup to process
-        sleep(Duration::from_secs(2)).await;
+        sleep(Duration::from_secs(5)).await;
 
         println!("🗑️ Sending delete-session command");
         // Send delete-session command as a final cleanup
         if let Err(e) = room.send(RoomMessageEventContent::text_plain("!wa delete-session")).await {
             tracing::error!("Failed to send delete-session command: {}", e);
         }
+        sleep(Duration::from_secs(5)).await;
     }
 
     // Delete the bridge record
