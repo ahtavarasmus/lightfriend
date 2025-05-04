@@ -242,35 +242,7 @@ pub async fn fetch_whatsapp_messages(
     
     tracing::info!("Retrieved a total of {} messages across all rooms", messages.len());
     
-    // Print message details in a readable format
-    println!("\n📱 WhatsApp Messages Summary:");
-    println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    
-    for msg in messages.iter() {
-        let datetime = chrono::DateTime::<chrono::Utc>::from_timestamp(msg.timestamp, 0)
-            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-            .unwrap_or_else(|| "unknown time".to_string());
-            
-        let message_type_icon = match msg.message_type.as_str() {
-            "text" => "💬",
-            "notice" => "📢",
-            "image" => "🖼️",
-            "video" => "🎥",
-            "file" => "📎",
-            "audio" => "🔊",
-            "location" => "📍",
-            "emote" => "🎭",
-            _ => "📝",
-        };
-        
-        println!("\n{} Room: {}", message_type_icon, msg.room_name);
-        println!("👤 {}", msg.sender_display_name);
-        println!("🕒 {}", datetime);
-        println!("📄 {}", msg.content);
-        println!("─────────────────────────────────────");
-    }
-    
-    println!("\nTotal messages: {}\n", messages.len());
+
     Ok(messages)
 }
 
@@ -290,7 +262,7 @@ pub async fn send_whatsapp_message(
     // Get bridge bot username from environment variable or use default pattern
     let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
         .unwrap_or_else(|_| "@whatsappbot:".to_string());
-    tracing::info!("Sending WhatsApp message for user {} to room_name {}", user_id, chat_name);
+    tracing::info!("Sending WhatsApp message for user {}", user_id);
 
     // Normalize phone number format
     
@@ -338,7 +310,7 @@ pub async fn send_whatsapp_message(
 
         if has_bridge_bot && room_name.to_lowercase().contains(&chat_name.to_lowercase()) {
             target_room = Some(room);
-            tracing::info!("Found matching room by room name: {}", room_name);
+            tracing::info!("Found matching room");
             break;
         }
         
@@ -353,7 +325,6 @@ pub async fn send_whatsapp_message(
 
     // Send the message with transaction ID
     let txn_id = matrix_sdk::ruma::TransactionId::new();
-    println!("sending message: {:#?} to user: {:#?}", content.clone(), target_room.clone());
     room.send(content.clone()).with_transaction_id(txn_id).await?;
     println!("just sent the message");
 
@@ -402,7 +373,7 @@ pub async fn fetch_whatsapp_room_messages(
     tracing::debug!("Getting list of joined rooms");
     let joined_rooms = client.joined_rooms();
     
-    tracing::debug!("Searching for target WhatsApp room matching '{}'", chat_name);
+    tracing::debug!("Searching for target WhatsApp room");
     let mut target_room = None;
     let mut rooms_checked = 0;
     let mut whatsapp_rooms_found = 0;
@@ -412,18 +383,17 @@ pub async fn fetch_whatsapp_room_messages(
         let room_name = match room.display_name().await {
             Ok(name) => name.to_string(),
             Err(e) => {
-                tracing::warn!("Failed to get display name for room {}: {}", room.room_id(), e);
+                tracing::warn!("Failed to get display name for room {}", e);
                 continue;
             }
         };
         
         if room_name.contains("(WA)") {
             whatsapp_rooms_found += 1;
-            tracing::debug!("Found WhatsApp room: {}", room_name);
             
             if room_name.to_lowercase().contains(&chat_name.to_lowercase()) {
                 target_room = Some(room);
-                tracing::info!("Found matching room: {}", room_name);
+                tracing::info!("Found matching room");
                 break;
             }
         }
@@ -437,7 +407,7 @@ pub async fn fetch_whatsapp_room_messages(
     );
 
     let room = target_room.ok_or_else(|| {
-        anyhow!("Could not find WhatsApp room matching: {}", chat_name)
+        anyhow!("Could not find WhatsApp room matching the chat room")
     })?;
 
     let room_name = room.display_name().await?.to_string();
@@ -493,7 +463,7 @@ pub async fn fetch_whatsapp_room_messages(
             }
         },
         Err(e) => {
-            tracing::error!("Failed to fetch messages from room {}: {}", room_name, e);
+            tracing::error!("Failed to fetch messages from {}", e);
             return Err(anyhow!("Failed to fetch messages: {}", e));
         }
     }
@@ -502,35 +472,10 @@ pub async fn fetch_whatsapp_room_messages(
     messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
     
     let total_messages = messages.len();
-    tracing::info!(
-        "Message retrieval complete - Room: {}, Total messages: {}, Types: {}",
-        room_name,
-        total_messages,
-        messages.iter()
-            .map(|m| m.message_type.as_str())
-            .collect::<std::collections::HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-
-    // Log message timestamps range if messages exist
-    if !messages.is_empty() {
-        let oldest = messages.iter().map(|m| m.timestamp).min().unwrap();
-        let newest = messages.iter().map(|m| m.timestamp).max().unwrap();
-        tracing::debug!(
-            "Message time range - Oldest: {}, Newest: {}", 
-            chrono::DateTime::<chrono::Utc>::from_timestamp(oldest, 0)
-                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-                .unwrap_or_else(|| "unknown".to_string()),
-            chrono::DateTime::<chrono::Utc>::from_timestamp(newest, 0)
-                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-                .unwrap_or_else(|| "unknown".to_string())
-        );
-    }
     
     Ok(messages)
 }
+
 
 pub async fn search_whatsapp_rooms(
     state: &AppState,
@@ -615,46 +560,7 @@ pub async fn search_whatsapp_rooms(
 
     tracing::info!("Found {} matching WhatsApp rooms", matching_rooms.len());
 
-    // Log the found rooms for debugging
-    for room in matching_rooms.iter() {
-        let timestamp = if room.last_activity > 0 {
-            chrono::DateTime::<chrono::Utc>::from_timestamp(room.last_activity, 0)
-                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-                .unwrap_or_else(|| "unknown".to_string())
-        } else {
-            "no messages".to_string()
-        };
-    }
-
     Ok(matching_rooms)
 }
 
-fn normalize_phone_number(phone: &str) -> Result<(String, String)> {
-    // Remove any spaces, dashes, or parentheses
-    let cleaned = phone.chars()
-        .filter(|c| c.is_ascii_digit() || *c == '+')
-        .collect::<String>();
-
-    // If number doesn't start with +, assume it's a local number and add +358
-    let normalized = if !cleaned.starts_with('+') {
-        if cleaned.starts_with("0") {
-            format!("+358{}", &cleaned[1..])
-        } else {
-            format!("+358{}", cleaned)
-        }
-    } else {
-        cleaned
-    };
-
-    // Validate the number format
-    if !normalized.starts_with("+") || normalized.len() < 10 {
-        return Err(anyhow!("Invalid phone number format. Please use international format (e.g., +358442105886)"));
-    }
-
-    // Create the two formats
-    let room_format = format!("{} (WA)", normalized);
-    let sender_format = format!("whatsapp_{}", &normalized[1..]); // Remove leading +
-
-    Ok((room_format, sender_format))
-}
 

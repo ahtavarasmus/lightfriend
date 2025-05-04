@@ -94,7 +94,37 @@ pub async fn test_fetch_messages(
         Ok(messages) => {
             tracing::info!("Found {} messages", messages.len());
             
-            // Log some details about the messages to help debug
+            // Print message details in a readable format for testing
+            println!("\n📱 WhatsApp Messages Summary:");
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            
+            for msg in messages.iter() {
+                let datetime = chrono::DateTime::<chrono::Utc>::from_timestamp(msg.timestamp, 0)
+                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                    .unwrap_or_else(|| "unknown time".to_string());
+                    
+                let message_type_icon = match msg.message_type.as_str() {
+                    "text" => "💬",
+                    "notice" => "📢", 
+                    "image" => "🖼️",
+                    "video" => "🎥",
+                    "file" => "📎",
+                    "audio" => "🔊",
+                    "location" => "📍",
+                    "emote" => "🎭",
+                    _ => "📝",
+                };
+                
+                println!("\n{} Room: {}", message_type_icon, msg.room_name);
+                println!("👤 {}", msg.sender_display_name);
+                println!("🕒 {}", datetime);
+                println!("📄 {}", msg.content);
+                println!("─────────────────────────────────────");
+            }
+            
+            println!("\nTotal messages: {}\n", messages.len());
+            
+            // Also keep the debug logging for the first 5 messages
             for (i, msg) in messages.iter().enumerate().take(5) {
                 tracing::info!(
                     "Message {}: room={}, sender={}, content={}",

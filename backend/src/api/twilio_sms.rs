@@ -1739,6 +1739,14 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
             ..Default::default()
         }),
     );
+    eval_properties.insert(
+        "is_correction".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some("Whether the user's latest message is a correction or clarification of their previous query rather than a new question".to_string()),
+            ..Default::default()
+        }),
+    );
     // Define evaluation tool
     let eval_tools = vec![
         chat_completion::Tool {
@@ -1771,9 +1779,19 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                 2. Task completion: Did it fulfill the user's request?\n\
                 3. Tool usage: Were appropriate tools used when needed?\n\
                 4. Response quality: Was it clear, concise, and helpful?\n\
-                5. Error handling: Were errors handled gracefully?\n\n\
+                5. Error handling: Were errors handled gracefully?\n\
+                6. Message type: Is this a correction/clarification of a previous query or a new question?\n\n\
                 For unsuccessful responses, provide a reason that helps improve the system without revealing \
-                sensitive details.".to_string()
+                sensitive details.\n\n\
+                Important: Set is_correction to true if the user's message is:\n\
+                - Clarifying their previous question\n\
+                - Correcting a misunderstanding from the previous interaction\n\
+                - Providing additional information requested by the AI\n\
+                - Rephrasing their question because the AI's response was unclear or incorrect\n\
+                Set is_correction to false if:\n\
+                - It's a completely new question\n\
+                - It's unrelated to the previous conversation\n\
+                - The previous interaction was successfully completed".to_string()
             ),
             name: None,
             tool_calls: None,
@@ -1800,7 +1818,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
     ];
 
     let eval_req = chat_completion::ChatCompletionRequest::new(
-        "meta-llama/llama-4-scout".to_string(),
+        "openai/gpt-4o-mini".to_string(),
         eval_messages,
     )
     .tools(eval_tools)
@@ -1828,6 +1846,8 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         #[serde(deserialize_with = "deserialize_bool")]
         success: bool,
         reason: Option<String>,
+        #[serde(deserialize_with = "deserialize_bool", default)]
+        is_correction: bool,
     }
 
     fn deserialize_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
@@ -1837,7 +1857,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         Ok(BoolValue::deserialize(deserializer)?.into())
     }
 
-    let (eval_result, eval_reason) = match client.chat_completion(eval_req).await {
+    let (eval_result, eval_reason, should_charge) = match client.chat_completion(eval_req).await {
         Ok(result) => {
             println!("Got evaluation response from model");
             if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
@@ -1848,41 +1868,65 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                         println!("Tool call arguments: {}", args);
                         match serde_json::from_str::<EvalResponse>(args) {
                             Ok(eval) => {
-                                println!("Successfully parsed evaluation response: success={}, reason={:?}", eval.success, eval.reason);
-                                (eval.success, eval.reason)
+                                println!("Successfully parsed evaluation response: success={}, reason={:?}, is_correction={}", 
+                                    eval.success, eval.reason, eval.is_correction);
+                                // If it's a correction and the previous response wasn't successful, we won't charge
+                                let should_charge = !(eval.is_correction && !eval.success);
+                                (eval.success, eval.reason, should_charge)
                             },
                             Err(e) => {
                                 println!("Failed to parse evaluation response: {}, falling back to default", e);
-                                (!fail, Some("Failed to parse evaluation response".to_string()))
+                                (!fail, Some("Failed to parse evaluation response".to_string()), true)
                             },
                         }
                     } else {
                         println!("No arguments found in tool call");
-                        (!fail, Some("Missing evaluation arguments".to_string()))
+                        (!fail, Some("Missing evaluation arguments".to_string()), true)
                     }
                 } else {
                     println!("No tool calls found in response");
-                    (!fail, Some("No evaluation tool calls found".to_string()))
+                    (!fail, Some("No evaluation tool calls found".to_string()), true)
                 }
             } else {
                 println!("No tool calls section in response");
-                (!fail, Some("No evaluation tool calls received".to_string()))
+                (!fail, Some("No evaluation tool calls received".to_string()), true)
             }
         }
         Err(e) => {
             println!("Failed to get evaluation response: {}", e);
-            (!fail, Some("Failed to get evaluation response".to_string()))
+            (!fail, Some("Failed to get evaluation response".to_string()), true)
         }
     };
-
+    // Append no-charge notice if applicable
+    let final_response_with_notice = if !should_charge.clone() {
+        format!("{}\n\n(Note: No charge - correction to prior query)", final_response)
+    } else {
+        final_response
+    };
+    println!("Should charge: {}",should_charge);
 
     // Send the final response to the conversation
-    match crate::api::twilio_utils::send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number,&final_response).await {
+    match crate::api::twilio_utils::send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number, &final_response_with_notice).await {
         Ok(message_sid) => {
-            if !fail {
-                // Deduct credits for the message
+            // Always log the SMS usage metadata and eval(no content!)
+            if let Err(e) = state.user_repository.log_usage(
+                user.id,
+                Some(message_sid),
+                "sms".to_string(),
+                None,
+                Some(processing_time_secs as i32),
+                Some(eval_result),
+                eval_reason,
+                None,  
+                None,
+                None
+            ) {
+                eprintln!("Failed to log SMS usage: {}", e);
+                // Continue execution even if logging fails
+            }
 
-
+            if should_charge {
+                // Only deduct credits if we should charge
                 if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
                     eprintln!("Failed to deduct user credits: {}", e);
                     return (
@@ -1891,23 +1935,6 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                             message: "Failed to process credits points".to_string(),
                         })
                     );
-                }
-
-                // Log the SMS usage metadata and eval(no content!)
-                if let Err(e) = state.user_repository.log_usage(
-                    user.id,
-                    Some(message_sid),
-                    "sms".to_string(),
-                    None,
-                    Some(processing_time_secs as i32),
-                    Some(eval_result),
-                    eval_reason,
-                    None,  
-                    None,
-                    None,
-                ) {
-                    eprintln!("Failed to log SMS usage: {}", e);
-                    // Continue execution even if logging fails
                 }
                         
                 match state.user_repository.is_credits_under_threshold(user.id) {
@@ -1931,8 +1958,8 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     },
                     Err(e) => eprintln!("Failed to check if user credits is under threshold: {}", e),
                 }
-
             }
+
             (
                 StatusCode::OK,
                 axum::Json(TwilioResponse {
