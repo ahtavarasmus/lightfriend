@@ -13,10 +13,18 @@ pub async fn check_user_credits(
     let mut required_credits: f32 = 0.0; // for voice  
     if event_type == "message" {
         // Get message cost
-        required_credits = std::env::var("MESSAGE_COST")
-            .expect("MESSAGE_COST not set")
-            .parse::<f32>()
-            .unwrap_or(0.10);
+        // Deduct credits for the message
+        let required_credits= if user.phone_number.starts_with("+1") {
+            std::env::var("MESSAGE_COST_US")
+                .unwrap_or_else(|_| std::env::var("MESSAGE_COST").expect("MESSAGE_COST not set"))
+                .parse::<f32>()
+                .unwrap_or(0.10)
+        } else {
+            std::env::var("MESSAGE_COST")
+                .expect("MESSAGE_COST not set")
+                .parse::<f32>()
+                .unwrap_or(0.20)
+        };
     }
 
     // No sub credits left, check extra credits
@@ -64,12 +72,17 @@ pub fn deduct_user_credits(
             return Err("Database error occurred".to_string());
         }
     };
-
-    let message_cost: f32 = std::env::var("MESSAGE_COST")
-        .expect("MESSAGE_COST not set")
-        .parse::<f32>()
-        .unwrap_or(0.15); // default to message
-
+    let message_cost= if user.phone_number.starts_with("+1") {
+        std::env::var("MESSAGE_COST_US")
+            .unwrap_or_else(|_| std::env::var("MESSAGE_COST").expect("MESSAGE_COST not set"))
+            .parse::<f32>()
+            .unwrap_or(0.10)
+    } else {
+        std::env::var("MESSAGE_COST")
+            .expect("MESSAGE_COST not set")
+            .parse::<f32>()
+            .unwrap_or(0.20)
+    };    
     let mut credits_cost = message_cost;
 
     if event_type == "voice" {

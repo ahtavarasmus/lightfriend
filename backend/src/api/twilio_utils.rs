@@ -342,7 +342,7 @@ async fn redact_sensitive_info(body: &str) -> String {
         },
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
-            content: chat_completion::Content::Text(initial_redacted),
+            content: chat_completion::Content::Text(initial_redacted.clone()),
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -389,9 +389,9 @@ async fn redact_message(
         .await?;
 
     if response.status().is_success() {
-        tracing::info!("Message {} redacted successfully", message_sid);
+        println!("Message {} redacted successfully", message_sid);
     } else {
-        tracing::error!("Failed to redact message {}: {}", message_sid, response.status());
+        println!("Failed to redact message {}: {}", message_sid, response.status());
         return Err(format!("Failed to redact message: {}", response.status()).into());
     }
 
@@ -430,8 +430,10 @@ pub async fn send_conversation_message(
     println!("successfully sent the conversation message with SID: {}", response.sid);
     tracing::info!("Message sent successfully to conversation {} with message SID: {}", conversation_sid, response.sid);
 
+    println!("BEFORE REDACTING: {}", body);
     // Redact sensitive information using enhanced LLM-based redaction
     let redacted_body = redact_sensitive_info(&body).await;
+    println!("AFTER REDACTING: {}", redacted_body);
     
     // Update the message with the redacted body
     redact_message(conversation_sid, &response.sid, &redacted_body).await?;

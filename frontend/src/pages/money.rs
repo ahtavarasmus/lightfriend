@@ -247,15 +247,26 @@ pub fn pricing(props: &PricingProps) -> Html {
                     <div class="pricing-card main">
                         <div class="card-header">
                             <h3>{"SMS Messages"}</h3>
-                            <div class="price">
-                                <span class="amount">{"€0.10"}</span>
-                                <span class="period">{"/message"}</span>
+                            <div class="price-container">
+                                <div class="us-price">
+                                    <div class="price">
+                                        <span class="region">{"US: "}</span>
+                                        <span class="amount">{"€0.10"}</span>
+                                        <span class="period">{"/message"}</span>
+                                    </div>
+                                </div>
+                                <div class="price">
+                                    <span class="region">{"International: "}</span>
+                                    <span class="amount">{"€0.20"}</span>
+                                    <span class="period">{"/message"}</span>
+                                </div>
                             </div>
                         </div>
                         <ul>
                             <li>{"AI assistant chat responses"}</li>
                             <li>{"Charged only when you take initiative"}</li>
                             <li>{"24/7 availability"}</li>
+                            <li>{"Automatic region detection"}</li>
                         </ul>
                     </div>
 
