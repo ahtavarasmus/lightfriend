@@ -8,8 +8,14 @@ use serde_json::json;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
+pub struct TestSmsRequest {
+    pub message: String,
+    pub user_id: i32,
+}
+
+#[derive(Deserialize)]
 pub struct BroadcastMessageRequest {
-    message: String,
+    pub message: String,
 }
 
 #[derive(Serialize)]
@@ -58,8 +64,6 @@ pub async fn update_preferred_number_admin(
     let allowed_numbers = vec![
         std::env::var("USA_PHONE").expect("USA_PHONE must be set in environment"),
         std::env::var("FIN_PHONE").expect("FIN_PHONE must be set in environment"),
-        std::env::var("NLD_PHONE").expect("NLD_PHONE must be set in environment"),
-        std::env::var("CHZ_PHONE").expect("CHZ_PHONE must be set in environment"),
         std::env::var("AUS_PHONE").expect("AUS_PHONE must be set in environment"),
         std::env::var("GB_PHONE").expect("GB_PHONE must be set in environment"),
     ];
@@ -275,6 +279,51 @@ pub async fn get_usage_logs(
 
     tracing::info!("returning response_logs");
     Ok(Json(response_logs))
+}
+
+pub async fn test_sms(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<TestSmsRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Get the user for the test
+    let user = state.user_repository.find_by_id(request.user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        ))?
+        .ok_or_else(|| (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "User not found"}))
+        ))?;
+
+    // Create a mock Twilio payload
+    let mock_payload = crate::api::twilio_sms::TwilioWebhookPayload {
+        from: user.phone_number.clone(),
+        to: user.preferred_number.unwrap_or_else(|| "+0987654321".to_string()),
+        body: request.message,
+    };
+
+    // Process the SMS using the existing handler with test mode
+    let (status, _, response) = crate::api::twilio_sms::process_sms(
+        &state,
+        mock_payload,
+        true, // Set test mode to true
+    ).await;
+
+    if status == StatusCode::OK {
+        Ok(Json(json!({
+            "message": response.message,
+            "status": "success"
+        })))
+    } else {
+        Err((
+            status,
+            Json(json!({
+                "error": "Failed to process test message",
+                "details": response.message
+            }))
+        ))
+    }
 }
 
 pub async fn set_preferred_number_default(

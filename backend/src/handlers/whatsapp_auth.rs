@@ -110,9 +110,10 @@ async fn connect_whatsapp(
     let room = client.get_room(&room_id).ok_or(anyhow!("Room not found"))?;
     println!("🤖 Inviting bot user: {}", bot_user_id);
     room.invite_user_by_id(&bot_user_id).await?;
+    client.sync_once(MatrixSyncSettings::default()).await?;
     println!("🤖 Waiting for bot to join...");
-    for _ in 0..5 {
-        let members = room.members(matrix_sdk::RoomMemberships::empty()).await?;
+    for _ in 0..30 {
+        let members = room.members(matrix_sdk::RoomMemberships::JOIN).await?;
         if members.iter().any(|m| m.user_id() == bot_user_id) {
             println!("✅ Bot has joined the room");
             break;
@@ -133,12 +134,17 @@ async fn connect_whatsapp(
     println!("⏳ Starting pairing code monitoring");
     client.sync_once(MatrixSyncSettings::default()).await?;
 
-    let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(1));
+    let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(5));
 
     println!("🔄 Starting message polling loop");
     for attempt in 1..=60 {
         println!("📡 Sync attempt #{}", attempt);
         client.sync_once(sync_settings.clone()).await?;
+        if room.is_synced() {
+            println!("Room is fully synced with the server");
+        } else {
+            println!("Room is NOT fully synced with the server!");
+        }
         
         sleep(Duration::from_millis(500)).await;
         
@@ -159,7 +165,7 @@ async fn connect_whatsapp(
                                 SyncRoomMessageEvent::Redacted(_) => continue,
                             };
 
-                            println!("📨 Processing message event");
+                            println!("📨 Processing message event: {:#?}", event_content);
                             if let MessageType::Notice(text_content) = event_content.msgtype {
                                 println!("📝 Text message found from bot");
                                 // Check for pairing code in the message (e.g., "FQWG-FHKC")

@@ -215,7 +215,7 @@ pub struct UsageLog {
     pub time_consumed: Option<i32>, // messsage response time or call duration in seconds
     pub success: Option<bool>, // if call/message was successful judged by ai
     pub reason: Option<String>, // if call/message was not successful, store the reason why (no sensitive content)
-    pub status: Option<String>, // call specific: 'ongoing' or 'done'
+    pub status: Option<String>, // call specific: 'ongoing' or 'done' OR message specific: 'charged' or 'correction'
     pub recharge_threshold_timestamp: Option<i32>, // call specific: timestamp when credits go below recharge threshold
     pub zero_credits_timestamp: Option<i32>, // call specific: timestamp when credits reach zero
     pub call_duration: Option<i32>, // call specific: timestamp when credits reach zero

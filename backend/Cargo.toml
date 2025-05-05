@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+strsim = "0.11.1"
 governor = "0.6"  # For rate limiting
 nonzero_ext = "0.3"  # For NonZeroU32
 dashmap = "5.5"  # For concurrent hash map to store per-user limits

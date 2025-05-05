@@ -618,6 +618,7 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository, setup_en
         // sync for rooms keys
         println!("🔄 Performing initial sync to get room keys");
         client.sync_once(matrix_sdk::config::SyncSettings::new()).await?;
+        sleep(Duration::from_secs(2)).await;
         println!("✅ Initial sync complete");
 
     // Return the fully initialized client

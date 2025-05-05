@@ -134,8 +134,6 @@ pub async fn update_preferred_number(
     let allowed_numbers = vec![
         std::env::var("USA_PHONE").expect("USA_PHONE must be set in environment"),
         std::env::var("FIN_PHONE").expect("FIN_PHONE must be set in environment"),
-        std::env::var("NLD_PHONE").expect("NLD_PHONE must be set in environment"),
-        std::env::var("CHZ_PHONE").expect("CHZ_PHONE must be set in environment"),
         std::env::var("AUS_PHONE").expect("AUS_PHONE must be set in environment"),
         std::env::var("GB_PHONE").expect("GB_PHONE must be set in environment"),
     ];

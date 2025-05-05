@@ -7,6 +7,7 @@ use yew_router::prelude::*;
 use crate::Route;
 use chrono::{Utc, TimeZone};
 use crate::profile::billing_models::format_timestamp;
+use serde_json::json;
 
 #[derive(Serialize)]
 struct BroadcastMessage {
@@ -62,14 +63,24 @@ struct UsageLog {
 
 
 
-#[function_component]
-pub fn AdminDashboard() -> Html {
+
+#[derive(Debug, Clone)]
+struct ChatMessage {
+    content: String,
+    is_user: bool,
+    timestamp: i64,
+}
+
+#[function_component(AdminDashboard)]
+pub fn admin_dashboard() -> Html {
     let users = use_state(|| Vec::new());
     let error = use_state(|| None::<String>);
     let usage_logs = use_state(|| Vec::<UsageLog>::new());
     let activity_filter = use_state(|| None::<String>);
     let selected_user_id = use_state(|| None::<i32>);
     let message = use_state(|| String::new());
+    let test_message = use_state(|| String::new());
+    let chat_messages = use_state(|| Vec::<ChatMessage>::new());
     let delete_modal = use_state(|| DeleteModalState {
         show: false,
         user_id: None,
@@ -253,6 +264,120 @@ pub fn AdminDashboard() -> Html {
                         {"Send Broadcast(only works with admin)"}
                     </button>
                 </div>
+
+                // Test SMS Chat Section
+                <div class="test-chat-section">
+                    <h2>{"Test SMS Processing (User ID: 1)"}</h2>
+                    <div class="chat-window">
+                        <div class="chat-messages">
+                            {
+                                (*chat_messages).iter().map(|msg| {
+                                    let timestamp = chrono::DateTime::<chrono::Utc>::from_timestamp(msg.timestamp, 0)
+                                        .map(|dt| dt.format("%H:%M:%S").to_string())
+                                        .unwrap_or_else(|| "unknown time".to_string());
+                                    
+                                    html! {
+                                        <div class={classes!("chat-message", if msg.is_user { "user" } else { "assistant" })}>
+                                            <div class="message-content">{&msg.content}</div>
+                                            <div class="message-timestamp">{timestamp}</div>
+                                        </div>
+                                    }
+                                }).collect::<Html>()
+                            }
+                        </div>
+                        <div class="chat-input">
+                            <input
+                                type="text"
+                                value={(*test_message).clone()}
+                                onchange={{
+                                    let test_message = test_message.clone();
+                                    Callback::from(move |e: Event| {
+                                        let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+                                        test_message.set(input.value());
+                                    })
+                                }}
+                                onkeypress={{
+                                    let test_message = test_message.clone();
+                                    let chat_messages = chat_messages.clone();
+                                    let error = error.clone();
+                                    
+                                    Callback::from(move |e: KeyboardEvent| {
+                                        if e.key() == "Enter" {
+                                            let test_message = test_message.clone();
+                                            let chat_messages = chat_messages.clone();
+                                            let error = error.clone();
+                                            let message_content = (*test_message).clone();
+                                            
+                                            if !message_content.is_empty() {
+                                                wasm_bindgen_futures::spawn_local(async move {
+                                                    if let Some(token) = window()
+                                                        .and_then(|w| w.local_storage().ok())
+                                                        .flatten()
+                                                        .and_then(|storage| storage.get_item("token").ok())
+                                                        .flatten()
+                                                    {
+                                                        // Add user message to chat
+                                                        let mut new_messages = (*chat_messages).clone();
+                                                        new_messages.push(ChatMessage {
+                                                            content: message_content.clone(),
+                                                            is_user: true,
+                                                            timestamp: chrono::Utc::now().timestamp(),
+                                                        });
+                                                        chat_messages.set(new_messages);
+                                                        
+                                                        // Clear input
+                                                        test_message.set(String::new());
+                                                        
+                                                        // Send test message
+                                                        match Request::post(&format!("{}/api/admin/test-sms", config::get_backend_url()))
+                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                            .json(&json!({
+                                                                "message": message_content,
+                                                                "user_id": 1
+                                                            }))
+                                                            .unwrap()
+                                                            .send()
+                                                            .await
+                                                        {
+                                                            Ok(response) => {
+                                                                if response.ok() {
+                                                                    match response.json::<serde_json::Value>().await {
+                                                                        Ok(data) => {
+                                                                            if let Some(reply) = data.get("message").and_then(|m| m.as_str()) {
+                                                                                let mut new_messages = (*chat_messages).clone();
+                                                                                new_messages.push(ChatMessage {
+                                                                                    content: reply.to_string(),
+                                                                                    is_user: false,
+                                                                                    timestamp: chrono::Utc::now().timestamp(),
+                                                                                });
+                                                                                chat_messages.set(new_messages);
+                                                                            }
+                                                                        }
+                                                                        Err(_) => {
+                                                                            error.set(Some("Failed to parse response".to_string()));
+                                                                        }
+                                                                    }
+                                                                } else {
+                                                                    error.set(Some("Failed to process test message".to_string()));
+                                                                }
+                                                            }
+                                                            Err(_) => {
+                                                                error.set(Some("Failed to send test message".to_string()));
+                                                            }
+                                                        }
+                                                    }
+                                                });
+                                            }
+                                        }
+                                    })
+                                }}
+                                placeholder="Type a message and press Enter..."
+                                class="chat-input-field"
+                            />
+                        </div>
+                    </div>
+                </div>
+
                 // Usage Logs Section
                 <div class="filter-section">
                     <h3>{"Usage Logs"}</h3>
@@ -311,14 +436,14 @@ pub fn AdminDashboard() -> Html {
                         {
                             (*usage_logs).iter()
                                 .filter(|log| {
-                                    if let Some(filter) = (*activity_filter).as_ref() {
-                                        match filter.as_str() {
-                                            "failed" => !log.success.unwrap_or(true),
-                                            _ => log.activity_type == *filter
-                                        }
-                                    } else {
-                                        true
-                                    }
+                    if let Some(filter) = (*activity_filter).as_ref() {
+                        match filter.as_str() {
+                            "failed" => !log.success.unwrap_or(true),
+                            _ => log.activity_type == *filter
+                        }
+                    } else {
+                        true
+                    }
                                 })
                                 .map(|log| {
                                     html! {
@@ -897,7 +1022,7 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                                     </table>
                                 </div>
             {
-                if delete_modal.show {
+                if (*delete_modal).show {
                     html! {
                         <div class="modal-overlay">
                             <div class="modal-content">
@@ -984,6 +1109,76 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                 }
             </div>
             <style>
+                {r#"
+                .test-chat-section {
+                    margin: 2rem 0;
+                    padding: 1rem;
+                    background: rgba(30, 30, 30, 0.7);
+                    border-radius: 8px;
+                }
+
+                .chat-window {
+                    display: flex;
+                    flex-direction: column;
+                    height: 400px;
+                    border: 1px solid rgba(30, 144, 255, 0.2);
+                    border-radius: 8px;
+                    overflow: hidden;
+                }
+
+                .chat-messages {
+                    flex-grow: 1;
+                    overflow-y: auto;
+                    padding: 1rem;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.5rem;
+                }
+
+                .chat-message {
+                    max-width: 80%;
+                    padding: 0.5rem 1rem;
+                    border-radius: 8px;
+                    margin: 0.25rem 0;
+                }
+
+                .chat-message.user {
+                    align-self: flex-end;
+                    background: rgba(30, 144, 255, 0.2);
+                    color: #fff;
+                }
+
+                .chat-message.assistant {
+                    align-self: flex-start;
+                    background: rgba(76, 175, 80, 0.2);
+                    color: #fff;
+                }
+
+                .message-timestamp {
+                    font-size: 0.7rem;
+                    color: #999;
+                    margin-top: 0.25rem;
+                }
+
+                .chat-input {
+                    padding: 1rem;
+                    background: rgba(0, 0, 0, 0.2);
+                }
+
+                .chat-input-field {
+                    width: 100%;
+                    padding: 0.75rem;
+                    border: 1px solid rgba(30, 144, 255, 0.2);
+                    border-radius: 4px;
+                    background: rgba(0, 0, 0, 0.3);
+                    color: #fff;
+                }
+
+                .chat-input-field:focus {
+                    outline: none;
+                    border-color: #1E90FF;
+                }
+                "#}
                 {r#"
                 .judgment-processed {
                     font-size: 0.8rem;

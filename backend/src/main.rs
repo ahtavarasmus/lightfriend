@@ -133,7 +133,7 @@ pub fn validate_env() {
     let required_vars = [
         "JWT_SECRET_KEY", "JWT_REFRESH_KEY", "DATABASE_URL", "PERPLEXITY_API_KEY",
         "ASSISTANT_ID", "ELEVENLABS_SERVER_URL_SECRET", "FIN_PHONE", "USA_PHONE",
-        "NLD_PHONE", "CHZ_PHONE", "AUS_PHONE", "GB_PHONE","TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN",
+        "AUS_PHONE", "GB_PHONE","TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN",
         "ENVIRONMENT", "FRONTEND_URL", "STRIPE_CREDITS_PRODUCT_ID",
         "STRIPE_SUBSCRIPTION_WORLD_PRICE_ID",
         "STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET",
@@ -165,8 +165,9 @@ async fn main() {
     // Create filter that sets Matrix SDK logs to WARN and keeps our app at DEBUG
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| {
-            EnvFilter::new("debug,lightfriend=debug")
+            EnvFilter::new("warn,lightfriend=debug")
                 .add_directive("matrix_sdk=warn".parse().unwrap())
+                .add_directive("tokio-runtime-worker=warn".parse().unwrap())
                 .add_directive("ruma=warn".parse().unwrap())
                 .add_directive("eyeball=warn".parse().unwrap())
         });
@@ -287,6 +288,7 @@ async fn main() {
         .route("/api/admin/subscription/{user_id}/{tier}", post(admin_handlers::update_subscription_tier))
         .route("/api/admin/messages/{user_id}/{amount}", post(admin_handlers::update_user_messages))
         .route("/api/billing/reset-credits/{user_id}", post(billing_handlers::reset_credits))
+        .route("/api/admin/test-sms", post(admin_handlers::test_sms))
         .route_layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::require_admin));
 
     // Protected routes that need user authentication

@@ -96,8 +96,7 @@ fn requires_subscription(path: &str, has_sub: bool, has_discount: bool) -> bool 
             "sms" |
             "shazam" |
             "email" |
-            "calendar" |
-            "whatsapp"
+            "calendar"
         );
         println!("Discount user tool access check: {}", has_access);
         return !has_access;

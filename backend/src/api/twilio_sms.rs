@@ -71,11 +71,11 @@ async fn fetch_conversation_messages(conversation_sid: &str) -> Result<Vec<Twili
 #[derive(Deserialize, Clone)]
 pub struct TwilioWebhookPayload {
     #[serde(rename = "From")]
-    from: String,
+    pub from: String,
     #[serde(rename = "To")]
-    to: String,
+    pub to: String,
     #[serde(rename = "Body")]
-    body: String,
+    pub body: String,
 }
 
 #[derive(Serialize, Debug)]
@@ -304,6 +304,9 @@ pub async fn handle_incoming_sms(
 ) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
     println!("Received SMS from: {} to: {}", payload.from, payload.to);
 
+    // Process SMS with is_test set to false for actual SMS handling
+    process_sms(&state, payload.clone(), false).await;
+
     // Check for Shazam shortcut ('S' or 's')
     if payload.body.trim() == "S" || payload.body.trim() == "s" {
         println!("Shazam shortcut detected");
@@ -377,7 +380,7 @@ pub async fn handle_incoming_sms(
 
     // Process SMS in the background
     tokio::spawn(async move {
-        let result = process_sms(state.clone(), payload.clone()).await;
+        let result = process_sms(&state, payload.clone(), false).await;
         
         if result.0 != StatusCode::OK {
             eprintln!("Background SMS processing failed with status: {:?}", result.0);
@@ -438,9 +441,11 @@ fn get_subscription_error(tool_name: &str) -> String {
         }
     )
 }
-
-async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (StatusCode, axum::Json<TwilioResponse>) {
-
+pub async fn process_sms(
+    state: &Arc<AppState>,
+    payload: TwilioWebhookPayload,
+    is_test: bool,
+) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
     let start_time = std::time::Instant::now(); // Track processing time
 
     let user = match state.user_repository.find_by_phone_number(&payload.from) {
@@ -450,21 +455,23 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         },
         Ok(None) => {
             tracing::error!("No user found for phone number: {}", payload.from);
-            return (
-                StatusCode::NOT_FOUND,
-                axum::Json(TwilioResponse {
-                    message: "User not found".to_string(),
-                })
-            );
+                return (
+                    StatusCode::NOT_FOUND,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    axum::Json(TwilioResponse {
+                        message: "User not found".to_string(),
+                    })
+                );
         },
         Err(e) => {
             tracing::error!("Database error while finding user for phone number {}: {}", payload.from, e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(TwilioResponse {
-                    message: "Database error".to_string(),
-                })
-            );
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    axum::Json(TwilioResponse {
+                        message: "Database error".to_string(),
+                    })
+                );
         }
     };
     let auth_user = crate::handlers::auth_middleware::AuthUser {
@@ -477,12 +484,13 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         Ok(conv) => conv,
         Err(e) => {
             eprintln!("Failed to ensure conversation exists: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(TwilioResponse {
-                    message: "Failed to create conversation".to_string(),
-                })
-            );
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    axum::Json(TwilioResponse {
+                        message: "Failed to create conversation".to_string(),
+                    })
+                );
         }
     };
 
@@ -516,6 +524,17 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         }
     };
 
+    // Calculate total offset in seconds
+    let offset_seconds = hours * 3600 + minutes * 60 * if hours >= 0 { 1 } else { -1 };
+
+    // Create FixedOffset for chrono
+    let user_timezone = chrono::FixedOffset::east_opt(offset_seconds)
+        .unwrap_or_else(|| chrono::FixedOffset::east(0)); // Fallback to UTC if invalid
+
+    // Format current time in RFC3339 for the user's timezone
+    let formatted_time = Utc::now().with_timezone(&user_timezone).to_rfc3339();
+    println!("FORMATTED_TIME: {}", formatted_time);
+
     // Format offset string (e.g., "+02:00" or "-05:30")
     let offset = format!("{}{:02}:{:02}", 
         if hours >= 0 { "+" } else { "-" },
@@ -526,7 +545,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: format!("You are a friendly and helpful AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Be direct and natural in your answers. Since users are using SMS, keep responses clear and brief. Avoid suggesting actions requiring smartphones or internet. Do not ask for confirmation to use tools. For WhatsApp messages: NEVER send a message without first confirming the recipient using search_whatsapp_rooms. Always search first, then confirm the recipient exists in the search results and is something user agrees with before sending. If there is even slightest hint that they could be helpful, use them immediately. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages. Use simple language and focus on the most important information first. This is what the user wants to you to know: {}. The user's timezone is {} with offset {}. When using tools that require time information (like calendar or email): 1. Always use RFC3339/ISO8601 format (e.g. '2024-03-23T14:30:00Z') 2. If no specific time is mentioned, use the current time for start and 24 hours ahead for end 3. Always consider the user's timezone when interpreting time-related requests 4. For 'today' queries, use 00:00 of current day as start and 23:59 as end in user's timezone 5. For 'tomorrow' queries, use 00:00 to 23:59 of next day in user's timezone. 6. Unless user references the previous query's results, you should always use the tools to fetch the latest information before answering the question. When you use tools make sure to add relevant info about the user to the tool call so they can act accordingly.", Utc::now().format("%Y-%m-%d"), user_info, timezone_str, offset),
+        content: format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes.\n\n### Tool Usage Guidelines:\n- **For tools that fetch information** (e.g., `fetch_whatsapp_messages`, `fetch_imap_emails`, `ask_perplexity`, `get_weather`, `calendar`, `fetch_tasks`):\n  - Use them directly to gather data.\n  - Provide all relevant details in the response immediately.\n- **For tools that perform actions** (e.g., `send_whatsapp_message`, `create_task`):\n  - Confirm details with the user before proceeding.\n  - **For `send_whatsapp_message`**:\n    - Use `search_whatsapp_rooms` first to find and confirm the exact recipient.\n    - Show search results to the user and wait for confirmation before sending.\n\n### Date and Time Handling:\n- Use **RFC3339/ISO8601 format** (e.g., '2024-03-23T14:30:00Z') for all date/time inputs.\n- If no specific time is mentioned:\n  - Use the **current time** for start and **24 hours ahead** for end or the otherway around depending on the tool.\n- Always consider the user's timezone: {} with offset {}.\n- For queries about:\n  - **\"Today\"**: Use 00:00 to 23:59 of the current day.\n  - **\"Tomorrow\"**: Use 00:00 to 23:59 of the next day.\n\n### Additional Guidelines:\n- **Weather Queries**: If no location is specified, assume the user’s home location from user info.\n- **Email Queries**: For `fetch_specific_email`, provide the whole message body or a summary if too long—never just the subject.\n- **WhatsApp Fetching**: Use the room name directly from the user’s message/context without searching rooms.\n\nNever use markdown or HTML in responses. User information: {}. Always use tools to fetch the latest information before answering.", formatted_time, timezone_str, offset, user_info),
     }];
     
     // Process the message body to remove "forget" if it exists at the start
@@ -627,7 +646,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         "start".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Start time from which we start fetching the events. Should be in format: '2024-03-16T00:00:00Z'".to_string()),
+            description: Some("Start time in RFC3339 format in UTC (e.g., '2024-03-16T00:00:00Z')".to_string()),
             ..Default::default()
         }),
     );
@@ -635,7 +654,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         "end".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("End time for which we end fetching the events from. Should be in format: '2024-03-16T00:00:00Z'".to_string()),
+            description: Some("End time in RFC3339 format in UTC (e.g., '2024-03-16T00:00:00Z')".to_string()),
             ..Default::default()
         }),
     );
@@ -655,7 +674,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         "start".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Start time from which we start fetching the messages. Should be in format: 'YYYY-MM-DDT00:00:00Z'".to_string()),
+            description: Some("Start time in RFC3339 format in UTC (e.g., '2024-03-16T00:00:00Z')".to_string()),
             ..Default::default()
         }),
     );
@@ -663,7 +682,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         "end".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("End time for which we end fetching the messages from. Should be in format: 'YYYY-MM-DDT00:00:00Z'".to_string()),
+            description: Some("End time in RFC3339 format in UTC (e.g., '2024-03-16T00:00:00Z')".to_string()),
             ..Default::default()
         }),
     );
@@ -735,7 +754,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         "due_time".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Optional due time for the task in RFC3339 format (e.g. '2024-03-23T14:30:00Z')".to_string()),
+            description: Some("Optional due time in RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z')".to_string()),
             ..Default::default()
         }),
     );
@@ -783,7 +802,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
                     properties: Some(whatsapp_messages_properties),
-                    required: Some(vec![String::from("start_time"), String::from("end_time")]),
+                    required: Some(vec![String::from("start"), String::from("end")]),
                 },
             },
         },
@@ -863,7 +882,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
                 name: String::from("get_weather"),
-                description: Some(String::from("Used to get the current weather if user asks for it. If user doesn't give a specific location you should assume they are at home(Do NOT put location as 'home' though, you have to find it from user's info section above along with more information about the user.")),
+                description: Some(String::from("Fetches the current weather for the given location. The AI should use the user's home location from user info if none is specified in the query.")),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
                     properties: Some(weather_properties),
@@ -887,7 +906,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
                 name: String::from("calendar"),
-                description: Some(String::from("Calendar tool fetches the user's calendar events for the specific time frame. If the user doesn't give the specific time frame assume for today and tomorrow to be the time range.")),
+                description: Some(String::from("Fetches the user's calendar events for the specified time frame.")),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
                     properties: Some(calendar_properties),
@@ -927,6 +946,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
             eprintln!("OPENROUTER_API_KEY not set");
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(TwilioResponse {
                     message: "Server configuration error".to_string(),
                 })
@@ -943,6 +963,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                 eprintln!("Failed to build OpenAI client: {}", e);
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
                     axum::Json(TwilioResponse {
                         message: "Failed to initialize AI service".to_string(),
                     })
@@ -983,12 +1004,13 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         Ok(result) => result,
         Err(e) => {
             eprintln!("Failed to get chat completion: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(TwilioResponse {
-                    message: "Failed to process your request".to_string(),
-                })
-            );
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        [(axum::http::header::CONTENT_TYPE, "application/json")],
+                        axum::Json(TwilioResponse {
+                            message: "Failed to process your request".to_string(),
+                        })
+                    );
         }
     };
 
@@ -1030,6 +1052,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     eprintln!("No tool calls found in response despite tool_calls finish reason");
                     return (
                         StatusCode::INTERNAL_SERVER_ERROR,
+                        [(axum::http::header::CONTENT_TYPE, "application/json")],
                         axum::Json(TwilioResponse {
                             message: "Failed to process your request".to_string(),
                         })
@@ -1139,6 +1162,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     // Return early without sending any SMS response
                     return (
                         StatusCode::OK,
+                        [(axum::http::header::CONTENT_TYPE, "application/json")],
                         axum::Json(TwilioResponse {
                             message: "Shazam call initiated".to_string(),
                         })
@@ -1485,12 +1509,12 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                         &args.chat_name,
                         args.limit,
                     ).await {
-                        Ok(messages) => {
+                        Ok((messages, room_name)) => {
                             if messages.is_empty() {
-                                tool_answers.insert(tool_call_id, format!("No messages found in chat '{}'.", args.chat_name));
+                                tool_answers.insert(tool_call_id, format!("No messages found in chat '{}'.", room_name.trim_end_matches(" (WA)")));
                             } else {
-                                let mut response = String::new();
-                                for (i, msg) in messages.iter().take(5).enumerate() {
+                                let mut response = format!("Messages from '{}':\n\n", room_name.trim_end_matches(" (WA)"));
+                                for (i, msg) in messages.iter().take(10).enumerate() {
                                     let timestamp = chrono::DateTime::<chrono::Utc>::from_timestamp(msg.timestamp, 0)
                                         .map(|dt| dt.format("%m/%d %H:%M").to_string())
                                         .unwrap_or_else(|| "unknown time".to_string());
@@ -1518,8 +1542,8 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                                     }
                                 }
                                 
-                                if messages.len() > 5 {
-                                    response.push_str(&format!("\n\n(+ {} more messages)", messages.len() - 5));
+                                if messages.len() > 10 {
+                                    response.push_str(&format!("\n\n(+ {} more messages)", messages.len() - 10));
                                 }
                                 
                                 tool_answers.insert(tool_call_id, response);
@@ -1727,7 +1751,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         "success".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some("Whether the response was successful and helpful".to_string()),
+            description: Some("Whether the response was successful and provided the information user asked for. Note that the information might not look like success(whatsapp message fetch returns missed call notice), but should still be considered successful.".to_string()),
             ..Default::default()
         }),
     );
@@ -1743,7 +1767,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         "is_correction".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some("Whether the user's latest message is a correction or clarification of their previous query rather than a new question".to_string()),
+            description: Some("Set to true ONLY if the AI made a clear mistake that the user is correcting OR the AI explicitly asked for more information to complete the original query, and the user provides it. Defaults to false otherwise, including when the user shifts topics, adds unprompted details, or fails to provide enough initial context that would be obvious to their question.".to_string()),
             ..Default::default()
         }),
     );
@@ -1754,13 +1778,12 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
             function: types::Function {
                 name: String::from("evaluate_response"),
                 description: Some(String::from(
-                    "Evaluates the quality and effectiveness of an AI response in a conversation. \
-                    Consider: context awareness, task completion, tool usage, response quality, and error handling."
+                    "Evaluates the AI response based on success and whether the user's message is a correction or new query."
                 )),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
                     properties: Some(eval_properties),
-                    required: Some(vec![String::from("success")]),
+                    required: Some(vec![String::from("success"), String::from("is_correction")]),
                 },
             },
         },
@@ -1771,27 +1794,22 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
             content: chat_completion::Content::Text(
-                "You are a conversation quality evaluator. Analyze the latest AI response in the context \
-                of the entire conversation history and evaluate if it was successful, helpful, and maintained \
-                proper context. Use the evaluate_response function to provide structured feedback.\n\n\
-                Consider these aspects:\n\
-                1. Context awareness: Does the response consider previous messages?\n\
-                2. Task completion: Did it fulfill the user's request?\n\
-                3. Tool usage: Were appropriate tools used when needed?\n\
-                4. Response quality: Was it clear, concise, and helpful?\n\
-                5. Error handling: Were errors handled gracefully?\n\
-                6. Message type: Is this a correction/clarification of a previous query or a new question?\n\n\
-                For unsuccessful responses, provide a reason that helps improve the system without revealing \
-                sensitive details.\n\n\
-                Important: Set is_correction to true if the user's message is:\n\
-                - Clarifying their previous question\n\
-                - Correcting a misunderstanding from the previous interaction\n\
-                - Providing additional information requested by the AI\n\
-                - Rephrasing their question because the AI's response was unclear or incorrect\n\
-                Set is_correction to false if:\n\
-                - It's a completely new question\n\
-                - It's unrelated to the previous conversation\n\
-                - The previous interaction was successfully completed".to_string()
+                "You are a conversation evaluator. Assess the latest AI response in the context of the conversation history. Use the evaluate_response function to provide feedback.\n\n\
+                ### Guidelines:\n\
+                - **Success**: True if the AI addressed the user's request; false otherwise.\n\
+                - **is_correction**: Defaults to false. Set to true ONLY if:\n\
+                  1. The AI made a clear mistake (e.g., fetched messages for 'Jane' when asked for 'John'), and the user corrects it.\n\
+                  2. The AI explicitly asks for more information (e.g., 'I found rooms 'Sarah' and 'Sarah new'. Which one do i fetch from?'), and the user provides it.\n\
+                - **is_correction = false** when:\n\
+                  - The user shifts topics (e.g., 'mom' to 'dad' after a successful response).\n\
+                  - The user adds unprompted details or rephrases due to their own vague initial query (e.g., 'fetch messages for my friend' then 'I meant Sarah').\n\
+                  - If the user’s initial query lacks basic context, follow-ups are new queries, not corrections.\n\n\
+                ### Examples:\n\
+                - User: 'Fetch messages from mom.' AI: 'Here they are.' User: 'No, I meant dad.' → `is_correction = false` (User shifted topics).\n\
+                - User: 'Fetch messages from John.' AI: 'Here’s Jane’s messages.' User: 'I said John.' → `is_correction = true` (AI mistake).\n\
+                - User: 'Send message 'hey' to Sarah.' AI: 'I'm sending 'hey' to 'Sarah Williams'. Correct?' User: 'Yes.' → `is_correction = true` (AI requested confirmation).\n\
+                - User: 'Fetch messages for my friend.' AI: 'Please specify.' User: 'Sarah.' → `is_correction = false` (User’s initial query was vague, not a correction).\n\n\
+                When in doubt, set `is_correction` to false to ensure new queries are charged.".to_string()
             ),
             name: None,
             tool_calls: None,
@@ -1822,8 +1840,8 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
         eval_messages,
     )
     .tools(eval_tools)
-    .tool_choice(chat_completion::ToolChoiceType::Auto)
-    .max_tokens(150);
+    .tool_choice(chat_completion::ToolChoiceType::Required)
+    .max_tokens(200);
 
     #[derive(Deserialize)]
     #[serde(untagged)]
@@ -1870,8 +1888,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                             Ok(eval) => {
                                 println!("Successfully parsed evaluation response: success={}, reason={:?}, is_correction={}", 
                                     eval.success, eval.reason, eval.is_correction);
-                                // If it's a correction and the previous response wasn't successful, we won't charge
-                                let should_charge = !(eval.is_correction && !eval.success);
+                                let should_charge = !eval.is_correction;
                                 (eval.success, eval.reason, should_charge)
                             },
                             Err(e) => {
@@ -1899,16 +1916,45 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
     };
     // Append no-charge notice if applicable
     let final_response_with_notice = if !should_charge.clone() {
-        format!("{}\n\n(Note: No charge - correction to prior query)", final_response)
+        format!("{}\n\n(msg not charged)", final_response)
     } else {
         final_response
     };
-    println!("Should charge: {}",should_charge);
+    println!("Should charge: {}", should_charge);
 
-    // Send the final response to the conversation
+    let status = if !should_charge {"correction".to_string()} else {"charged".to_string()};
+    // If in test mode, skip sending the actual message and return the response directly
+    if is_test {
+        // Log the test usage without actually sending the message
+        if let Err(e) = state.user_repository.log_usage(
+            user.id,
+            None,  // No message SID in test mode
+            "sms_test".to_string(),
+            None,
+            Some(processing_time_secs as i32),
+            Some(eval_result),
+            eval_reason,
+            Some(status),
+            None,
+            None
+        ) {
+            eprintln!("Failed to log test SMS usage: {}", e);
+        }
+
+        return (
+            StatusCode::OK,
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            axum::Json(TwilioResponse {
+                message: final_response_with_notice,
+            })
+        );
+    }
+
+    // Send the actual message if not in test mode
     match crate::api::twilio_utils::send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number, &final_response_with_notice).await {
         Ok(message_sid) => {
             // Always log the SMS usage metadata and eval(no content!)
+            println!("status of the message: {}", status);
             if let Err(e) = state.user_repository.log_usage(
                 user.id,
                 Some(message_sid),
@@ -1917,7 +1963,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                 Some(processing_time_secs as i32),
                 Some(eval_result),
                 eval_reason,
-                None,  
+                Some(status),  
                 None,
                 None
             ) {
@@ -1931,6 +1977,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
                     eprintln!("Failed to deduct user credits: {}", e);
                     return (
                         StatusCode::INTERNAL_SERVER_ERROR,
+                        [(axum::http::header::CONTENT_TYPE, "application/json")],
                         axum::Json(TwilioResponse {
                             message: "Failed to process credits points".to_string(),
                         })
@@ -1962,6 +2009,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
 
             (
                 StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(TwilioResponse {
                     message: "Message sent successfully".to_string(),
                 })
@@ -1971,6 +2019,7 @@ async fn process_sms(state: Arc<AppState>, payload: TwilioWebhookPayload) -> (St
             eprintln!("Failed to send conversation message: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(TwilioResponse {
                     message: "Failed to send message".to_string(),
                 })

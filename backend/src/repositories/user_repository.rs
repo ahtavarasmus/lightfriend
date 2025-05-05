@@ -186,8 +186,6 @@ impl UserRepository {
         let phone_numbers = [
             ("FIN_PHONE", "+358"),
             ("USA_PHONE", "+1"),
-            ("NLD_PHONE", "+31"),
-            ("CHZ_PHONE", "+420"),
             ("AUS_PHONE", "+61"),
             ("GB_PHONE", "+44"),
         ];
