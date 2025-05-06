@@ -141,7 +141,7 @@ pub async fn create_subscription_checkout(
                 shipping: None,
             }),
             subscription_data: Some(stripe::CreateCheckoutSessionSubscriptionData {
-                trial_period_days: Some(7), // Set 7-day free trial
+                trial_period_days: Some(3), // Set 3-day free trial
                 trial_settings: Some(stripe::CreateCheckoutSessionSubscriptionDataTrialSettings {
                     end_behavior: stripe::CreateCheckoutSessionSubscriptionDataTrialSettingsEndBehavior {
                         missing_payment_method: stripe::CreateCheckoutSessionSubscriptionDataTrialSettingsEndBehaviorMissingPaymentMethod::Cancel,

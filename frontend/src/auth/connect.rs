@@ -620,14 +620,15 @@ pub fn connect(props: &ConnectProps) -> Html {
                                 <p class="service-description">
                                     {"Access and manage your Google Calendar events through SMS or voice calls."}
                                 </p>
-                                if *calendar_connected {
-                                    <div class="calendar-controls">
-                                        <button 
-                                            onclick={onclick_delete_calendar}
-                                            class="disconnect-button"
-                                        >
-                                            {"Disconnect"}
-                                        </button>
+                                if let Some(sub_tier) = &props.sub_tier {
+                                    if *calendar_connected {
+                                        <div class="calendar-controls">
+                                            <button 
+                                                onclick={onclick_delete_calendar}
+                                                class="disconnect-button"
+                                            >
+                                                {"Disconnect"}
+                                            </button>
                                             {
                                                 if props.user_id == 1 {
                                                     let onclick_test = {
@@ -798,6 +799,14 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         </div>
                                     }
                                 } else {
+                                    if *calendar_connected {
+                                        <button 
+                                            onclick={onclick_delete_calendar}
+                                            class="disconnect-button"
+                                        >
+                                            {"Delete connection data"}
+                                        </button>
+                                    }
                                     <div class="upgrade-prompt">
                                         <div class="upgrade-content">
                                             <h3>{"Pro Plan Required"}</h3>
@@ -836,7 +845,8 @@ pub fn connect(props: &ConnectProps) -> Html {
                                     {"This integration creates a dedicated \"lightfriend\" list, keeping your existing task lists untouched. "}
                                     {"Perfect for quick note-taking, setting reminders, or capturing ideas on the go. (Tasks with due time will only know the date and be set to midnight regardless of the time set to it)"}
                                 </p>
-                                if *tasks_connected {
+                                if let Some(sub_tier) = &props.sub_tier {
+                                    if *tasks_connected {
                                     <div class="tasks-controls">
                                         <button 
                                             onclick={onclick_delete_tasks}
@@ -917,6 +927,15 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         </button>
                                     }
                                 } else {
+                                    if *tasks_connected {
+                                        <button 
+                                            onclick={onclick_delete_tasks}
+                                            class="disconnect-button"
+                                        >
+                                            {"Delete connection data"}
+                                        </button>
+                                    }
+
                                     <div class="upgrade-prompt">
                                         <div class="upgrade-content">
                                             <h3>{"Pro Plan Required"}</h3>
@@ -969,7 +988,8 @@ pub fn connect(props: &ConnectProps) -> Html {
                                     <a class="nice-link" href="https://myaccount.google.com/apppasswords" target="_blank">{"here"}</a>
                                     {" (requires 2FA)."}
                                 </p>
-                                if *imap_connected {
+                                if let Some(sub_tier) = &props.sub_tier {
+                                    if *imap_connected {
                                     <div class="imap-controls">
                                         <button 
                                             onclick={onclick_imap_disconnect}
@@ -1225,6 +1245,15 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         </div>
                                     }
                                 } else {
+                                    if *imap_connected {
+                                        <button 
+                                            onclick={onclick_imap_disconnect}
+                                            class="disconnect-button"
+                                        >
+                                            {"Disconnect"}
+                                        </button>
+                                    }
+
                                     <div class="upgrade-prompt">
                                         <div class="upgrade-content">
                                             <h3>{"Pro Plan Required"}</h3>

@@ -112,7 +112,7 @@ pub async fn broadcast_email(
         ))?;
 
     let resend = Resend::new(&resend_api_key);
-    let from = "lightfriend@ahtava.com";
+    let from = "info@updates.lightfriend.ai";
 
     let mut success_count = 0;
     let mut failed_count = 0;
