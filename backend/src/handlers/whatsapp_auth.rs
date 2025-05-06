@@ -56,37 +56,62 @@ async fn connect_whatsapp_with_retry(
     user_id: i32,
     user_repository: &crate::repositories::user_repository::UserRepository,
 ) -> Result<(OwnedRoomId, String)> {
-    let mut retry_count = 0;
+    const MAX_RETRIES: u32 = 3;
+    const RETRY_DELAY: Duration = Duration::from_secs(2);
+    
     let username = client.user_id()
         .ok_or_else(|| anyhow!("User ID not available"))?
         .localpart()
         .to_string();
 
-    loop {
+    for retry_count in 0..MAX_RETRIES {
         match connect_whatsapp(client, bridge_bot, phone_number).await {
             Ok(result) => return Ok(result),
             Err(e) => {
-                if retry_count < 1 && is_one_time_key_conflict(&e) {
-                    tracing::warn!("One-time key conflict detected for user {}, resetting client store", user_id);
+                if retry_count < MAX_RETRIES - 1 && is_one_time_key_conflict(&e) {
+                    tracing::warn!(
+                        "One-time key conflict detected for user {} (attempt {}/{}), resetting client store", 
+                        user_id, 
+                        retry_count + 1, 
+                        MAX_RETRIES
+                    );
+                    
                     // Clear the store
                     let store_path = get_store_path(&username)?;
                     if Path::new(&store_path).exists() {
                         fs::remove_dir_all(&store_path).await?;
+                        sleep(Duration::from_millis(500)).await; // Small delay before recreation
                         fs::create_dir_all(&store_path).await?;
                         tracing::info!("Cleared store directory: {}", store_path);
                     }
+                    
+                    // Add delay before retry
+                    sleep(RETRY_DELAY).await;
+                    
                     // Reinitialize client
-                    let new_client = matrix_auth::get_client(user_id, user_repository, true).await?;
-                    *client = new_client; // Update the client reference
-                    retry_count += 1;
-                    tracing::info!("Client reinitialized, retrying operation");
-                    continue;
+                    match matrix_auth::get_client(user_id, user_repository, true).await {
+                        Ok(new_client) => {
+                            *client = new_client; // Update the client reference
+                            tracing::info!("Client reinitialized, retrying operation");
+                            continue;
+                        },
+                        Err(init_err) => {
+                            tracing::error!("Failed to reinitialize client: {}", init_err);
+                            return Err(init_err);
+                        }
+                    }
                 } else {
-                    return Err(e);
+                    if is_one_time_key_conflict(&e) {
+                        return Err(anyhow!("Failed after {} attempts to resolve one-time key conflict: {}", MAX_RETRIES, e));
+                    } else {
+                        return Err(e);
+                    }
                 }
             }
         }
     }
+    
+    Err(anyhow!("Exceeded maximum retry attempts ({})", MAX_RETRIES))
 }
 
 #[derive(Serialize)]

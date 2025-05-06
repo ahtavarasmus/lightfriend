@@ -1745,6 +1745,177 @@ pub async fn process_sms(
 
     let processing_time_secs = start_time.elapsed().as_secs(); // Calculate processing time
 
+    // Check if the latest AI message in history had a free reply string
+    let should_charge = if payload.body.to_lowercase().starts_with("forget") {
+        true
+    } else {
+        !messages.iter()
+            .rev() // Reverse to get latest messages first
+            .find(|msg| msg.author == "lightfriend") // Find the latest AI message
+            .map(|msg| msg.body.contains("(free reply)")) // Check if it contains "(free reply)"
+            .unwrap_or(false) // Default to charging if no AI message found
+    };
+
+    // Create clarification check function properties
+    let mut clarify_properties = HashMap::new();
+    clarify_properties.insert(
+        "is_clarifying".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some("Whether the AI's response is asking a clarifying question instead of providing an answer".to_string()),
+            ..Default::default()
+        }),
+    );
+    clarify_properties.insert(
+        "explanation".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Brief explanation of why this is or isn't a clarifying question without revealing conversation content.".to_string()),
+            ..Default::default()
+        }),
+    );
+
+    // Define clarification check tool
+    let clarify_tools = vec![
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: String::from("check_clarification"),
+                description: Some(String::from(
+                    "Determines if the AI's response is asking a clarifying question instead of providing an answer"
+                )),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(clarify_properties),
+                    required: Some(vec![String::from("is_clarifying")]),
+                },
+            },
+        },
+    ];
+
+    // Create clarification check messages with more context
+    let mut clarify_messages = vec![
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::system,
+            content: chat_completion::Content::Text(
+                "You are an evaluator that determines if an AI response is EXPLICITLY asking for REQUIRED information to complete the ORIGINAL task. Default to FALSE unless the response is clearly asking for specific information that is necessary to provide ANY answer to the user's request.\n\n\
+                Examples of TRUE clarifying questions (where NO information is provided yet):\n\
+                - User: 'Send a message to mom' -> AI: 'I see multiple contacts named mom. Which one should I send the message to?'\n\
+                - User: 'Check my calendar' -> AI: 'For which date range would you like me to check your calendar?'\n\
+                - User: 'What's the weather?' -> AI: 'Which location would you like the weather for?'\n\n\
+                Examples that should be FALSE (complete answers with optional follow-ups):\n\
+                - User: 'Show contacts named mom' -> AI: 'You have 2 contacts: 1. Mom (mobile) 2. Mom (work). Would you like to message either of them?'\n\
+                - User: 'Get my recent emails' -> AI: 'Here are your latest emails: [email list]. Would you like to see more?'\n\
+                - User: 'Check weather in London' -> AI: 'It's sunny and 20°C in London. Would you like to check another city?'\n\n\
+                Key rules:\n\
+                1. If the response provides ANY useful information that answers the original query, mark as FALSE\n\
+                2. Follow-up questions after providing information are NOT clarifying questions\n\
+                3. Only mark TRUE if the AI CANNOT provide ANY answer without more information\n\
+                4. When in doubt, always return FALSE".to_string(),
+            ),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+    ];
+
+    // Add up to 3 previous message pairs for context
+    let context_messages: Vec<_> = messages.iter()
+        .rev()
+        .take(6) // Take 6 messages (3 pairs of user-assistant exchanges)
+        .collect();
+
+    if !context_messages.is_empty() {
+        clarify_messages.push(chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::user,
+            content: chat_completion::Content::Text(
+                format!(
+                    "Previous conversation:\n{}",
+                    context_messages.iter()
+                        .rev() // Reverse back to chronological order
+                        .map(|msg| format!("[{}]: {}", 
+                            if msg.author == "lightfriend" { "AI" } else { "User" },
+                            msg.body
+                        ))
+                        .collect::<Vec<String>>()
+                        .join("\n")
+                )
+            ),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        });
+    }
+
+    // Add the current exchange
+    clarify_messages.push(chat_completion::ChatCompletionMessage {
+        role: chat_completion::MessageRole::user,
+        content: chat_completion::Content::Text(format!(
+            "Current exchange:\nUser: {}\nAI: {}",
+            payload.body,
+            final_response
+        )),
+        name: None,
+        tool_calls: None,
+        tool_call_id: None,
+    });
+
+    let clarify_req = chat_completion::ChatCompletionRequest::new(
+        "openai/gpt-4o-mini".to_string(),
+        clarify_messages,
+    )
+    .tools(clarify_tools)
+    .tool_choice(chat_completion::ToolChoiceType::Required)
+    .max_tokens(100);
+
+    #[derive(Deserialize)]
+    struct ClarifyResponse {
+        #[serde(deserialize_with = "deserialize_bool")]
+        is_clarifying: bool,
+        explanation: Option<String>,
+    }
+
+    // If message starts with "forget", skip clarification check
+    let (is_clarifying, clarify_explanation) = if payload.body.to_lowercase().starts_with("forget") {
+        (false, Some("Skipped clarification check for forget command".to_string()))
+    } else {
+        match client.chat_completion(clarify_req).await {
+            Ok(result) => {
+                println!("Got clarification check response from model");
+                if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
+                    if let Some(first_call) = tool_calls.first() {
+                        if let Some(args) = &first_call.function.arguments {
+                            match serde_json::from_str::<ClarifyResponse>(args) {
+                                Ok(clarify) => {
+                                    println!("Clarification check result: is_clarifying={}, explanation={:?}", 
+                                        clarify.is_clarifying, clarify.explanation);
+                                    (clarify.is_clarifying, clarify.explanation)
+                                },
+                                Err(e) => {
+                                    println!("Failed to parse clarification response: {}", e);
+                                    (false, Some("Failed to parse clarification check".to_string()))
+                                },
+                            }
+                        } else {
+                            println!("No arguments found in clarification tool call");
+                            (false, Some("Missing clarification check arguments".to_string()))
+                        }
+                    } else {
+                        println!("No clarification tool calls found");
+                        (false, Some("No clarification check tool calls found".to_string()))
+                    }
+                } else {
+                    println!("No tool calls section in clarification response");
+                    (false, Some("No clarification check tool calls received".to_string()))
+                }
+            }
+            Err(e) => {
+                println!("Failed to get clarification check response: {}", e);
+                (false, Some("Failed to get clarification check response".to_string()))
+            }
+        }
+    };
+
     // Create evaluation function properties
     let mut eval_properties = HashMap::new();
     eval_properties.insert(
@@ -1763,14 +1934,6 @@ pub async fn process_sms(
             ..Default::default()
         }),
     );
-    eval_properties.insert(
-        "is_correction".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some("Set to true ONLY if the AI made a clear mistake that the user is correcting OR the AI explicitly asked for more information to complete the original query, and the user provides it. Defaults to false otherwise, including when the user shifts topics, adds unprompted details, or fails to provide enough initial context that would be obvious to their question.".to_string()),
-            ..Default::default()
-        }),
-    );
     // Define evaluation tool
     let eval_tools = vec![
         chat_completion::Tool {
@@ -1778,12 +1941,12 @@ pub async fn process_sms(
             function: types::Function {
                 name: String::from("evaluate_response"),
                 description: Some(String::from(
-                    "Evaluates the AI response based on success and whether the user's message is a correction or new query."
+                    "Evaluates the AI response based on success."
                 )),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
                     properties: Some(eval_properties),
-                    required: Some(vec![String::from("success"), String::from("is_correction")]),
+                    required: Some(vec![String::from("success")]),
                 },
             },
         },
@@ -1794,22 +1957,9 @@ pub async fn process_sms(
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
             content: chat_completion::Content::Text(
-                "You are a conversation evaluator. Assess the latest AI response in the context of the conversation history. Use the evaluate_response function to provide feedback.\n\n\
+                "You are a conversation evaluator. Assess the latest user's query in the context of the conversation history and the AI's response to it. Use the evaluate_response function to provide feedback.\n\n\
                 ### Guidelines:\n\
-                - **Success**: True if the AI addressed the user's request; false otherwise.\n\
-                - **is_correction**: Defaults to false. Set to true ONLY if:\n\
-                  1. The AI made a clear mistake (e.g., fetched messages for 'Jane' when asked for 'John'), and the user corrects it.\n\
-                  2. The AI explicitly asks for more information (e.g., 'I found rooms 'Sarah' and 'Sarah new'. Which one do i fetch from?'), and the user provides it.\n\
-                - **is_correction = false** when:\n\
-                  - The user shifts topics (e.g., 'mom' to 'dad' after a successful response).\n\
-                  - The user adds unprompted details or rephrases due to their own vague initial query (e.g., 'fetch messages for my friend' then 'I meant Sarah').\n\
-                  - If the user’s initial query lacks basic context, follow-ups are new queries, not corrections.\n\n\
-                ### Examples:\n\
-                - User: 'Fetch messages from mom.' AI: 'Here they are.' User: 'No, I meant dad.' → `is_correction = false` (User shifted topics).\n\
-                - User: 'Fetch messages from John.' AI: 'Here’s Jane’s messages.' User: 'I said John.' → `is_correction = true` (AI mistake).\n\
-                - User: 'Send message 'hey' to Sarah.' AI: 'I'm sending 'hey' to 'Sarah Williams'. Correct?' User: 'Yes.' → `is_correction = true` (AI requested confirmation).\n\
-                - User: 'Fetch messages for my friend.' AI: 'Please specify.' User: 'Sarah.' → `is_correction = false` (User’s initial query was vague, not a correction).\n\n\
-                When in doubt, set `is_correction` to false to ensure new queries are charged.".to_string()
+                - **Success**: True if the AI successfully answered the user's request; false otherwise.".to_string(),
             ),
             name: None,
             tool_calls: None,
@@ -1864,8 +2014,6 @@ pub async fn process_sms(
         #[serde(deserialize_with = "deserialize_bool")]
         success: bool,
         reason: Option<String>,
-        #[serde(deserialize_with = "deserialize_bool", default)]
-        is_correction: bool,
     }
 
     fn deserialize_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
@@ -1875,7 +2023,7 @@ pub async fn process_sms(
         Ok(BoolValue::deserialize(deserializer)?.into())
     }
 
-    let (eval_result, eval_reason, should_charge) = match client.chat_completion(eval_req).await {
+    let (eval_result, eval_reason) = match client.chat_completion(eval_req).await {
         Ok(result) => {
             println!("Got evaluation response from model");
             if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
@@ -1886,43 +2034,53 @@ pub async fn process_sms(
                         println!("Tool call arguments: {}", args);
                         match serde_json::from_str::<EvalResponse>(args) {
                             Ok(eval) => {
-                                println!("Successfully parsed evaluation response: success={}, reason={:?}, is_correction={}", 
-                                    eval.success, eval.reason, eval.is_correction);
-                                let should_charge = !eval.is_correction;
-                                (eval.success, eval.reason, should_charge)
+                                println!("Successfully parsed evaluation response: success={}, reason={:?}", 
+                                    eval.success, eval.reason);
+                                (eval.success, eval.reason)
                             },
                             Err(e) => {
                                 println!("Failed to parse evaluation response: {}, falling back to default", e);
-                                (!fail, Some("Failed to parse evaluation response".to_string()), true)
+                                (!fail, Some("Failed to parse evaluation response".to_string()))
                             },
                         }
                     } else {
                         println!("No arguments found in tool call");
-                        (!fail, Some("Missing evaluation arguments".to_string()), true)
+                        (!fail, Some("Missing evaluation arguments".to_string()))
                     }
                 } else {
                     println!("No tool calls found in response");
-                    (!fail, Some("No evaluation tool calls found".to_string()), true)
+                    (!fail, Some("No evaluation tool calls found".to_string()))
                 }
             } else {
                 println!("No tool calls section in response");
-                (!fail, Some("No evaluation tool calls received".to_string()), true)
+                (!fail, Some("No evaluation tool calls received".to_string()))
             }
         }
         Err(e) => {
             println!("Failed to get evaluation response: {}", e);
-            (!fail, Some("Failed to get evaluation response".to_string()), true)
+            (!fail, Some("Failed to get evaluation response".to_string()))
         }
     };
-    // Append no-charge notice if applicable
-    let final_response_with_notice = if !should_charge.clone() {
-        format!("{}\n\n(msg not charged)", final_response)
+    let final_response_with_notice = if is_clarifying {
+        format!("{} (free reply)", final_response)
     } else {
         final_response
     };
-    println!("Should charge: {}", should_charge);
 
-    let status = if !should_charge {"correction".to_string()} else {"charged".to_string()};
+    let status = if should_charge {"charging".to_string()} else {"this was free reply".to_string()};
+    println!("STATUS: {}", status);
+    let mut final_eval: String = "".to_string();
+    if let Some(eval) = eval_reason {
+        if let Some(clarify_expl) = clarify_explanation {
+            final_eval = format!("success reason: {}; clarifying explanation: {}",eval,clarify_expl);
+        } else {
+            final_eval = format!("success reason: {}", eval);
+        }
+    } else if let Some(clarify_expl) = clarify_explanation {
+        final_eval = format!("clarifying reason: {}", clarify_expl);
+    }
+    println!("FINAL_EVAL: {}", final_eval);
+
     // If in test mode, skip sending the actual message and return the response directly
     if is_test {
         // Log the test usage without actually sending the message
@@ -1933,7 +2091,7 @@ pub async fn process_sms(
             None,
             Some(processing_time_secs as i32),
             Some(eval_result),
-            eval_reason,
+            Some(final_eval),
             Some(status),
             None,
             None
@@ -1962,10 +2120,10 @@ pub async fn process_sms(
                 None,
                 Some(processing_time_secs as i32),
                 Some(eval_result),
-                eval_reason,
+                Some(final_eval),
                 Some(status),  
                 None,
-                None
+                None,
             ) {
                 eprintln!("Failed to log SMS usage: {}", e);
                 // Continue execution even if logging fails

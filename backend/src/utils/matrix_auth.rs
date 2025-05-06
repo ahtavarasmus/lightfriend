@@ -159,59 +159,98 @@ async fn try_bootstrap_cross_signing(
     password: &str,
 ) -> Result<bool> {
     println!("🔄 Bootstrapping cross-signing keys");
-    match client.encryption().bootstrap_cross_signing(None).await {
-        Ok(_) => {
-            println!("✅ Successfully bootstrapped cross-signing");
-            Ok(true)
-        },
-        Err(e) => {
-            if let Some(response) = e.as_uiaa_response() {
-                println!("⚠️ Bootstrap requires authentication");
-                println!("👤 Username: {}", username);
-                println!("🔑 Password: {}", password);
-                
-                let user_identifier = matrix_sdk::ruma::api::client::uiaa::UserIdentifier::UserIdOrLocalpart(username.to_string());
-                let mut password_auth = matrix_sdk::ruma::api::client::uiaa::Password::new(user_identifier, password.to_string());
-                password_auth.session = response.session.clone();
-                
-                println!("🔄 Retrying bootstrap with authentication");
-                match client.encryption()
-                    .bootstrap_cross_signing(Some(matrix_sdk::ruma::api::client::uiaa::AuthData::Password(password_auth)))
-                    .await 
-                {
-                    Ok(_) => {
-                        println!("✅ Successfully bootstrapped cross-signing with authentication");
-                        Ok(true)
-                    },
-                    Err(e) => {
-                        println!("❌ Error during cross signing bootstrap with auth: {}", e);
-                        if e.to_string().contains("M_INVALID_SIGNATURE") || e.to_string().contains("already exists") {
-                            println!("🔄 Detected {} error, attempting recovery...", 
-                                if e.to_string().contains("M_INVALID_SIGNATURE") { "invalid signature" } else { "duplicate key" });
-                            
-                            // Clear the client's store path
-                            let store_path = format!(
-                                "{}/{}",
-                                std::env::var("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH")
-                                    .map_err(|_| anyhow!("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH not set"))?,
-                                username
-                            );
-                            
-                            println!("🗑️ Clearing store directory: {}", store_path);
-                            if std::path::Path::new(&store_path).exists() {
-                                std::fs::remove_dir_all(&store_path)?;
-                                std::fs::create_dir_all(&store_path)?;
+    
+    // Helper function to clear store
+    async fn clear_store(username: &str) -> Result<()> {
+        let store_path = format!(
+            "{}/{}",
+            std::env::var("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH")
+                .map_err(|_| anyhow!("MATRIX_HOMESERVER_PERSISTENT_STORE_PATH not set"))?,
+            username
+        );
+        
+        println!("🗑️ Clearing store directory: {}", store_path);
+        if std::path::Path::new(&store_path).exists() {
+            tokio::fs::remove_dir_all(&store_path).await?;
+            tokio::fs::create_dir_all(&store_path).await?;
+        }
+        Ok(())
+    }
+
+    // Helper function to check if error is due to key conflict
+    fn is_key_conflict(e: &matrix_sdk::Error) -> bool {
+        let error_str = e.to_string().to_lowercase();
+        error_str.contains("one time key") && error_str.contains("already exists") ||
+        error_str.contains("m_invalid_signature") ||
+        error_str.contains("already exists")
+    }
+
+    let mut retry_count = 0;
+    let max_retries = 3;
+
+    loop {
+        match client.encryption().bootstrap_cross_signing(None).await {
+            Ok(_) => {
+                println!("✅ Successfully bootstrapped cross-signing");
+                return Ok(true);
+            },
+            Err(e) => {
+                if let Some(response) = e.as_uiaa_response() {
+                    println!("⚠️ Bootstrap requires authentication");
+                    
+                    let user_identifier = matrix_sdk::ruma::api::client::uiaa::UserIdentifier::UserIdOrLocalpart(username.to_string());
+                    let mut password_auth = matrix_sdk::ruma::api::client::uiaa::Password::new(user_identifier, password.to_string());
+                    password_auth.session = response.session.clone();
+                    
+                    match client.encryption()
+                        .bootstrap_cross_signing(Some(matrix_sdk::ruma::api::client::uiaa::AuthData::Password(password_auth)))
+                        .await 
+                    {
+                        Ok(_) => {
+                            println!("✅ Successfully bootstrapped cross-signing with authentication");
+                            return Ok(true);
+                        },
+                        Err(e) => {
+                            println!("❌ Error during cross signing bootstrap with auth: {}", e);
+                            if is_key_conflict(&e) {
+                                if retry_count >= max_retries {
+                                    return Err(anyhow!("Failed to bootstrap after {} retries", max_retries));
+                                }
+                                println!("🔄 Detected key conflict, clearing store and retrying... (attempt {}/{})", 
+                                    retry_count + 1, max_retries);
+                                
+                                if let Err(clear_err) = clear_store(username).await {
+                                    println!("⚠️ Failed to clear store: {}", clear_err);
+                                }
+                                
+                                // Add a small delay before retrying
+                                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                                retry_count += 1;
+                                continue;
                             }
-                            
-                            Err(anyhow!("Matrix client needs to be reinitialized. Please try again."))
-                        } else {
-                            Err(anyhow!("Failed to bootstrap cross-signing: {}", e))
+                            return Err(anyhow!("Failed to bootstrap cross-signing: {}", e));
                         }
                     }
+                } else if is_key_conflict(&e) {
+                    if retry_count >= max_retries {
+                        return Err(anyhow!("Failed to bootstrap after {} retries", max_retries));
+                    }
+                    println!("🔄 Detected key conflict, clearing store and retrying... (attempt {}/{})", 
+                        retry_count + 1, max_retries);
+                    
+                    if let Err(clear_err) = clear_store(username).await {
+                        println!("⚠️ Failed to clear store: {}", clear_err);
+                    }
+                    
+                    // Add a small delay before retrying
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                    retry_count += 1;
+                    continue;
+                } else {
+                    println!("❌ Error during cross signing bootstrap: {:#?}", e);
+                    return Err(anyhow!("Failed to bootstrap cross-signing: {}", e));
                 }
-            } else {
-                println!("❌ Error during cross signing bootstrap: {:#?}", e);
-                Err(anyhow!("Failed to bootstrap cross-signing: {}", e))
+
             }
         }
     }

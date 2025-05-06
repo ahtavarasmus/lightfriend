@@ -371,7 +371,7 @@ if status.connected {
                                                     {
                                                         spawn_local(async move {
                                                             let request_body = serde_json::json!({
-                                                                "chat_name": "rasmus",
+                                                                "chat_name": "Rasmus Ähtävä",
                                                                 "message": "rasmus testing matrix, sorry:)"
                                                             });
 

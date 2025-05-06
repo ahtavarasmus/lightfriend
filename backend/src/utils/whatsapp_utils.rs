@@ -290,13 +290,15 @@ pub async fn send_whatsapp_message(
     // Get all joined rooms
     let joined_rooms = client.joined_rooms();
     
-    // Find WhatsApp room by checking both formats
+    // Find WhatsApp room with exact match (case insensitive)
     let mut target_room = None;
+    let search_term_lower = chat_name.trim().to_lowercase();
+    let mut found_rooms = Vec::new();
     
     for room in joined_rooms {
         let room_name = room.display_name().await?.to_string();
         
-            
+
         // Get room members
         let members = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
             Ok(members) => members,
@@ -310,18 +312,51 @@ pub async fn send_whatsapp_message(
         if !has_bridge_bot {
             continue;
         }
-        // Split the room name by " (WA)" to isolate the chat name
-        let parts = room_name.split(" (WA)").collect::<Vec<&str>>();
-        if parts.len() > 0 && parts[0].trim().to_lowercase() == chat_name.trim().to_lowercase() {
+
+        // Only process WhatsApp rooms
+        if !room_name.contains("(WA)") {
+            continue;
+        }
+
+        // Extract chat name from room name
+        let chat_name_part = room_name
+            .split(" (WA)")
+            .next()
+            .unwrap_or(&room_name)
+            .trim()
+            .to_string();
+
+        found_rooms.push((room.clone(), chat_name_part.clone()));
+
+        // Check for exact match (case insensitive)
+        if chat_name_part.to_lowercase() == search_term_lower {
             target_room = Some(room);
-            tracing::info!("Found matching room: {}", room_name);
+            tracing::info!("Found exact matching room: {}", room_name);
             break;
         }
     }
 
-    let room = target_room.clone().ok_or_else(|| {
-        anyhow!("Could not find WhatsApp room for phone number: {:#?}", chat_name)
-    })?;
+    let room = if let Some(room) = target_room {
+        room
+    } else {
+        // Provide a helpful error message listing similar rooms
+        let similar_rooms: Vec<String> = found_rooms
+            .iter()
+            .filter(|(_, name)| name.to_lowercase().contains(&search_term_lower))
+            .map(|(_, name)| name.clone())
+            .collect();
+
+        let error_msg = if similar_rooms.is_empty() {
+            format!("Could not find exact matching WhatsApp room for '{}'", chat_name)
+        } else {
+            format!(
+                "Could not find exact matching WhatsApp room for '{}'. Did you mean one of these?\n{}",
+                chat_name,
+                similar_rooms.join("\n")
+            )
+        };
+        return Err(anyhow!(error_msg));
+    };
 
     // Create message content
     let content = RoomMessageEventContent::text_plain(message);

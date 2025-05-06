@@ -961,7 +961,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                             // Create a new sync task
                             let state_clone = Arc::clone(&state);
                             let handle = tokio::spawn(async move {
-                                match crate::utils::matrix_auth::get_client(user_id, &state_clone.user_repository, true).await {
+                                match crate::utils::matrix_auth::get_client(user_id, &state_clone.user_repository, false).await {
                                     Ok(client) => {
                                         info!("Starting Matrix sync for user {}", user_id);
                                         if let Err(e) = client.sync(matrix_sdk::config::SyncSettings::default()).await {
