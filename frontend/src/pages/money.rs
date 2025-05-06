@@ -263,10 +263,9 @@ pub fn pricing(props: &PricingProps) -> Html {
                             </div>
                         </div>
                         <ul>
-                            <li>{"AI assistant chat responses"}</li>
+                            <li>{"AI assistant sms responses"}</li>
                             <li>{"Charged only when you take initiative"}</li>
                             <li>{"24/7 availability"}</li>
-                            <li>{"Automatic region detection"}</li>
                         </ul>
                     </div>
 
