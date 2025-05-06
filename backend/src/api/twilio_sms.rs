@@ -498,15 +498,15 @@ pub async fn process_sms(
         }
     };
     println!("messages: {:#?}", messages);
-    let last_msg = messages.iter().rev().find(|msg| msg.author == "lightfriend");
+    let last_msg = messages.iter().find(|msg| msg.author == "lightfriend");
     println!("last msg: {:#?}", last_msg);
 
     if let Some(last_ai_message) = last_msg {
         if last_ai_message.body.contains("(yes-> send, no -> discard)") {
+            println!("last message contained yes or no");
             let user_response = payload.body.trim().to_lowercase();
             
             // Extract chat name and message content from the confirmation message
-            let mut breakout = false;
             if let Some(captures) = regex::Regex::new(r"Confirm the sending of WhatsApp message to '(.+?)' with content: '(.+?)'?")
                 .ok()
                 .and_then(|re| re.captures(&last_ai_message.body)) {
@@ -589,6 +589,15 @@ pub async fn process_sms(
                 }
             }
         }
+    }
+    if user.id == 1 {
+            return (
+                            StatusCode::OK,
+                            [(axum::http::header::CONTENT_TYPE, "application/json")],
+                            axum::Json(TwilioResponse {
+                                message: "Message sending cancelled.".to_string(),
+                            })
+                        );
     }
     let auth_user = crate::handlers::auth_middleware::AuthUser {
         user_id: user.id, 
