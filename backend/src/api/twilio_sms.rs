@@ -474,11 +474,6 @@ pub async fn process_sms(
                 );
         }
     };
-    let auth_user = crate::handlers::auth_middleware::AuthUser {
-        user_id: user.id, 
-        is_admin: false,
-    };
-
 
     let conversation = match state.user_conversations.get_conversation(&user, payload.to).await {
         Ok(conv) => conv,
@@ -494,8 +489,7 @@ pub async fn process_sms(
         }
     };
 
-
-    // Fetch conversation messages
+    // Handle WhatsApp message confirmation flow
     let messages = match fetch_conversation_messages(&conversation.conversation_sid).await {
         Ok(msgs) => msgs,
         Err(e) => {
@@ -503,6 +497,95 @@ pub async fn process_sms(
             Vec::new()
         }
     };
+
+    if let Some(last_ai_message) = messages.iter().find(|msg| msg.author == "lightfriend") {
+        if last_ai_message.body.contains("(yes-> send, no -> discard)") {
+            let user_response = payload.body.trim().to_lowercase();
+            
+            // Extract chat name and message content from the confirmation message
+            let mut breakout = false;
+            if let Some(captures) = regex::Regex::new(r"Confirm the sending of WhatsApp message to '(.+?)' with content: '(.+?)'?")
+                .ok()
+                .and_then(|re| re.captures(&last_ai_message.body)) {
+                
+                let chat_name = captures.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
+                let message_content = captures.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
+
+                    match user_response.as_str() {
+                        "yes" => {
+                            // Send the WhatsApp message
+                            match crate::utils::whatsapp_utils::send_whatsapp_message(
+                                &state,
+                                user.id,
+                                &chat_name,
+                                &message_content,
+                            ).await {
+                                Ok(_) => {
+                                    // Send confirmation via Twilio
+                                    if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                                        &conversation.conversation_sid,
+                                        &conversation.twilio_number,
+                                        &format!("Message sent successfully to {}", chat_name),
+                                    ).await {
+                                        eprintln!("Failed to send confirmation message: {}", e);
+                                    }
+                                    return (
+                                        StatusCode::OK,
+                                        [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                        axum::Json(TwilioResponse {
+                                            message: format!("Message sent successfully to {}", chat_name),
+                                        })
+                                    );
+                                }
+                                Err(e) => {
+                                    // Send error message via Twilio
+                                    if let Err(send_err) = crate::api::twilio_utils::send_conversation_message(
+                                        &conversation.conversation_sid,
+                                        &conversation.twilio_number,
+                                        &format!("Failed to send message: {}", e),
+                                    ).await {
+                                        eprintln!("Failed to send error message: {}", send_err);
+                                    }
+                                    return (
+                                        StatusCode::OK,
+                                        [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                        axum::Json(TwilioResponse {
+                                            message: format!("Failed to send message: {}", e),
+                                        })
+                                    );
+                                }
+                            }
+                        }
+                        "no" => {
+                            // Send cancellation confirmation via Twilio
+                            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                                &conversation.conversation_sid,
+                                &conversation.twilio_number,
+                                "Message sending cancelled.",
+                            ).await {
+                                eprintln!("Failed to send cancellation confirmation: {}", e);
+                            }
+                            return (
+                                StatusCode::OK,
+                                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                axum::Json(TwilioResponse {
+                                    message: "Message sending cancelled.".to_string(),
+                                })
+                            );
+                        }
+                        _ => {
+                            // If user provided something else than yes/no, treat it as a new message
+                            // and continue with normal message processing
+                        }
+                }
+            }
+        }
+    }
+    let auth_user = crate::handlers::auth_middleware::AuthUser {
+        user_id: user.id, 
+        is_admin: false,
+    };
+
 
     let user_info = match user.info {
         Some(info) => info,
@@ -1421,7 +1504,7 @@ pub async fn process_sms(
                         }
                         Err(e) => {
                             eprintln!("Failed to send WhatsApp message: {}", e);
-                            tool_answers.insert(tool_call_id, 
+                            tool_answers.insert(tool_call_id,  
                                 format!("Failed to send WhatsApp message: {}. Please make sure you're connected to WhatsApp bridge and the recipient exists.", e)
                             );
                         }
