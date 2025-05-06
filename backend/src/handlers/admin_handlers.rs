@@ -6,6 +6,8 @@ use axum::{
 };
 use serde_json::json;
 use serde::{Deserialize, Serialize};
+use resend_rs::{Resend, Result as ResendResult};
+use resend_rs::types::CreateEmailBaseOptions;
 
 #[derive(Deserialize)]
 pub struct TestSmsRequest {
@@ -15,6 +17,12 @@ pub struct TestSmsRequest {
 
 #[derive(Deserialize)]
 pub struct BroadcastMessageRequest {
+    pub message: String,
+}
+
+#[derive(Deserialize)]
+pub struct EmailBroadcastRequest {
+    pub subject: String,
     pub message: String,
 }
 
@@ -87,6 +95,63 @@ pub async fn update_preferred_number_admin(
     })))
 }
 
+
+pub async fn broadcast_email(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<EmailBroadcastRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    let users = state.user_repository.get_all_users().map_err(|e| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": format!("Database error: {}", e)}))
+    ))?;
+
+    let resend_api_key = std::env::var("RESEND_EMAIL_API_KEY")
+        .map_err(|_| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "RESEND_EMAIL_API_KEY not set"}))
+        ))?;
+
+    let resend = Resend::new(&resend_api_key);
+    let from = "lightfriend@ahtava.com";
+
+    let mut success_count = 0;
+    let mut failed_count = 0;
+
+    for user in users {
+        if !user.notify {
+            continue;
+        }
+
+        let to = vec![user.email.as_str()];
+        let email = CreateEmailBaseOptions::new(from, to, &request.subject)
+            .with_html(&format!(
+                "{}<br><br>To stop receiving updates about new features, visit your profile settings.",
+                request.message
+            ));
+
+        match resend.emails.send(email).await {
+            Ok(_) => {
+                success_count += 1;
+                tracing::info!("Successfully sent email to {}", user.email);
+            }
+            Err(e) => {
+                failed_count += 1;
+                tracing::error!("Failed to send email to {}: {}", user.email, e);
+            }
+        }
+
+        // Add a small delay to avoid hitting rate limits
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    }
+
+    Ok(Json(json!({
+        "message": "Email broadcast completed",
+        "stats": {
+            "success": success_count,
+            "failed": failed_count
+        }
+    })))
+}
 
 pub async fn broadcast_message(
     State(state): State<Arc<AppState>>,

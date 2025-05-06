@@ -14,6 +14,12 @@ struct BroadcastMessage {
     message: String,
 }
 
+#[derive(Serialize)]
+struct EmailBroadcastMessage {
+    subject: String,
+    message: String,
+}
+
 
 #[derive(Deserialize, Clone, Debug)]
 struct UserInfo {
@@ -79,6 +85,8 @@ pub fn admin_dashboard() -> Html {
     let activity_filter = use_state(|| None::<String>);
     let selected_user_id = use_state(|| None::<i32>);
     let message = use_state(|| String::new());
+    let email_subject = use_state(|| String::new());
+    let email_message = use_state(|| String::new());
     let test_message = use_state(|| String::new());
     let chat_messages = use_state(|| Vec::<ChatMessage>::new());
     let delete_modal = use_state(|| DeleteModalState {
@@ -199,7 +207,7 @@ pub fn admin_dashboard() -> Html {
 
                 
                 <div class="broadcast-section">
-                    <h2>{"Broadcast Message"}</h2>
+                    <h2>{"SMS Broadcast"}</h2>
                     <textarea
                         value={(*message).clone()}
                         onchange={{
@@ -209,7 +217,7 @@ pub fn admin_dashboard() -> Html {
                                 message.set(input.value());
                             })
                         }}
-                        placeholder="Enter message to broadcast..."
+                        placeholder="Enter SMS message to broadcast..."
                         class="broadcast-textarea"
                     />
                     <button
@@ -246,13 +254,13 @@ pub fn admin_dashboard() -> Html {
                                             Ok(response) => {
                                                 if response.ok() {
                                                     message.set(String::new());
-                                                    error.set(Some("Message sent successfully".to_string()));
+                                                    error.set(Some("SMS broadcast sent successfully".to_string()));
                                                 } else {
-                                                    error.set(Some("Failed to send message".to_string()));
+                                                    error.set(Some("Failed to send SMS broadcast".to_string()));
                                                 }
                                             }
                                             Err(_) => {
-                                                error.set(Some("Failed to send request".to_string()));
+                                                error.set(Some("Failed to send SMS broadcast request".to_string()));
                                             }
                                         }
                                     }
@@ -261,7 +269,91 @@ pub fn admin_dashboard() -> Html {
                         }}
                         class="broadcast-button"
                     >
-                        {"Send Broadcast(only works with admin)"}
+                        {"Send SMS Broadcast"}
+                    </button>
+                </div>
+
+                <div class="broadcast-section email-broadcast">
+                    <h2>{"Email Broadcast"}</h2>
+                    <input
+                        type="text"
+                        value={(*email_subject).clone()}
+                        onchange={{
+                            let email_subject = email_subject.clone();
+                            Callback::from(move |e: Event| {
+                                let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+                                email_subject.set(input.value());
+                            })
+                        }}
+                        placeholder="Enter email subject..."
+                        class="email-subject-input"
+                    />
+                    <textarea
+                        value={(*email_message).clone()}
+                        onchange={{
+                            let email_message = email_message.clone();
+                            Callback::from(move |e: Event| {
+                                let input: web_sys::HtmlTextAreaElement = e.target_unchecked_into();
+                                email_message.set(input.value());
+                            })
+                        }}
+                        placeholder="Enter email message to broadcast..."
+                        class="broadcast-textarea"
+                    />
+                    <button
+                        onclick={{
+                            let email_subject = email_subject.clone();
+                            let email_message = email_message.clone();
+                            let error = error.clone();
+                            Callback::from(move |_| {
+                                let email_subject = email_subject.clone();
+                                let email_message = email_message.clone();
+                                let error = error.clone();
+                                
+                                if email_subject.is_empty() || email_message.is_empty() {
+                                    error.set(Some("Subject and message cannot be empty".to_string()));
+                                    return;
+                                }
+                                
+                                wasm_bindgen_futures::spawn_local(async move {
+                                    if let Some(token) = window()
+                                        .and_then(|w| w.local_storage().ok())
+                                        .flatten()
+                                        .and_then(|storage| storage.get_item("token").ok())
+                                        .flatten()
+                                    {
+                                        let broadcast_message = EmailBroadcastMessage {
+                                            subject: (*email_subject).clone(),
+                                            message: (*email_message).clone(),
+                                        };
+                                        
+                                        match Request::post(&format!("{}/api/admin/broadcast-email", config::get_backend_url()))
+                                            .header("Authorization", &format!("Bearer {}", token))
+                                            .json(&broadcast_message)
+                                            .unwrap()
+                                            .send()
+                                            .await
+                                        {
+                                            Ok(response) => {
+                                                if response.ok() {
+                                                    email_subject.set(String::new());
+                                                    email_message.set(String::new());
+                                                    error.set(Some("Email broadcast sent successfully".to_string()));
+                                                } else {
+                                                    error.set(Some("Failed to send email broadcast".to_string()));
+                                                }
+                                            }
+                                            Err(_) => {
+                                                error.set(Some("Failed to send email broadcast request".to_string()));
+                                            }
+                                        }
+                                    }
+                                });
+                            })
+                        }}
+                        class="broadcast-button email"
+                    >
+                        {"Send Email Broadcast"}
                     </button>
                 </div>
 
@@ -1313,11 +1405,43 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                     grid-column: 1 / -1;
                 }
 
-                .usage-sid .value {
-                    font-family: monospace;
-                    font-size: 0.8rem;
-                    color: #7EB2FF;
-                }
+                    .usage-sid .value {
+                        font-family: monospace;
+                        font-size: 0.8rem;
+                        color: #7EB2FF;
+                    }
+
+                    .email-broadcast {
+                        margin-top: 2rem;
+                        border-top: 1px solid rgba(30, 144, 255, 0.2);
+                        padding-top: 2rem;
+                    }
+
+                    .email-subject-input {
+                        width: 100%;
+                        padding: 0.75rem;
+                        margin-bottom: 1rem;
+                        border: 1px solid rgba(30, 144, 255, 0.2);
+                        border-radius: 4px;
+                        background: rgba(0, 0, 0, 0.3);
+                        color: #fff;
+                        font-size: 1rem;
+                    }
+
+                    .email-subject-input:focus {
+                        outline: none;
+                        border-color: #1E90FF;
+                    }
+
+                    .broadcast-button.email {
+                        background: linear-gradient(45deg, #1E90FF, #4169E1);
+                        color: white;
+                    }
+
+                    .broadcast-button.email:hover {
+                        background: linear-gradient(45deg, #4169E1, #1E90FF);
+                        box-shadow: 0 4px 15px rgba(30, 144, 255, 0.4);
+                    }
 
                 @media (max-width: 768px) {
                     .usage-filter {
