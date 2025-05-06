@@ -1106,6 +1106,84 @@ pub async fn handle_whatsapp_search_tool_call(
     }
 }
 
+pub async fn handle_whatsapp_fetch_specific_room_tool_call(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Starting WhatsApp specific room message fetch");
+
+    // Extract user_id and chat_room from query parameters
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing or invalid user_id"
+                }))
+            ));
+        }
+    };
+
+    let chat_room = match params.get("chat_room") {
+        Some(room) => room,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing chat_room parameter"
+                }))
+            ));
+        }
+    };
+
+    // Fetch messages using the existing utility function
+    match crate::utils::whatsapp_utils::fetch_whatsapp_room_messages(&state, user_id, chat_room, Some(20)).await {
+        Ok((messages, room_name)) => {
+            if messages.is_empty() {
+                return Ok(Json(json!({
+                    "response": format!("No WhatsApp messages found in chat room '{}'.", chat_room),
+                    "messages": []
+                })));
+            }
+
+            // Format messages for voice response
+            let mut response_text = format!(
+                "Here are the recent messages from {}: ",
+                room_name.trim_end_matches(" (WA)")
+            );
+
+            // Add messages to the voice response
+            for (i, msg) in messages.iter().take(20).enumerate() {
+                response_text.push_str(&format!(
+                    "Message {} from {}, sent on {}: {}. ",
+                    i + 1,
+                    msg.sender_display_name,
+                    msg.formatted_timestamp,
+                    msg.content
+                ));
+            }
+
+            Ok(Json(json!({
+                "response": response_text,
+                "messages": messages,
+                "room_name": room_name,
+                "total_count": messages.len()
+            })))
+        },
+        Err(e) => {
+            error!("Failed to fetch WhatsApp messages: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to fetch WhatsApp messages",
+                    "details": e.to_string()
+                }))
+            ))
+        }
+    }
+}
+
 pub async fn handle_whatsapp_fetch_tool_call(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
@@ -1170,16 +1248,13 @@ pub async fn handle_whatsapp_fetch_tool_call(
 
             // Add up to 5 most recent messages to the voice response
             for (i, msg) in messages.iter().take(20).enumerate() {
-                let datetime = chrono::DateTime::<chrono::Utc>::from_timestamp(msg.timestamp, 0)
-                    .map(|dt| dt.format("%B %d at %H:%M").to_string())
-                    .unwrap_or_else(|| "unknown time".to_string());
 
                 response_text.push_str(&format!(
                     "Message {} from {} in chat {}, sent on {}: {}. ",
                     i + 1,
                     msg.sender_display_name,
                     msg.room_name,
-                    datetime,
+                    msg.formatted_timestamp,
                     msg.content
                 ));
             }

@@ -257,6 +257,7 @@ async fn main() {
         .route("/api/call/tasks", get(elevenlabs::handle_tasks_fetching_tool_call))
         .route("/api/call/tasks/create", post(elevenlabs::handle_tasks_creation_tool_call))
         .route("/api/call/whatsapp", get(elevenlabs::handle_whatsapp_fetch_tool_call))
+        .route("/api/call/whatsapp/specific-room", get(elevenlabs::handle_whatsapp_fetch_specific_room_tool_call))
         .route("/api/call/whatsapp/search", post(elevenlabs::handle_whatsapp_search_tool_call))
         .route("/api/call/whatsapp/confirm", post(elevenlabs::handle_whatsapp_confirm_send))
         .route_layer(middleware::from_fn_with_state(state.clone(), elevenlabs::check_subscription_access))
