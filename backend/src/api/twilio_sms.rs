@@ -497,7 +497,7 @@ pub async fn process_sms(
             Vec::new()
         }
     };
-    println!("messages");
+    println!("messages: {:#?}", messages);
     let last_msg = messages.iter().rev().find(|msg| msg.author == "lightfriend");
     println!("last msg: {:#?}", last_msg);
 
