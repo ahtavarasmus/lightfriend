@@ -497,8 +497,11 @@ pub async fn process_sms(
             Vec::new()
         }
     };
+    println!("messages");
+    let last_msg = messages.iter().rev().find(|msg| msg.author == "lightfriend");
+    println!("last msg: {:#?}", last_msg);
 
-    if let Some(last_ai_message) = messages.iter().find(|msg| msg.author == "lightfriend") {
+    if let Some(last_ai_message) = last_msg {
         if last_ai_message.body.contains("(yes-> send, no -> discard)") {
             let user_response = payload.body.trim().to_lowercase();
             
@@ -509,74 +512,80 @@ pub async fn process_sms(
                 .and_then(|re| re.captures(&last_ai_message.body)) {
                 
                 let chat_name = captures.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
+                println!("chatname: {}",chat_name);
                 let message_content = captures.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
+                println!("content: {}",message_content);
 
-                    match user_response.as_str() {
-                        "yes" => {
-                            // Send the WhatsApp message
-                            match crate::utils::whatsapp_utils::send_whatsapp_message(
-                                &state,
-                                user.id,
-                                &chat_name,
-                                &message_content,
-                            ).await {
-                                Ok(_) => {
-                                    // Send confirmation via Twilio
-                                    if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                                        &conversation.conversation_sid,
-                                        &conversation.twilio_number,
-                                        &format!("Message sent successfully to {}", chat_name),
-                                    ).await {
-                                        eprintln!("Failed to send confirmation message: {}", e);
-                                    }
-                                    return (
-                                        StatusCode::OK,
-                                        [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                        axum::Json(TwilioResponse {
-                                            message: format!("Message sent successfully to {}", chat_name),
-                                        })
-                                    );
+                match user_response.as_str() {
+                    "yes" => {
+                        // Send the WhatsApp message
+                        match crate::utils::whatsapp_utils::send_whatsapp_message(
+                            &state,
+                            user.id,
+                            &chat_name,
+                            &message_content,
+                        ).await {
+                            Ok(_) => {
+                                // Send confirmation via Twilio
+                                println!("sending messages since user said yes");
+                                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                                    &conversation.conversation_sid,
+                                    &conversation.twilio_number,
+                                    &format!("Message sent successfully to {}", chat_name),
+                                ).await {
+                                    eprintln!("Failed to send confirmation message: {}", e);
                                 }
-                                Err(e) => {
-                                    // Send error message via Twilio
-                                    if let Err(send_err) = crate::api::twilio_utils::send_conversation_message(
-                                        &conversation.conversation_sid,
-                                        &conversation.twilio_number,
-                                        &format!("Failed to send message: {}", e),
-                                    ).await {
-                                        eprintln!("Failed to send error message: {}", send_err);
-                                    }
-                                    return (
-                                        StatusCode::OK,
-                                        [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                        axum::Json(TwilioResponse {
-                                            message: format!("Failed to send message: {}", e),
-                                        })
-                                    );
+                                return (
+                                    StatusCode::OK,
+                                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                    axum::Json(TwilioResponse {
+                                        message: format!("Message sent successfully to {}", chat_name),
+                                    })
+                                );
+                            }
+                            Err(e) => {
+                                // Send error message via Twilio
+                                println!("sending failed to send the message to whatsapp sms");
+                                if let Err(send_err) = crate::api::twilio_utils::send_conversation_message(
+                                    &conversation.conversation_sid,
+                                    &conversation.twilio_number,
+                                    &format!("Failed to send message: {}", e),
+                                ).await {
+                                    eprintln!("Failed to send error message: {}", send_err);
                                 }
+                                return (
+                                    StatusCode::OK,
+                                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                    axum::Json(TwilioResponse {
+                                        message: format!("Failed to send message: {}", e),
+                                    })
+                                );
                             }
                         }
-                        "no" => {
-                            // Send cancellation confirmation via Twilio
-                            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                                &conversation.conversation_sid,
-                                &conversation.twilio_number,
-                                "Message sending cancelled.",
-                            ).await {
-                                eprintln!("Failed to send cancellation confirmation: {}", e);
-                            }
-                            return (
-                                StatusCode::OK,
-                                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                axum::Json(TwilioResponse {
-                                    message: "Message sending cancelled.".to_string(),
-                                })
-                            );
+                    }
+                    "no" => {
+                        // Send cancellation confirmation via Twilio
+                        println!("User said not so we are sending message discarded confirmation");
+                        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                            &conversation.conversation_sid,
+                            &conversation.twilio_number,
+                            "Message sending cancelled.",
+                        ).await {
+                            eprintln!("Failed to send cancellation confirmation: {}", e);
                         }
-                        _ => {
-                            // If user provided something else than yes/no, treat it as a new message
-                            // and continue with normal message processing
-                        }
+                        return (
+                            StatusCode::OK,
+                            [(axum::http::header::CONTENT_TYPE, "application/json")],
+                            axum::Json(TwilioResponse {
+                                message: "Message sending cancelled.".to_string(),
+                            })
+                        );
+                    }
+                    _ => {
+                        println!("User said something else than yes or no so continuing");
+                        // If user provided something else than yes/no, treat it as a new message
+                        // and continue with normal message processing
+                    }
                 }
             }
         }
