@@ -68,10 +68,22 @@ pub struct AgentConfig {
 
 // Helper function to check if a tool is accessible based on user's status
 fn requires_subscription(path: &str, has_sub: bool, has_discount: bool) -> bool {
+    // Extract the tool name from the path using a more robust method
+    let tool_name = {
+        let parts: Vec<&str> = path.split('/').collect();
+        println!("parts: {:#?}", parts);
+        if parts.len() >= 4 && parts[2] == "call" {
+            // Path format is /api/call/{tool}[/action]
+            parts[3]
+        } else {
+            // Fallback to empty string if path format is unexpected
+            ""
+        }
+    };
 
-    // Extract the tool name from the path
-    let tool_name = path.split('/').last().unwrap_or("");
+
     println!("\n=== Subscription Check Details ===");
+    println!("Path: {}", path);
     println!("Tool name: {}", tool_name);
     println!("Has subscription: {}", has_sub);
     println!("Has discount: {}", has_discount);
@@ -893,6 +905,203 @@ pub async fn handle_tasks_fetching_tool_call(
         Err(e) => {
             error!("Failed to fetch tasks: {:?}", e);
             Err(e)
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WhatsAppSearchPayload {
+    search_term: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WhatsAppConfirmPayload {
+    chat_name: String,
+    message: String,
+}
+
+pub async fn handle_whatsapp_confirm_send(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    Json(payload): Json<WhatsAppConfirmPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Starting WhatsApp message confirmation for chat: {}", payload.chat_name);
+
+    // Extract user_id from query parameters
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing or invalid user_id"
+                }))
+            ));
+        }
+    };
+
+    // Get user from database
+    let user = match state.user_repository.find_by_id(user_id) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": "User not found"
+                }))
+            ));
+        }
+        Err(e) => {
+            error!("Error fetching user: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to fetch user"
+                }))
+            ));
+        }
+    };
+
+    // First, try to find the exact room using fetch_whatsapp_room_messages
+    match crate::utils::whatsapp_utils::fetch_whatsapp_room_messages(
+        &state,
+        user_id,
+        &payload.chat_name,
+        Some(1), // Limit to 1 message since we only need the room name
+    ).await {
+        Ok((_, room_name)) => {
+            // Get the actual room name without the (WA) suffix
+            let clean_room_name = room_name.trim_end_matches(" (WA)").to_string();
+            
+            // Create confirmation message
+            let confirmation_message = format!(
+                "Confirm the sending of WhatsApp message to '{}' with content: '{}'?",
+                clean_room_name,
+                payload.message
+            );
+
+            // Get conversation for the user
+            let conversation = match state.user_conversations.get_conversation(&user, user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))).await {
+                Ok(conv) => conv,
+                Err(e) => {
+                    error!("Failed to get conversation: {}", e);
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "Failed to get or create conversation"
+                        }))
+                    ));
+                }
+            };
+
+            // Send the confirmation SMS
+            match crate::api::twilio_utils::send_conversation_message(
+                &conversation.conversation_sid,
+                &conversation.twilio_number,
+                &confirmation_message
+            ).await {
+                Ok(message_sid) => {
+                    println!("Successfully sent confirmation SMS with SID: {}", message_sid);
+                    Ok(Json(json!({
+                        "status": "success",
+                        "message": "Confirmation message sent",
+                        "room_name": clean_room_name,
+                        "message_sid": message_sid
+                    })))
+                }
+                Err(e) => {
+                    error!("Failed to send confirmation SMS: {}", e);
+                    Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "Failed to send confirmation message",
+                            "details": e.to_string()
+                        }))
+                    ))
+                }
+            }
+        },
+        Err(e) => {
+            error!("Failed to find WhatsApp room: {}", e);
+            Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": "Failed to find WhatsApp room",
+                    "details": e.to_string()
+                }))
+            ))
+        }
+    }
+}
+
+pub async fn handle_whatsapp_search_tool_call(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    Json(payload): Json<WhatsAppSearchPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Starting WhatsApp room search for term: {}", payload.search_term);
+
+    // Extract user_id from query parameters
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing or invalid user_id"
+                }))
+            ));
+        }
+    };
+
+    // Search for rooms using the existing utility function
+    match crate::utils::whatsapp_utils::search_whatsapp_rooms(&state, user_id, &payload.search_term).await {
+        Ok(rooms) => {
+            if rooms.is_empty() {
+                return Ok(Json(json!({
+                    "response": format!("No WhatsApp contacts found matching '{}'.", payload.search_term),
+                    "rooms": []
+                })));
+            }
+
+            // Format rooms for voice response
+            let mut response_text = format!(
+                "Found {} matching WhatsApp contacts. ",
+                rooms.len()
+            );
+
+            // Add up to 5 most relevant rooms to the voice response
+            for (i, room) in rooms.iter().take(5).enumerate() {
+                response_text.push_str(&format!(
+                    "Contact {} is {}, last active {}. ",
+                    i + 1,
+                    room.display_name.trim_end_matches(" (WA)"),
+                    room.last_activity_formatted
+                ));
+            }
+
+            if rooms.len() > 5 {
+                response_text.push_str(&format!(
+                    "And {} more contacts found. ",
+                    rooms.len() - 5
+                ));
+            }
+
+            Ok(Json(json!({
+                "response": response_text,
+                "rooms": rooms,
+                "total_count": rooms.len()
+            })))
+        },
+        Err(e) => {
+            error!("Failed to search WhatsApp rooms: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to search WhatsApp contacts",
+                    "details": e.to_string()
+                }))
+            ))
         }
     }
 }

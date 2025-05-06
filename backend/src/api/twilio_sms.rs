@@ -1453,21 +1453,17 @@ pub async fn process_sms(
                             } else {
                                 let mut response = String::new();
                                 for (i, room) in rooms.iter().take(5).enumerate() {
-                                    let last_active = chrono::DateTime::<chrono::Utc>::from_timestamp(room.last_activity, 0)
-                                        .map(|dt| dt.format("%m/%d %H:%M").to_string())
-                                        .unwrap_or_else(|| "never".to_string());
-                                    
                                     if i == 0 {
                                         response.push_str(&format!("{}. {} (last active: {})", 
                                             i + 1,
                                             room.display_name.trim_end_matches(" (WA)"),
-                                            last_active
+                                            room.last_activity_formatted
                                         ));
                                     } else {
                                         response.push_str(&format!("\n{}. {} (last active: {})", 
                                             i + 1,
                                             room.display_name.trim_end_matches(" (WA)"),
-                                            last_active
+                                            room.last_activity_formatted
                                         ));
                                     }
                                 }
@@ -1515,10 +1511,6 @@ pub async fn process_sms(
                             } else {
                                 let mut response = format!("Messages from '{}':\n\n", room_name.trim_end_matches(" (WA)"));
                                 for (i, msg) in messages.iter().take(10).enumerate() {
-                                    let timestamp = chrono::DateTime::<chrono::Utc>::from_timestamp(msg.timestamp, 0)
-                                        .map(|dt| dt.format("%m/%d %H:%M").to_string())
-                                        .unwrap_or_else(|| "unknown time".to_string());
-                                    
                                     let content = if msg.content.len() > 100 {
                                         format!("{}...", &msg.content[..97])
                                     } else {
@@ -1529,14 +1521,14 @@ pub async fn process_sms(
                                         response.push_str(&format!("{}. {} at {}:\n{}", 
                                             i + 1, 
                                             msg.sender_display_name,
-                                            timestamp,
+                                            msg.formatted_timestamp,
                                             content
                                         ));
                                     } else {
                                         response.push_str(&format!("\n\n{}. {} at {}:\n{}", 
                                             i + 1, 
                                             msg.sender_display_name,
-                                            timestamp,
+                                            msg.formatted_timestamp,
                                             content
                                         ));
                                     }
@@ -1603,11 +1595,7 @@ pub async fn process_sms(
                                 tool_answers.insert(tool_call_id, "No WhatsApp messages found for this time period.".to_string());
                             } else {
                                 let mut response = String::new();
-                                for (i, msg) in messages.iter().take(5).enumerate() {
-                                    let timestamp = chrono::DateTime::<chrono::Utc>::from_timestamp(msg.timestamp, 0)
-                                        .map(|dt| dt.format("%m/%d %H:%M").to_string())
-                                        .unwrap_or_else(|| "unknown time".to_string());
-                                    
+                                for (i, msg) in messages.iter().take(15).enumerate() {
                                     let content = if msg.content.len() > 100 {
                                         format!("{}...", &msg.content[..97])
                                     } else {
@@ -1619,7 +1607,7 @@ pub async fn process_sms(
                                             i + 1, 
                                             msg.sender_display_name,
                                             msg.room_name,
-                                            timestamp,
+                                            msg.formatted_timestamp,
                                             content
                                         ));
                                     } else {
@@ -1627,14 +1615,14 @@ pub async fn process_sms(
                                             i + 1, 
                                             msg.sender_display_name,
                                             msg.room_name,
-                                            timestamp,
+                                            msg.formatted_timestamp,
                                             content
                                         ));
                                     }
                                 }
                                 
-                                if messages.len() > 5 {
-                                    response.push_str(&format!("\n\n(+ {} more messages)", messages.len() - 5));
+                                if messages.len() > 15 {
+                                    response.push_str(&format!("\n\n(+ {} more messages)", messages.len() - 15));
                                 }
                                 
                                 tool_answers.insert(tool_call_id, response);

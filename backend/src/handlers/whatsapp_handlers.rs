@@ -117,7 +117,7 @@ pub async fn test_fetch_messages(
                 
                 println!("\n{} Room: {}", message_type_icon, msg.room_name);
                 println!("👤 {}", msg.sender_display_name);
-                println!("🕒 {}", datetime);
+                println!("🕒 {}", msg.formatted_timestamp);
                 println!("📄 {}", msg.content);
                 println!("─────────────────────────────────────");
             }
