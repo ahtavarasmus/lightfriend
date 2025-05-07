@@ -554,7 +554,8 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     match twilio_utils::send_conversation_message(
                                         &conversation.conversation_sid,
                                         &conversation.twilio_number,
-                                        &final_notification
+                                        &final_notification,
+                                        true,
                                     ).await {
                                         Ok(_) => info!("Successfully sent email notification to user {}", user.id),
                                         Err(e) => error!("Failed to send email notification: {}", e),

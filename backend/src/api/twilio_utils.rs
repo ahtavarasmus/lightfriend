@@ -367,7 +367,7 @@ async fn redact_sensitive_info(body: &str) -> String {
 }
 
 // Function to update (redact) a message in Twilio
-async fn redact_message(
+pub async fn redact_message(
     conversation_sid: &str,
     message_sid: &str,
     redacted_body: &str,
@@ -401,8 +401,33 @@ async fn redact_message(
 pub async fn send_conversation_message(
     conversation_sid: &str, 
     twilio_number: &String,
-    body: &str
+    body: &str,
+    redact: bool,
 ) -> Result<String, Box<dyn Error>> {
+    // If this is a non-free reply message, we should redact previous free reply messages
+    if redact && !body.contains("(free reply)") {
+        // Fetch recent messages
+        let messages = match crate::api::twilio_sms::fetch_conversation_messages(conversation_sid).await {
+            Ok(msgs) => msgs,
+            Err(e) => {
+                eprintln!("Failed to fetch messages for redaction: {}", e);
+                vec![] // Continue with sending the message even if fetching fails
+            }
+        };
+
+        // Find and redact free reply messages until we hit a non-free reply message
+        for msg in messages {
+            if msg.author == "lightfriend" && msg.body.contains("(free reply)") {
+                let redacted_body = redact_sensitive_info(&msg.body).await;
+                if let Err(e) = redact_message(conversation_sid, &msg.sid, &redacted_body).await {
+                    eprintln!("Failed to redact free reply message {}: {}", msg.sid, e);
+                }
+            } else if msg.author == "lightfriend" {
+                // Stop when we hit a non-free reply message
+                break;
+            }
+        }
+    }
     let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
     let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
     let client = Client::new();
@@ -431,12 +456,17 @@ pub async fn send_conversation_message(
     tracing::info!("Message sent successfully to conversation {} with message SID: {}", conversation_sid, response.sid);
 
     println!("BEFORE REDACTING: {}", body);
-    // Redact sensitive information using enhanced LLM-based redaction
-    let redacted_body = redact_sensitive_info(&body).await;
-    println!("AFTER REDACTING: {}", redacted_body);
+
     
-    // Update the message with the redacted body
-    redact_message(conversation_sid, &response.sid, &redacted_body).await?;
+    // Only redact the current message if it's not a free reply message
+    if redact && !body.contains("(free reply)") {
+        // Redact sensitive information using enhanced LLM-based redaction
+        let redacted_body = redact_sensitive_info(&body).await;
+        println!("AFTER REDACTING: {}", redacted_body);
+        
+        // Update the message with the redacted body
+        redact_message(conversation_sid, &response.sid, &redacted_body).await?;
+    }
 
     Ok(response.sid)
 }

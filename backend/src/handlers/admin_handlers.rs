@@ -226,6 +226,7 @@ async fn process_broadcast_messages(
                     &conversation.conversation_sid,
                     &sender_number,
                     &message_with_stop,
+                    false,
                 )
                 .await
                 .map_err(|e| BroadcastError::MessageSendError(e.to_string()))

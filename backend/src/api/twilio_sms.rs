@@ -31,11 +31,11 @@ struct ChatMessage {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-struct TwilioMessageResponse {
-    sid: String,
-    conversation_sid: String,
-    body: String,
-    author: String,
+pub struct TwilioMessageResponse {
+    pub sid: String,
+    pub conversation_sid: String,
+    pub body: String,
+    pub author: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,7 +43,7 @@ struct TwilioMessagesResponse {
     messages: Vec<TwilioMessageResponse>,
 }
 
-async fn fetch_conversation_messages(conversation_sid: &str) -> Result<Vec<TwilioMessageResponse>, Box<dyn Error>> {
+pub async fn fetch_conversation_messages(conversation_sid: &str) -> Result<Vec<TwilioMessageResponse>, Box<dyn Error>> {
     let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
     let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
 
@@ -204,6 +204,7 @@ pub async fn send_shazam_answer_to_user(
         &conversation.conversation_sid,
         &conversation.twilio_number,
         message,
+        true,
     )
     .await {
         Ok(message_sid) => {
@@ -516,6 +517,15 @@ pub async fn process_sms(
                 let message_content = captures.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
                 println!("content: {}",message_content);
 
+                // Redact the confirmation message after extracting the necessary information
+                if let Err(e) = crate::api::twilio_utils::redact_message(
+                    &conversation.conversation_sid,
+                    &last_ai_message.sid,
+                    &format!("Confirm the sending of WhatsApp message to '[CHAT_NAME_REDACTED]' with content: '[MESSAGE_CONTENT_REDACTED]' (yes-> send, no -> discard)")
+                ).await {
+                    eprintln!("Failed to redact confirmation message: {}", e);
+                }
+
                 match user_response.as_str() {
                     "yes" => {
                         // Send the WhatsApp message
@@ -532,6 +542,7 @@ pub async fn process_sms(
                                     &conversation.conversation_sid,
                                     &conversation.twilio_number,
                                     &format!("Message sent successfully to {}", chat_name),
+                                    true,
                                 ).await {
                                     eprintln!("Failed to send confirmation message: {}", e);
                                 }
@@ -550,6 +561,7 @@ pub async fn process_sms(
                                     &conversation.conversation_sid,
                                     &conversation.twilio_number,
                                     &format!("Failed to send message: {}", e),
+                                    true,
                                 ).await {
                                     eprintln!("Failed to send error message: {}", send_err);
                                 }
@@ -570,6 +582,7 @@ pub async fn process_sms(
                             &conversation.conversation_sid,
                             &conversation.twilio_number,
                             "Message sending cancelled.",
+                            true,
                         ).await {
                             eprintln!("Failed to send cancellation confirmation: {}", e);
                         }
@@ -592,12 +605,12 @@ pub async fn process_sms(
     }
     if user.id == 1 {
             return (
-                            StatusCode::OK,
-                            [(axum::http::header::CONTENT_TYPE, "application/json")],
-                            axum::Json(TwilioResponse {
-                                message: "Message sending cancelled.".to_string(),
-                            })
-                        );
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                axum::Json(TwilioResponse {
+                    message: "Message sending cancelled.".to_string(),
+                })
+            );
     }
     let auth_user = crate::handlers::auth_middleware::AuthUser {
         user_id: user.id, 
@@ -2198,7 +2211,7 @@ pub async fn process_sms(
     }
 
     // Send the actual message if not in test mode
-    match crate::api::twilio_utils::send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number, &final_response_with_notice).await {
+    match crate::api::twilio_utils::send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number, &final_response_with_notice, true).await {
         Ok(message_sid) => {
             // Always log the SMS usage metadata and eval(no content!)
             println!("status of the message: {}", status);

@@ -636,7 +636,8 @@ pub async fn handle_send_sms_tool_call(
     match crate::api::twilio_utils::send_conversation_message(
         &conversation.conversation_sid,
         &conversation.twilio_number,
-        &payload.message
+        &payload.message,
+        true,
     ).await {
         Ok(message_sid) => {
             println!("Successfully sent SMS with SID: {}", message_sid);
@@ -998,7 +999,8 @@ pub async fn handle_whatsapp_confirm_send(
             match crate::api::twilio_utils::send_conversation_message(
                 &conversation.conversation_sid,
                 &conversation.twilio_number,
-                &confirmation_message
+                &confirmation_message,
+                false, // we should not redact the body right away since we need to extract the message content from this message
             ).await {
                 Ok(message_sid) => {
                     println!("Successfully sent confirmation SMS with SID: {}", message_sid);
