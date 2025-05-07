@@ -22,12 +22,18 @@ mod pages {
     pub mod blog;
     pub mod proactive;
 }
+
+mod connections {
+    pub mod email;
+    pub mod calendar;
+    pub mod whatsapp;
+    pub mod tasks;
+}
 mod auth {
     pub mod connect;
     pub mod verify;
     pub mod signup;
     pub mod oauth_flow;
-    pub mod whatsapp;
 }
 mod admin {
     pub mod dashboard;

@@ -248,72 +248,111 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         <span class="service-status">{"Connected ✓"}</span>
                     }
                 }
+                <button class="info-button" onclick={Callback::from(|_| {
+                    if let Some(element) = web_sys::window()
+                        .and_then(|w| w.document())
+                        .and_then(|d| d.get_element_by_id("whatsapp-info"))
+                    {
+                        let display = element.get_attribute("style")
+                            .unwrap_or_else(|| "display: none".to_string());
+                        
+                        if display.contains("none") {
+                            let _ = element.set_attribute("style", "display: block");
+                        } else {
+                            let _ = element.set_attribute("style", "display: none");
+                        }
+                    }
+                })}>
+                    {"ⓘ"}
+                </button>
+            </div>
+                <div id="whatsapp-info" class="info-section" style="display: none">
+                <h4>{"How It Works"}</h4>
+
+                <div class="info-subsection">
+                    <h5>{"SMS and Voice Call Tools"}</h5>
+                    <ul>
+                        <li>{"Fetch WhatsApp Messages: Get recent WhatsApp messages from a specific time period"}</li>
+                        <li>{"Fetch Chat Messages: Get messages from a specific WhatsApp chat or contact"}</li>
+                        <li>{"Search Contacts: Search for WhatsApp contacts or chat rooms by name"}</li>
+                        <li>{"Send Message: Send a WhatsApp message to a specific recipient (will ask for confirmation before sending) (Voice call tool sends the proposed recipient and message content to you by SMS for you to confirm with simple yes or no. (by typing 'yes', proposed message will be sent and you will be charged for the SMS message. Typing 'no', will discard the message and you will not be charged. Typing anything else is considered just normal new message query.)"}</li>
+                    </ul>
+                    </div>
+
+                <div class="info-subsection security-notice">
+                    <h5>{"Security & Privacy"}</h5>
+                    <p>{"Your security is our priority. Here's how we protect your messages:"}</p>
+                    <ul>
+                        <li>{"Your WhatsApp messages are end-to-end encrypted between WhatsApp and our Matrix server, keeping them safe from prying eyes. To deliver them via SMS, our server decrypts the messages, ensuring they’re readable when you request them. We use the same trusted Matrix server and WhatsApp bridge technology as Beeper, with robust encryption and strict access controls to protect your data at every step."}</li>
+                    </ul>
+                    <p class="security-recommendation">{"Note: While we maintain high security standards, SMS and voice calls use standard cellular networks. For maximum privacy, use WhatsApp directly for sensitive communications."}</p>
+                </div>
             </div>
             
             if let Some(status) = (*connection_status).clone() {
                 <div class="connection-status">
-if status.connected {
-    <>
-        {
-            // Show sync indicator for 15 minutes after connection
-            if js_sys::Date::now() - (status.created_at as f64 * 1000.0) <= 900000.0 { // 15 minutes in milliseconds
-                html! {
-                    <div class="sync-indicator">
-                        <div class="sync-spinner"></div>
-                        <p>{"Syncing chats... This may take up to 15 minutes for all chats to fully propagate"}</p>
-                    </div>
-                }
-            } else {
-                html! {}
-            }
-        }
-        <div class="button-group">
-            <p class="service-description">
-                {"Send and receive WhatsApp messages through SMS or voice calls."}
-            </p>
-            <button onclick={disconnect} class="disconnect-button">
-                {"Disconnect WhatsApp"}
-            </button>
-            {
-                if props.user_id == 1 {
-                    html! {
-                        <button onclick={{
-                            let fetch_status = fetch_status.clone();
-                            Callback::from(move |_| {
-                                let fetch_status = fetch_status.clone();
-                                if let Some(token) = window()
-                                    .and_then(|w| w.local_storage().ok())
-                                    .flatten()
-                                    .and_then(|storage| storage.get_item("token").ok())
-                                    .flatten()
-                                {
-                                    spawn_local(async move {
-                                        match Request::post(&format!("{}/api/auth/whatsapp/resync", config::get_backend_url()))
-                                            .header("Authorization", &format!("Bearer {}", token))
-                                            .send()
-                                            .await
-                                        {
-                                            Ok(_) => {
-                                                web_sys::console::log_1(&"WhatsApp resync initiated".into());
-                                                // Refresh status after resync
-                                                fetch_status.emit(());
-                                            }
-                                            Err(e) => {
-                                                web_sys::console::error_1(&format!("Failed to resync WhatsApp: {}", e).into());
-                                            }
-                                        }
-                                    });
+                    if status.connected {
+                        <>
+                            {
+                                // Show sync indicator for 15 minutes after connection
+                                if js_sys::Date::now() - (status.created_at as f64 * 1000.0) <= 900000.0 { // 15 minutes in milliseconds
+                                    html! {
+                                        <div class="sync-indicator">
+                                            <div class="sync-spinner"></div>
+                                            <p>{"Building the connection bridge... This may take up to 10 minutes. Message history will not be fetched. Lightfriend can only fetch messages from current time onwards."}</p>
+                                        </div>
+                                    }
+                                } else {
+                                    html! {}
                                 }
-                            })
-                        }} class="resync-button">
-                            {"Resync WhatsApp"}
-                        </button>
-                    }
-                } else {
-                    html! {}
-                }
-            }
-        </div>
+                            }
+                            <div class="button-group">
+                                <p class="service-description">
+                                    {"Send and receive WhatsApp messages through SMS or voice calls."}
+                                </p>
+                                <button onclick={disconnect} class="disconnect-button">
+                                    {"Disconnect"}
+                                </button>
+                                {
+                                    if props.user_id == 1 {
+                                        html! {
+                                            <button onclick={{
+                                                let fetch_status = fetch_status.clone();
+                                                Callback::from(move |_| {
+                                                    let fetch_status = fetch_status.clone();
+                                                    if let Some(token) = window()
+                                                        .and_then(|w| w.local_storage().ok())
+                                                        .flatten()
+                                                        .and_then(|storage| storage.get_item("token").ok())
+                                                        .flatten()
+                                                    {
+                                                        spawn_local(async move {
+                                                            match Request::post(&format!("{}/api/auth/whatsapp/resync", config::get_backend_url()))
+                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                .send()
+                                                                .await
+                                                            {
+                                                                Ok(_) => {
+                                                                    web_sys::console::log_1(&"WhatsApp resync initiated".into());
+                                                                    // Refresh status after resync
+                                                                    fetch_status.emit(());
+                                                                }
+                                                                Err(e) => {
+                                                                    web_sys::console::error_1(&format!("Failed to resync WhatsApp: {}", e).into());
+                                                                }
+                                                            }
+                                                        });
+                                                    }
+                                                })
+                                            }} class="resync-button">
+                                                {"Resync WhatsApp"}
+                                            </button>
+                                        }
+                                    } else {
+                                        html! {}
+                                    }
+                                }
+                            </div>
                             {
                                 if props.user_id == 1 {
                                     html! {
@@ -595,10 +634,17 @@ if status.connected {
                     }
                     .whatsapp-connect {
                         background: rgba(0, 0, 0, 0.2);
-                        border: 1px solid rgba(30, 144, 255, 0.1);
+                        border: 1px solid rgba(30, 144, 255, 0.2);
                         border-radius: 12px;
                         padding: 1.5rem;
                         margin: 1rem 0;
+                        transition: all 0.3s ease;
+                    }
+
+                    .whatsapp-connect:hover {
+                        transform: translateY(-2px);
+                        border-color: rgba(30, 144, 255, 0.4);
+                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.1);
                     }
 
                     .whatsapp-connect h3 {
@@ -659,10 +705,18 @@ if status.connected {
                     }
 
                     .disconnect-button {
-                        background: linear-gradient(45deg, #FF4B4B, #FF6B6B);
+                        background: transparent;
+                        border: 1px solid rgba(255, 99, 71, 0.3);
+                        color: #FF6347;
                     }
 
-                    .connect-button:hover, .disconnect-button:hover {
+                    .disconnect-button:hover {
+                        background: rgba(255, 99, 71, 0.1);
+                        border-color: rgba(255, 99, 71, 0.5);
+                        transform: translateY(-2px);
+                    }
+
+                    .connect-button:hover {
                         transform: translateY(-2px);
                         box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3);
                     }
@@ -742,6 +796,60 @@ if status.connected {
                     .upgrade-button:hover {
                         transform: translateY(-2px);
                         box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3);
+                    }
+
+                    .info-button {
+                        background: none;
+                        border: none;
+                        color: #1E90FF;
+                        font-size: 1.2rem;
+                        cursor: pointer;
+                        padding: 0.5rem;
+                        border-radius: 50%;
+                        width: 2rem;
+                        height: 2rem;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        transition: all 0.3s ease;
+                        margin-left: auto;
+                    }
+
+                    .info-button:hover {
+                        background: rgba(30, 144, 255, 0.1);
+                        transform: scale(1.1);
+                    }
+
+
+                    .security-notice {
+                        background: rgba(30, 144, 255, 0.1);
+                        padding: 1.2rem;
+                        border-radius: 8px;
+                        border: 1px solid rgba(30, 144, 255, 0.2);
+                    }
+
+                    .security-notice p {
+                        margin: 0 0 1rem 0;
+                        color: #CCC;
+                    }
+
+                    .security-notice p:last-child {
+                        margin-bottom: 0;
+                    }
+
+                    .security-recommendation {
+                        font-style: italic;
+                        color: #999 !important;
+                        margin-top: 1rem !important;
+                        font-size: 0.9rem;
+                        padding-top: 1rem;
+                        border-top: 1px solid rgba(30, 144, 255, 0.1);
+                    }
+
+                    .service-header {
+                        display: flex;
+                        align-items: center;
+                        gap: 1rem;
                     }
 
                     @keyframes spin {

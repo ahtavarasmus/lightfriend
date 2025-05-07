@@ -1157,11 +1157,6 @@ pub fn landing() -> Html {
                         color: #7EB2FF;
                     }
 
-                    .info-section {
-                        padding: 1.5rem 0;
-                        margin: 1rem 0;
-                        text-align: center;
-                    }
 
     .section-title {
         color: #7EB2FF;
@@ -2946,7 +2941,6 @@ pub fn Home() -> Html {
                     }
 
                     .info-section {
-                        background: rgba(0, 0, 0, 0.2);
                         border-radius: 12px;
                         padding: 2rem;
                         margin: 1.5rem 0;

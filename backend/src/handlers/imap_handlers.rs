@@ -4,7 +4,8 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, TimeZone};
+use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use imap;
@@ -18,6 +19,29 @@ use crate::{
     handlers::auth_middleware::AuthUser,
 };
 
+fn format_timestamp(timestamp: i64, timezone: Option<String>) -> String {
+    // Convert timestamp to DateTime<Utc>
+    let dt_utc = match DateTime::from_timestamp(timestamp, 0) {
+        Some(dt) => dt,
+        None => return "Invalid timestamp".to_string(),
+    };
+    
+    // Convert to user's timezone if provided, otherwise use UTC
+    let formatted = if let Some(tz_str) = timezone {
+        match tz_str.parse::<Tz>() {
+            Ok(tz) => dt_utc.with_timezone(&tz).format("%Y-%m-%d %H:%M:%S").to_string(),
+            Err(_) => {
+                tracing::warn!("Invalid timezone '{}', falling back to UTC", tz_str);
+                dt_utc.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+            }
+        }
+    } else {
+        dt_utc.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+    };
+    
+    formatted
+}
+
 #[derive(Debug, Serialize)]
 pub struct ImapEmailPreview {
     pub id: String,
@@ -25,6 +49,7 @@ pub struct ImapEmailPreview {
     pub from: Option<String>,
     pub from_email: Option<String>,
     pub date: Option<DateTime<Utc>>,
+    pub date_formatted: Option<String>,
     pub snippet: Option<String>,
     pub body: Option<String>,
     pub is_read: bool,
@@ -37,6 +62,7 @@ pub struct ImapEmail {
     pub from: Option<String>,
     pub from_email: Option<String>,
     pub date: Option<DateTime<Utc>>,
+    pub date_formatted: Option<String>,
     pub snippet: Option<String>,
     pub body: Option<String>,
     pub is_read: bool,
@@ -167,7 +193,8 @@ pub async fn fetch_single_imap_email(
                     "subject": email.subject.unwrap_or_else(|| "No subject".to_string()),
                     "from": email.from.unwrap_or_else(|| "Unknown sender".to_string()),
                     "from_email": email.from_email.unwrap_or_else(|| "unknown@email.com".to_string()),
-                    "date": email.date.map(|dt| dt.to_rfc3339()),
+                        "date": email.date.map(|dt| dt.to_rfc3339()),
+                        "date_formatted": email.date_formatted,
                     "snippet": email.snippet.unwrap_or_else(|| "No preview".to_string()),
                     "body": email.body.unwrap_or_else(|| "No content".to_string()),
                     "is_read": email.is_read
@@ -333,16 +360,22 @@ pub async fn fetch_emails_imap(
             (clean_content, snippet)
         }).unwrap_or_else(|| (String::new(), String::new()));
 
-        email_previews.push(ImapEmailPreview {
-            id: uid.clone(),
-            subject: subject.clone(),
-            from: Some(from.clone()),
-            from_email: Some(from_email.clone()),
-            date,
-            snippet: Some(snippet),
-            body: Some(body),
-            is_read,
-        });
+            let date_formatted = date.map(|dt| format_timestamp(dt.timestamp(), state.user_repository.find_by_id(user_id)
+                .ok()
+                .and_then(|u| u.ok())
+                .and_then(|u| u.timezone)));
+
+            email_previews.push(ImapEmailPreview {
+                id: uid.clone(),
+                subject: subject.clone(),
+                from: Some(from.clone()),
+                from_email: Some(from_email.clone()),
+                date,
+                date_formatted,
+                snippet: Some(snippet),
+                body: Some(body),
+                is_read,
+            });
 
         // Mark email as processed if unprocessed is true
         if unprocessed {
@@ -518,12 +551,18 @@ pub async fn fetch_single_email_imap(
         .logout()
         .map_err(|e| ImapError::ConnectionError(format!("Failed to logout: {}", e)))?;
 
+    let date_formatted = date.map(|dt| format_timestamp(dt.timestamp(), state.user_repository.find_by_id(user_id)
+        .ok()
+        .and_then(|u| u.ok())
+        .and_then(|u| u.timezone)));
+
     Ok(ImapEmail {
         id: email_id.to_string(),
         subject,
         from,
         from_email,
         date,
+        date_formatted,
         snippet: Some(snippet),
         body: Some(body),
         is_read,

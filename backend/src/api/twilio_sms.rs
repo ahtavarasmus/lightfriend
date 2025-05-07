@@ -1297,10 +1297,8 @@ pub async fn process_sms(
                                     for (i, email) in emails_array.iter().rev().take(5).rev().enumerate() {
                                         let subject = email.get("subject").and_then(|s| s.as_str()).unwrap_or("No subject");
                                         let from = email.get("from").and_then(|f| f.as_str()).unwrap_or("Unknown sender");
-                                        let date = email.get("date").and_then(|d| d.as_str())
-                                            .and_then(|d| chrono::DateTime::parse_from_rfc3339(d).ok())
-                                            .map(|d| d.format("%m/%d").to_string())
-                                            .unwrap_or_else(|| "No date".to_string());
+
+                                        let date_formatted = email.get("date_formatted").and_then(|d| d.as_str()).unwrap();
                                         let body = email.get("body").and_then(|b| b.as_str()).unwrap_or("");
                                         let snippet = if body.len() > 100 {
                                             format!("{}...", body.chars().take(100).collect::<String>())
@@ -1309,9 +1307,9 @@ pub async fn process_sms(
                                         };
                                         
                                         if i == 0 {
-                                            response.push_str(&format!("{}. {} from {} ({}):\n{}", i + 1, subject, from, date, snippet));
+                                            response.push_str(&format!("{}. {} from {} ({}):\n{}", i + 1, subject, from, date_formatted, snippet));
                                         } else {
-                                            response.push_str(&format!("\n\n{}. {} from {} ({}):\n{}", i + 1, subject, from, date, snippet));
+                                            response.push_str(&format!("\n\n{}. {} from {} ({}):\n{}", i + 1, subject, from, date_formatted, snippet));
                                         }
                                     }
                                     
@@ -1373,7 +1371,7 @@ pub async fn process_sms(
                                     i + 1,
                                     email.from.as_deref().unwrap_or("Unknown"),
                                     email.subject.as_deref().unwrap_or("No subject"),
-                                    email.date.map_or("No date".to_string(), |d| d.to_rfc3339()),
+                                    email.date_formatted.as_deref().unwrap_or("No date"),
                                     email.snippet.as_deref().unwrap_or(""),
                                     email.body.as_deref().unwrap_or("No content")
                                 );

@@ -201,7 +201,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="feature-logo" />{" Perplexity AI search"}</li>
                         <li>{"☀️ Ask about the Weather"}</li>
                         <li>{"🔄 24/7 automated monitoring (optional)"}</li>
-                        <li>{"📱 Up to 150 proactive notifications/month"}</li>
+                        <li>{"📱 Up to 150 automatic notifications/month"}</li>
                     </ul>
                     {
                         if props.is_logged_in && props.sub_tier.is_none() {
@@ -251,7 +251,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 <div class="us-price">
                                     <div class="price">
                                         <span class="region">{"US: "}</span>
-                                        <span class="amount">{"€0.10"}</span>
+                                        <span class="amount">{"€0.09"}</span>
                                         <span class="period">{"/message"}</span>
                                     </div>
                                 </div>
@@ -278,16 +278,23 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <div class="faq-grid">
                     <div class="faq-item">
                         <h3>{"How does billing work?"}</h3>
-                        <p>{"You’ll purchase credits in advance to use for voice calls and SMS messages. You can optionally enable automatic top-up to recharge your account with additional credits whenever your balance runs low, ensuring uninterrupted service. No minimum fees or hidden charges. Proactive messaging subscription is paid on montly basis and gives 150 notification montly quota."}</p>
+                        <p>{"You’ll purchase credits in advance to use for voice calls and SMS messages. You can optionally enable automatic top-up to recharge your account with additional credits whenever your balance runs low, ensuring uninterrupted service. No minimum fees or hidden charges. Pro Plan is paid on montly basis and gives access to all the tools and 150 notification message monthly quota when if monitoring is set."}</p>
                     </div>
                     
                     <div class="faq-item">
-                        <h3>{"What counts as a message or call?"}</h3>
-                        <p>{"You are charged for all messages and calls you initiate. For example texting 'shazam' to lightfriend, you will only be charged for the 'shazam' message and not the listening call."}</p>
+                        <h3>{"When will I get charged?"}</h3>
+                        <p>{"For voice calls, you are charged by the seconds when you initiate the call to lightfriend. The AI's responses during the call are included in this time."}</p>
+                        <p>{"For SMS messages, you are charged for each complete query. If the AI needs more information to properly answer your query, you'll see '(free reply)' at the end of its message. Your response to such messages is free since the AI needed clarification to complete your original request, otherwise messages are charged."}</p>
+                        <p>{"For example:"}</p>
+                        <ul class="example-list">
+                            <li>{"You: What's the weather like?"}</li>
+                            <li>{"AI: In which city? (free reply)"}</li>
+                            <li>{"You: In Helsinki"}</li>
+                            <li>{"AI: The weather in Helsinki is... (this completes the interaction, you are charged once for the first message)"}</li>
+                        </ul>
                     </div>
-
                     <div class="faq-item">
-                        <h3>{"How does proactive email monitoring work?"}</h3>
+                        <h3>{"How does automatic email monitoring work?"}</h3>
                         <p>{"Our AI continuously monitors your email every minute, analyzing new messages using advanced criteria including priority senders, custom keywords, and waiting checks. It evaluates each email's importance on a scale of 0-10, considering factors like urgency indicators, sender importance, and content significance. You'll only be notified of truly important messages."}</p>
                     </div>
 
@@ -297,26 +304,22 @@ pub fn pricing(props: &PricingProps) -> Html {
                     </div>
 
                     <div class="faq-item">
-                        <h3>{"How does the AI determine email importance?"}</h3>
-                        <p>{"The AI uses a comprehensive evaluation process that checks for: urgency indicators (words like 'urgent', 'deadline'), sender importance (managers, clients), content significance (action items, meetings), context (CC'd stakeholders, business hours), and personal impact. You can also set your own importance threshold (default is 7/10) for notifications."}</p>
-                    </div>
-
-                    <div class="faq-item">
-                        <h3>{"What about message quotas?"}</h3>
-                        <p>{"The subscription includes up to 150 proactive notifications per month. You'll receive a notice when you're on your last notification, and your quota automatically resets at the start of each month. This helps manage costs while ensuring you don't miss truly important messages."}</p>
-                    </div>
-
-                    <div class="faq-item">
                         <h3>{"What email services are supported?"}</h3>
                         <p>{"Currently, we support IMAP email monitoring, meaning all major email providers work."}</p>
                     </div>
 
-
-
                     <div class="faq-item">
                         <h3>{"What about refunds?"}</h3>
-                        <p>{"Due to the pay-as-you-go nature of our service, we don't offer refunds. You're only charged for services you actually use."}</p>
+                        <p>{"Due to the pay-as-you-go nature of our service, we don't offer refunds."}</p>
                     </div>
+
+                    <div class="faq-item">
+                        <h3>{""}</h3>
+                        <p>{""}</p>
+                    </div>
+
+
+
                 </div>
             </div>
 
@@ -602,6 +605,53 @@ pub fn pricing(props: &PricingProps) -> Html {
                     gap: 0.75rem;
                     font-size: 1.1rem;
                 }
+                .faq-grid {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 3rem;
+                    max-width: 800px;
+                    margin: 0 auto;
+                }
+
+                .faq-item {
+                    border-bottom: 1px solid rgba(30, 144, 255, 0.1);
+                    padding-bottom: 3rem;
+                }
+
+                .faq-item:last-child {
+                    border-bottom: none;
+                }
+
+                .faq-item h3 {
+                    color: #fff;
+                    font-size: 1.8rem;
+                    margin-bottom: 1.5rem;
+                    font-weight: 600;
+                }
+
+                .faq-item p {
+                    color: #999;
+                    line-height: 1.8;
+                    font-size: 1.1rem;
+                    margin-bottom: 1rem;
+                }
+
+                .faq-item .example-list {
+                    list-style: none;
+                    padding: 1rem 1.5rem;
+                    margin: 1rem 0;
+                    background: rgba(30, 30, 30, 0.5);
+                    border-left: 3px solid #1E90FF;
+                    border-radius: 4px;
+                }
+
+                .faq-item .example-list li {
+                    color: #999;
+                    padding: 0.5rem 0;
+                    font-family: monospace;
+                    font-size: 0.95rem;
+                }
+
 
                 .pricing-card li img {
                     margin-right: 0.5rem;
@@ -637,39 +687,42 @@ pub fn pricing(props: &PricingProps) -> Html {
                 }
 
                 .faq-grid {
-                    display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+                    display: flex;
+                    flex-direction: column;
                     gap: 2.5rem;
-                    max-width: 1400px;
+                    max-width: 800px;
                     margin: 0 auto;
                 }
-                }
+
 
                 .faq-item {
                     background: rgba(30, 30, 30, 0.7);
                     border: 1px solid rgba(30, 144, 255, 0.1);
                     border-radius: 16px;
-                    padding: 2rem;
+                    padding: 2.5rem;
                     backdrop-filter: blur(10px);
                     transition: all 0.3s ease;
                 }
 
                 .faq-item:hover {
-                    transform: translateY(-5px);
+
                     border-color: rgba(30, 144, 255, 0.3);
                     box-shadow: 0 8px 32px rgba(30, 144, 255, 0.1);
                 }
-                }
+
 
                 .faq-item h3 {
                     color: #7EB2FF;
-                    font-size: 1.2rem;
-                    margin-bottom: 1rem;
+                    font-size: 1.4rem;
+                    margin-bottom: 1.5rem;
+                    letter-spacing: 0.5px;
                 }
 
                 .faq-item p {
                     color: #999;
-                    line-height: 1.6;
+                    line-height: 1.8;
+                    font-size: 1.1rem;
+                    margin-bottom: 1rem;
                 }
 
                 @media (max-width: 968px) {
