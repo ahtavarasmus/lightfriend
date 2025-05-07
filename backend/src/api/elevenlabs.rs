@@ -976,7 +976,7 @@ pub async fn handle_whatsapp_confirm_send(
             
             // Create confirmation message
             let confirmation_message = format!(
-                "Confirm the sending of WhatsApp message to '{}' with content: '{}'? (yes-> send, no -> discard)(free reply)",
+                "Confirm the sending of WhatsApp message to '{}' with content: '{}'? (yes-> send, no -> discard)",
                 clean_room_name,
                 payload.message
             );

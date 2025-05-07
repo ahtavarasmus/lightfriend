@@ -539,29 +539,37 @@ pub async fn process_sms(
                             Ok(_) => {
                                 // Send confirmation via Twilio
                                 println!("sending messages since user said yes");
+                                let confirmation_msg = format!("Message sent successfully to {}", chat_name);
                                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                                     &conversation.conversation_sid,
                                     &conversation.twilio_number,
-                                    &format!("Message sent successfully to {}", chat_name),
+                                    &confirmation_msg,
                                     true,
                                 ).await {
                                     eprintln!("Failed to send confirmation message: {}", e);
                                 }
+
+                                // Deduct credits for the confirmation response
+                                if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
+                                    eprintln!("Failed to deduct user credits for WhatsApp confirmation: {}", e);
+                                }
+
                                 return (
                                     StatusCode::OK,
                                     [(axum::http::header::CONTENT_TYPE, "application/json")],
                                     axum::Json(TwilioResponse {
-                                        message: format!("Message sent successfully to {}", chat_name),
+                                        message: confirmation_msg,
                                     })
                                 );
                             }
                             Err(e) => {
                                 // Send error message via Twilio
                                 println!("sending failed to send the message to whatsapp sms");
+                                let error_msg = format!("Failed to send message: {}(not charged)", e);
                                 if let Err(send_err) = crate::api::twilio_utils::send_conversation_message(
                                     &conversation.conversation_sid,
                                     &conversation.twilio_number,
-                                    &format!("Failed to send message: {}", e),
+                                    &error_msg,
                                     true,
                                 ).await {
                                     eprintln!("Failed to send error message: {}", send_err);
@@ -570,7 +578,7 @@ pub async fn process_sms(
                                     StatusCode::OK,
                                     [(axum::http::header::CONTENT_TYPE, "application/json")],
                                     axum::Json(TwilioResponse {
-                                        message: format!("Failed to send message: {}", e),
+                                        message: error_msg,
                                     })
                                 );
                             }
@@ -579,19 +587,21 @@ pub async fn process_sms(
                     "no" => {
                         // Send cancellation confirmation via Twilio
                         println!("User said not so we are sending message discarded confirmation");
+                        let cancel_msg = "Message sending cancelled.";
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                             &conversation.conversation_sid,
                             &conversation.twilio_number,
-                            "Message sending cancelled.",
+                            cancel_msg,
                             true,
                         ).await {
                             eprintln!("Failed to send cancellation confirmation: {}", e);
                         }
+
                         return (
                             StatusCode::OK,
                             [(axum::http::header::CONTENT_TYPE, "application/json")],
                             axum::Json(TwilioResponse {
-                                message: "Message sending cancelled.".to_string(),
+                                message: cancel_msg.to_string(),
                             })
                         );
                     }
@@ -604,15 +614,7 @@ pub async fn process_sms(
             }
         }
     }
-    if user.id == 1 {
-            return (
-                StatusCode::OK,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                axum::Json(TwilioResponse {
-                    message: "Message sending cancelled.".to_string(),
-                })
-            );
-    }
+    
     let auth_user = crate::handlers::auth_middleware::AuthUser {
         user_id: user.id, 
         is_admin: false,
