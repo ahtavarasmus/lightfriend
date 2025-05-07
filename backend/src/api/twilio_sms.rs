@@ -305,8 +305,6 @@ pub async fn handle_incoming_sms(
 ) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
     println!("Received SMS from: {} to: {}", payload.from, payload.to);
 
-    // Process SMS with is_test set to false for actual SMS handling
-    process_sms(&state, payload.clone(), false).await;
 
     // Check for Shazam shortcut ('S' or 's')
     if payload.body.trim() == "S" || payload.body.trim() == "s" {
