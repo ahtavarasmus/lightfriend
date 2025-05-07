@@ -76,7 +76,29 @@ pub fn privacy_policy() -> Html {
             </section>
 
             <section>
-                <h2>{"7. Google Tasks Integration and OAuth"}</h2>
+                <h2>{"7. WhatsApp Integration"}</h2>
+                <p>{"Lightfriend integrates with WhatsApp to allow you to send and receive WhatsApp messages via SMS or voice calls. Due to the technical requirements of providing this service, we must process and temporarily store certain WhatsApp data. Here's how we handle your WhatsApp data:"}</p>
+                <ul>
+                    <li>{"Connection Data: When you connect your WhatsApp account, we store necessary authentication data to maintain the connection between our service and your WhatsApp account."}</li>
+                    <li>{"Message Encryption in Transit: All WhatsApp messages are protected with end-to-end encryption during transmission between WhatsApp's API and our servers. The decryption process occurs securely on our servers using securely stored keys, which is necessary for converting messages to SMS and voice calls."}</li>
+                    <li>{"Message Processing: To enable the conversion of WhatsApp messages to SMS and voice calls, messages must be processed and temporarily stored on our secure servers. This storage is a technical necessity to ensure reliable message delivery and conversion between different communication formats."}</li>
+                    <li>{"Message Storage Duration: Messages are retained only for the minimum time necessary to ensure reliable delivery and system functionality. We automatically remove messages based on our retention policy."}</li>
+                    <li>{"Security Measures: While messages cannot be encrypted at rest due to technical limitations of the WhatsApp bridge technology, we implement strict access controls and security measures to protect your data. Access to message data is strictly limited to only essential system processes required for service operation. Our servers are secured with industry-standard practices and access controls."}</li>
+                    <li>{"Contact Information: We process but do not permanently store WhatsApp contact names when you search for contacts or send messages."}</li>
+
+                    <li>{"Data Retention: WhatsApp connection data is retained until you disconnect the service or delete your account."}</li>
+                    <li>{"Third-Party Access: We do not share your WhatsApp data with any third parties except as required by law."}</li>
+                </ul>
+                <p>{"Important Disclaimers:"}</p>
+                <ul>
+                    <li>{"Message Content Responsibility: Users are solely responsible for the content of messages sent through our service. Lightfriend acts solely as a technical intermediary for message delivery and does not monitor, edit, or take responsibility for user-generated content."}</li>
+                    <li>{"Technical Requirements: The processing and temporary storage of messages is a technical requirement necessary to provide the service. By using our WhatsApp integration, you acknowledge and accept these technical requirements."}</li>
+                    <li>{"Service Limitations: Due to the technical nature of the WhatsApp bridge, we cannot guarantee the privacy of messages beyond our implemented security measures. Users should consider this when deciding what information to share through the service."}</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2>{"8. Google Tasks Integration and OAuth"}</h2>
                 <p>{"Lightfriend integrates with Google Tasks to allow you to manage your tasks via SMS or voice call commands. To provide this functionality, we use Google OAuth with the following details:"}</p>
                 <ul>
                     <li>{"Data We Access: We request access to your Google Tasks data only when you authorize it through OAuth."}</li>

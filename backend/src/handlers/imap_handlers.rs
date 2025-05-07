@@ -362,8 +362,7 @@ pub async fn fetch_emails_imap(
 
             let date_formatted = date.map(|dt| format_timestamp(dt.timestamp(), state.user_repository.find_by_id(user_id)
                 .ok()
-                .and_then(|u| u.ok())
-                .and_then(|u| u.timezone)));
+                .and_then(|u| u.unwrap().timezone)));
 
             email_previews.push(ImapEmailPreview {
                 id: uid.clone(),
@@ -553,8 +552,7 @@ pub async fn fetch_single_email_imap(
 
     let date_formatted = date.map(|dt| format_timestamp(dt.timestamp(), state.user_repository.find_by_id(user_id)
         .ok()
-        .and_then(|u| u.ok())
-        .and_then(|u| u.timezone)));
+        .and_then(|u| u.unwrap().timezone)));
 
     Ok(ImapEmail {
         id: email_id.to_string(),

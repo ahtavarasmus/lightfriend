@@ -1566,7 +1566,31 @@ impl UserRepository {
         Ok(())
     }
 
+    pub fn delete_telegram_bridge(&self, user_id: i32) -> Result<(), DieselError> {
+        use crate::schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
 
+        diesel::delete(bridges::table)
+            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::bridge_type.eq("telegram"))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+
+    pub fn get_telegram_bridge(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
+        use crate::schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let bridge = bridges::table
+            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::bridge_type.eq("telegram"))
+            .first::<Bridge>(&mut conn)
+            .optional()?;
+
+        Ok(bridge)
+    }
     pub fn get_whatsapp_bridge(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
         use crate::schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");

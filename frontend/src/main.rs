@@ -27,6 +27,7 @@ mod connections {
     pub mod email;
     pub mod calendar;
     pub mod whatsapp;
+    pub mod telegram;
     pub mod tasks;
 }
 mod auth {
