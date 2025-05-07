@@ -499,6 +499,7 @@ pub async fn process_sms(
         }
     };
     println!("messages: {:#?}", messages);
+
     let last_msg = messages.iter().find(|msg| msg.author == "lightfriend");
     println!("last msg: {:#?}", last_msg);
 
@@ -508,7 +509,7 @@ pub async fn process_sms(
             let user_response = payload.body.trim().to_lowercase();
             
             // Extract chat name and message content from the confirmation message
-            if let Some(captures) = regex::Regex::new(r"Confirm the sending of WhatsApp message to '(.+?)' with content: '(.+?)'?")
+            if let Some(captures) = regex::Regex::new(r"Confirm the sending of WhatsApp message to '([^']+)' with content: '([^']+)'")
                 .ok()
                 .and_then(|re| re.captures(&last_ai_message.body)) {
                 
