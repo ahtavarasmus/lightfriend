@@ -501,6 +501,8 @@ pub async fn process_sms(
     let last_msg = messages.iter().find(|msg| msg.author == "lightfriend");
     println!("last msg: {:#?}", last_msg);
 
+    // if AI decides it needs more information we should put this as false so next message knows whatsup
+    let mut redact_the_body = true;
     if let Some(last_ai_message) = last_msg {
         if last_ai_message.body.contains("(yes-> send, no -> discard)") {
             println!("last message contained yes or no");
@@ -2167,6 +2169,9 @@ pub async fn process_sms(
     } else {
         final_response
     };
+    if is_clarifying {
+        redact_the_body = false;
+    }
 
     let status = if should_charge {"charging".to_string()} else {"this was free reply".to_string()};
     println!("STATUS: {}", status);
@@ -2210,7 +2215,7 @@ pub async fn process_sms(
     }
 
     // Send the actual message if not in test mode
-    match crate::api::twilio_utils::send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number, &final_response_with_notice, true).await {
+    match crate::api::twilio_utils::send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number, &final_response_with_notice, redact_the_body).await {
         Ok(message_sid) => {
             // Always log the SMS usage metadata and eval(no content!)
             println!("status of the message: {}", status);
