@@ -522,7 +522,7 @@ pub async fn process_sms(
                 if let Err(e) = crate::api::twilio_utils::redact_message(
                     &conversation.conversation_sid,
                     &last_ai_message.sid,
-                    &format!("Confirm the sending of WhatsApp message to '[CHAT_NAME_REDACTED]' with content: '[MESSAGE_CONTENT_REDACTED]' (yes-> send, no -> discard)")
+                    &format!("Confirm the sending of WhatsApp message to '[CHAT_NAME_REDACTED]' with content: '[MESSAGE_CONTENT_REDACTED]'")
                 ).await {
                     eprintln!("Failed to redact confirmation message: {}", e);
                 }
