@@ -180,20 +180,39 @@ pub fn landing() -> Html {
                     </div>
                 </div>
             </section>
-            // ProductHunt Launch Demo section
-            <section class="producthunt-demo">
-                <h2>{"Featured on ProductHunt"}</h2>
-                <div class="producthunt-iframe-container">
-                    <iframe 
-                        style="border: none;" 
-                        src="https://cards.producthunt.com/cards/products/1050798" 
-                        width="500" 
-                        height="405" 
-                        frameborder="0" 
-                        scrolling="no" 
-                        allowfullscreen={true}
-                    >
-                    </iframe>
+            // Featured Sections
+            <section class="featured-sections">
+                <div class="featured-grid">
+                    <div class="featured-item producthunt-demo">
+                        <h2>{"Featured on ProductHunt"}</h2>
+                        <div class="producthunt-iframe-container">
+                            <iframe 
+                                style="border: none;" 
+                                src="https://cards.producthunt.com/cards/products/1050798" 
+                                width="500" 
+                                height="405" 
+                                frameborder="0" 
+                                scrolling="no" 
+                                allowfullscreen={true}
+                            >
+                            </iframe>
+                        </div>
+                    </div>
+                    <div class="featured-item solopush-feature">
+                        <h2>{"#1 Product of the Day"}</h2>
+                        <div class="solopush-content">
+                            <img src="/assets/solopushlogo.png" alt="SoloPush Logo" class="solopush-logo" />
+                            <p>{"Ranked #1 Product of the Day on SoloPush"}</p>
+                            <a 
+                                href="https://www.solopush.com/product/lightfriend" 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                class="solopush-link"
+                            >
+                                {"View on SoloPush"}
+                            </a>
+                        </div>
+                    </div>
                 </div>
             </section>
 
@@ -261,8 +280,69 @@ pub fn landing() -> Html {
             <style>
                 {r#"
 
+                    .featured-sections {
+                        padding: 4rem 0;
+                        text-align: center;
+                    }
+
+                    .featured-grid {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                        gap: 2rem;
+                        max-width: 1200px;
+                        margin: 0 auto;
+                        padding: 0 2rem;
+                    }
+
+                    .featured-item {
+                        background: rgba(30, 30, 30, 0.7);
+                        border: 1px solid rgba(30, 144, 255, 0.1);
+                        border-radius: 16px;
+                        padding: 2rem;
+                        text-align: center;
+                    }
+
+                    .featured-item h2 {
+                        font-size: 1.8rem;
+                        margin-bottom: 1.5rem;
+                        color: #7EB2FF;
+                    }
+
+                    .solopush-content {
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        gap: 1.5rem;
+                    }
+
+                    .solopush-logo {
+                        max-width: 200px;
+                        height: auto;
+                    }
+
+                    .solopush-content p {
+                        color: #fff;
+                        font-size: 1.2rem;
+                    }
+
+                    .solopush-link {
+                        display: inline-block;
+                        padding: 0.8rem 1.5rem;
+                        background: linear-gradient(45deg, #1E90FF, #4169E1);
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 8px;
+                        font-size: 1rem;
+                        transition: all 0.3s ease;
+                    }
+
+                    .solopush-link:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
+                    }
+
                     .producthunt-demo {
-                        padding: 2rem 0;
+                        padding: 0;
                         text-align: center;
                     }
 

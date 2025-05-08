@@ -376,6 +376,7 @@ pub async fn redact_message(
     let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
     let client = Client::new();
 
+    // 1. Update the conversation message body
     let form_data = vec![("Body", redacted_body)];
 
     let response = client
@@ -388,13 +389,27 @@ pub async fn redact_message(
         .send()
         .await?;
 
-    if response.status().is_success() {
-        println!("Message {} redacted successfully", message_sid);
-    } else {
-        println!("Failed to redact message {}: {}", message_sid, response.status());
-        return Err(format!("Failed to redact message: {}", response.status()).into());
+    if !response.status().is_success() {
+        println!("Failed to update conversation message {}: {}", message_sid, response.status());
+        return Err(format!("Failed to update conversation message: {}", response.status()).into());
     }
 
+    // 2. Redact the message in Twilio's logs using the Messages Redaction API
+    let redaction_response = client
+        .post(format!(
+            "https://api.twilio.com/2010-04-01/Accounts/{}/Messages/{}/Redact.json",
+            account_sid, message_sid
+        ))
+        .basic_auth(&account_sid, Some(&auth_token))
+        .send()
+        .await?;
+
+    if !redaction_response.status().is_success() {
+        println!("Failed to redact message in logs {}: {}", message_sid, redaction_response.status());
+        return Err(format!("Failed to redact message in logs: {}", redaction_response.status()).into());
+    }
+
+    println!("Message {} fully redacted (both conversation and logs)", message_sid);
     Ok(())
 }
 
