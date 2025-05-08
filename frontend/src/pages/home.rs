@@ -105,6 +105,16 @@ pub fn is_logged_in() -> bool {
 
 #[function_component(Landing)]
 pub fn landing() -> Html {
+
+    let is_privacy_expanded = use_state(|| false);
+    let onclick = {
+        let is_privacy_expanded = is_privacy_expanded.clone();
+        Callback::from(move |_| {
+            is_privacy_expanded.set(!*is_privacy_expanded);
+        })
+    };
+
+
     html! {
 
         <div class="landing-page">
@@ -179,6 +189,57 @@ pub fn landing() -> Html {
                         <img src="/assets/delivery.png" alt="Proactive notifications demo" />
                     </div>
                 </div>
+
+                // Privacy Section
+                <div class="feature-block privacy">
+                    <div class="feature-content">
+                        <h2>{"Your Privacy Comes First"}</h2>
+                        <p>{"We take your privacy seriously. Our service is designed with strong privacy protections to ensure your personal data stays secure and private."}</p>
+                        <ul class="feature-list">
+                            <li>{"🔒 No storage of call recordings - we only keep anonymous success metrics to improve the service"}</li>
+                            <li>{"🤖 Automated redaction of sensitive information in message context"}</li>
+                            <li>{"📱 SMS context stored securely with Twilio, fetched only when needed"}</li>
+                            <li>{"🗑️ Automatic deletion of service connections and associated data upon disconnection"}</li>
+                        </ul>
+                        <div class="privacy-example">
+                        {
+                            html! {
+                                <>
+                                <button 
+                                    class="privacy-toggle"
+                                    {onclick}
+                                >
+                                    <h3>{"How We Handle Your Data"}</h3>
+                                    <span class="toggle-icon">{if *is_privacy_expanded {"▼"} else {"▶"}}</span>
+                                </button>
+                                {
+                                    if *is_privacy_expanded {
+                                    html! {
+                                        <div class="privacy-content">
+                                            <p>{"We maintain minimal context for conversations while protecting your privacy:"}</p>
+                                            <ul class="privacy-details">
+                                                <li><strong>{"Call Privacy:"}</strong>{" No recordings are stored. We only keep anonymous metrics like call success rate and general reasons (e.g., 'Weather was not found for <this> region.') to improve the service."}</li>
+                                                <li><strong>{"Message Privacy:"}</strong>{" Message context is automatically redacted to remove sensitive information while maintaining conversational flow. These redacted messages are stored securely with Twilio and only fetched when needed for context."}</li>
+                                            </ul>
+                                            <p class="context-example">{"Example of how we handle message context:"}</p>
+                                            <pre class="redaction-example">
+                                                {"Original: \"Hey, can you check if John Smith sent me an email about the $5000 invoice?\"\nStored as: \"Hey, can you check if [NAME_REDACTED] sent me an email about the [CONTENT_REDACTED]?\""}
+                                            </pre>
+                                        </div>
+                                        }
+                                    } else {
+                                        html! {}
+                                    }
+                                }
+                            </>
+                            }
+                        }
+                        </div>
+                    </div>
+                    <div class="feature-image">
+                        <img src="/assets/privacyshowcase.png" alt="Privacy and security illustration" />
+                    </div>
+                </div >
             </section>
             // Featured Sections
             <section class="featured-sections">
@@ -306,6 +367,125 @@ pub fn landing() -> Html {
                         font-size: 1.8rem;
                         margin-bottom: 1.5rem;
                         color: #7EB2FF;
+                    }
+
+                    .feature-block:hover {
+                        transform: translateY(-5px);
+                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
+                        border-color: rgba(30, 144, 255, 0.3);
+                    }
+
+                    .privacy-example {
+                        margin-top: 2rem;
+                        padding: 1.5rem;
+                        background: rgba(0, 0, 0, 0.2);
+                        border-radius: 12px;
+                        border: 1px solid rgba(30, 144, 255, 0.1);
+                    }
+
+                    .privacy-toggle {
+                        width: 100%;
+                        background: none;
+                        border: none;
+                        padding: 0;
+                        cursor: pointer;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        color: inherit;
+                        transition: all 0.3s ease;
+                    }
+
+                    .privacy-toggle:hover {
+                        color: #7EB2FF;
+                    }
+
+                    .privacy-toggle h3 {
+                        margin: 0;
+                        text-align: left;
+                    }
+
+                    .toggle-icon {
+                        font-size: 0.8rem;
+                        color: #7EB2FF;
+                        transition: transform 0.3s ease;
+                    }
+
+                    .privacy-content {
+                        margin-top: 1.5rem;
+                        animation: slideDown 0.3s ease;
+                    }
+
+                    @keyframes slideDown {
+                        from {
+                            opacity: 0;
+                            transform: translateY(-10px);
+                        }
+                        to {
+                            opacity: 1;
+                            transform: translateY(0);
+                        }
+                    }
+
+                    .privacy-example h3 {
+                        color: #7EB2FF;
+                        font-size: 1.2rem;
+                        margin-bottom: 1rem;
+                    }
+
+                    .redaction-example {
+                        background: rgba(0, 0, 0, 0.3);
+                        padding: 1rem;
+                        border-radius: 8px;
+                        font-family: monospace;
+                        font-size: 0.9rem;
+                        color: #999;
+                        white-space: pre-wrap;
+                        overflow-x: auto;
+                    }
+
+                    .privacy-details {
+                        list-style: none;
+                        padding: 0;
+                        margin: 1.5rem 0;
+                    }
+
+                    .privacy-details li {
+                        margin-bottom: 1rem;
+                        color: #e0e0e0;
+                        line-height: 1.6;
+                    }
+
+                    .privacy-details strong {
+                        color: #7EB2FF;
+                        display: block;
+                        margin-bottom: 0.3rem;
+                    }
+
+                    .context-example {
+                        color: #7EB2FF;
+                        margin: 1.5rem 0 0.5rem 0;
+                        font-size: 0.9rem;
+                    }
+
+                    .feature-block.privacy {
+                        background: rgba(30, 30, 30, 0.8);
+                        border: 1px solid rgba(30, 144, 255, 0.15);
+                    }
+
+                    .feature-block.privacy:hover {
+                        border-color: rgba(30, 144, 255, 0.4);
+                    }
+
+                    @media (max-width: 768px) {
+                        .privacy-example {
+                            padding: 1rem;
+                        }
+
+                        .redaction-example {
+                            font-size: 0.8rem;
+                            padding: 0.75rem;
+                        }
                     }
 
                     .solopush-content {

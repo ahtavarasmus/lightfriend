@@ -48,7 +48,7 @@ pub fn privacy_policy() -> Html {
                 <p>{"You have the right to:"}</p>
                 <ul>
                     <li>{"Access your personal data"}</li>
-                    <li>{"Modify your phone number, email, nickname, and profile information"}</li>
+                    <li>{"Modify your phone number, email, nickname, profile information and service connections"}</li>
                     <li>{"Request account deletion (subject to outstanding payments)"}</li>
                 </ul>
             </section>
@@ -83,9 +83,7 @@ pub fn privacy_policy() -> Html {
                     <li>{"Message Encryption in Transit: All WhatsApp messages are protected with end-to-end encryption during transmission between WhatsApp's API and our servers. The decryption process occurs securely on our servers using securely stored keys, which is necessary for converting messages to SMS and voice calls."}</li>
                     <li>{"Message Processing: To enable the conversion of WhatsApp messages to SMS and voice calls, messages must be processed and temporarily stored on our secure servers. This storage is a technical necessity to ensure reliable message delivery and conversion between different communication formats."}</li>
                     <li>{"Message Storage Duration: Messages are retained only for the minimum time necessary to ensure reliable delivery and system functionality. We automatically remove messages based on our retention policy."}</li>
-                    <li>{"Security Measures: While messages cannot be encrypted at rest due to technical limitations of the WhatsApp bridge technology, we implement strict access controls and security measures to protect your data. Access to message data is strictly limited to only essential system processes required for service operation. Our servers are secured with industry-standard practices and access controls."}</li>
-                    <li>{"Contact Information: We process but do not permanently store WhatsApp contact names when you search for contacts or send messages."}</li>
-
+                    <li>{"Security Measures: Access to message data is strictly limited to only essential system processes required for service operation. Our servers are secured with industry-standard practices and access controls."}</li>
                     <li>{"Data Retention: WhatsApp connection data is retained until you disconnect the service or delete your account."}</li>
                     <li>{"Third-Party Access: We do not share your WhatsApp data with any third parties except as required by law."}</li>
                 </ul>
@@ -108,7 +106,6 @@ pub fn privacy_policy() -> Html {
                     <li>{"Sharing: We do not share these tokens or your Google user data with third parties, except as required by law or to facilitate the Google API services you've authorized."}</li>
                 </ul>
             </section>
-
 
             <section>
                 <h2>{"8. Data Retention"}</h2>
