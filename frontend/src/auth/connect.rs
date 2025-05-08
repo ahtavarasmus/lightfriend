@@ -399,35 +399,6 @@ pub fn connect(props: &ConnectProps) -> Html {
                                     </div>
                                 </div>
                             </div>
-
-                            // Delete SMS Context
-                            <div class="service-item">
-                                <div class="service-header">
-                                    <div class="service-name">
-                                        {"🗑️ Delete SMS Context"}
-                                    </div>
-                                    <button class="info-button" onclick={Callback::from(|_| {
-                                        if let Some(element) = web_sys::window()
-                                            .and_then(|w| w.document())
-                                            .and_then(|d| d.get_element_by_id("delete-sms-context-info"))
-                                        {
-                                            let display = element.get_attribute("style")
-                                                .unwrap_or_else(|| "display: none".to_string());
-                                            
-                                            if display.contains("none") {
-                                                let _ = element.set_attribute("style", "display: block");
-                                            } else {
-                                                let _ = element.set_attribute("style", "display: none");
-                                            }
-                                        }
-                                    })}>
-                                        {"ⓘ"}
-                                    </button>
-                                </div>
-                                <p class="service-description">
-                                    {"Delete all your SMS conversation history with lightfriend. This tool is only accessible via SMS and can be used if you want to refresh your context. Won't delete message history from your phone obviously. If you want lightfriend to ignore the history for one message only, you can just start your query with 'forget '."}
-                                </p>
-                            </div>
                         </div>
                     </div>
                     if let Some(err) = (*error).as_ref() {

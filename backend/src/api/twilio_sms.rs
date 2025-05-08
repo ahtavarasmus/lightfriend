@@ -896,6 +896,16 @@ pub async fn process_sms(
         }),
     );
 
+    let mut placeholder_properties = HashMap::new();
+    placeholder_properties.insert(
+        "param".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("put nothing here".to_string()),
+            ..Default::default()
+        }),
+    );
+
 
     // Define tools
     let tools = vec![
@@ -906,7 +916,7 @@ pub async fn process_sms(
                 description: Some(String::from("Deletes all sms conversation history for a specific user. Use this when user asks to delete their chat history or conversations. It won't delete the history from their phone obviously.")),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
-                    properties: None,
+                    properties: Some(placeholder_properties),
                     required: None,
                 },
             },
@@ -1764,21 +1774,8 @@ pub async fn process_sms(
                     }
                 } else if name == "delete_sms_conversation_history" {
                     println!("Executing delete_sms_conversation_history tool call");
-                    #[derive(Deserialize)]
-                    struct DeleteConversationsArgs {
-                        phone_number: String,
-                    }
 
-                    let args: DeleteConversationsArgs = match serde_json::from_str(arguments) {
-                        Ok(args) => args,
-                        Err(e) => {
-                            eprintln!("Failed to parse delete conversations arguments: {}", e);
-                            tool_answers.insert(tool_call_id, "Failed to parse request arguments.".to_string());
-                            continue;
-                        }
-                    };
-
-                    match crate::api::twilio_utils::delete_bot_conversations(&args.phone_number).await {
+                    match crate::api::twilio_utils::delete_bot_conversations(&user.phone_number).await {
                         Ok(_) => {
                             tool_answers.insert(tool_call_id, "Successfully deleted all bot conversations.".to_string());
                         }
