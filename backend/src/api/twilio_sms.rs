@@ -1979,10 +1979,7 @@ pub async fn process_sms(
     }
 
     // If message starts with "forget", skip clarification check
-    let (is_clarifying, clarify_explanation) = if payload.body.to_lowercase().starts_with("forget") {
-        (false, Some("Skipped clarification check for forget command".to_string()))
-    } else {
-        match client.chat_completion(clarify_req).await {
+    let (is_clarifying, clarify_explanation) = match client.chat_completion(clarify_req).await {
             Ok(result) => {
                 println!("Got clarification check response from model");
                 if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
@@ -2016,8 +2013,7 @@ pub async fn process_sms(
                 println!("Failed to get clarification check response: {}", e);
                 (false, Some("Failed to get clarification check response".to_string()))
             }
-        }
-    };
+        };
 
     // Create evaluation function properties
     let mut eval_properties = HashMap::new();
@@ -2169,6 +2165,7 @@ pub async fn process_sms(
     } else {
         final_response
     };
+    println!("is_clarifying message: {}", is_clarifying);
     if is_clarifying {
         redact_the_body = false;
     }
