@@ -32,6 +32,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
     let qr_code = use_state(|| None::<String>);
     let error = use_state(|| None::<String>);
     let is_connecting = use_state(|| false);
+    let show_disconnect_modal = use_state(|| false);
 
     // Function to fetch WhatsApp status
     let fetch_status = {
@@ -296,12 +297,12 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                     if status.connected {
                         <>
                             {
-                                // Show sync indicator for 15 minutes after connection
-                                if js_sys::Date::now() - (status.created_at as f64 * 1000.0) <= 900000.0 { // 15 minutes in milliseconds
+                                // Show sync indicator for 10 minutes after connection
+                                if js_sys::Date::now() - (status.created_at as f64 * 1000.0) <= 600000.0 { // 10 minutes in milliseconds
                                     html! {
                                         <div class="sync-indicator">
                                             <div class="sync-spinner"></div>
-                                            <p>{"Building the connection bridge... This may take up to 10 minutes. Message history will not be fetched. Lightfriend can only fetch messages from current time onwards."}</p>
+                                            <p>{"Syncing contacts... This may take up to 10 minutes. History will not be fetched except for the latest message in each chat."}</p>
                                         </div>
                                     }
                                 } else {
@@ -312,9 +313,43 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                                 <p class="service-description">
                                     {"Send and receive WhatsApp messages through SMS or voice calls. (currently only works with direct messages and not groups."}
                                 </p>
-                                <button onclick={disconnect} class="disconnect-button">
+                                <button onclick={
+                                    let show_disconnect_modal = show_disconnect_modal.clone();
+                                    Callback::from(move |_| show_disconnect_modal.set(true))
+                                } class="disconnect-button">
                                     {"Disconnect"}
                                 </button>
+                                if *show_disconnect_modal {
+                                    <div class="modal-overlay">
+                                        <div class="modal-content">
+                                            <h3>{"Confirm Disconnection"}</h3>
+                                            <p>{"Are you sure you want to disconnect WhatsApp? This will:"}</p>
+                                            <ul>
+                                                <li>{"Stop all WhatsApp message forwarding"}</li>
+                                                <li>{"Delete all your WhatsApp data from our servers"}</li>
+                                                <li>{"Require reconnection to use WhatsApp features again"}</li>
+                                            </ul>
+                                            <div class="modal-buttons">
+                                                <button onclick={
+                                                    let show_disconnect_modal = show_disconnect_modal.clone();
+                                                    Callback::from(move |_| show_disconnect_modal.set(false))
+                                                } class="cancel-button">
+                                                    {"Cancel"}
+                                                </button>
+                                                <button onclick={
+                                                    let disconnect = disconnect.clone();
+                                                    let show_disconnect_modal = show_disconnect_modal.clone();
+                                                    Callback::from(move |_| {
+                                                        disconnect.emit(());
+                                                        show_disconnect_modal.set(false);
+                                                    })
+                                                } class="confirm-disconnect-button">
+                                                    {"Yes, Disconnect"}
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
                                 {
                                     if props.user_id == 1 {
                                         html! {
@@ -737,6 +772,85 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         border-radius: 8px;
                         padding: 1rem;
                         margin-top: 1rem;
+                    }
+
+                    .modal-overlay {
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                        background: rgba(0, 0, 0, 0.85);
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        z-index: 1000;
+                    }
+
+                    .modal-content {
+                        background: #1a1a1a;
+                        border: 1px solid rgba(30, 144, 255, 0.2);
+                        border-radius: 12px;
+                        padding: 2rem;
+                        max-width: 500px;
+                        width: 90%;
+                        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+                    }
+
+                    .modal-content h3 {
+                        color: #FF6347;
+                        margin-bottom: 1rem;
+                    }
+
+                    .modal-content p {
+                        color: #CCC;
+                        margin-bottom: 1rem;
+                    }
+
+                    .modal-content ul {
+                        margin-bottom: 2rem;
+                        padding-left: 1.5rem;
+                    }
+
+                    .modal-content li {
+                        color: #999;
+                        margin-bottom: 0.5rem;
+                    }
+
+                    .modal-buttons {
+                        display: flex;
+                        gap: 1rem;
+                        justify-content: flex-end;
+                    }
+
+                    .cancel-button {
+                        background: transparent;
+                        border: 1px solid rgba(204, 204, 204, 0.3);
+                        color: #CCC;
+                        padding: 0.8rem 1.5rem;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                    }
+
+                    .cancel-button:hover {
+                        background: rgba(204, 204, 204, 0.1);
+                        transform: translateY(-2px);
+                    }
+
+                    .confirm-disconnect-button {
+                        background: linear-gradient(45deg, #FF6347, #FF4500);
+                        color: white;
+                        border: none;
+                        padding: 0.8rem 1.5rem;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                    }
+
+                    .confirm-disconnect-button:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 12px rgba(255, 99, 71, 0.3);
                     }
                     .sync-spinner {
                         display: inline-block;
