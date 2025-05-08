@@ -85,11 +85,123 @@ pub fn connect(props: &ConnectProps) -> Html {
     );
             html! {
                 <div class="connect-section">
+
+                    // Information Search Services
+                    <div class="service-group">
+                        <h3 class="service-group-title">
+                            <i class="fa-solid fa-globe"></i>
+                            {"Internet Search"}
+                        </h3>
+                        <div class="service-list">
+                            // Perplexity
+                            <div class="service-item">
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        <img src="https://www.perplexity.ai/favicon.ico" alt="Perplexity"/>
+                                        {"Perplexity AI"}
+                                    </div>
+                                </div>
+                                <p class="service-description">
+                                    {"Ask any question and get accurate, AI-powered answers through SMS or voice calls. Perplexity helps you find information, solve problems, and learn new things."}
+                                </p>
+                            </div>
+
+                            // Weather
+                            <div class="service-item">
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        {"☀️ Weather"}
+                                    </div>
+                                </div>
+                                <p class="service-description">
+                                    {"Get instant weather updates and forecasts for any location through SMS or voice calls. Provides current conditions."}
+                                </p>
+                            </div>
+
+                            // Shazam
+                            <div class="service-item">
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        {"🎵 Shazam"}
+                                        {
+                                            if props.sub_tier.is_none() && !props.discount {
+                                                html! {
+                                                    <span class="pro-tag">{"Pro"}</span>
+                                                }
+                                            } else {
+                                                html! {}
+                                            }
+                                        }
+                                    </div>
+                                    <button class="info-button" onclick={Callback::from(|_| {
+                                        if let Some(element) = web_sys::window()
+                                            .and_then(|w| w.document())
+                                            .and_then(|d| d.get_element_by_id("shazam-info"))
+                                        {
+                                            let display = element.get_attribute("style")
+                                                .unwrap_or_else(|| "display: none".to_string());
+                                            
+                                            if display.contains("none") {
+                                                let _ = element.set_attribute("style", "display: block");
+                                            } else {
+                                                let _ = element.set_attribute("style", "display: none");
+                                            }
+                                        }
+                                    })}>
+                                        {"ⓘ"}
+                                    </button>
+                                </div>
+                                <p class="service-description">
+                                    {"Identify any song by calling your lightfriend and playing the music. Once identified, you'll receive the song details via SMS."}
+                                </p>
+                                <div id="shazam-info" class="info-section" style="display: none">
+                                    <h4>{"How It Works"}</h4>
+                                    <div class="info-subsection">
+                                        <ul>
+                                            <li>{"1. Send either 's' or ask something related to shazam"}</li>
+                                            <li>{"2. Answer the incoming call from other number"}</li>
+                                            <li>{"3. Put the on speaker phone and let it listen to the music"}</li>
+                                            <li>{"4. once every 15s of music, lightfriend will try to identify the song and send you the details by sms. Overall it tries to identify the audio 4 times in the 1 minute call. If no message is received, lightfriend couldn't identify the music."}</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+
+                            // QR Code Scanner (Coming Soon)
+                            <div class="service-item coming-soon">
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        <i class="fas fa-qrcode" style="color: #1E90FF; font-size: 24px; margin-right: 8px;"></i>
+                                        {"QR Code Scanner"}
+                                        <span class="coming-soon-tag">{"Coming Soon"}</span>
+                                    </div>
+                                </div>
+                                <p class="service-description">
+                                    {"Send a photo of a QR code through SMS and receive its contents instantly. Perfect for quickly accessing information from QR codes without a smartphone."}
+                                </p>
+                            </div>
+                            // Photo Translation (Coming Soon)
+                            <div class="service-item coming-soon">
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        {"🔤 Photo Translation"}
+                                        <span class="coming-soon-tag">{"Coming Soon"}</span>
+                                    </div>
+                                </div>
+                                <p class="service-description">
+                                    {"Send a photo of text in any language and receive its English translation instantly via SMS. Perfect for understanding foreign text without a smartphone."}
+                                </p>
+                            </div>
+
+                        </div>
+                    </div>
+
+
                     // Calendar Services
                     <div class="service-group">
                         <h3 class="service-group-title">
                             <i class="fas fa-calendar"></i>
-                            {"Calendar Services"}
+                            {"Calendar"}
                         </h3>
                         <div class="service-list">
                             <CalendarConnect 
@@ -98,11 +210,29 @@ pub fn connect(props: &ConnectProps) -> Html {
                                 discount={props.discount}
                             />
                         </div>
+
+                        <br/>
+                        // Outlook Calendar (Coming Soon)
+                        <div class="service-item coming-soon">
+                            <div class="service-header">
+                                <div class="service-name">
+                                    <img src="https://upload.wikimedia.org/wikipedia/commons/d/df/Microsoft_Office_Outlook_%282018%E2%80%93present%29.svg" alt="Outlook Calendar"/>
+                                    {"Outlook Calendar"}
+                                    <span class="coming-soon-tag">{"Coming Soon"}</span>
+                                </div>
+                            </div>
+                            <p class="service-description">
+                                {"Manage your Outlook Calendar events through SMS or voice calls."}
+                            </p>
+                            <button class="connect-button" disabled=true>
+                                {"Connect"}
+                            </button>
+                        </div>
                     </div>
                     <div class="service-group">
                         <h3 class="service-group-title">
-                            <i class="fas fa-calendar"></i>
-                            {"Memory Services"}
+                            <i class="fa-solid fa-database"></i>
+                            {"Memory"}
                         </h3>
                         <div class="service-list">
                      
@@ -119,7 +249,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                     <div class="service-group">
                         <h3 class="service-group-title">
                             <i class="fas fa-envelope"></i>
-                            {"Email Services"}
+                            {"Email"}
                         </h3>
                         <div class="service-list">
 
@@ -131,11 +261,13 @@ pub fn connect(props: &ConnectProps) -> Html {
                         </div>
                     </div>
 
+                    
+
                     // Messaging Services 
                     <div class="service-group">
                         <h3 class="service-group-title">
                             <i class="fas fa-comments"></i>
-                            {"Messaging Services"}
+                            {"Messaging"}
                         </h3>
                         <div class="service-list">
 
@@ -171,31 +303,112 @@ pub fn connect(props: &ConnectProps) -> Html {
                             }
                         </div>
 
-                        // Outlook Calendar (Coming Soon)
-                        <div class="service-item coming-soon">
-                            <div class="service-header">
-                                <div class="service-name">
-                                    <img src="https://upload.wikimedia.org/wikipedia/commons/d/df/Microsoft_Office_Outlook_%282018%E2%80%93present%29.svg" alt="Outlook Calendar"/>
-                                    {"Outlook Calendar"}
-                                    <span class="coming-soon-tag">{"Coming Soon"}</span>
-                                </div>
-                            </div>
-                            <p class="service-description">
-                                {"Manage your Outlook Calendar events through SMS or voice calls."}
-                            </p>
-                            <button class="connect-button" disabled=true>
-                                {"Connect"}
-                            </button>
-                        </div>
                     </div>
 
+                    // Management Tools
+                    <div class="service-group">
+                        <h3 class="service-group-title">
+                            <i class="fa-solid fa-plus"></i>
+                            {"Management tools"}
+                        </h3>
+                        <div class="service-list">
+                            // Waiting Checks
+                            <div class="service-item">
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        {"⏰ Waiting Checks"}
+                                        {
+                                            if props.sub_tier.is_none() && !props.discount {
+                                                html! {
+                                                    <span class="pro-tag">{"Pro"}</span>
+                                                }
+                                            } else {
+                                                html! {}
+                                            }
+                                        }
+                                    </div>
+                                    <button class="info-button" onclick={Callback::from(|_| {
+                                        if let Some(element) = web_sys::window()
+                                            .and_then(|w| w.document())
+                                            .and_then(|d| d.get_element_by_id("waiting-checks-info"))
+                                        {
+                                            let display = element.get_attribute("style")
+                                                .unwrap_or_else(|| "display: none".to_string());
+                                            
+                                            if display.contains("none") {
+                                                let _ = element.set_attribute("style", "display: block");
+                                            } else {
+                                                let _ = element.set_attribute("style", "display: none");
+                                            }
+                                        }
+                                    })}>
+                                        {"ⓘ"}
+                                    </button>
+                                </div>
+                                <p class="service-description">
+                                    {"Set up proactive notifications for when you're waiting for something. Get a call when it's time to check on what you're waiting for. Currently only can be only put for emails."}
+                                </p>
+                                <div id="waiting-checks-info" class="info-section" style="display: none">
+                                    <h4>{"How It Works"}</h4>
+                                    <div class="info-subsection">
+                                        <ul>
+                                            <li>{"1. Tell lightfriend what you're waiting for"}</li>
+                                            <li>{"2. Set how long to wait before checking"}</li>
+                                            <li>{"3. When lightfriend notices the event, it sends you a text"}</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+
+                            // SMS During Calls
+                            <div class="service-item">
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        {"📱 SMS During Calls"}
+                                    </div>
+                                    <button class="info-button" onclick={Callback::from(|_| {
+                                        if let Some(element) = web_sys::window()
+                                            .and_then(|w| w.document())
+                                            .and_then(|d| d.get_element_by_id("sms-during-calls-info"))
+                                        {
+                                            let display = element.get_attribute("style")
+                                                .unwrap_or_else(|| "display: none".to_string());
+                                            
+                                            if display.contains("none") {
+                                                let _ = element.set_attribute("style", "display: block");
+                                            } else {
+                                                let _ = element.set_attribute("style", "display: none");
+                                            }
+                                        }
+                                    })}>
+                                        {"ⓘ"}
+                                    </button>
+                                </div>
+                                <p class="service-description">
+                                    {"Send information via SMS while you're on a voice call with lightfriend. Perfect for getting details you need to write down or remember."}
+                                </p>
+                                <div id="sms-during-calls-info" class="info-section" style="display: none">
+                                    <h4>{"How It Works"}</h4>
+                                    <div class="info-subsection">
+                                        <ul>
+                                            <li>{"1. During any voice call with lightfriend"}</li>
+                                            <li>{"2. Ask for information to be sent via SMS"}</li>
+                                            <li>{"3. Continue your conversation while receiving the info"}</li>
+                                            <li>{"4. Check your messages after the call for the details"}</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                     if let Some(err) = (*error).as_ref() {
                         <div class="error-message">
                             {err}
                         </div>
                     }
 <style>
-{".connect-section {
+{"
+.connect-section {
     max-width: 800px;
     margin: 0;
     padding: 0;
@@ -242,6 +455,42 @@ pub fn connect(props: &ConnectProps) -> Html {
         width: 100%;
         box-sizing: border-box;
     }
+}
+
+.info-button:hover {
+    background: rgba(30, 144, 255, 0.1);
+    transform: scale(1.1);
+}
+
+.info-section {
+    background: rgba(30, 144, 255, 0.05);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-top: 1rem;
+    border: 1px solid rgba(30, 144, 255, 0.1);
+}
+
+.info-section p {
+    color: #CCC;
+    margin: 0 0 0.5rem 0;
+}
+
+.info-section ul {
+    margin: 0;
+    padding-left: 1.2rem;
+    color: #999;
+}
+
+.info-section li {
+    margin: 0.5rem 0;
+}
+
+.fas.fa-cloud-sun,
+.fas.fa-qrcode,
+.fas.fa-search {
+    display: inline-block;
+    width: 24px;
+    text-align: center;
 }
 
 .service-group-title {
@@ -390,6 +639,18 @@ pub fn connect(props: &ConnectProps) -> Html {
     padding: 0.25rem 0.75rem;
     border-radius: 12px;
     margin-left: 0.75rem;
+}
+
+.pro-tag {
+    background: linear-gradient(45deg, #FFD700, #FFA500);
+    color: #000;
+    font-size: 0.8rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    margin-left: 0.75rem;
+    font-weight: bold;
+    text-shadow: 0 1px 1px rgba(255, 255, 255, 0.5);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .test-button {

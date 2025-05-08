@@ -2206,87 +2206,6 @@ pub fn Home() -> Html {
                             }
 
                         <div class="feature-status">
-                            <h3>{"Your lightfriend's Capabilities"}</h3>
-                            <h4>{"Tools"}</h4>
-                                {
-                                    if let Some(profile) = (*profile_data).as_ref() {
-                                        if profile.sub_tier.is_some() {
-                                            html! {
-                                                <>
-                                                <ul>
-                    
-                                                <li>{"Perplexity AI search"}</li>
-                                                <li>{"Dedicated Weather search"}</li>
-                                                <li>{"Send info to you by sms during voice calls"}</li>
-
-                                                <li>{"Email, Calendar, Tasks and WhatsApp integration"}</li>
-                                                <li>{"Shazam song recognition - Get a call, play the song, AI sends it to you by sms."}</li>
-                                                <li>{"Set up waiting checks for proactive messaging"}</li>
-
-                                                </ul>
-                                                </>
-                                            }
-                                        } else {
-                                            html! {
-                                                <>
-                                                <ul>
-                                                <li>{"Perplexity AI search"}</li>
-                                                <li>{"Dedicated Weather search"}</li>
-                                                <li>{"Send info to you by sms during voice calls"}</li>
-
-                                                </ul>
-
-                                                <h4>{"Subscribe to Pro Plan to get the following tools:"}</h4>
-                                                <ul>
-                                                <li>{"Email, Calendar, Tasks and WhatsApp integration"}</li>
-                                                <li>{"Shazam song recognition - Get a call, play the song, AI sends it to you by sms."}</li>
-                                                <li>{"Set up waiting checks for proactive messaging"}</li>
-                                                </ul>
-                                                </>
-                                            }
-                                        }
-                                    } else {
-                                        html! {
-                                        }
-                                    }
-                                }
-
-                            <h4>{"Methods"}</h4>
-                                {
-                                    if let Some(profile) = (*profile_data).as_ref() {
-                                        if profile.sub_tier.is_some() {
-                                            html! {
-
-                                            <ul>
-                                                <li>{"Voice calling"}</li>
-                                                <li>{"Text messaging"}</li>
-                                                <li>{"Proactive Messaging"}</li>
-                                                </ul>
-                                            }
-                                        } else {
-                                            html! {
-                                                <>
-                                                <ul>
-                                                <li>{"Voice calling"}</li>
-                                                <li>{"Text messaging"}</li>
-                                                </ul>
-                                                <h4>{"Subscribe to Pro Plan to get the following method:"}</h4>
-                                                <ul>
-                                                <li>{"Proactive Messaging"}</li>
-                                                </ul>
-                                                </>
-                                            }
-                                        }
-                                    } else {
-                                        html! {}
-                                    }
-                                }
-                            <h3>{"Coming Soon"}</h3>
-                            <ul>
-                                <li>{"Telegram integration (Pro Plan)"}</li>
-                                <li>{"Camera functionality for photo translation and more (Pro Plan)"}</li>
-                            </ul>
-                            
                             <p class="feature-suggestion">
                                 {"Have a feature in mind? Email your suggestions to "}
                                 <a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>
@@ -2296,7 +2215,6 @@ pub fn Home() -> Html {
                             <ul>
                                 <li>{"You can ask multiple questions in a single SMS to save money. Note that answers will be less detailed due to SMS character limits. Example: 'did sam altman tweet today and whats the weather?' -> 'Sam Altman hasn't tweeted today. Last tweet was on March 3, a cryptic \"!!!\" image suggesting a major AI development. Weather in Tampere: partly cloudy, 0°C, 82% humidity, wind at 4 m/s.'"}</li>
                                 <li>{"Start your message with 'forget' to make the assistant forget previous conversation context and start fresh. Note that this only applies to that one message - the next message will again remember previous context."}</li>
-                                <li>{"For Shazam song recognition, ask the assistant to use shazam or identify a song. Then assistant will make a call to you and it will listen to audio. Once recognized the song name will be texted to you and you can close the call."}</li>
                             </ul>
 
 
