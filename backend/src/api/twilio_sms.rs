@@ -902,6 +902,18 @@ pub async fn process_sms(
         chat_completion::Tool {
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
+                name: String::from("delete_sms_conversation_history"),
+                description: Some(String::from("Deletes all sms conversation history for a specific user. Use this when user asks to delete their chat history or conversations. It won't delete the history from their phone obviously.")),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: None,
+                    required: None,
+                },
+            },
+        },
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
                 name: String::from("send_whatsapp_message"),
                 description: Some(String::from("Sends a WhatsApp message to a specific chat. IMPORTANT: Before using this, you MUST first use search_whatsapp_rooms to confirm the recipient exists and get their exact chat name. Never send a message without confirming the recipient first and getting the confirmation from the user!")),
                 parameters: types::FunctionParameters {
@@ -1747,6 +1759,33 @@ pub async fn process_sms(
                             eprintln!("Failed to fetch WhatsApp messages: {}", e);
                             tool_answers.insert(tool_call_id, 
                                 "Failed to fetch WhatsApp messages. Please make sure you're connected to WhatsApp bridge.".to_string()
+                            );
+                        }
+                    }
+                } else if name == "delete_sms_conversation_history" {
+                    println!("Executing delete_sms_conversation_history tool call");
+                    #[derive(Deserialize)]
+                    struct DeleteConversationsArgs {
+                        phone_number: String,
+                    }
+
+                    let args: DeleteConversationsArgs = match serde_json::from_str(arguments) {
+                        Ok(args) => args,
+                        Err(e) => {
+                            eprintln!("Failed to parse delete conversations arguments: {}", e);
+                            tool_answers.insert(tool_call_id, "Failed to parse request arguments.".to_string());
+                            continue;
+                        }
+                    };
+
+                    match crate::api::twilio_utils::delete_bot_conversations(&args.phone_number).await {
+                        Ok(_) => {
+                            tool_answers.insert(tool_call_id, "Successfully deleted all bot conversations.".to_string());
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to delete bot conversations: {}", e);
+                            tool_answers.insert(tool_call_id, 
+                                format!("Failed to delete conversations: {}", e)
                             );
                         }
                     }

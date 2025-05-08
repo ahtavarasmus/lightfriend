@@ -1,5 +1,5 @@
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::env;
 use crate::models::user_models::User;
 use std::error::Error;
@@ -25,6 +25,21 @@ pub struct MessageResponse {
 pub struct ConversationResponse {
     sid: String,
     chat_service_sid: String,
+}
+
+#[derive(Deserialize)]
+pub struct ConversationsListResponse {
+    conversations: Vec<ConversationResponse>,
+}
+
+#[derive(Deserialize)]
+pub struct MessagesListResponse {
+    messages: Vec<MessageInfo>,
+}
+
+#[derive(Deserialize)]
+pub struct MessageInfo {
+    author: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -63,6 +78,67 @@ pub async fn fetch_conversation_participants(conversation_sid: &str) -> Result<V
     Ok(response.participants)
 }
 
+
+pub async fn delete_bot_conversations(user_phone: &str) -> Result<(), Box<dyn Error>> {
+    let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
+    let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
+    let client = Client::new();
+
+    // Fetch all conversations
+    let response: ConversationsListResponse = client
+        .get("https://conversations.twilio.com/v1/Conversations")
+        .basic_auth(&account_sid, Some(&auth_token))
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    let mut deleted_count = 0;
+    for conversation in response.conversations {
+        // Check if user is a participant in this conversation
+        let participants = fetch_conversation_participants(&conversation.sid).await?;
+        let user_is_participant = participants.iter().any(|p| {
+            if let Some(binding) = &p.messaging_binding {
+                if let Some(address) = &binding.address {
+                    return address == user_phone;
+                }
+            }
+            false
+        });
+
+        if user_is_participant {
+            // Verify this is a conversation with the bot by checking messages
+            let messages: MessagesListResponse = client
+                .get(format!(
+                    "https://conversations.twilio.com/v1/Conversations/{}/Messages",
+                    conversation.sid
+                ))
+                .basic_auth(&account_sid, Some(&auth_token))
+                .send()
+                .await?
+                .json()
+                .await?;
+
+            // Check if any message is from "lightfriend" (our bot)
+            let has_bot_messages = messages.messages.iter().any(|msg| msg.author == "lightfriend");
+
+            if has_bot_messages {
+                match delete_twilio_conversation(&conversation.sid).await {
+                    Ok(_) => {
+                        deleted_count += 1;
+                        println!("Deleted conversation: {}", conversation.sid);
+                    }
+                    Err(e) => {
+                        eprintln!("Failed to delete conversation {}: {}", conversation.sid, e);
+                    }
+                }
+            }
+        }
+    }
+
+    println!("Successfully deleted {} conversations for user {}", deleted_count, user_phone);
+    Ok(())
+}
 
 pub async fn delete_twilio_conversation(conversation_sid: &str) -> Result<(), Box<dyn Error>> {
     let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
