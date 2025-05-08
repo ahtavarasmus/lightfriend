@@ -284,7 +284,9 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                     <p>{"Your security is our priority. Here's how we protect your messages:"}</p>
                     <ul>
                         <li>{"Your WhatsApp messages are end-to-end encrypted between WhatsApp and our Matrix server, keeping them safe from prying eyes. To deliver them via SMS, our server decrypts the messages, ensuring they’re readable when you request them. We use the same trusted Matrix server and WhatsApp bridge technology as Beeper, with robust encryption and strict access controls to protect your data at every step."}</li>
+                        <li>{"When you disconnect your WhatsApp account, all your WhatsApp data will be automatically deleted from our servers."}</li>
                     </ul>
+
                     <p class="security-recommendation">{"Note: While we maintain high security standards, SMS and voice calls use standard cellular networks. For maximum privacy, use WhatsApp directly for sensitive communications."}</p>
                 </div>
             </div>
@@ -308,7 +310,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                             }
                             <div class="button-group">
                                 <p class="service-description">
-                                    {"Send and receive WhatsApp messages through SMS or voice calls."}
+                                    {"Send and receive WhatsApp messages through SMS or voice calls. (currently only works with direct messages and not groups."}
                                 </p>
                                 <button onclick={disconnect} class="disconnect-button">
                                     {"Disconnect"}

@@ -226,6 +226,7 @@ pub async fn fetch_whatsapp_messages(
                             // Skip error messages and failed bridge notifications
                             if body.contains("Failed to bridge media") ||
                                body.contains("media no longer available") ||
+                               body.contains("Decrypting message from WhatsApp failed") ||
                                body.starts_with("* Failed to") {
                                 continue;
                             }

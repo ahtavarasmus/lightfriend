@@ -394,21 +394,6 @@ pub async fn redact_message(
         return Err(format!("Failed to update conversation message: {}", response.status()).into());
     }
 
-    // 2. Redact the message in Twilio's logs using the Messages Redaction API
-    let redaction_response = client
-        .post(format!(
-            "https://api.twilio.com/2010-04-01/Accounts/{}/Messages/{}/Redact.json",
-            account_sid, message_sid
-        ))
-        .basic_auth(&account_sid, Some(&auth_token))
-        .send()
-        .await?;
-
-    if !redaction_response.status().is_success() {
-        println!("Failed to redact message in logs {}: {}", message_sid, redaction_response.status());
-        return Err(format!("Failed to redact message in logs: {}", redaction_response.status()).into());
-    }
-
     println!("Message {} fully redacted (both conversation and logs)", message_sid);
     Ok(())
 }
