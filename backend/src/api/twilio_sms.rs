@@ -1901,20 +1901,20 @@ pub async fn process_sms(
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
             content: chat_completion::Content::Text(
-                "You are an evaluator that determines if an AI response is EXPLICITLY asking for REQUIRED information to complete the ORIGINAL task. Default to FALSE unless the response is clearly asking for specific information that is necessary to provide ANY answer to the user's request.\n\n\
-                Examples of TRUE clarifying questions (where NO information is provided yet):\n\
+                "You are an evaluator that determines if an AI response is asking for REQUIRED information OR is seeking for CONFIRMATION to complete the task. Default to FALSE otherwise.\n\n\
+                Examples of TRUE clarifying questions:\n\
                 - User: 'Send a message to mom' -> AI: 'I see multiple contacts named mom. Which one should I send the message to?'\n\
                 - User: 'Check my calendar' -> AI: 'For which date range would you like me to check your calendar?'\n\
                 - User: 'What's the weather?' -> AI: 'Which location would you like the weather for?'\n\n\
+                - User: 'Can you send message hey hows it going to mom?' -> AI: 'I found the contact \'Mom\' on WhatsApp. Do you want me to send \'hey hows it going\' to this contact?'\n\n\
                 Examples that should be FALSE (complete answers with optional follow-ups):\n\
-                - User: 'Show contacts named mom' -> AI: 'You have 2 contacts: 1. Mom (mobile) 2. Mom (work). Would you like to message either of them?'\n\
+                - User: 'Show contacts named mom' -> AI: 'You have 2 contacts: 1. Mom (mobile) 2. Mom (work).'\n\
                 - User: 'Get my recent emails' -> AI: 'Here are your latest emails: [email list]. Would you like to see more?'\n\
                 - User: 'Check weather in London' -> AI: 'It's sunny and 20°C in London. Would you like to check another city?'\n\n\
                 Key rules:\n\
-                1. If the response provides ANY useful information that answers the original query, mark as FALSE\n\
-                2. Follow-up questions after providing information are NOT clarifying questions\n\
-                3. Only mark TRUE if the AI CANNOT provide ANY answer without more information\n\
-                4. When in doubt, always return FALSE".to_string(),
+                2. Follow-up questions after answering the original question are NOT clarifying questions\n\
+                3. Only mark TRUE if the AI is asking to confirm the data it got from the user or it CANNOT provide an answer without more information\n\
+                4. When in doubt, return FALSE".to_string(),
             ),
             name: None,
             tool_calls: None,
@@ -1962,6 +1962,8 @@ pub async fn process_sms(
         tool_calls: None,
         tool_call_id: None,
     });
+    println!("payload.body: {}", payload.body);
+    println!("final_response: {}", final_response);
 
     let clarify_req = chat_completion::ChatCompletionRequest::new(
         "openai/gpt-4o-mini".to_string(),
