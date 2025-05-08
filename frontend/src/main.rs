@@ -1,7 +1,7 @@
 use yew::prelude::*;
 use yew_router::prelude::*;
 use log::{info, Level};
-use web_sys::window;
+use web_sys::{window, MouseEvent};
 
 mod config;
 mod profile {
@@ -153,12 +153,35 @@ pub struct NavProps {
 #[function_component(Nav)]
 pub fn nav(props: &NavProps) -> Html {
     let NavProps { logged_in, on_logout } = props;
+    let menu_open = use_state(|| false);
     
     let handle_logout = {
         let on_logout = on_logout.clone();
         Callback::from(move |_| {
             on_logout.emit(());
         })
+    };
+
+let toggle_menu = {
+    let menu_open = menu_open.clone();
+    Callback::from(move |e: MouseEvent| {
+        e.prevent_default();
+        menu_open.set(!*menu_open);
+    })
+};
+
+let close_menu = {
+    let menu_open = menu_open.clone();
+    Callback::from(move |e: MouseEvent| {
+        e.prevent_default();
+        menu_open.set(false);
+    })
+};
+
+    let menu_class = if *menu_open {
+        "nav-right mobile-menu-open"
+    } else {
+        "nav-right"
     };
 
     html! {
@@ -168,39 +191,59 @@ pub fn nav(props: &NavProps) -> Html {
                     {"lightfriend"}
                 </Link<Route>>
                 
-                <div class="nav-right">
+                <button class="burger-menu" onclick={toggle_menu}>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                </button>
+                <div class={menu_class}>
                     {
                         if !*logged_in {
                             html! {
-                                <Link<Route> to={Route::Blog} classes="nav-link">
-                                    {"The Other Stuff"}
-                                </Link<Route>>
+                                <div onclick={close_menu.clone()}>
+                                    <Link<Route> to={Route::Blog} classes="nav-link">
+                                        {"The Other Stuff"}
+                                    </Link<Route>>
+                                </div>
                             }
                         } else {
                             html! {}
                         }
 
                     }
-                    <Link<Route> to={Route::Pricing} classes="nav-link">
-                        {"Pricing"}
-                    </Link<Route>>
+                    <div onclick={close_menu.clone()}>
+                        <Link<Route> to={Route::Pricing} classes="nav-link">
+                            {"Pricing"}
+                        </Link<Route>>
+                    </div>
                     {
                         if *logged_in {
                             html! {
                                 <>
-                                    <Link<Route> to={Route::Profile} classes="nav-profile-link">
-                                        {"Profile"}
-                                    </Link<Route>>
-                                    <button onclick={handle_logout} class="nav-logout-button">
+                                    <div onclick={close_menu.clone()}>
+                                        <Link<Route> to={Route::Profile} classes="nav-profile-link">
+                                            {"Profile"}
+                                        </Link<Route>>
+                                    </div>
+                                    <button onclick={
+                                        let close = close_menu.clone();
+                                        let logout = handle_logout.clone();
+                                        Callback::from(move |e: MouseEvent| {
+                                            close.emit(e);
+                                            logout.emit(());
+                                        })
+                                    } class="nav-logout-button">
                                         {"Logout"}
                                     </button>
                                 </>
                             }
                         } else {
                             html! {
-                                <Link<Route> to={Route::Login} classes="nav-login-button">
-                                    {"Login"}
-                                </Link<Route>>
+                                <div onclick={close_menu.clone()}>
+                                    <Link<Route> to={Route::Login} classes="nav-login-button">
+                                        {"Login"}
+                                    </Link<Route>>
+                                </div>
                             }
                         }
                     }
