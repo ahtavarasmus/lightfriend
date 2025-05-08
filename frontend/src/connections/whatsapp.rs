@@ -592,8 +592,15 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
 
                     .button-group {
                         display: flex;
+                        flex-direction: column;
                         gap: 1rem;
                         margin-bottom: 1rem;
+                    }
+
+                    @media (min-width: 768px) {
+                        .button-group {
+                            flex-direction: row;
+                        }
                     }
 
                     .resync-button {
@@ -852,6 +859,16 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         display: flex;
                         align-items: center;
                         gap: 1rem;
+                        flex-wrap: wrap;
+                    }
+
+                    .service-name {
+                        flex: 1;
+                        min-width: 150px;
+                    }
+
+                    .service-status {
+                        white-space: nowrap;
                     }
 
                     @keyframes spin {

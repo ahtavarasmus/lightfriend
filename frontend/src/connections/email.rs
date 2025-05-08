@@ -319,8 +319,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
 
             </div>
             <p class="service-description">
-                {"Connect your email account using IMAP access your emails through SMS or voice calls."}
-                {"For Gmail, create an app password "}
+                {"Connect your email account using IMAP access your emails through SMS or voice calls. For Gmail, create an app password "}
                 <a class="nice-link" href="https://myaccount.google.com/apppasswords" target="_blank">{"here"}</a>
                 {" (requires 2FA)."}
             </p>

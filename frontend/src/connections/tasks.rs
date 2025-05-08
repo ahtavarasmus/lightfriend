@@ -203,8 +203,7 @@ pub fn tasks_connect(props: &TasksConnectProps) -> Html {
             }
             </div>
             <p class="service-description">
-                {"Create and manage tasks and ideas through SMS or voice calls."}
-                {"This integration creates a dedicated \"lightfriend\" list, keeping your existing task lists untouched. "}
+                {"Create and manage tasks and ideas through SMS or voice calls. This integration creates a dedicated \"lightfriend\" list, keeping your existing task lists untouched. "}
                 {"Perfect for quick note-taking or capturing ideas on the go."}
             </p>
             <div id="tasks-info" class="info-section" style="display: none">

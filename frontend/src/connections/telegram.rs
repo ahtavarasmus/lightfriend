@@ -329,7 +329,7 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                                     {"Send and receive Telegram messages through SMS or voice calls."}
                                 </p>
                                 <button onclick={start_connection} class="connect-button">
-                                    {"Connect Telegram"}
+                                    {"Start Auth"}
                                 </button>
                             }
                         } else {
@@ -362,6 +362,7 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         background: rgba(0, 0, 0, 0.2);
                         border: 1px solid rgba(0, 136, 204, 0.2);
                         border-radius: 12px;
+                        width: 100%;
                         padding: 1.5rem;
                         margin: 1rem 0;
                         transition: all 0.3s ease;
@@ -377,6 +378,16 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         display: flex;
                         align-items: center;
                         gap: 1rem;
+                        flex-wrap: wrap;
+                    }
+
+                    .service-name {
+                        flex: 1;
+                        min-width: 150px;
+                    }
+
+                    .service-status {
+                        white-space: nowrap;
                     }
 
                     .service-name {
@@ -464,8 +475,15 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
 
                     .button-group {
                         display: flex;
+                        flex-direction: column;
                         gap: 1rem;
                         margin-bottom: 1rem;
+                    }
+
+                    @media (min-width: 768px) {
+                        .button-group {
+                            flex-direction: row;
+                        }
                     }
 
                     .connect-button, .disconnect-button {
@@ -531,15 +549,15 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         background: rgba(0, 136, 204, 0.05);
                         border: 1px solid rgba(0, 136, 204, 0.1);
                         border-radius: 12px;
-                        padding: 2rem;
+                        padding: 1.8rem;
                         text-align: center;
-                        margin: 1rem 0;
+                        margin: 0.8rem 0;
                     }
 
                     .upgrade-content h3 {
                         color: #0088cc;
                         margin-bottom: 1rem;
-                        font-size: 1.5rem;
+                        font-size: 1.2rem;
                     }
 
                     .upgrade-button {
