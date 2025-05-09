@@ -285,6 +285,16 @@ pub fn landing() -> Html {
                             <span class="author-title">{"Designer"}</span>
                         </div>
                     </div>
+
+                    <div class="testimonial-card">
+                        <div class="testimonial-content">
+                            <p>{"\"I've tested probably all of the minimalist phones and other focus tools. They all either have an appstore and whatsapp which bring also youtube and other distractions or they don't have appstore, but then I can't access whatsapp or emails. Lightfriend is the only one that actually solves the problem. So worth it, would recommend.\""}</p>
+                        </div>
+                        <div class="testimonial-author">
+                            <span class="author-name">{"Patrick C."}</span>
+                            <span class="author-title">{"Entrepreneur"}</span>
+                        </div>
+                    </div>
                 </div>
             </section>
             // Featured Sections
