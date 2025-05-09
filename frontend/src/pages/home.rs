@@ -192,15 +192,16 @@ pub fn landing() -> Html {
 
                 // Privacy Section
                 <div class="feature-block privacy">
-                    <div class="feature-content">
-                        <h2>{"Your Privacy Comes First"}</h2>
-                        <p>{"We take your privacy seriously. Our service is designed with strong privacy protections to ensure your personal data stays secure and private."}</p>
-                        <ul class="feature-list">
-                            <li>{"🔒 No storage of call recordings - we only keep anonymous success metrics to improve the service"}</li>
-                            <li>{"🤖 Automated redaction of sensitive information in message context"}</li>
-                            <li>{"📱 SMS context stored securely with Twilio, fetched only when needed"}</li>
-                            <li>{"🗑️ Automatic deletion of service connections and associated data upon disconnection"}</li>
-                        </ul>
+                        <div class="feature-content">
+                            <h2>{"Your Privacy Comes First"}</h2>
+                            <p>{"We take your privacy seriously. Our service is designed with strong privacy protections to ensure your personal data stays secure and private. The entire codebase is open source, allowing full transparency of our privacy practices."}</p>
+                            <ul class="feature-list">
+                                <li>{"🔒 No storage of call recordings - we only keep anonymous success metrics to improve the service"}</li>
+                                <li>{"🤖 Automated redaction of sensitive information in message context"}</li>
+                                <li>{"📱 SMS context stored securely with Twilio, fetched only when needed"}</li>
+                                <li>{"🗑️ Automatic deletion of service connections and associated data upon disconnection"}</li>
+                                <li>{"💻 100% open source - verify our privacy practices in the code"}</li>
+                            </ul>
                         <div class="privacy-example">
                         {
                             html! {

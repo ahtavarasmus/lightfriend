@@ -298,11 +298,11 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         <>
                             {
                                 // Show sync indicator for 10 minutes after connection
-                                if js_sys::Date::now() - (status.created_at as f64 * 1000.0) <= 600000.0 { // 10 minutes in milliseconds
+                                if js_sys::Date::now() - (status.created_at as f64 * 1000.0) <= 300000.0 { // 10 minutes in milliseconds
                                     html! {
                                         <div class="sync-indicator">
                                             <div class="sync-spinner"></div>
-                                            <p>{"Syncing contacts... This may take up to 10 minutes. History will not be fetched except for the latest message in each chat."}</p>
+                                            <p>{"Building the bridge... This may take up to 5 minutes. History will not be fetched. Only future messages will be visible and if you want to send a message to someone, they may need to first send something to you before lightfriend can find their contact info."}</p>
                                         </div>
                                     }
                                 } else {
