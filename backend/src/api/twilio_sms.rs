@@ -2110,7 +2110,11 @@ pub async fn process_sms(
                 messages.iter()
                     .map(|msg| format!("[{}]: {}", 
                         if msg.author == "lightfriend" { "AI" } else { "User" },
-                        if msg.body.len() > 50 { format!("{}...", &msg.body[..50]) } else { msg.body.clone() }
+                        if msg.body.chars().count() > 50 {
+                            format!("{}...", msg.body.chars().take(50).collect::<String>())
+                        } else {
+                            msg.body.clone()
+                        }
                     ))
                     .collect::<Vec<String>>()
                     .join("\n"),
