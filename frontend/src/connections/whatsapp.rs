@@ -276,7 +276,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         <li>{"Fetch WhatsApp Messages: Get recent WhatsApp messages from a specific time period"}</li>
                         <li>{"Fetch Chat Messages: Get messages from a specific WhatsApp chat or contact"}</li>
                         <li>{"Search Contacts: Search for WhatsApp contacts or chat rooms by name"}</li>
-                        <li>{"Send Message: Send a WhatsApp message to a specific recipient (will ask for confirmation before sending) (Voice call tool sends the proposed recipient and message content to you by SMS for you to confirm with simple yes or no. (by typing 'yes', proposed message will be sent and you will be charged for the SMS message. Typing 'no', will discard the message and you will not be charged. Typing anything else is considered just normal new message query.)"}</li>
+                        <li>{"Send Message: Send a WhatsApp message to a specific recipient (will ask for confirmation before sending) (Voice call tool sends the proposed recipient and message content to you by SMS for you to confirm with simple yes or no. (by typing 'yes', proposed message will be sent and you will be charged for the SMS message. Typing 'no', will discard the message and you will not be charged. Typing anything else is considered just normal new message query.) When sending a message to someone, they may need to first send something to you before lightfriend can find their contact info."}</li>
                     </ul>
                     </div>
 
@@ -540,11 +540,12 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                                     <p class="instruction">{"2. Go to Settings > Linked Devices"}</p>
                                     <p class="instruction">{"3. Tap 'Link a Device'"}</p>
                                     <p class="instruction">{"4. When prompted, enter this code"}</p>
+                                    <p class="instruction">{"5. Wait for few minutes to let lightfriend build the connection"}</p>
 
                                 </div>
                             } else {
                                 <div class="loading-container">
-                                    <p>{"Generating connection code..."}</p>
+                                    <p>{"Generating connection code...(may take a moment, stay still:D)"}</p>
                                     <div class="loading-spinner"></div>
                                 </div>
                             }
