@@ -494,11 +494,11 @@ pub async fn stripe_webhook(
                     stripe::Expandable::Id(id) => id,
                     stripe::Expandable::Object(customer) => customer.id,
                 };
-                // TODO have to fetch the latest emails if account connected here and mark them as processed :D !!!!
+
                 
-                // Update user's subscription tier to "tier 1" and set messages_left to 150
 
                 if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
+                    // Update subscription tier and messages
                     state.user_repository.set_subscription_tier(
                         user.id,
                         Some("tier 1"),
@@ -507,6 +507,17 @@ pub async fn stripe_webhook(
                     // Enable proactive IMAP messaging for subscribed users
                     state.user_repository.update_imap_proactive(user.id, true).ok();
                     println!("Updated subscription tier to 'tier 1', set 150 messages, and enabled proactive IMAP for user {}", user.id);
+
+                    // Mark existing emails as processed to prevent spam
+                    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user.id, true, Some(100), true).await {
+                        Ok(emails) => {
+                            println!("Marked {} existing emails as processed for new subscriber {}", emails.len(), user.id);
+                        }
+                        Err(e) => {
+                            println!("Failed to mark existing emails as processed for user {}: {:?}", user.id, e);
+                            // Continue processing even if marking emails fails
+                        }
+                    }
                 }
             }
         },
