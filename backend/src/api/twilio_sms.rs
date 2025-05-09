@@ -1648,8 +1648,9 @@ pub async fn process_sms(
                             } else {
                                 let mut response = format!("Messages from '{}':\n\n", room_name.trim_end_matches(" (WA)"));
                                 for (i, msg) in messages.iter().take(10).enumerate() {
-                                    let content = if msg.content.len() > 100 {
-                                        format!("{}...", &msg.content[..97])
+                                    let content = if msg.content.chars().count() > 100 {
+                                        let truncated: String = msg.content.chars().take(97).collect();
+                                        format!("{}...", truncated)
                                     } else {
                                         msg.content.clone()
                                     };
