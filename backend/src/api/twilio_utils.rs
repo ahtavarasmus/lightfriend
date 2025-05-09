@@ -535,7 +535,6 @@ pub async fn send_conversation_message(
     if redact && !body.contains("(free reply)") {
         // Redact sensitive information using enhanced LLM-based redaction
         let redacted_body = redact_sensitive_info(&body).await;
-        println!("AFTER REDACTING: {}", redacted_body);
         
         // Update the message with the redacted body
         redact_message(conversation_sid, &response.sid, &redacted_body).await?;

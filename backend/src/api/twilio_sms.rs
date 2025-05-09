@@ -1999,8 +1999,6 @@ pub async fn process_sms(
         tool_calls: None,
         tool_call_id: None,
     });
-    println!("payload.body: {}", payload.body);
-    println!("final_response: {}", final_response);
 
     let clarify_req = chat_completion::ChatCompletionRequest::new(
         "openai/gpt-4o-mini".to_string(),
