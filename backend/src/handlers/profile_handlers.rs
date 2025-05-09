@@ -6,7 +6,6 @@ use axum::{
     http::StatusCode,
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(Deserialize)]
 pub struct TimezoneUpdateRequest {
@@ -338,25 +337,6 @@ pub struct EmailJudgmentResponse {
     pub should_notify: bool,
     pub score: i32,
     pub reason: String,
-}
-
-pub async fn unsubscribe_notifications(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Path(token): axum::extract::Path<String>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Update notify preference to false for the user with this token
-    match state.user_repository.unsubscribe_by_token(&token) {
-        Ok(_) => Ok(Json(json!({
-            "message": "Successfully unsubscribed from notifications"
-        }))),
-        Err(e) => {
-            tracing::error!("Failed to unsubscribe user: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to unsubscribe from notifications"}))
-            ))
-        }
-    }
 }
 
 pub async fn get_email_judgments(
