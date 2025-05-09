@@ -767,7 +767,6 @@ if client.encryption().backups().are_enabled() { // check if we have active back
     }
 }
 
-// TODO do moodle kandi things today
     let redo_secret_storage = false;
     if let Some(status) = client.encryption().cross_signing_status().await {
         if user.secret_store_key and client.encryption().secret_storage().is_enabled() {
