@@ -190,7 +190,6 @@ async fn connect_whatsapp(
                                 SyncRoomMessageEvent::Redacted(_) => continue,
                             };
 
-                            println!("📨 Processing message event: {:#?}", event_content);
                             if let MessageType::Notice(text_content) = event_content.msgtype {
                                 println!("📝 Text message found from bot");
                                 // Check for pairing code in the message (e.g., "FQWG-FHKC")
@@ -477,9 +476,6 @@ async fn monitor_whatsapp_connection(
                                 _ => continue,
                             };
         
-                            // Check for successful connection messages
-                            // Debug log the message content
-                            println!("📱 WhatsApp bot message: {}", content);
 
                             println!("message contains Successfully logged in as: {}",content.contains("Successfully logged in as"));
                             // Check for successful login message first
