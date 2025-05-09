@@ -120,7 +120,7 @@ pub fn landing() -> Html {
             <header class="hero">
                 <h1>{"Your AI Assistant for Dumbphones"}</h1>
                 <p class="hero-subtitle">
-                    {"Access your digital life through simple calls and texts - no smartphone needed."}
+                    {"Access your digital life through simple calls and texts"}
                 </p>
                 <Link<Route> to={Route::Register} classes="forward-link">
                     <button class="hero-cta">
@@ -240,6 +240,53 @@ pub fn landing() -> Html {
                     </div>
                 </div >
             </section>
+
+            // Testimonials Section
+            <section class="testimonials">
+                <h2>{"What Our Users Say"}</h2>
+                <div class="testimonials-grid">
+    
+                    <div class="testimonial-card">
+                        <div class="testimonial-content">
+                            <p>{"\"I've struggled with phone addiction for a long time and lightfriend finally helped me get over the hump to switch to a dumbphone. I feel so much more alive and clear headed right now and I love it! Also, the day is surprisingly long if you don't scroll your phone 4 hours a day haha. I can't recommend lightfriend enough!!\""}</p>
+                        </div>
+                        <div class="testimonial-author">
+                            <span class="author-name">{"Sarah K."}</span>
+                            <span class="author-title">{"Student"}</span>
+                        </div>
+                    </div>
+
+                    <div class="testimonial-card">
+                        <div class="testimonial-content">
+                            <p>{"\"I was able to move to full-time dumbphone user because of lightfriend. Before, I've had to keep the smartphone close by because of WhatsApp and was fighting all the time not to fall into the social media algorithms. Lightfriend gave me the tools to ditch the smartphone completely and it's honestly been such a relief. \""}</p>
+                        </div>
+                        <div class="testimonial-author">
+                            <span class="author-name">{"Michael R."}</span>
+                            <span class="author-title">{"Software Developer"}</span>
+                        </div>
+                    </div>
+
+                    <div class="testimonial-card">
+                        <div class="testimonial-content">
+                            <p>{"\"I've been using dumbphone since 2020 because of my ADHD. I'm constantly forgetting stuff and lightfriend has saved me so many times already:D. Just last night I promised to drive pick up package from the post office, but of course my dumbass forgot the delivery code was in my email and I left only with my dumbphone... But I asked lightfriend and it gave me the code!! \""}</p>
+                        </div>
+                        <div class="testimonial-author">
+                            <span class="author-name">{"Long Time Dumbphone User"}</span>
+                            <span class="author-title">{"Artist"}</span>
+                        </div>
+                    </div>
+
+                    <div class="testimonial-card">
+                        <div class="testimonial-content">
+                            <p>{"\"I love that I can keep my old Nokia phone and still stay connected. The voice interface is surprisingly natural, and seamless. I like to call lightfriend to read my emails to me when I'm driving to work.\""}</p>
+                        </div>
+                        <div class="testimonial-author">
+                            <span class="author-name">{"David W."}</span>
+                            <span class="author-title">{"Designer"}</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
             // Featured Sections
             <section class="featured-sections">
                 <div class="featured-grid">
@@ -339,6 +386,95 @@ pub fn landing() -> Html {
             </footer>
             <style>
                 {r#"
+                    .testimonials {
+                        padding: 6rem 2rem;
+                        text-align: center;
+                        background: linear-gradient(
+                            to bottom,
+                            rgba(30, 144, 255, 0.05),
+                            transparent
+                        );
+                    }
+
+                    .testimonials h2 {
+                        font-size: 3rem;
+                        margin-bottom: 3rem;
+                        background: linear-gradient(45deg, #fff, #7EB2FF);
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                    }
+
+                    .testimonials-grid {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                        gap: 2rem;
+                        max-width: 1200px;
+                        margin: 0 auto;
+                    }
+
+                    .testimonial-card {
+                        background: rgba(30, 30, 30, 0.7);
+                        border: 1px solid rgba(30, 144, 255, 0.1);
+                        border-radius: 16px;
+                        padding: 2rem;
+                        text-align: left;
+                        transition: all 0.3s ease;
+                        display: flex;
+                        flex-direction: column;
+                        justify-content: space-between;
+                    }
+
+                    .testimonial-card:hover {
+                        transform: translateY(-5px);
+                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
+                        border-color: rgba(30, 144, 255, 0.3);
+                    }
+
+                    .testimonial-content {
+                        margin-bottom: 1.5rem;
+                    }
+
+                    .testimonial-content p {
+                        color: #e0e0e0;
+                        font-size: 1.1rem;
+                        line-height: 1.6;
+                        font-style: italic;
+                    }
+
+                    .testimonial-author {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 0.25rem;
+                    }
+
+                    .author-name {
+                        color: #7EB2FF;
+                        font-weight: 600;
+                    }
+
+                    .author-title {
+                        color: #999;
+                        font-size: 0.9rem;
+                    }
+
+                    @media (max-width: 768px) {
+                        .testimonials {
+                            padding: 4rem 1rem;
+                        }
+
+                        .testimonials h2 {
+                            font-size: 2rem;
+                            margin-bottom: 2rem;
+                        }
+
+                        .testimonial-card {
+                            padding: 1.5rem;
+                        }
+
+                        .testimonial-content p {
+                            font-size: 1rem;
+                        }
+                    }
 
                     .featured-sections {
                         padding: 4rem 0;
