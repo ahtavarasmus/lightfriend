@@ -12,49 +12,46 @@ use wasm_bindgen_futures::spawn_local;
 
 fn render_notification_settings(profile: Option<&UserProfile>) -> Html {
     html! {
-        <div class="notification-settings">
+        <div style="margin-top: 2rem; padding: 1.5rem; background: rgba(30, 30, 30, 0.7); border: 1px solid rgba(30, 144, 255, 0.1); border-radius: 12px; margin-bottom: 2rem;">
             {
                 if let Some(profile) = profile {
                     html! {
                         <>
-                            <div class="notify-toggle">
-                                <span>{"Notifications"}</span>
-                                <span class="toggle-status">
-                                    {if profile.notify {"Active"} else {"Inactive"}}
-                                </span>
-                                <label class="switch">
-                                    <input 
-                                        type="checkbox" 
-                                        checked={profile.notify}
-                                        onchange={{
-                                            let user_id = profile.id;
-                                            Callback::from(move |e: Event| {
-                                                let input: HtmlInputElement = e.target_unchecked_into();
-                                                let notify = input.checked();
-                                                
-                                                if let Some(token) = window()
-                                                    .and_then(|w| w.local_storage().ok())
-                                                    .flatten()
-                                                    .and_then(|storage| storage.get_item("token").ok())
-                                                    .flatten()
-                                                {
-                                                    spawn_local(async move {
-                                                        let _ = Request::post(&format!("{}/api/profile/update-notify/{}", config::get_backend_url(), user_id))
-                                                            .header("Authorization", &format!("Bearer {}", token))
-                                                            .header("Content-Type", "application/json")
-                                                            .json(&json!({"notify": notify}))
-                                                            .expect("Failed to serialize notify request")
-                                                            .send()
-                                                            .await;
-                                                    });
-                                                }
-                                            })
-                                        }}
-                                    />
-                                    <span class="slider round"></span>
-                                </label>
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
+                                <span style="color: white;">{"Notifications"}</span>
+                                    <label class="switch">
+                                        <input 
+                                            type="checkbox" 
+                                            checked={profile.notify}
+                                            onchange={{
+                                                let user_id = profile.id;
+                                                Callback::from(move |e: Event| {
+                                                    let input: HtmlInputElement = e.target_unchecked_into();
+                                                    let notify = input.checked();
+                                                    
+                                                    if let Some(token) = window()
+                                                        .and_then(|w| w.local_storage().ok())
+                                                        .flatten()
+                                                        .and_then(|storage| storage.get_item("token").ok())
+                                                        .flatten()
+                                                    {
+                                                        spawn_local(async move {
+                                                            let _ = Request::post(&format!("{}/api/profile/update-notify/{}", config::get_backend_url(), user_id))
+                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                .header("Content-Type", "application/json")
+                                                                .json(&json!({"notify": notify}))
+                                                                .expect("Failed to serialize notify request")
+                                                                .send()
+                                                                .await;
+                                                        });
+                                                    }
+                                                })
+                                            }}
+                                        />
+                                        <span class="slider round"></span>
+                                    </label>
                             </div>
-                            <p class="notification-description">
+                            <p style="color: #999; font-size: 0.9rem; margin-top: 0.5rem;">
                                 {"Receive notifications about new feature updates."}
                             </p>
                         </>
@@ -66,6 +63,7 @@ fn render_notification_settings(profile: Option<&UserProfile>) -> Html {
         </div>
     }
 }
+
 
 const PHONE_NUMBERS: &[(&str, &str, Option<&str>)] = &[
     ("us", "+18153684737", None),
@@ -1969,6 +1967,8 @@ pub fn landing() -> Html {
                             font-size: 1rem;
                         }
                     }
+
+                   
                 "#}
             </style>
         </div>
@@ -2217,71 +2217,16 @@ pub fn Home() -> Html {
                                 <li>{"You can ask multiple questions in a single SMS to save money. Note that answers will be less detailed due to SMS character limits. Example: 'did sam altman tweet today and whats the weather?' -> 'Sam Altman hasn't tweeted today. Last tweet was on March 3, a cryptic \"!!!\" image suggesting a major AI development. Weather in Tampere: partly cloudy, 0°C, 82% humidity, wind at 4 m/s.'"}</li>
                                 <li>{"Start your message with 'forget' to make the assistant forget previous conversation context and start fresh. Note that this only applies to that one message - the next message will again remember previous context."}</li>
                             </ul>
-
-
                         </div>
 
+                        {
+                            if let Some(profile) = (*profile_data).as_ref() {
+                                render_notification_settings(Some(profile))
+                            } else {
+                                html! {}
+                            }
+                        }
 
-                        <div class="notification-settings">
-                                {
-                                    if let Some(profile) = (*profile_data).as_ref() {
-                                        html! {
-                                            <>
-                                                <div class="notify-toggle">
-                                                    <span>{"Notifications"}</span>
-                                                    <span class="toggle-status">
-                                                        {if profile.notify {"Active"} else {"Inactive"}}
-                                                    </span>
-                                                    <label class="switch">
-                                                        <input 
-                                                            type="checkbox" 
-                                                            checked={profile.notify}
-                                                            onchange={{
-                                                                let user_id = profile.id;
-                                                                let profile_data = profile_data.clone();
-                                                                Callback::from(move |e: Event| {
-                                                                    let input: HtmlInputElement = e.target_unchecked_into();
-                                                                    let notify = input.checked();
-                                                                    let profile_data = profile_data.clone();
-                                                                    
-                                                                    if let Some(token) = window()
-                                                                        .and_then(|w| w.local_storage().ok())
-                                                                        .flatten()
-                                                                        .and_then(|storage| storage.get_item("token").ok())
-                                                                        .flatten()
-                                                                    {
-                                                                        spawn_local(async move {
-                                                                            let _ = Request::post(&format!("{}/api/profile/update-notify/{}", config::get_backend_url(), user_id))
-                                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                                .header("Content-Type", "application/json")
-                                                                                .json(&json!({"notify": notify}))
-                                                                                .expect("Failed to serialize notify request")
-                                                                                .send()
-                                                                                .await;
-
-                                                                            // Update local state after successful API call
-                                                                            if let Some(mut current_profile) = (*profile_data).clone() {
-                                                                                current_profile.notify = notify;
-                                                                                profile_data.set(Some(current_profile));
-                                                                            }
-                                                                        });
-                                                                    }
-                                                                })
-                                                            }}
-                                                        />
-                                                        <span class="slider round"></span>
-                                                    </label>
-                                                </div>
-                                                <p class="notification-description">
-                                                    {"Receive notifications about new feature updates."}
-                                                </p>
-                                            </>
-                                        }
-                                    } else {
-                                        html! {}
-                                    }
-                                }
-                            </div>
 
                                     </div>
                                 },
@@ -3641,6 +3586,95 @@ pub fn Home() -> Html {
                             font-size: 1rem;
                         }
                     }
+                    /* Notification Toggle Switch Styles */
+                    .notification-home-settings {
+                        margin-top: 2rem !important;
+                        padding: 1.5rem !important;
+                        background: rgba(30, 30, 30, 0.7) !important;
+                        border: 1px solid rgba(30, 144, 255, 0.1) !important;
+                        border-radius: 12px !important;
+                        margin-bottom: 2rem !important;
+                    }
+
+                    .notification-home-settings .notify-toggle {
+                        display: flex !important;
+                        align-items: center !important;
+                        justify-content: space-between !important;
+                        margin-bottom: 1rem !important;
+                    }
+
+                    .notification-home-settings .toggle-status {
+                        margin-right: 1rem !important;
+                        color: #999 !important;
+                    }
+
+                    .notification-home-settings .notification-description {
+                        color: #999 !important;
+                        font-size: 0.9rem !important;
+                        margin-top: 0.5rem !important;
+                    }
+                    /* Ensure switch styles are not overridden */
+                    /* Switch styling */
+                    .switch {
+                        position: relative !important;
+                        display: inline-block !important;
+                        width: 60px !important;
+                        height: 34px !important;
+                        margin-left: 1rem !important;
+                    }
+
+                    .switch input {
+                        opacity: 0 !important;
+                        width: 0 !important;
+                        height: 0 !important;
+                    }
+
+                    .slider {
+                        position: absolute !important;
+                        cursor: pointer !important;
+                        top: 0 !important;
+                        left: 0 !important;
+                        right: 0 !important;
+                        bottom: 0 !important;
+                        background-color: #666 !important;
+                        transition: .4s !important;
+                        border-radius: 34px !important;
+                        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+                    }
+
+                    .slider:before {
+                        position: absolute !important;
+                        content: "" !important;
+                        height: 26px !important;
+                        width: 26px !important;
+                        left: 4px !important;
+                        bottom: 4px !important;
+                        background-color: white !important;
+                        transition: .4s !important;
+                        border-radius: 50% !important;
+                        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2) !important;
+                    }
+
+                    input:checked + .slider {
+                        background-color: #1E90FF !important;
+                    }
+
+                    input:checked + .slider:before {
+                        transform: translateX(26px) !important;
+                    }
+
+                    input:focus + .slider {
+                        box-shadow: 0 0 1px rgba(30, 144, 255, 0.5) !important;
+                    }
+
+                    .slider.round {
+                        border-radius: 34px !important;
+                    }
+
+                    .slider.round:before {
+                        border-radius: 50% !important;
+                    }
+                 
                 "#}
             </style>
             

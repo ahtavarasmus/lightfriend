@@ -113,6 +113,7 @@ pub async fn broadcast_email(
 
     let resend = Resend::new(&resend_api_key);
     let from = "info@updates.lightfriend.ai";
+    let reply_to = "rasmus@ahtava.com";
 
     let mut success_count = 0;
     let mut failed_count = 0;
@@ -122,12 +123,19 @@ pub async fn broadcast_email(
             continue;
         }
 
+        // Skip users with invalid or empty email addresses
+        if user.email.is_empty() || !user.email.contains('@') || !user.email.contains('.') {
+            tracing::warn!("Skipping invalid email address: {}", user.email);
+            continue;
+        }
+
         let to = vec![user.email.as_str()];
         let email = CreateEmailBaseOptions::new(from, to, &request.subject)
-            .with_html(&format!(
-                "{}<br><br>To stop receiving updates about new features, visit your profile settings.",
+            .with_text(&format!(
+                "{}",
                 request.message
-            ));
+            ))
+            .with_reply(reply_to); 
 
         match resend.emails.send(email).await {
             Ok(_) => {
@@ -210,6 +218,12 @@ async fn process_broadcast_messages(
             }
         };
         if !user.notify {
+            continue;
+        }
+
+        // Skip users who have a valid email address
+        if !user.email.is_empty() && user.email.contains('@') && user.email.contains('.') {
+            tracing::info!("Skipping SMS for user with valid email: {}", user.email);
             continue;
         }
 
