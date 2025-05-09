@@ -84,7 +84,7 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
     };
 
     html! {
-        <button class="iq-button signup-button pro-signup" href="#" {onclick}><b>{"Subscribe Now with 3 Day free trial!"}</b></button>
+        <button class="iq-button signup-button pro-signup" href="#" {onclick}><b>{"Subscribe Now!"}</b></button>
     }
 }
 

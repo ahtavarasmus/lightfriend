@@ -111,55 +111,101 @@ pub async fn create_subscription_checkout(
 
     let price_id = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID")
                             .expect("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID must be set in environment");
+    let mut checkout_session: CheckoutSession;
     
-    let checkout_session = CheckoutSession::create(
-        &client,
-        CreateCheckoutSession {
-            success_url: Some(&format!("{}/profile?subscription=success", domain_url)),
-            cancel_url: Some(&format!("{}/profile?subscription=canceled", domain_url)),
-            mode: Some(stripe::CheckoutSessionMode::Subscription),
-            line_items: Some(vec![
-                stripe::CreateCheckoutSessionLineItems {
-                    price: Some(price_id),
-                    quantity: Some(1),
+    if user.discount {
+
+        checkout_session = CheckoutSession::create(
+            &client,
+            CreateCheckoutSession {
+                success_url: Some(&format!("{}/profile?subscription=success", domain_url)),
+                cancel_url: Some(&format!("{}/profile?subscription=canceled", domain_url)),
+                mode: Some(stripe::CheckoutSessionMode::Subscription),
+                line_items: Some(vec![
+                    stripe::CreateCheckoutSessionLineItems {
+                        price: Some(price_id),
+                        quantity: Some(1),
+                        ..Default::default()
+                    }
+                ]),
+                customer: Some(customer_id.parse().unwrap()),
+                allow_promotion_codes: Some(true),
+                billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
+                automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
+                    enabled: true,
+                    liability: None,
+                }),
+                tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
+                    enabled: true,
+                }),
+                customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
+                    address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
+                    name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto), // Add this line
+                    shipping: None,
+                }),
+                subscription_data: Some(stripe::CreateCheckoutSessionSubscriptionData {
+                    trial_period_days: Some(3), // Set 3-day free trial
+                    trial_settings: Some(stripe::CreateCheckoutSessionSubscriptionDataTrialSettings {
+                        end_behavior: stripe::CreateCheckoutSessionSubscriptionDataTrialSettingsEndBehavior {
+                            missing_payment_method: stripe::CreateCheckoutSessionSubscriptionDataTrialSettingsEndBehaviorMissingPaymentMethod::Cancel,
+                        },
+                    }),
                     ..Default::default()
-                }
-            ]),
-            customer: Some(customer_id.parse().unwrap()),
-            allow_promotion_codes: Some(true),
-            billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
-            automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
-                enabled: true,
-                liability: None,
-            }),
-            tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
-                enabled: true,
-            }),
-            customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
-                address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
-                name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto), // Add this line
-                shipping: None,
-            }),
-            subscription_data: Some(stripe::CreateCheckoutSessionSubscriptionData {
-                trial_period_days: Some(3), // Set 3-day free trial
-                trial_settings: Some(stripe::CreateCheckoutSessionSubscriptionDataTrialSettings {
-                    end_behavior: stripe::CreateCheckoutSessionSubscriptionDataTrialSettingsEndBehavior {
-                        missing_payment_method: stripe::CreateCheckoutSessionSubscriptionDataTrialSettingsEndBehaviorMissingPaymentMethod::Cancel,
-                    },
                 }),
                 ..Default::default()
-            }),
-            ..Default::default()
-        },
-    )
-    .await
-    .map_err(|e| {
-        println!("Stripe error details: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to create Subscription Checkout Session: {}", e)})),
+            },
         )
-    })?;
+        .await
+        .map_err(|e| {
+            println!("Stripe error details: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to create Subscription Checkout Session: {}", e)})),
+            )
+        })?;
+    } else {
+
+        checkout_session = CheckoutSession::create(
+            &client,
+            CreateCheckoutSession {
+                success_url: Some(&format!("{}/profile?subscription=success", domain_url)),
+                cancel_url: Some(&format!("{}/profile?subscription=canceled", domain_url)),
+                mode: Some(stripe::CheckoutSessionMode::Subscription),
+                line_items: Some(vec![
+                    stripe::CreateCheckoutSessionLineItems {
+                        price: Some(price_id),
+                        quantity: Some(1),
+                        ..Default::default()
+                    }
+                ]),
+                customer: Some(customer_id.parse().unwrap()),
+                allow_promotion_codes: Some(true),
+                billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
+                automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
+                    enabled: true,
+                    liability: None,
+                }),
+                tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
+                    enabled: true,
+                }),
+                customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
+                    address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
+                    name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto), // Add this line
+                    shipping: None,
+                }),
+                ..Default::default()
+            },
+        )
+        .await
+        .map_err(|e| {
+            println!("Stripe error details: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to create Subscription Checkout Session: {}", e)})),
+            )
+        })?;
+    }
+
 
     println!("Subscription checkout session created successfully");
     
