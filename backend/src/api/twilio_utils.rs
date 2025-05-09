@@ -528,10 +528,7 @@ pub async fn send_conversation_message(
         .await?;
     println!("successfully sent the conversation message with SID: {}", response.sid);
     tracing::info!("Message sent successfully to conversation {} with message SID: {}", conversation_sid, response.sid);
-    println!("successfully sent the conversation message with SID: {}", response.sid);
-    tracing::info!("Message sent successfully to conversation {} with message SID: {}", conversation_sid, response.sid);
 
-    println!("BEFORE REDACTING: {}", body);
 
     
     // Only redact the current message if it's not a free reply message

@@ -2267,7 +2267,7 @@ pub async fn process_sms(
                 Some(processing_time_secs as i32),
                 Some(eval_result),
                 Some(final_eval),
-                Some(status),  
+                Some(status),
                 None,
                 None,
             ) {
@@ -2321,6 +2321,22 @@ pub async fn process_sms(
         }
         Err(e) => {
             eprintln!("Failed to send conversation message: {}", e);
+            // Log the failed attempt with error message in status
+            let error_status = format!("failed to send: {}", e);
+            if let Err(log_err) = state.user_repository.log_usage(
+                user.id,
+                None,
+                "sms".to_string(),
+                None,
+                Some(processing_time_secs as i32),
+                Some(false),  // Mark as unsuccessful
+                Some(final_eval),
+                Some(error_status),
+                None,
+                None,
+            ) {
+                eprintln!("Failed to log SMS usage after send error: {}", log_err);
+            }
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
