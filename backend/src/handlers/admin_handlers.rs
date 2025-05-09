@@ -100,16 +100,32 @@ pub async fn broadcast_email(
     State(state): State<Arc<AppState>>,
     Json(request): Json<EmailBroadcastRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    let users = state.user_repository.get_all_users().map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Database error: {}", e)}))
-    ))?;
+    // Validate input
+    if request.subject.is_empty() || request.message.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Subject and message cannot be empty"}))
+        ));
+    }
 
-    let resend_api_key = std::env::var("RESEND_EMAIL_API_KEY")
-        .map_err(|_| (
+    let users = state.user_repository.get_all_users().map_err(|e| {
+        tracing::error!("Database error when fetching users: {}", e);
+        (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "RESEND_EMAIL_API_KEY not set"}))
-        ))?;
+            Json(json!({"error": format!("Database error: {}", e)}))
+        )
+    })?;
+
+    let resend_api_key = match std::env::var("RESEND_EMAIL_API_KEY") {
+        Ok(key) => key,
+        Err(e) => {
+            tracing::error!("Failed to get RESEND_EMAIL_API_KEY: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Email service configuration error"}))
+            ));
+        }
+    };
 
     let resend = Resend::new(&resend_api_key);
     let from = "info@updates.lightfriend.ai";
@@ -117,9 +133,11 @@ pub async fn broadcast_email(
 
     let mut success_count = 0;
     let mut failed_count = 0;
+    let mut error_details = Vec::new();
 
     for user in users {
         if !user.notify {
+            tracing::debug!("Skipping user {} - notifications disabled", user.email);
             continue;
         }
 
@@ -131,11 +149,9 @@ pub async fn broadcast_email(
 
         let to = vec![user.email.as_str()];
         let email = CreateEmailBaseOptions::new(from, to, &request.subject)
-            .with_text(&format!(
-                "{}",
-                request.message
-            ))
-            .with_reply(reply_to); 
+            .with_text(&request.message)
+            .with_reply(reply_to)
+            .with_html(&request.message); // Add HTML version for better formatting
 
         match resend.emails.send(email).await {
             Ok(_) => {
@@ -144,7 +160,9 @@ pub async fn broadcast_email(
             }
             Err(e) => {
                 failed_count += 1;
-                tracing::error!("Failed to send email to {}: {}", user.email, e);
+                let error_msg = format!("Failed to send to {}: {}", user.email, e);
+                tracing::error!("{}", error_msg);
+                error_details.push(error_msg);
             }
         }
 
@@ -152,12 +170,28 @@ pub async fn broadcast_email(
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
 
+    if success_count == 0 && failed_count > 0 {
+        // If all attempts failed, return an error
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": "Failed to send any emails",
+                "details": error_details,
+                "stats": {
+                    "success": success_count,
+                    "failed": failed_count
+                }
+            }))
+        ));
+    }
+
     Ok(Json(json!({
         "message": "Email broadcast completed",
         "stats": {
             "success": success_count,
             "failed": failed_count
-        }
+        },
+        "error_details": error_details
     })))
 }
 
