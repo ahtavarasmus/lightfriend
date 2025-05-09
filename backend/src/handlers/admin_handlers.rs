@@ -255,11 +255,6 @@ async fn process_broadcast_messages(
             continue;
         }
 
-        // Skip users who have a valid email address
-        if !user.email.is_empty() && user.email.contains('@') && user.email.contains('.') {
-            tracing::info!("Skipping SMS for user with valid email: {}", user.email);
-            continue;
-        }
 
         let conversation_result = state
             .user_conversations
