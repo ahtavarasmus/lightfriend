@@ -18,7 +18,7 @@ quoted_printable = "0.4"
 time = "0.3"
 sha1 = "0.10"
 tokio-cron-scheduler = "0.9"
-axum = { version = "0.8", features = ["ws"] }
+axum = { version = "0.8", features = ["ws", "multipart"] }
 futures = "0.3"
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -29,7 +29,7 @@ jiff = "0.2.5"
 diesel = { version = "2.1.0", features = ["sqlite", "r2d2"] }
 diesel_migrations = "2.1.0"
 dotenvy = "0.15"
-tower-http = { version = "0.5", features = ["cors", "trace"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "fs"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing = "0.1"
 bcrypt = "0.10"

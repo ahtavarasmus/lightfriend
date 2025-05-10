@@ -14,8 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use chrono::TimeZone;
-use crate::handlers::imap_handlers::fetch_emails_imap;
-
+use crate::handlers::imap_handlers::{fetch_emails_imap, fetch_single_email_imap};
 
 
 #[derive(Debug, Deserialize)]
@@ -504,61 +503,122 @@ pub async fn handle_create_waiting_check_email_tool_call(
     }
 }
 
-
 pub async fn handle_email_fetch_tool_call(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-) -> Json<serde_json::Value> {
-
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Extract and parse user_id from query params
     let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
         Some(id) => id,
         None => {
-            return Json(json!({
-                "error": "Invalid or missing user_id parameter"
-            }));
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Invalid or missing user_id parameter"
+                }))
+            ));
         }
     };
-    println!("Received Gmail fetch request for user: {}", user_id);
+    println!("Received email fetch request for user: {}", user_id);
     
     match crate::handlers::imap_handlers::fetch_emails_imap(&state, user_id, true, Some(10), false).await {
         Ok(emails) => {
-            // Format emails for voice response
-            let mut response_text = String::from("Here are your recent emails. ");
-            
-            for (i, email) in emails.iter().enumerate() {
-                let subject = email.subject.as_deref().unwrap_or("No subject");
-                let from = email.from.as_deref().unwrap_or("Unknown sender");
-                let status = if email.is_read { "read" } else { "unread" };
-                let body = email.body.as_deref().unwrap_or("No content available");
+            if emails.is_empty() {
+                return Ok(Json(json!({
+                    "response": "I don't see any recent emails in your inbox.",
+                    "emails": [],
+                    "total_count": 0
+                })));
+            }
+
+            // Format emails for voice response in a more natural way
+            let mut response_text = format!(
+                "I found {} recent emails in your inbox. ", 
+                emails.len()
+            );
+
+            // Group emails by read status
+            let unread_count = emails.iter().filter(|e| !e.is_read).count();
+            if unread_count > 0 {
                 response_text.push_str(&format!(
-                    "Email {}. From {}. Subject: {}. Status: {}. Content: {}. ",
-                    i + 1,
-                    from,
-                    subject,
-                    status,
-                    body
+                    "{} of them {} unread. ",
+                    unread_count,
+                    if unread_count == 1 { "is" } else { "are" }
                 ));
             }
 
-            if emails.is_empty() {
-                response_text = "You have no recent emails.".to_string();
+            // Add details for each email in a conversational way
+            for (i, email) in emails.iter().enumerate() {
+                let from = email.from.as_deref().unwrap_or("an unknown sender");
+                let subject = email.subject.as_deref().unwrap_or("no subject");
+                let date = email.date_formatted.as_deref().unwrap_or("recently");
+                
+                // Truncate body if too long and clean it up
+                let body = email.body.as_ref()
+                    .map(|b| {
+                        let cleaned = b.replace('\n', " ").replace('\r', " ");
+                        let chars: Vec<char> = cleaned.chars().collect();
+                        if chars.len() > 150 {
+                            let truncated: String = chars.into_iter().take(150).collect();
+                            format!("{}...", truncated)
+                        } else {
+                            cleaned
+                        }
+                    })
+                    .unwrap_or_else(|| "no content".to_string());
+                // Format each email in a more natural way
+                let email_intro = if i == 0 {
+                    "The most recent email is"
+                } else if i == emails.len() - 1 {
+                    "And finally"
+                } else {
+                    "Next"
+                };
+
+                response_text.push_str(&format!(
+                    "{} from {}, sent {}. The subject is '{}'. {}. ",
+                    email_intro,
+                    from,
+                    date,
+                    subject,
+                    if email.is_read {
+                        format!("Here's what it says: {}", body)
+                    } else {
+                        format!("This unread email says: {}", body)
+                    }
+                ));
             }
 
-            Json(json!({
-                "response": response_text
-            }))
+            Ok(Json(json!({
+                "response": response_text,
+                "emails": emails.iter().map(|email| {
+                    json!({
+                        "id": email.id,
+                        "subject": email.subject,
+                        "from": email.from,
+                        "from_email": email.from_email,
+                        "date": email.date.map(|dt| dt.to_rfc3339()),
+                        "date_formatted": email.date_formatted,
+                        "body": email.body,
+                        "is_read": email.is_read
+                    })
+                }).collect::<Vec<_>>(),
+                "total_count": emails.len(),
+                "unread_count": unread_count
+            })))
         },
         Err(e) => {
-            error!("Error fetching Gmail messages: {:?}", e);
-            Json(json!({
-                "error": "Failed to fetch Gmail messages",
-                "details": format!("{:?}", e)
-            }))
+            error!("Failed to fetch emails: {:?}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to fetch emails",
+                    "details": format!("{:?}", e)
+                }))
+            ))
         }
     }
 }
-
 
 
 
@@ -911,6 +971,12 @@ pub async fn handle_tasks_fetching_tool_call(
 }
 
 #[derive(Debug, Deserialize)]
+pub struct EmailSearchPayload {
+    pub search_term: String,
+    pub search_type: Option<String>, // "sender", "subject", or "all"
+}
+
+#[derive(Debug, Deserialize)]
 pub struct WhatsAppSearchPayload {
     search_term: String,
 }
@@ -919,6 +985,298 @@ pub struct WhatsAppSearchPayload {
 pub struct WhatsAppConfirmPayload {
     chat_name: String,
     message: String,
+}
+
+pub async fn handle_email_search_tool_call(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    Json(payload): Json<EmailSearchPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Starting email search for term: {}", payload.search_term);
+
+    // Extract user_id from query parameters
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing or invalid user_id"
+                }))
+            ));
+        }
+    };
+
+    // First fetch recent emails with increased limit
+    match fetch_emails_imap(&state, user_id, true, Some(50), false).await {
+        Ok(emails) => {
+            let search_term = payload.search_term.to_lowercase();
+            let search_type = payload.search_type.as_deref().unwrap_or("all");
+
+            // Create a structure to hold email with its match score
+            #[derive(Debug)]
+            struct ScoredEmail {
+                email: crate::handlers::imap_handlers::ImapEmailPreview,
+                score: f64,
+                match_type: String,
+                matched_field: String,
+            }
+
+            let mut scored_emails: Vec<ScoredEmail> = Vec::new();
+            let now = chrono::Utc::now().timestamp() as f64;
+
+            for email in emails {
+                let mut best_score = 0.0;
+                let mut best_match_type = String::new();
+                let mut best_matched_field = String::new();
+
+                // Calculate time-based score factor (higher for more recent emails)
+                let time_factor = email.date
+                    .map(|date| {
+                        let age_in_days = (now - date.timestamp() as f64) / (24.0 * 60.0 * 60.0);
+                        // Exponential decay: score drops by half every 7 days, but never below 0.1
+                        (0.5f64.powf(age_in_days / 7.0)).max(0.1)
+                    })
+                    .unwrap_or(0.1); // Default factor for emails without dates
+
+                // Helper closure for scoring
+                let score_field = |field: &Option<String>, field_name: &str| -> Option<(f64, String)> {
+                    field.as_ref().map(|content| {
+                        let content_lower = content.to_lowercase();
+                        
+                        // Exact match
+                        if content_lower == search_term {
+                            return (1.0, "exact".to_string());
+                        }
+                        
+                        // Substring match
+                        if content_lower.contains(&search_term) {
+                            return (0.8, "substring".to_string());
+                        }
+                        
+                        // Similarity match using Jaro-Winkler
+                        let similarity = strsim::jaro_winkler(&content_lower, &search_term);
+                        if similarity >= 0.7 {
+                            return (similarity * 0.6, "similar".to_string());
+                        }
+                        
+                        (0.0, "none".to_string())
+                    })
+                };
+
+                // Score based on search type
+                match search_type {
+                    "sender" => {
+                        if let Some((score, match_type)) = score_field(&email.from, "sender") {
+                            if score > best_score {
+                                best_score = score;
+                                best_match_type = match_type;
+                                best_matched_field = "sender".to_string();
+                            }
+                        }
+                    },
+                    "subject" => {
+                        if let Some((score, match_type)) = score_field(&email.subject, "subject") {
+                            if score > best_score {
+                                best_score = score;
+                                best_match_type = match_type;
+                                best_matched_field = "subject".to_string();
+                            }
+                        }
+                    },
+                    _ => { // "all" or any other value
+                        // Check subject
+                        if let Some((score, match_type)) = score_field(&email.subject, "subject") {
+                            if score > best_score {
+                                best_score = score;
+                                best_match_type = match_type;
+                                best_matched_field = "subject".to_string();
+                            }
+                        }
+                        
+                        // Check sender
+                        if let Some((score, match_type)) = score_field(&email.from, "sender") {
+                            if score > best_score {
+                                best_score = score;
+                                best_match_type = match_type;
+                                best_matched_field = "sender".to_string();
+                            }
+                        }
+                        
+                        // Check body
+                        if let Some((score, match_type)) = score_field(&email.body, "body") {
+                            if score > best_score {
+                                best_score = score;
+                                best_match_type = match_type;
+                                best_matched_field = "body".to_string();
+                            }
+                        }
+                    }
+                }
+
+                // Add to scored emails if there's any match
+                if best_score > 0.0 {
+                    // Combine content match score with time factor
+                    let final_score = best_score * time_factor;
+                    scored_emails.push(ScoredEmail {
+                        email,
+                        score: final_score,
+                        match_type: best_match_type,
+                        matched_field: best_matched_field,
+                    });
+                }
+            }
+
+            // Sort by score (highest first)
+            scored_emails.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+
+            if scored_emails.is_empty() {
+                return Ok(Json(json!({
+                    "response": format!("No emails found matching '{}'.", payload.search_term),
+                    "found": false
+                })));
+            }
+
+            // Get the best match
+            let best_match = &scored_emails[0];
+            
+            // Fetch the full email content for the best match
+            match fetch_single_email_imap(&state, user_id, &best_match.email.id).await {
+                Ok(full_email) => {
+                    // Format response text in a more natural, voice-friendly way
+                    let match_quality = match best_match.match_type.as_str() {
+                        "exact" => "an exact match",
+                        "substring" => "a matching part",
+                        "similar" => "a similar match",
+                        _ => "a match"
+                    };
+
+                    let from = full_email.from.as_ref().map_or("an unknown sender", String::as_str);
+                    let subject = full_email.subject.as_ref().map_or("no subject", String::as_str);
+                    let body = full_email.body.as_ref()
+                        .map(|b| {
+                            let chars: Vec<char> = b.chars().collect();
+                            if chars.len() > 200 {
+                                let truncated: String = chars.into_iter().take(200).collect();
+                                format!("{}...", truncated)
+                            } else {
+                                b.clone()
+                            }
+                        })
+                        .unwrap_or_else(|| "no content".to_string());
+
+                    let mut response_text = format!(
+                        "I found {} for your search in the {} field. This email is from {}. The subject is: {}. Here's what it says: {}. ",
+                        match_quality,
+                        best_match.matched_field,
+                        from,
+                        subject,
+                        body
+                    );
+
+                    // Add information about additional matches if any
+                    if scored_emails.len() > 1 {
+                        let additional_matches = scored_emails.len() - 1;
+                        
+                        if additional_matches == 1 {
+                            response_text.push_str("I also found one more matching email. ");
+                        } else {
+                            response_text.push_str(&format!("I also found {} more matching emails. ", additional_matches));
+                        }
+
+                        // Add brief info about next few matches in a more conversational way
+                        for (i, scored_email) in scored_emails.iter().skip(1).take(2).enumerate() {
+                            let from = scored_email.email.from.as_ref().map_or("an unknown sender", String::as_str);
+                            let match_desc = match scored_email.match_type.as_str() {
+                                "exact" => "exactly matches",
+                                "substring" => "contains",
+                                "similar" => "is similar to",
+                                _ => "matches"
+                            };
+
+                            if i == 0 {
+                                response_text.push_str(&format!(
+                                    "The next best match is from {}, where your search term {} the {}. ",
+                                    from,
+                                    match_desc,
+                                    scored_email.matched_field
+                                ));
+                            } else {
+                                response_text.push_str(&format!(
+                                    "Another match is from {}, with the search term matching the {}. ",
+                                    from,
+                                    scored_email.matched_field
+                                ));
+                            }
+                        }
+
+                        if additional_matches > 2 {
+                            response_text.push_str(&format!(
+                                "There are {} more matching emails that I haven't described. ",
+                                additional_matches - 2
+                            ));
+                        }
+                    }
+
+                    Ok(Json(json!({
+                        "response": response_text,
+                        "found": true,
+                        "primary_match": {
+                            "email": {
+                                "id": full_email.id,
+                                "subject": full_email.subject,
+                                "from": full_email.from,
+                                "from_email": full_email.from_email,
+                                "date": full_email.date.map(|dt| dt.to_rfc3339()),
+                                "date_formatted": full_email.date_formatted,
+                                "body": full_email.body,
+                                "is_read": full_email.is_read
+                            },
+                            "match_quality": {
+                                "score": best_match.score,
+                                "match_type": best_match.match_type,
+                                "matched_field": best_match.matched_field
+                            }
+                        },
+                        "additional_matches": scored_emails.iter().skip(1).take(4).map(|scored| {
+                            json!({
+                                "id": scored.email.id,
+                                "subject": scored.email.subject,
+                                "from": scored.email.from,
+                                "date_formatted": scored.email.date_formatted,
+                                "match_quality": {
+                                    "score": scored.score,
+                                    "match_type": scored.match_type,
+                                    "matched_field": scored.matched_field
+                                }
+                            })
+                        }).collect::<Vec<_>>(),
+                        "total_matches": scored_emails.len()
+                    })))
+                },
+                Err(e) => {
+                    error!("Failed to fetch full email content: {:?}", e);
+                    Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "Failed to fetch full email content",
+                            "details": format!("{:?}", e)
+                        }))
+                    ))
+                }
+            }
+        },
+        Err(e) => {
+            error!("Failed to fetch emails: {:?}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to fetch emails",
+                    "details": format!("{:?}", e)
+                }))
+            ))
+        }
+    }
 }
 
 pub async fn handle_whatsapp_confirm_send(

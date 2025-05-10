@@ -27,7 +27,7 @@ use openai_api_rs::v1::{
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct ChatMessage {
     role: String,
-    content: String,
+    content: chat_completion::Content,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -69,6 +69,13 @@ pub async fn fetch_conversation_messages(conversation_sid: &str) -> Result<Vec<T
 }
 
 #[derive(Deserialize, Clone)]
+pub struct MediaItem {
+    pub content_type: String,
+    pub url: String,
+    pub sid: String,
+}
+
+#[derive(Deserialize, Clone)]
 pub struct TwilioWebhookPayload {
     #[serde(rename = "From")]
     pub from: String,
@@ -76,6 +83,12 @@ pub struct TwilioWebhookPayload {
     pub to: String,
     #[serde(rename = "Body")]
     pub body: String,
+    #[serde(rename = "NumMedia")]
+    pub num_media: Option<String>,
+    #[serde(rename = "MediaUrl0")]
+    pub media_url0: Option<String>,
+    #[serde(rename = "MediaContentType0")]
+    pub media_content_type0: Option<String>,
 }
 
 #[derive(Serialize, Debug)]
@@ -446,6 +459,8 @@ pub async fn process_sms(
     is_test: bool,
 ) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
     let start_time = std::time::Instant::now(); // Track processing time
+    // TODO remove
+    println!("payload.num_media: {:#?}", payload.num_media);
 
     let user = match state.user_repository.find_by_phone_number(&payload.from) {
         Ok(Some(user)) => {
@@ -473,6 +488,7 @@ pub async fn process_sms(
                 );
         }
     };
+    println!("payload.num_media: {:#?}", payload.num_media);
 
     let conversation = match state.user_conversations.get_conversation(&user, payload.to).await {
         Ok(conv) => conv,
@@ -662,7 +678,7 @@ pub async fn process_sms(
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes.\n\n### Tool Usage Guidelines:\n- **For tools that fetch information** (e.g., `fetch_whatsapp_messages`, `fetch_imap_emails`, `ask_perplexity`, `get_weather`, `calendar`, `fetch_tasks`):\n  - Use them directly to gather data.\n  - Provide all relevant details in the response immediately.\n- **For tools that perform actions** (e.g., `send_whatsapp_message`, `create_task`):\n  - Confirm details with the user before proceeding.\n  - **For `send_whatsapp_message`**:\n    - Use `search_whatsapp_rooms` first to find and confirm the exact recipient.\n    - Show search results to the user and wait for confirmation before sending.\n\n### Date and Time Handling:\n- Use **RFC3339/ISO8601 format** (e.g., '2024-03-23T14:30:00Z') for all date/time inputs.\n- If no specific time is mentioned:\n  - Use the **current time** for start and **24 hours ahead** for end or the otherway around depending on the tool.\n- Always consider the user's timezone: {} with offset {}.\n- For queries about:\n  - **\"Today\"**: Use 00:00 to 23:59 of the current day.\n  - **\"Tomorrow\"**: Use 00:00 to 23:59 of the next day.\n\n### Additional Guidelines:\n- **Weather Queries**: If no location is specified, assume the user’s home location from user info.\n- **Email Queries**: For `fetch_specific_email`, provide the whole message body or a summary if too long—never just the subject.\n- **WhatsApp Fetching**: Use the room name directly from the user’s message/context without searching rooms.\n\nNever use markdown or HTML in responses. User information: {}. Always use tools to fetch the latest information before answering.", formatted_time, timezone_str, offset, user_info),
+        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes.\n\n### Tool Usage Guidelines:\n- **For tools that fetch information** (e.g., `fetch_whatsapp_messages`, `fetch_imap_emails`, `ask_perplexity`, `get_weather`, `calendar`, `fetch_tasks`):\n  - Use them directly to gather data.\n  - Provide all relevant details in the response immediately.\n- **For tools that perform actions** (e.g., `send_whatsapp_message`, `create_task`):\n  - Confirm details with the user before proceeding.\n  - **For `send_whatsapp_message`**:\n    - Use `search_whatsapp_rooms` first to find and confirm the exact recipient.\n    - Show search results to the user and wait for confirmation before sending.\n\n### Date and Time Handling:\n- Use **RFC3339/ISO8601 format** (e.g., '2024-03-23T14:30:00Z') for all date/time inputs.\n- If no specific time is mentioned:\n  - Use the **current time** for start and **24 hours ahead** for end or the otherway around depending on the tool.\n- Always consider the user's timezone: {} with offset {}.\n- For queries about:\n  - **\"Today\"**: Use 00:00 to 23:59 of the current day.\n  - **\"Tomorrow\"**: Use 00:00 to 23:59 of the next day.\n\n### Additional Guidelines:\n- **Weather Queries**: If no location is specified, assume the user’s home location from user info.\n- **Email Queries**: For `fetch_specific_email`, provide the whole message body or a summary if too long—never just the subject.\n- **WhatsApp Fetching**: Use the room name directly from the user’s message/context without searching rooms.\n\nNever use markdown or HTML in responses. User information: {}. Always use tools to fetch the latest information before answering.", formatted_time, timezone_str, offset, user_info)),
     }];
     
     // Process the message body to remove "forget" if it exists at the start
@@ -674,23 +690,56 @@ pub async fn process_sms(
 
     // Only include conversation history if message starts with "forget"
     if !payload.body.to_lowercase().starts_with("forget") {
-        let mut history: Vec<ChatMessage> = messages.clone().into_iter().map(|msg| {
-            ChatMessage {
-                role: if msg.author == "lightfriend" { "assistant" } else { "user" }.to_string(),
-                content: msg.body,
-            }
-        }).collect();
+    let mut history: Vec<ChatMessage> = messages.clone().into_iter().map(|msg| {
+        ChatMessage {
+            role: if msg.author == "lightfriend" { "assistant" } else { "user" }.to_string(),
+            content: chat_completion::Content::Text(msg.body.clone()),
+        }
+    }).collect();
         history.reverse();
         
         // Combine system message with conversation history
         chat_messages.extend(history);
     }
 
-    // Add the current message with processed body
-    chat_messages.push(ChatMessage {
-        role: "user".to_string(),
-        content: processed_body,
-    });
+    println!("media_url: {:#?}",payload.num_media);
+    // Handle image if present
+    if let (Some(num_media), Some(media_url), Some(content_type)) = (
+        payload.num_media.as_ref(),
+        payload.media_url0.as_ref(),
+        payload.media_content_type0.as_ref()
+    ) {
+        if num_media != "0" && content_type.starts_with("image/") {
+            // Add the image URL message
+            chat_messages.push(ChatMessage {
+                role: "user".to_string(),
+                content: chat_completion::Content::ImageUrl(vec![
+                    chat_completion::ImageUrl {
+                        r#type: chat_completion::ContentType::image_url,
+                        text: Some(processed_body),
+                        image_url: Some(chat_completion::ImageUrlType {
+                            url: media_url.clone(),
+                        }),
+                    },
+                ]),
+
+            });
+        } else {
+            // Add regular text message if no image
+            chat_messages.push(ChatMessage {
+                role: "user".to_string(),
+                content: chat_completion::Content::Text(processed_body),
+            });
+        }
+    } else {
+        // Add regular text message if no media
+        chat_messages.push(ChatMessage {
+            role: "user".to_string(),
+            content: chat_completion::Content::Text(processed_body),
+        });
+    }
+
+    println!("chat_messages: {:#?}",chat_messages);
 
 
     let mut waiting_check_properties = HashMap::new();
@@ -1122,7 +1171,7 @@ pub async fn process_sms(
                 "system" => chat_completion::MessageRole::system,
                 _ => chat_completion::MessageRole::user, // default to user if unknown
             },
-            content: chat_completion::Content::Text(msg.content),
+            content: msg.content.clone(),
             name: None,
             tool_calls: None,
             tool_call_id: None,

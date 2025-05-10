@@ -23,6 +23,7 @@ use oauth2::{
 };
 use urlencoding;
 use tower_http::cors::{CorsLayer, Any, AllowOrigin};
+use tower_http::services::ServeDir;
 use tower_http::trace::{TraceLayer, DefaultMakeSpan, DefaultOnResponse};
 use tracing::Level;
 use std::sync::Arc;
@@ -166,7 +167,7 @@ async fn main() {
     // Create filter that sets Matrix SDK logs to WARN and keeps our app at DEBUG
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| {
-            EnvFilter::new("warn,lightfriend=debug")
+            EnvFilter::new("info,lightfriend=debug")
                 .add_directive("matrix_sdk=warn".parse().unwrap())
                 .add_directive("tokio-runtime-worker=warn".parse().unwrap())
                 .add_directive("ruma=warn".parse().unwrap())
@@ -254,6 +255,7 @@ async fn main() {
         .route("/api/call/shazam", get(elevenlabs::handle_shazam_tool_call))
         .route("/api/call/calendar", get(elevenlabs::handle_calendar_tool_call))
         .route("/api/call/email", get(elevenlabs::handle_email_fetch_tool_call))
+        .route("/api/call/email/specific", post(elevenlabs::handle_email_search_tool_call))
         .route("/api/call/email/waiting_check", post(elevenlabs::handle_create_waiting_check_email_tool_call))
         .route("/api/call/tasks", get(elevenlabs::handle_tasks_fetching_tool_call))
         .route("/api/call/tasks/create", post(elevenlabs::handle_tasks_creation_tool_call))
@@ -294,6 +296,7 @@ async fn main() {
         .route("/api/admin/messages/{user_id}/{amount}", post(admin_handlers::update_user_messages))
         .route("/api/billing/reset-credits/{user_id}", post(billing_handlers::reset_credits))
         .route("/api/admin/test-sms", post(admin_handlers::test_sms))
+        .route("/api/admin/test-sms-with-image", post(admin_handlers::test_sms_with_image))
         .route_layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::require_admin));
 
     // Protected routes that need user authentication
@@ -398,6 +401,7 @@ async fn main() {
         .merge(elevenlabs_routes)
         .merge(elevenlabs_free_routes)
         .merge(elevenlabs_webhook_routes)
+        .nest_service("/uploads", ServeDir::new("uploads"))
         // Serve static files (robots.txt, sitemap.xml) at the root
         .layer(session_layer)
         .layer(

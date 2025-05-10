@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use axum::{
     Json,
-    extract::State,
+    extract::{State, Multipart},
     http::StatusCode,
 };
 use serde_json::json;
@@ -9,10 +9,20 @@ use serde::{Deserialize, Serialize};
 use resend_rs::{Resend, Result as ResendResult};
 use resend_rs::types::CreateEmailBaseOptions;
 
+use std::path::Path;
+use tokio::fs;
+use uuid::Uuid;
+
 #[derive(Deserialize)]
 pub struct TestSmsRequest {
     pub message: String,
     pub user_id: i32,
+}
+
+#[derive(Serialize)]
+pub struct TestSmsWithImageResponse {
+    message: String,
+    image_path: String,
 }
 
 #[derive(Deserialize)]
@@ -390,6 +400,105 @@ pub async fn get_usage_logs(
     Ok(Json(response_logs))
 }
 
+pub async fn test_sms_with_image(
+    State(state): State<Arc<AppState>>,
+    mut multipart: Multipart,
+) -> Result<Json<TestSmsWithImageResponse>, (StatusCode, Json<serde_json::Value>)> {
+    println!("test_sms_with_image");
+    // Ensure uploads directory path is absolute
+    // Create uploads directory if it doesn't exist
+    let uploads_dir = Path::new("backend/uploads");
+    if !uploads_dir.exists() {
+        fs::create_dir_all(uploads_dir).await.map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to create uploads directory: {}", e)}))
+        ))?;
+    }
+
+    let mut message = String::new();
+                let mut image_data_url = None;
+
+                while let Some(field) = multipart.next_field().await.map_err(|e| (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": format!("Failed to process form data: {}", e)}))
+                ))? {
+                    let name = field.name().unwrap_or("").to_string();
+
+                    match name.as_str() {
+                        "message" => {
+                            println!("Processing message field");
+                            message = field.text().await.map_err(|e| (
+                                StatusCode::BAD_REQUEST,
+                                Json(json!({"error": format!("Failed to read message: {}", e)}))
+                            ))?;
+                        }
+                        "image" => {
+                            let file_name = format!("{}.jpg", Uuid::new_v4());
+                            println!("Processing image: {}", file_name);
+                            let path = uploads_dir.join(&file_name);
+                            
+                            let data = field.bytes().await.map_err(|e| (
+                                StatusCode::BAD_REQUEST,
+                                Json(json!({"error": format!("Failed to read image data: {}", e)}))
+                            ))?;
+
+                            // Save the file
+                            fs::write(&path, &data).await.map_err(|e| (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({"error": format!("Failed to save image: {}", e)}))
+                            ))?;
+
+                            // Convert to base64 data URL
+                            let base64 = base64::encode(&data);
+                            let mime_type = "image/jpeg"; // Assuming JPEG format
+                            let data_url = format!("data:{};base64,{}", mime_type, base64);
+                            
+                            // Store both the data URL and save the file path
+                            let absolute_path = path.canonicalize().map_err(|e| (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({"error": format!("Failed to get absolute path: {}", e)}))
+                            ))?.to_string_lossy().into_owned();
+
+                            image_data_url = Some((data_url, absolute_path.clone()));
+                            println!("Image saved at: {}", absolute_path);
+                        }
+                        _ => continue,
+                    }
+                }
+
+    // Create mock Twilio payload with image
+    let mock_payload = crate::api::twilio_sms::TwilioWebhookPayload {
+        from: "+358442105886".to_string(), // Default test number
+        to: std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER must be set"),
+        body: message.clone(),
+        num_media: image_data_url.as_ref().map(|_| "1".to_string()),
+        media_url0: Some(image_data_url.as_ref().map(|(data_url, _)| data_url.clone()).unwrap_or_default()),
+        media_content_type0: Some("image/jpeg".to_string()),
+    };
+    println!("mock_payload.num_media: {:#?}",mock_payload.num_media);
+    // Process the SMS using the existing handler with test mode
+    let (status, _, response) = crate::api::twilio_sms::process_sms(
+        &state,
+        mock_payload,
+        true, // Set test mode to true
+    ).await;
+
+    if status == StatusCode::OK {
+        Ok(Json(TestSmsWithImageResponse {
+            message: response.message.clone(),
+            image_path: image_data_url.map(|(_, path)| path).unwrap_or_default(),
+        }))
+    } else {
+        Err((
+            status,
+            Json(json!({
+                "error": "Failed to process test message",
+                "details": response.message
+            }))
+        ))
+    }
+}
+
 pub async fn test_sms(
     State(state): State<Arc<AppState>>,
     Json(request): Json<TestSmsRequest>,
@@ -410,6 +519,9 @@ pub async fn test_sms(
         from: user.phone_number.clone(),
         to: user.preferred_number.unwrap_or_else(|| "+0987654321".to_string()),
         body: request.message,
+        num_media: None,
+        media_url0: None,
+        media_content_type0: None,
     };
 
     // Process the SMS using the existing handler with test mode

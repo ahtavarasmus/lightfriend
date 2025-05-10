@@ -1,5 +1,7 @@
 use yew::prelude::*;
+use wasm_bindgen::JsCast;
 use web_sys::window;
+use wasm_bindgen::closure::Closure;
 use crate::config;
 use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
@@ -75,6 +77,12 @@ struct ChatMessage {
     content: String,
     is_user: bool,
     timestamp: i64,
+    image_url: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ImagePreview {
+    data_url: Option<String>,
 }
 
 #[function_component(AdminDashboard)]
@@ -89,6 +97,7 @@ pub fn admin_dashboard() -> Html {
     let email_message = use_state(|| String::new());
     let test_message = use_state(|| String::new());
     let chat_messages = use_state(|| Vec::<ChatMessage>::new());
+    let image_preview = use_state(|| ImagePreview { data_url: None });
     let delete_modal = use_state(|| DeleteModalState {
         show: false,
         user_id: None,
@@ -370,6 +379,11 @@ pub fn admin_dashboard() -> Html {
                                     
                                     html! {
                                         <div class={classes!("chat-message", if msg.is_user { "user" } else { "assistant" })}>
+                                            if let Some(image_url) = &msg.image_url {
+                                                <div class="message-image">
+                                                    <img src={image_url.clone()} alt="Uploaded content" />
+                                                </div>
+                                            }
                                             <div class="message-content">{&msg.content}</div>
                                             <div class="message-timestamp">{timestamp}</div>
                                         </div>
@@ -377,7 +391,138 @@ pub fn admin_dashboard() -> Html {
                                 }).collect::<Html>()
                             }
                         </div>
-                        <div class="chat-input">
+                    <div class="chat-input">
+                        {
+                            if let Some(preview_url) = &(*image_preview).data_url {
+                                html! {
+                                    <div class="image-preview">
+                                        <img src={preview_url.clone()} alt="Preview" />
+                                        <button 
+                                            onclick={{
+                                                let image_preview = image_preview.clone();
+                                                Callback::from(move |_| {
+                                                    image_preview.set(ImagePreview { data_url: None });
+                                                })
+                                            }}
+                                            class="remove-image"
+                                        >
+                                            {"×"}
+                                        </button>
+                                    </div>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
+                        <div class="chat-input-wrapper">
+                            <input
+                                type="file"
+                                accept="image/*"
+                                id="image-upload"
+                                class="image-upload"
+                                onchange={{
+                                    let test_message = test_message.clone();
+                                    let chat_messages = chat_messages.clone();
+                                    let error = error.clone();
+                                    let image_preview_handle = image_preview.clone();
+                                    
+                                    Callback::from(move |e: Event| {
+                                        let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+                                        if let Some(files) = input.files() {
+                                            if let Some(file) = files.get(0) {
+                                                let test_message = test_message.clone();
+                                                let chat_messages = chat_messages.clone();
+                                                let error = error.clone();
+                                                let image_preview = image_preview_handle.clone();
+                                                
+                                                // First create a preview of the image
+                                                let file_reader = web_sys::FileReader::new().unwrap();
+                                                let file_reader_clone = file_reader.clone();
+                                                let image_preview_for_closure = image_preview.clone();
+                                                
+                                                let onload = Closure::wrap(Box::new(move || {
+                                                    if let Ok(result) = file_reader_clone.result() {
+                                                        if let Some(data_url) = result.as_string() {
+                                                            image_preview_for_closure.set(ImagePreview {
+                                                                data_url: Some(data_url),
+                                                            });
+                                                        }
+                                                    }
+                                                }) as Box<dyn FnMut()>);
+                                                
+                                                file_reader.set_onload(Some(onload.as_ref().unchecked_ref()));
+                                                file_reader.read_as_data_url(&file).unwrap();
+                                                onload.forget();
+
+                                                wasm_bindgen_futures::spawn_local(async move {
+                                                    if let Some(token) = window()
+                                                        .and_then(|w| w.local_storage().ok())
+                                                        .flatten()
+                                                        .and_then(|storage| storage.get_item("token").ok())
+                                                        .flatten()
+                                                    {
+                                                        let form_data = web_sys::FormData::new().unwrap();
+                                                        form_data.append_with_blob("image", &file).unwrap();
+                                                        form_data.append_with_str("message", &(*test_message)).unwrap();
+                                                        
+                                                        match Request::post(&format!("{}/api/admin/test-sms-with-image", config::get_backend_url()))
+                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                            .body(form_data)
+                                                            .send()
+                                                            .await
+                                                        {
+                                                            Ok(response) => {
+                                                                if response.ok() {
+                                                                    match response.json::<serde_json::Value>().await {
+                                                                        Ok(data) => {
+                                                                            let mut new_messages = (*chat_messages).clone();
+                                                                            
+                                                                            // Add user message with image
+                                                                            if let Some(image_url) = data.get("image_url").and_then(|u| u.as_str()) {
+                                                                                new_messages.push(ChatMessage {
+                                                                                    content: (*test_message).clone(),
+                                                                                    is_user: true,
+                                                                                    timestamp: chrono::Utc::now().timestamp(),
+                                                                                    image_url: Some(image_url.to_string()),
+                                                                                });
+                                                                            }
+                                                                            
+                                                                            // Add AI response
+                                                                            if let Some(reply) = data.get("message").and_then(|m| m.as_str()) {
+                                                                                new_messages.push(ChatMessage {
+                                                                                    content: reply.to_string(),
+                                                                                    is_user: false,
+                                                                                    timestamp: chrono::Utc::now().timestamp(),
+                                                                                    image_url: None,
+                                                                                });
+                                                                            }
+                                                                            
+                                                                            chat_messages.set(new_messages);
+                                                                            test_message.set(String::new());
+                                                                        }
+                                                                        Err(_) => {
+                                                                            error.set(Some("Failed to parse response".to_string()));
+                                                                        }
+                                                                    }
+                                                                } else {
+                                                                    error.set(Some("Failed to process test message with image".to_string()));
+                                                                }
+                                                            }
+                                                            Err(_) => {
+                                                                error.set(Some("Failed to send test message with image".to_string()));
+                                                            }
+                                                        }
+                                                    }
+                                                });
+                                            }
+                                        }
+                                    })
+                                }}
+                            />
+                            <label for="image-upload" class="image-upload-label">
+                                <i class="fas fa-image"></i>
+                            </label>
+                            </div>
                             <input
                                 type="text"
                                 value={(*test_message).clone()}
@@ -392,6 +537,7 @@ pub fn admin_dashboard() -> Html {
                                     let test_message = test_message.clone();
                                     let chat_messages = chat_messages.clone();
                                     let error = error.clone();
+                                    let image_preview_handle = image_preview.clone();
                                     
                                     Callback::from(move |e: KeyboardEvent| {
                                         if e.key() == "Enter" {
@@ -399,6 +545,8 @@ pub fn admin_dashboard() -> Html {
                                             let chat_messages = chat_messages.clone();
                                             let error = error.clone();
                                             let message_content = (*test_message).clone();
+                                            let image_preview_data = (*image_preview_handle).data_url.clone();
+                                            let image_preview = image_preview_handle.clone();
                                             
                                             if !message_content.is_empty() {
                                                 wasm_bindgen_futures::spawn_local(async move {
@@ -409,13 +557,16 @@ pub fn admin_dashboard() -> Html {
                                                         .flatten()
                                                     {
                                                         // Add user message to chat
-                                                        let mut new_messages = (*chat_messages).clone();
-                                                        new_messages.push(ChatMessage {
-                                                            content: message_content.clone(),
-                                                            is_user: true,
-                                                            timestamp: chrono::Utc::now().timestamp(),
-                                                        });
-                                                        chat_messages.set(new_messages);
+                                                                                                let mut new_messages = (*chat_messages).clone();
+                                                                                                new_messages.push(ChatMessage {
+                                                                                                    content: message_content.clone(),
+                                                                                                    is_user: true,
+                                                                                                    timestamp: chrono::Utc::now().timestamp(),
+                                                                                                    image_url: image_preview_data,
+                                                                                                });
+                                                                                                chat_messages.set(new_messages);
+                                                                                                // Clear the image preview after sending
+                                                                                                image_preview.set(ImagePreview { data_url: None });
                                                         
                                                         // Clear input
                                                         test_message.set(String::new());
@@ -433,17 +584,20 @@ pub fn admin_dashboard() -> Html {
                                                         {
                                                             Ok(response) => {
                                                                 if response.ok() {
-                                                                    match response.json::<serde_json::Value>().await {
-                                                                        Ok(data) => {
-                                                                            if let Some(reply) = data.get("message").and_then(|m| m.as_str()) {
-                                                                                let mut new_messages = (*chat_messages).clone();
-                                                                                new_messages.push(ChatMessage {
-                                                                                    content: reply.to_string(),
-                                                                                    is_user: false,
-                                                                                    timestamp: chrono::Utc::now().timestamp(),
-                                                                                });
-                                                                                chat_messages.set(new_messages);
-                                                                            }
+                                                                                                    match response.json::<serde_json::Value>().await {
+                                                                                                        Ok(data) => {
+                                                                                                            if let Some(reply) = data.get("message").and_then(|m| m.as_str()) {
+                                                                                                                let mut new_messages = (*chat_messages).clone();
+                                                                new_messages.push(ChatMessage {
+                                                                    content: reply.to_string(),
+                                                                    is_user: false,
+                                                                    timestamp: chrono::Utc::now().timestamp(),
+                                                                    image_url: None,
+                                                                });
+                                                                                                                chat_messages.set(new_messages);
+                                                                                                                // Clear the image preview after successful response
+                                                                                                                image_preview.set(ImagePreview { data_url: None });
+                                                                                                            }
                                                                         }
                                                                         Err(_) => {
                                                                             error.set(Some("Failed to parse response".to_string()));
@@ -1257,6 +1411,41 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                     background: rgba(0, 0, 0, 0.2);
                 }
 
+                .chat-input-wrapper {
+                    display: flex;
+                    align-items: center;
+                    gap: 0.5rem;
+                }
+
+                .image-upload {
+                    display: none;
+                }
+
+                .image-upload-label {
+                    cursor: pointer;
+                    padding: 0.5rem;
+                    background: rgba(30, 144, 255, 0.2);
+                    border-radius: 4px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    transition: all 0.3s ease;
+                }
+
+                .image-upload-label:hover {
+                    background: rgba(30, 144, 255, 0.3);
+                }
+
+                .message-image {
+                    margin-bottom: 0.5rem;
+                }
+
+                .message-image img {
+                    max-width: 100%;
+                    max-height: 200px;
+                    border-radius: 4px;
+                }
+
                 .chat-input-field {
                     width: 100%;
                     padding: 0.75rem;
@@ -1269,6 +1458,43 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                 .chat-input-field:focus {
                     outline: none;
                     border-color: #1E90FF;
+                }
+
+                .image-preview {
+                    position: relative;
+                    margin-bottom: 1rem;
+                    padding: 0.5rem;
+                    background: rgba(0, 0, 0, 0.2);
+                    border-radius: 8px;
+                    display: inline-block;
+                }
+
+                .image-preview img {
+                    max-width: 200px;
+                    max-height: 200px;
+                    border-radius: 4px;
+                }
+
+                .remove-image {
+                    position: absolute;
+                    top: 0;
+                    right: 0;
+                    background: rgba(255, 0, 0, 0.7);
+                    color: white;
+                    border: none;
+                    border-radius: 50%;
+                    width: 24px;
+                    height: 24px;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 16px;
+                    margin: 4px;
+                }
+
+                .remove-image:hover {
+                    background: rgba(255, 0, 0, 0.9);
                 }
                 "#}
                 {r#"
