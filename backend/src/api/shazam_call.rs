@@ -42,7 +42,6 @@ impl ShazamState {
 
 
 // Handler to start a call for a userwhisper
-
 pub async fn start_call_for_user(
     Path(user_id): Path<String>,
     axum::extract::State(state): axum::extract::State<Arc<crate::AppState>>,
@@ -61,11 +60,7 @@ pub async fn start_call_for_user(
     }
 
     // Choose the appropriate from number based on the destination
-    let from_number = if to_number.starts_with("+1") {
-        std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER must be set")
-    } else {
-        std::env::var("SHAZAM_EUROPE_PHONE_NUMBER").expect("SHAZAM_EUROPE_PHONE_NUMBER must be set")
-    };
+    let from_number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER must be set");
 
     let server_url = std::env::var("SERVER_URL").expect("SERVER_URL must be set");
     let twiml_url = format!("{}/api/twiml", server_url);

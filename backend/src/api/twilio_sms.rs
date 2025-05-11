@@ -459,8 +459,6 @@ pub async fn process_sms(
     is_test: bool,
 ) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
     let start_time = std::time::Instant::now(); // Track processing time
-    // TODO remove
-    println!("payload.num_media: {:#?}", payload.num_media);
 
     let user = match state.user_repository.find_by_phone_number(&payload.from) {
         Ok(Some(user)) => {
@@ -488,7 +486,6 @@ pub async fn process_sms(
                 );
         }
     };
-    println!("payload.num_media: {:#?}", payload.num_media);
 
     let conversation = match state.user_conversations.get_conversation(&user, payload.to).await {
         Ok(conv) => conv,
@@ -702,7 +699,6 @@ pub async fn process_sms(
         chat_messages.extend(history);
     }
 
-    println!("media_url: {:#?}",payload.num_media);
     // Handle image if present
     if let (Some(num_media), Some(media_url), Some(content_type)) = (
         payload.num_media.as_ref(),
@@ -1987,7 +1983,7 @@ pub async fn process_sms(
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
             content: chat_completion::Content::Text(
-                "You are an evaluator that determines if an AI response is asking for REQUIRED information OR is seeking for CONFIRMATION to complete the task. Default to FALSE otherwise.\n\n\
+                "You are an evaluator that determines if an AI response is asking for REQUIRED information OR is seeking for CONFIRMATION to complete the UNFINISHED task. Unfinished task is an answer where the AI did not provide ANY useful information yet to the user. Default to FALSE otherwise.\n\n\
                 Examples of TRUE clarifying questions:\n\
                 - User: 'Send a message to mom' -> AI: 'I see multiple contacts named mom. Which one should I send the message to?'\n\
                 - User: 'Check my calendar' -> AI: 'For which date range would you like me to check your calendar?'\n\

@@ -5,6 +5,8 @@ frontend/target/
 *.db
 database.db
 backend/database.db
+backend/backend/
+backend/uploads/
 backend/target/
 .env
 backend/src/api/payloads.md

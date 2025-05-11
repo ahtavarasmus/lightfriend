@@ -855,9 +855,22 @@ pub fn admin_dashboard() -> Html {
                                                     
                                                     html! {
                                                         <>
-                                                            <tr onclick={onclick} key={user.id} class={classes!("user-row", is_selected.then(|| "selected"))}>
+                                                            <tr onclick={onclick} key={user.id} class={classes!("user-row", is_selected.then(|| "selected"), user.sub_tier.is_some().then(|| "gold-user"))}>
                                                                 <td>{user.id}</td>
-                                                                <td>{&user.email}</td>
+                                                                <td>
+                                                                    <div class="user-email-container">
+                                                                        {&user.email}
+                                                                        {
+                                                                            if user.sub_tier.is_some() {
+                                                                                html! {
+                                                                                    <span class="gold-badge">{"★"}</span>
+                                                                                }
+                                                                            } else {
+                                                                                html! {}
+                                                                            }
+                                                                        }
+                                                                    </div>
+                                                                </td>
                                                                 <td>{format!("{:.2}", user.credits)}</td>
                                                             </tr>
                                                             if is_selected {
@@ -1817,6 +1830,22 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
 
                     .modal-button.delete:hover {
                         background-color: #c82333;
+                    }
+
+                    .user-email-container {
+                        display: flex;
+                        align-items: center;
+                        gap: 0.5rem;
+                    }
+
+                    .gold-badge {
+                        color: #FFD700;
+                        font-size: 1.2rem;
+                    }
+
+                    .gold-user {
+                        background: linear-gradient(90deg, rgba(255, 215, 0, 0.05), transparent);
+                        border-left: 3px solid #FFD700;
                     }
 
                 "#}
