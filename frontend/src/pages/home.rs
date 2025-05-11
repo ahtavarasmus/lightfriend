@@ -116,275 +116,237 @@ pub fn landing() -> Html {
     html! {
 
         <div class="landing-page">
-            // Hero Section
-            <header class="hero">
-                <h1>{"Your AI Assistant for Dumbphones"}</h1>
-                <p class="hero-subtitle">
-                    {"Access your digital life through simple calls and texts"}
-                </p>
-                <Link<Route> to={Route::Register} classes="forward-link">
-                    <button class="hero-cta">
-                        {"Try Now with Free Credits"}
-                    </button>
-                </Link<Route>>
-            </header>
+        <header class="hero">
+            <h1>{"Done Scrolling Your Life Away?"}</h1>
+            <p class="hero-subtitle">
+                {"The average person spends 4.5 hours a day on social media. That’s 15 years of your life gone. LightFriend’s dumbphone revolution lets you break free—without vanishing."}
+            </p>
+            <Link<Route> to={Route::Register} classes="forward-link">
+                <button class="hero-cta">{"Ditch the Scroll Now"}</button>
+            </Link<Route>>
+        </header>
 
-            // Main Features Section
-            <section class="main-features">
-                <div class="feature-block on-demand">
-                    <div class="feature-content">
-                        <h2>{"Ask Anything, Anytime"}</h2>
-                        <p>{"Need to check your WhatsApp? Want to know your next meeting? Just ask lightfriend through a call or text."}</p>
-                        <ul class="feature-list">
-                            <li><img src="/assets/whatsapplogo.png" alt="WhatsApp" class="feature-logo" />{" Send and receive WhatsApp messages"}</li>
-                            <li>{"📧 Access your emails"}</li>
-                            <li>{"✅ Manage your tasks"}</li>
-                            <li>{"📅 Check your calendar"}</li>
-                            <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="perplexity-logo" />{" Search the internet with Perplexity"}</li>
-                            <li>{"☀️ Check weather"}</li>
-                            <li>{"🎵 Identify songs with Shazam"}</li>
-                        </ul>
-                        <div class="demo-link-container">
-                            <a 
-                                href="https://www.youtube.com/shorts/KrVdJbHPB-o" 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                class="demo-link"
-                            >
-                                {"▶️ Watch Demo"}
-                            </a>
+        <section class="lifestyle-benefits">
+            <div class="benefit-block time-saved">
+                <div class="benefit-content">
+                    <h2>{"Reclaim Your Damn Time"}</h2>
+                    <div class="time-calculator">
+                        <div class="stat-block">
+                            <span class="stat-number">{"4.5"}</span>
+                            <span class="stat-label">{"Hours Daily"}</span>
+                        </div>
+                        <div class="stat-block">
+                            <span class="stat-number">{"1,642"}</span>
+                            <span class="stat-label">{"Hours Yearly"}</span>
+                        </div>
+                        <div class="stat-block highlight">
+                            <span class="stat-number">{"15"}</span>
+                            <span class="stat-label">{"Years of Life"}</span>
                         </div>
                     </div>
-                    <div class="feature-image">
-                        <img src="/assets/train.png" alt="On-demand assistance demo" />
-                    </div>
+                    <p class="source-note">
+                        {"Source: "}
+                        <a href="https://www.statista.com/topics/7863/social-media-and-generation-z-in-the-us/" target="_blank">{"Statista, Social Media & Gen Z"}</a>
+                    </p>
                 </div>
+            </div>
 
-                <div class="feature-block proactive">
-                    <div class="feature-content">
-                        <h2>{"Never Miss What Matters"}</h2>
-                        <p>{"Set up smart notifications for important emails, messages and updates. lightfriend monitors your accounts and notifies you only when it matters."}</p>
-                        <ul class="feature-list">
-                            <li>{"Smart message filtering"}</li>
-                            <li>{"Custom keyword alerts"}</li>
-                            <li>{"Priority sender notifications"}</li>
-                            <li>{"Temporary waiting checks"}</li>
-                        </ul>
-                        <div class="demo-link-container">
-                        /*
-                            <a 
-                                href="https://youtube.com/shorts/4ZYnhtm9dkk" 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                class="demo-link"
-                            >
-                                {"▶️ Watch Demo"}
-                            </a>
-                        */
+            <div class="benefit-block lifestyle">
+                <div class="benefit-content">
+                    <h2>{"Live Like You Mean It"}</h2>
+                    <div class="lifestyle-grid">
+                        <div class="lifestyle-item">
+                            <h3>{"Feel Alive Again"}</h3>
+                            <p>{"No more waking up to a dopamine crash. Start your day with clarity, not chaos."}</p>
+                        </div>
+                        <div class="lifestyle-item">
+                            <h3>{"Be Here Now"}</h3>
+                            <p>{"Real conversations. Deep focus. Moments that aren’t interrupted by pings."}</p>
+                        </div>
+                        <div class="lifestyle-item">
+                            <h3>{"Stay You, Not Glued"}</h3>
+                            <p>{"Get texts, calls, and essentials—without the apps that hijack your brain."}</p>
                         </div>
                     </div>
-                    <div class="feature-image">
-                        <img src="/assets/delivery.png" alt="Proactive notifications demo" />
+                </div>
+            </div>
+        </section>
+
+        <section class="main-features">
+            <h2>{"Freedom, Not Isolation"}</h2>
+            <p class="section-subtitle">{"LightFriend keeps you connected without the addiction."}</p>
+            <div class="feature-block on-demand">
+                <div class="feature-content">
+                    <h2>{"Your Life, Your Terms"}</h2>
+                    <p>{"Need your calendar? A WhatsApp reply? Just call or text LightFriend. It’s like a personal assistant, minus the smartphone trap."}</p>
+                    <ul class="feature-list">
+                        <li><img src="/assets/whatsapplogo.png" alt="WhatsApp" class="feature-logo" /> {"WhatsApp without the rabbit hole"}</li>
+                        <li>{"📧 Emails, only when you need them"}</li>
+                        <li>{"📅 Calendar at your fingertips"}</li>
+                        <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="perplexity-logo" /> {"Search the web, no doomscroll"}</li>
+                        <li>{"☀️ Weather, tasks, even song IDs"}</li>
+                    </ul>
+                    <div class="demo-link-container">
+                        <a href="https://www.youtube.com/shorts/KrVdJbHPB-o" target="_blank" rel="noopener noreferrer" class="demo-link">
+                            {"▶️ See It in Action"}
+                        </a>
                     </div>
                 </div>
+                <div class="feature-image">
+                    <img src="/assets/freedom_moment.png" alt="Person enjoying a screen-free moment" />
+                </div>
+            </div>
 
-                // Privacy Section
-                <div class="feature-block privacy">
-                        <div class="feature-content">
-                            <h2>{"Your Privacy Comes First"}</h2>
-                            <p>{"We take your privacy seriously. Our service is designed with strong privacy protections to ensure your personal data stays secure and private. The entire codebase is open source, allowing full transparency of our privacy practices."}</p>
-                            <ul class="feature-list">
-                                <li>{"🔒 No storage of call recordings - we only keep anonymous success metrics to improve the service"}</li>
-                                <li>{"🤖 Automated redaction of sensitive information in message context"}</li>
-                                <li>{"📱 SMS context stored securely with Twilio, fetched only when needed"}</li>
-                                <li>{"🗑️ Automatic deletion of service connections and associated data upon disconnection"}</li>
-                                <li>{"💻 100% open source - verify our privacy practices in the code"}</li>
-                            </ul>
-                        <div class="privacy-example">
+            <div class="feature-block proactive">
+                <div class="feature-content">
+                    <h2>{"Only What Matters"}</h2>
+                    <p>{"LightFriend filters the noise, pinging you only for important stuff—like that urgent email or a friend’s text."}</p>
+                    <ul class="feature-list">
+                        <li>{"Smart alerts for key messages"}</li>
+                        <li>{"Custom filters for your priorities"}</li>
+                        <li>{"No spam, no distractions"}</li>
+                    </ul>
+                </div>
+                <div class="feature-image">
+                    <img src="/assets/peaceful_connection.png" alt="Person receiving a meaningful notification" />
+                </div>
+            </div>
+
+            <div class="feature-block privacy">
+                <div class="feature-content">
+                    <h2>{"Your Data, Your Rules"}</h2>
+                    <p>{"We’re not Big Tech. LightFriend’s open-source code and privacy-first design keep your info safe."}</p>
+                    <ul class="feature-list">
+                        <li>{"🔒 No call recordings, ever"}</li>
+                        <li>{"🤖 Sensitive info auto-redacted"}</li>
+                        <li>{"📱 Secure SMS storage with Twilio"}</li>
+                        <li>{"🗑️ Data deleted when you’re done"}</li>
+                        <li>{"💻 Fully open-source—check it yourself"}</li>
+                    </ul>
+                    <div class="privacy-example">
                         {
                             html! {
                                 <>
-                                <button 
-                                    class="privacy-toggle"
-                                    {onclick}
-                                >
-                                    <h3>{"How We Handle Your Data"}</h3>
+                                <button class="privacy-toggle" {onclick}>
+                                    <h3>{"How We Protect You"}</h3>
                                     <span class="toggle-icon">{if *is_privacy_expanded {"▼"} else {"▶"}}</span>
                                 </button>
                                 {
                                     if *is_privacy_expanded {
                                     html! {
                                         <div class="privacy-content">
-                                            <p>{"We maintain minimal context for conversations while protecting your privacy:"}</p>
+                                            <p>{"We keep your data minimal and secure:"}</p>
                                             <ul class="privacy-details">
-                                                <li><strong>{"Call Privacy:"}</strong>{" No recordings are stored. We only keep anonymous metrics like call success rate and general reasons (e.g., 'Weather was not found for <this> region.') to improve the service."}</li>
-                                                <li><strong>{"Message Privacy:"}</strong>{" Message context is automatically redacted to remove sensitive information while maintaining conversational flow. These redacted messages are stored securely with Twilio and only fetched when needed for context."}</li>
+                                                <li><strong>{"Calls:"}</strong> {"No recordings. Just anonymous metrics to improve service."}</li>
+                                                <li><strong>{"Messages:"}</strong> {"Sensitive info redacted, stored securely with Twilio, fetched only when needed."}</li>
                                             </ul>
-                                            <p class="context-example">{"Example of how we handle message context:"}</p>
+                                            <p class="context-example">{"Example redaction:"}</p>
                                             <pre class="redaction-example">
-                                                {"Original: \"Hey, can you check if John Smith sent me an email about the $5000 invoice?\"\nStored as: \"Hey, can you check if [NAME_REDACTED] sent me an email about the [CONTENT_REDACTED]?\""}
+                                                {"Original: \"Check if John Smith sent the $5000 invoice\"\nStored: \"Check if [NAME_REDACTED] sent the [CONTENT_REDACTED]\""}
                                             </pre>
                                         </div>
-                                        }
+                                    }
                                     } else {
                                         html! {}
                                     }
                                 }
-                            </>
+                                </>
                             }
                         }
-                        </div>
-                    </div>
-                    <div class="feature-image">
-                        <img src="/assets/privacyshowcase.png" alt="Privacy and security illustration" />
-                    </div>
-                </div >
-            </section>
-
-            // Testimonials Section
-            <section class="testimonials">
-                <h2>{"What Our Users Say"}</h2>
-                <div class="testimonials-grid">
-    
-                    <div class="testimonial-card">
-                        <div class="testimonial-content">
-                            <p>{"\"I've struggled with phone addiction for a long time and lightfriend finally helped me get over the hump to switch to a dumbphone. I feel so much more alive and clear headed right now and I love it! Also, the day is surprisingly long if you don't scroll your phone 4 hours a day haha. I can't recommend lightfriend enough!!\""}</p>
-                        </div>
-                        <div class="testimonial-author">
-                            <span class="author-name">{"Sarah K."}</span>
-                            <span class="author-title">{"Student"}</span>
-                        </div>
-                    </div>
-
-                    <div class="testimonial-card">
-                        <div class="testimonial-content">
-                            <p>{"\"I was able to move to full-time dumbphone user because of lightfriend. Before, I've had to keep the smartphone close by because of WhatsApp and was fighting all the time not to fall into the social media algorithms. Lightfriend gave me the tools to ditch the smartphone completely and it's honestly been such a relief. \""}</p>
-                        </div>
-                        <div class="testimonial-author">
-                            <span class="author-name">{"Michael R."}</span>
-                            <span class="author-title">{"Software Developer"}</span>
-                        </div>
-                    </div>
-
-                    <div class="testimonial-card">
-                        <div class="testimonial-content">
-                            <p>{"\"I've been using dumbphone since 2020 because of my ADHD. I'm constantly forgetting stuff and lightfriend has saved me so many times already:D. Just last night I promised to drive pick up package from the post office, but of course my dumbass forgot the delivery code was in my email and I left only with my dumbphone... But I asked lightfriend and it gave me the code!! \""}</p>
-                        </div>
-                        <div class="testimonial-author">
-                            <span class="author-name">{"Long Time Dumbphone User"}</span>
-                            <span class="author-title">{"Artist"}</span>
-                        </div>
-                    </div>
-
-                    <div class="testimonial-card">
-                        <div class="testimonial-content">
-                            <p>{"\"I love that I can keep my old Nokia phone and still stay connected. The voice interface is surprisingly natural, and seamless. I like to call lightfriend to read my emails to me when I'm driving to work.\""}</p>
-                        </div>
-                        <div class="testimonial-author">
-                            <span class="author-name">{"David W."}</span>
-                            <span class="author-title">{"Designer"}</span>
-                        </div>
-                    </div>
-
-                    <div class="testimonial-card">
-                        <div class="testimonial-content">
-                            <p>{"\"I've tested probably all of the minimalist phones and other focus tools. They all either have an appstore and whatsapp which bring also youtube and other distractions or they don't have appstore, but then I can't access whatsapp or emails. Lightfriend is the only one that actually solves the problem. So worth it, would recommend.\""}</p>
-                        </div>
-                        <div class="testimonial-author">
-                            <span class="author-name">{"Patrick C."}</span>
-                            <span class="author-title">{"Entrepreneur"}</span>
-                        </div>
                     </div>
                 </div>
-            </section>
-            // Featured Sections
-            <section class="featured-sections">
-                <div class="featured-grid">
-                    <div class="featured-item producthunt-demo">
-                        <h2>{"Featured on ProductHunt"}</h2>
-                        <div class="producthunt-iframe-container">
-                            <iframe 
-                                style="border: none;" 
-                                src="https://cards.producthunt.com/cards/products/1050798" 
-                                width="500" 
-                                height="405" 
-                                frameborder="0" 
-                                scrolling="no" 
-                                allowfullscreen={true}
-                            >
-                            </iframe>
-                        </div>
+                <div class="feature-image-chield">
+                    <img src="/assets/privacy_shield.png" alt="Privacy-focused illustration" />
+                </div>
+            </div>
+        </section>
+
+        <section class="testimonials">
+            <h2>{"Real People, Real Freedom"}</h2>
+            <div class="testimonials-grid">
+                <div class="testimonial-card">
+                    <div class="testimonial-content">
+                        <p>{"“LightFriend got me off my phone addiction. I’m not kidding—I feel alive again. And yeah, days are LONG when you’re not scrolling 4 hours!”"}</p>
                     </div>
-                    <div class="featured-item solopush-feature">
-                        <h2>{"#1 Product of the Day"}</h2>
-                        <div class="solopush-content">
-                            <img src="/assets/solopushlogo.png" alt="SoloPush Logo" class="solopush-logo" />
-                            <p>{"Ranked #1 Product of the Day on SoloPush"}</p>
-                            <a 
-                                href="https://www.solopush.com/product/lightfriend" 
-                                target="_blank" 
-                                rel="noopener noreferrer"
-                                class="solopush-link"
-                            >
-                                {"View on SoloPush"}
-                            </a>
-                        </div>
+                    <div class="testimonial-author">
+                        <span class="author-name">{"Sarah K."}</span>
+                        <span class="author-title">{"Student"}</span>
                     </div>
                 </div>
-            </section>
-
-            // How It Works section
-            <section class="how-it-works">
-                <h2>{"How lightfriend Works"}</h2>
-                <p>{"Three simple steps to digital freedom"}</p>
-
-                <div class="steps-grid">
-                    <div class="step">
-                        <h3>{"Connect Your Services"}</h3>
-                        <p>{"Link your calendar, email, and messaging accounts through our secure web interface."}</p>
+                <div class="testimonial-card">
+                    <div class="testimonial-content">
+                        <p>{"“I was tethered to WhatsApp and social media. LightFriend let me ditch my smartphone for good. Such a relief.”"}</p>
                     </div>
-
-                    <div class="step">
-                        <h3>{"Use Your Dumbphone"}</h3>
-                        <p>{"Call or text your lightfriend to access your connected services anytime, anywhere."}</p>
-                    </div>
-
-                    <div class="step">
-                        <h3>{"Stay Present"}</h3>
-                        <p>{"Enjoy life without digital distractions, knowing essential information is just a call away."}</p>
+                    <div class="testimonial-author">
+                        <span class="author-name">{"Michael R."}</span>
+                        <span class="author-title">{"Software Developer"}</span>
                     </div>
                 </div>
-            </section>
+                <div class="testimonial-card">
+                    <div class="testimonial-content">
+                        <p>{"“ADHD here. Forgot a delivery code in my email, but LightFriend saved me with one text. It’s a game-changer.”"}</p>
+                    </div>
+                    <div class="testimonial-author">
+                        <span class="author-name">{"Long Time Dumbphone User"}</span>
+                        <span class="author-title">{"Artist"}</span>
+                    </div>
+                </div>
+                <div class="testimonial-card">
+                    <div class="testimonial-content">
+                        <p>{"“My old Nokia + LightFriend = perfection. I call to hear my emails while driving. It’s so chill.”"}</p>
+                    </div>
+                    <div class="testimonial-author">
+                        <span class="author-name">{"David W."}</span>
+                        <span class="author-title">{"Designer"}</span>
+                    </div>
+                </div>
+                <div class="testimonial-card">
+                    <div class="testimonial-content">
+                        <p>{"“Tried every minimalist phone. LightFriend’s the only one that nails it—WhatsApp, email, no distractions. Worth every penny.”"}</p>
+                    </div>
+                    <div class="testimonial-author">
+                        <span class="author-name">{"Patrick C."}</span>
+                        <span class="author-title">{"Entrepreneur"}</span>
+                    </div>
+                </div>
+            </div>
+        </section>
 
-            <footer class="footer-cta">
-                <div class="footer-content">
-                    <h2>{"Ready to Simplify and Stay Connected?"}</h2>
-                    <p class="subtitle">
-                        {"Join the digital minimalism movement with lightfriend — stay informed without endless distractions."}
-                    </p>
-                    <Link<Route> to={Route::Register} classes="forward-link">
-                        <button class="hero-cta">
-                                {"Start Now with Free Credits"}
+        <section class="how-it-works">
+            <h2>{"Escape the Scroll in 3 Steps"}</h2>
+            <p>{"LightFriend makes going dumbphone stupidly easy."}</p>
+            <div class="steps-grid">
+                <div class="step">
+                    <h3>{"Link Your Stuff"}</h3>
+                    <p>{"Connect your email, calendar, and messages via our secure web portal."}</p>
+                </div>
+                <div class="step">
+                    <h3>{"Use Any Basic Phone"}</h3>
+                    <p>{"Text or call LightFriend to get what you need, anywhere, anytime."}</p>
+                </div>
+                <div class="step">
+                    <h3>{"Live Free"}</h3>
+                    <p>{"Stay connected without the apps that suck you in. Just you, living."}</p>
+                </div>
+            </div>
+        </section>
 
-                        </button>
-                    </Link<Route>>
-                    <p class="disclaimer">
-                        {"No smartphone required. Works with any basic phone."}
-                    </p>
+        <footer class="footer-cta">
+            <div class="footer-content">
+                <h2>{"Ready to Take Your Life Back?"}</h2>
+                <p class="subtitle">{"LightFriend lets you quit the scroll without disappearing. Join the dumbphone revolution."}</p>
+                <Link<Route> to={Route::Register} classes="forward-link">
+                    <button class="hero-cta">{"Start Living Today"}</button>
+                </Link<Route>>
+                <p class="disclaimer">{"Works with any basic phone. No smartphone needed."}</p>
                 <div class="development-links">
-                    <p>{"Source code available on "}
-                        <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">
-                            {"GitHub"}
-                        </a>
+                    <p>{"Source code on "}
+                        <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">{"GitHub"}</a>
                     </p>
-                    <p>{"Follow development progress at "}
-                        <a href="https://pacepeek.com/ahtavarasmus" target="_blank" rel="noopener noreferrer">
-                            {"pacepeek.com/ahtavarasmus"}
-                        </a>
-                    {" and "}
-                    <a href="https://x.com/rasmuscodes" target="_blank" rel="noopener noreferrer">
-                        {"x.com/rasmuscodes"}
-                    </a>
+                    <p>{"Follow us at "}
+                        <a href="https://pacepeek.com/ahtavarasmus" target="_blank" rel="noopener noreferrer">{"pacepeek.com/ahtavarasmus"}</a>
+                        {" and "}
+                        <a href="https://x.com/rasmuscodes" target="_blank" rel="noopener noreferrer">{"x.com/rasmuscodes"}</a>
                     </p>
                     <div class="legal-links">
                         <a href="/terms">{"Terms & Conditions"}</a>
@@ -392,8 +354,8 @@ pub fn landing() -> Html {
                         <a href="/privacy">{"Privacy Policy"}</a>
                     </div>
                 </div>
-                </div>
-            </footer>
+            </div>
+        </footer>
             <style>
                 {r#"
                     .testimonials {
@@ -1096,11 +1058,23 @@ pub fn landing() -> Html {
                     align-items: center;
                 }
 
+                .feature-image-chield {
+                    flex: 1;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                }
+
                 .feature-image img {
                     max-width: 100%;
                     height: auto;
                     border-radius: 12px;
                     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                }
+                .feature-image-chield img {
+                    max-width: 100%;
+                    height: auto;
+                    border-radius: 12px;
                 }
 
                 .feature-block h2 {
@@ -1179,6 +1153,10 @@ pub fn landing() -> Html {
                     .feature-image {
                         order: -1;
                     }
+                    .feature-image-chield {
+                        order: -1;
+                    }
+
 
                     .feature-block h2 {
                         font-size: 2rem;
@@ -1317,12 +1295,147 @@ pub fn landing() -> Html {
                         text-align: center;
                         padding: 6rem 0;
                         position: relative;
-                        padding-top: 120px; /* Add extra padding to prevent content from hiding under nav */
+                        padding-top: 120px;
                         background: linear-gradient(
                             to bottom,
                             rgba(30, 144, 255, 0.05),
                             transparent
                         );
+                    }
+
+                    .lifestyle-benefits {
+                        padding: 6rem 2rem;
+                        background: linear-gradient(
+                            to bottom,
+                            transparent,
+                            rgba(30, 144, 255, 0.05)
+                        );
+                    }
+
+                    .benefit-block {
+                        max-width: 1200px;
+                        margin: 0 auto 4rem;
+                        padding: 3rem;
+                        background: rgba(30, 30, 30, 0.7);
+                        border: 1px solid rgba(30, 144, 255, 0.1);
+                        border-radius: 24px;
+                        transition: all 0.3s ease;
+                    }
+
+                    .benefit-block:hover {
+                        transform: translateY(-5px);
+                        box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
+                        border-color: rgba(30, 144, 255, 0.3);
+                    }
+
+                    .time-calculator {
+                        display: flex;
+                        justify-content: space-around;
+                        align-items: center;
+                        margin: 3rem 0;
+                        gap: 2rem;
+                    }
+
+                    .stat-block {
+                        text-align: center;
+                        padding: 2rem;
+                        background: rgba(30, 30, 30, 0.5);
+                        border: 1px solid rgba(30, 144, 255, 0.1);
+                        border-radius: 16px;
+                        transition: all 0.3s ease;
+                    }
+
+                    .stat-block:hover {
+                        transform: translateY(-5px);
+                        border-color: rgba(30, 144, 255, 0.3);
+                    }
+
+                    .stat-block.highlight {
+                        background: linear-gradient(
+                            45deg,
+                            rgba(30, 144, 255, 0.1),
+                            rgba(65, 105, 225, 0.1)
+                        );
+                        border-color: rgba(30, 144, 255, 0.3);
+                    }
+
+                    .stat-number {
+                        display: block;
+                        font-size: 3rem;
+                        font-weight: 700;
+                        color: #7EB2FF;
+                        margin-bottom: 0.5rem;
+                    }
+
+                    .stat-label {
+                        color: #999;
+                        font-size: 1rem;
+                    }
+
+                    .source-note {
+                        text-align: center;
+                        color: #666;
+                        font-size: 0.9rem;
+                        margin-top: 2rem;
+                    }
+
+                    .lifestyle-grid {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                        gap: 2rem;
+                        margin-top: 3rem;
+                    }
+
+                    .lifestyle-item {
+                        padding: 2rem;
+                        background: rgba(30, 30, 30, 0.5);
+                        border: 1px solid rgba(30, 144, 255, 0.1);
+                        border-radius: 16px;
+                        transition: all 0.3s ease;
+                    }
+
+                    .lifestyle-item:hover {
+                        transform: translateY(-5px);
+                        border-color: rgba(30, 144, 255, 0.3);
+                    }
+
+                    .lifestyle-item h3 {
+                        color: #7EB2FF;
+                        font-size: 1.5rem;
+                        margin-bottom: 1rem;
+                    }
+
+                    .lifestyle-item p {
+                        color: #999;
+                        font-size: 1.1rem;
+                        line-height: 1.6;
+                    }
+
+                    .section-subtitle {
+                        color: #999;
+                        font-size: 1.2rem;
+                        margin-bottom: 3rem;
+                        text-align: center;
+                    }
+
+                    @media (max-width: 768px) {
+                        .time-calculator {
+                            flex-direction: column;
+                            gap: 1rem;
+                        }
+
+                        .stat-block {
+                            width: 100%;
+                            padding: 1.5rem;
+                        }
+
+                        .lifestyle-grid {
+                            grid-template-columns: 1fr;
+                        }
+
+                        .benefit-block {
+                            padding: 2rem;
+                        }
                     }
 
                     .hero h1 {
