@@ -1,6 +1,0 @@
-
-<<<<<<< HEAD
-=======
-[dependencies]
-base64 = "0.13"  # or whatever version is compatible with your project
->>>>>>> Snippet
