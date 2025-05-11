@@ -153,7 +153,9 @@ pub fn landing() -> Html {
 
             <div class="benefit-block lifestyle">
                 <div class="benefit-content">
-                    <h2>{"Live Like You Mean It"}</h2>
+                    <div class="section-header">
+                        <h2>{"Live Like You Mean It"}</h2>
+                    </div>
                     <div class="lifestyle-grid">
                         <div class="lifestyle-item">
                             <h3>{"Feel Alive Again"}</h3>
@@ -173,8 +175,10 @@ pub fn landing() -> Html {
         </section>
 
         <section class="main-features">
-            <h2>{"Freedom, Not Isolation"}</h2>
-            <p class="section-subtitle">{"LightFriend keeps you connected without the addiction."}</p>
+            <div class="section-header">
+                <h2>{"Freedom, Not Isolation"}</h2>
+                <p class="section-subtitle">{"LightFriend keeps you connected without the addiction."}</p>
+            </div>
             <div class="feature-block on-demand">
                 <div class="feature-content">
                     <h2>{"Your Life, Your Terms"}</h2>
@@ -1411,11 +1415,38 @@ pub fn landing() -> Html {
                         line-height: 1.6;
                     }
 
+                    .section-header {
+                        text-align: center;
+                        margin-bottom: 3rem;
+                    }
+
+                    .section-header h2 {
+                        font-size: 3rem;
+                        margin-bottom: 1rem;
+                        background: linear-gradient(45deg, #fff, #7EB2FF);
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                    }
+
                     .section-subtitle {
                         color: #999;
                         font-size: 1.2rem;
-                        margin-bottom: 3rem;
+                        margin: 0;
                         text-align: center;
+                    }
+
+                    @media (max-width: 768px) {
+                        .section-header {
+                            margin-bottom: 2rem;
+                        }
+
+                        .section-header h2 {
+                            font-size: 2rem;
+                        }
+
+                        .section-subtitle {
+                            font-size: 1rem;
+                        }
                     }
 
                     @media (max-width: 768px) {
