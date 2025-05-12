@@ -1256,11 +1256,13 @@ pub async fn process_sms(
                 };
 
                 // Check if user has access to this tool
+                /*
                 if requires_subscription(name, user.sub_tier.clone(), user.discount) {
                     println!("Attempted to use subscription-only tool {} without proper subscription", name);
                     tool_answers.insert(tool_call_id, get_subscription_error(name));
                     continue;
                 }
+                */
                 let arguments = match &tool_call.function.arguments {
                     Some(args) => args,
                     None => continue,
