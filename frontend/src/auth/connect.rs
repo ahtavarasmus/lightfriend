@@ -346,7 +346,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                     </button>
                                 </div>
                                 <p class="service-description">
-                                    {"Set up proactive notifications for when you're waiting for something. Get a call when it's time to check on what you're waiting for. Currently only can be only put for emails."}
+                                    {"Set up proactive notifications for when you're waiting for something. Get a message when it's time to check on what you're waiting for. Currently only can be only put for emails. "}
                                 </p>
                                 <div id="waiting-checks-info" class="info-section" style="display: none">
                                     <h4>{"How It Works"}</h4>
