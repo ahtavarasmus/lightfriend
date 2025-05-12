@@ -60,6 +60,24 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
         0.0
     };
 
+    // Calculate usage estimates for monthly quota
+    let monthly_credits = user_profile.credits_left;
+    let monthly_minutes = if monthly_credits > 0.0 {
+        (monthly_credits / voice_second_cost / 60.0).floor()
+    } else {
+        0.0
+    };
+    let monthly_seconds = if monthly_credits > 0.0 {
+        (monthly_credits / voice_second_cost % 60.0).floor()
+    } else {
+        0.0
+    };
+    let monthly_messages = if monthly_credits > 0.0 {
+        (monthly_credits / message_cost).floor()
+    } else {
+        0.0
+    };
+
     // Function to update auto top-up settings and refresh the profile
     let update_auto_topup = {
         let user_id = user_profile.id;
@@ -451,16 +469,11 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                         html! {
                                             <div class="status">
                                                 <div class="subscription-tier">
-                                                    <div class="field-label-group">
-                                                        <h3>{"Current Subscription"}</h3>
-                                                        <div class="tooltip">
-                                                            <span class="tooltip-icon">{"?"}</span>
-                                                            <span class="tooltip-text">
-                                                                {"Active subscription gives full capability to your lightfriend. Browse all the capabilities at home page."}
-                                                            </span>
-                                                        </div>
-                                                    </div>
-                                                    <span class="tier-label">{"Pro Plan"}</span>
+                                                <h3>{"Current Subscription"}</h3>
+                                                <div class="tooltip">
+                                                    {"Active subscription gives full capability to your lightfriend. Browse all the capabilities at home page."}
+                                                </div>
+                                                    <span class="tier-label">{"Active"}</span>
                                                 </div>
                                             </div>
                                         }
@@ -468,15 +481,10 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                         html! {
                                             <div class="status">
                                                 <div class="discount-status">
-                                                    <div class="field-label-group">
-                                                        <h3>{"Current Subscription"}</h3>
-                                                        <div class="tooltip">
-                                                            <span class="tooltip-icon">{"?"}</span>
-                                                            <span class="tooltip-text">
-                                                                {"Early adopters keep access to tools: Email, Calendar, Shazam, Perplexity and Weather regardless of their subscription status. Thank you for taking interest!"}
-                                                            </span>
-                                                        </div>
-                                                    </div>
+                                                <h3>{"Current Subscription"}</h3>
+                                                <div class="tooltip">
+                                                    {"Early adopters keep access to tools: Email, Calendar, Shazam, Perplexity and Weather regardless of their subscription status. Thank you for taking interest!"}
+                                                </div>
                                                     <span>{"Early adopter"}</span>
                                                 </div>
                                             </div>
@@ -485,15 +493,10 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                         html! {
                                             <div class="status">
                                                 <div class="discount-status">
-                                                    <div class="field-label-group">
-                                                        <h3>{"Current Subscription"}</h3>
-                                                        <div class="tooltip">
-                                                            <span class="tooltip-icon">{"?"}</span>
-                                                            <span class="tooltip-text">
-                                                                {"Free Plan gives your lightfriend access to Perplexity Search and Weather tool. Upgrade to Pro Plan and get access to Email, Calendar and more!"}
-                                                            </span>
-                                                        </div>
-                                                    </div>
+                                                <h3>{"Current Subscription"}</h3>
+                                                <div class="tooltip">
+                                                    {"Free Plan gives your lightfriend access to Perplexity Search and Weather tool. Upgrade to Pro Plan and get access to Email, Calendar and more!"}
+                                                </div>
                                                     <span>{"Free Plan"}</span>
                                                 </div>
                                             </div>
@@ -506,44 +509,106 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                             <div class="section-container">
                                 <div class="section-header">
                                     <h3>{"Credits"}</h3>
-                                    <div class="tooltip">
-                                        <span class="tooltip-icon">{"?"}</span>
-                                        <span class="tooltip-text">
-                                            {"These are the credits you've purchased. They don't expire and can be used for voice calls or messages."}
+                                </div>
+                                <div class="credits-grid">
+                                    <div class="credits-card one-time-credits">
+                                        <div class="credits-header">{"Purchased Overage Credits"}</div>
+                                        <div class="tooltip">
+
+                                            {"These are the overage credits you've purchased. They don't expire and can be used for voice calls or messages when monthly quota is used up."}
+                                        </div>
+
+                                        <span>
+                                            {
+                                                if one_time_credits < 0.0 {
+                                                    format!("{:.2}€ (0 minutes/messages)", one_time_credits)
+                                                } else {
+                                                    format!("{:.2}€ ({:.0}min {:.0}s or {:.0} messages)", one_time_credits, one_time_minutes, one_time_seconds, one_time_messages)
+                                                }
+                                            }
                                         </span>
                                     </div>
-                                </div>
-                                <div class="one-time-credits">
-                                    <span>
-                                        {
-                                            if one_time_credits < 0.0 {
-                                                format!("{:.2}€ (0 minutes/messages)", one_time_credits)
-                                            } else {
-                                                format!("{:.2}€ ({:.0}min {:.0}s or {:.0} messages)", one_time_credits, one_time_minutes, one_time_seconds, one_time_messages)
+                                    <div class="credits-card monthly-credits">
+                                        <div class="credits-header">{"Monthly Quota Left"}</div>
+                                        <div class="tooltip">
+
+                                            {"This is how much monthly quota you have left. When these ran out, your purchased overage credits will be used."}
+                                        </div>
+
+
+                                        <span>
+                                            {
+                                                if monthly_credits < 0.0 {
+                                                    format!("0 minutes/messages")
+                                                } else {
+                                                    format!("{:.0}min {:.0}s or {:.0} messages", monthly_minutes, monthly_seconds, monthly_messages)
+                                                }
                                             }
-                                        }
-                                    </span>
+                                        </span>
+                                    </div>
+                                    <div class="credits-card proactive-messages">
+                                        <div class="credits-header">{"Monthly Proactive Messages"}</div>
+                                        <div class="tooltip">
+                                            {"These are your remaining proactive notifications for this month. Lightfriend uses these to notify you about important events, emails, and calendar updates."}
+                                        </div>
+
+                                        <span>
+                                            {
+                                                if user_profile.msgs_left <= 0 {
+                                                    "0 messages left".to_string()
+                                                } else {
+                                                    format!("{} messages left", user_profile.msgs_left)
+                                                }
+                                            }
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
                             
                             <div class="auto-topup-container">
-                                if user_profile.stripe_payment_method_id.is_some() {
-                                    <button 
-                                        class="auto-topup-button"
-                                        onclick={{
-                                            let show_modal = show_auto_topup_modal.clone();
-                                            Callback::from(move |_| show_modal.set(!*show_modal))
-                                        }}
-                                    >
-                                        {"Automatic Top-up"}
-                                    </button>
+                                {
+                                    if user_profile.sub_tier.is_some() {
+                                        html! {
+                                            <>
+                                                if user_profile.stripe_payment_method_id.is_some() {
+                                                    <button 
+                                                        class="auto-topup-button"
+                                                        onclick={{
+                                                            let show_modal = show_auto_topup_modal.clone();
+                                                            Callback::from(move |_| show_modal.set(!*show_modal))
+                                                        }}
+                                                    >
+                                                        {"Automatic Top-up"}
+                                                    </button>
+                                                }
+                                                <button 
+                                                    class="buy-credits-button"
+                                                    onclick={toggle_buy_credits_modal.clone()}
+                                                >
+                                                    {"Buy Credits"}
+                                                </button>
+                                            </>
+                                        }
+                                    } else {
+                                        html! {
+                                            <>
+                                            <div class="buy-credits-disabled">
+                                                <button 
+                                                    class="buy-credits-button disabled"
+                                                    title="Subscribe to enable credit purchases"
+                                                    disabled=true
+                                                >
+                                                    {"Buy Credits"}
+                                                </button>
+                                                
+                                            </div>
+                                            <div class="tooltip">
+                                                    {"Subscribe to a plan to enable credit purchases. Credits allow you to make more voice calls and send more messages."}
+                                                </div>
+                                                    </>
+                                        }
+                                    }
                                 }
-                                    <button 
-                                        class="buy-credits-button"
-                                        onclick={toggle_buy_credits_modal.clone()}
-                                    >
-                                        {"Buy Credits"}
-                                    </button>
 
                                 if user_profile.stripe_payment_method_id.is_some() || user_profile.sub_tier.is_some() {
                                     <button 
@@ -819,7 +884,26 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
 }
 
 /* Credits Display Containers */
-.one-time-credits, .subscription-credits {
+.credits-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+    margin-top: 1rem;
+}
+
+@media (max-width: 1200px) {
+    .credits-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 768px) {
+    .credits-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.credits-card {
     background: linear-gradient(to bottom, rgba(30, 144, 255, 0.05), rgba(30, 144, 255, 0.02));
     border-radius: 16px;
     padding: 2rem;
@@ -827,20 +911,50 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
     border: 1px solid rgba(30, 144, 255, 0.2);
     transition: all 0.3s ease;
     backdrop-filter: blur(5px);
+    position: relative;
 }
 
-.one-time-credits:hover, .subscription-credits:hover {
+.credits-card.proactive-messages {
+    background: linear-gradient(to bottom, rgba(76, 175, 80, 0.05), rgba(76, 175, 80, 0.02));
+    border: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+.credits-card.proactive-messages .credits-header {
+    color: #81c784;
+}
+
+.credits-card.proactive-messages:hover {
+    border-color: rgba(76, 175, 80, 0.4);
+    box-shadow: 0 4px 20px rgba(76, 175, 80, 0.15);
+}
+
+.credits-card:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
     border-color: rgba(30, 144, 255, 0.4);
 }
 
-.one-time-credits span, .subscription-credits span {
+.credits-card span {
     color: #e0e0e0;
     font-size: 1.2rem;
     font-weight: 500;
     display: block;
     line-height: 1.6;
+}
+
+.credits-header {
+    color: #7EB2FF;
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid rgba(30, 144, 255, 0.2);
+    padding-bottom: 0.8rem;
+}
+
+@media (max-width: 768px) {
+    .credits-grid {
+        grid-template-columns: 1fr;
+    }
 }
 
 /* Status Container */
@@ -1195,6 +1309,44 @@ input:checked + .slider:before {
     box-shadow: 0 4px 15px rgba(30, 144, 255, 0.3);
 }
 
+.buy-credits-button.disabled {
+    background: #666;
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.buy-credits-button.disabled:hover {
+    transform: none;
+    box-shadow: none;
+}
+
+.buy-credits-disabled {
+    position: relative;
+    display: inline-block;
+}
+
+.buy-credits-disabled .tooltip {
+    width: 250px;
+    background-color: rgba(0, 0, 0, 0.9);
+    color: white;
+    text-align: center;
+    padding: 8px;
+    border-radius: 6px;
+    position: absolute;
+    z-index: 1;
+    bottom: 125%;
+    left: 50%;
+    transform: translateX(-50%);
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.buy-credits-disabled:hover .tooltip {
+    visibility: visible;
+    opacity: 1;
+}
+
 /* Buy Credits Modal */
 .buy-credits-modal {
     position: absolute;
@@ -1507,40 +1659,14 @@ input:checked + .slider:before {
 
 
                 /* Tooltip Styles */
-                .field-label-group {
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
+                .credits-card, .subscription-tier, .discount-status, .no-subscription {
+                    position: relative;
                 }
 
                 .tooltip {
-                    position: relative;
-                    display: inline-block;
-                }
 
-                .tooltip-icon {
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    width: 18px;
-                    height: 18px;
-                    background-color: rgba(255, 255, 255, 0.1);
-                    border: 1px solid rgba(255, 255, 255, 0.2);
-                    border-radius: 50%;
-                    font-size: 12px;
-                    cursor: help;
-                    color: #fff;
-                    transition: all 0.3s ease;
-                }
-
-                .tooltip:hover .tooltip-icon {
-                    background-color: rgba(255, 255, 255, 0.2);
-                    border-color: rgba(255, 255, 255, 0.3);
-                }
-
-                .tooltip-text {
-                    visibility: hidden;
                     position: absolute;
+                    visibility: hidden;
                     width: 300px;
                     background-color: rgba(0, 0, 0, 0.9);
                     color: white;
@@ -1550,9 +1676,9 @@ input:checked + .slider:before {
                     font-size: 14px;
                     line-height: 1.4;
                     z-index: 1;
-                    bottom: 125%;
+                    top: -10px;
                     left: 50%;
-                    transform: translateX(-50%);
+                    transform: translateX(-50%) translateY(-100%);
                     opacity: 0;
                     transition: all 0.3s ease;
                     border: 1px solid rgba(30, 144, 255, 0.2);
@@ -1560,14 +1686,18 @@ input:checked + .slider:before {
                     backdrop-filter: blur(10px);
                 }
 
-                .tooltip:hover .tooltip-text {
+                .credits-card:hover .tooltip,
+                .subscription-tier:hover .tooltip,
+                .discount-status:hover .tooltip,
+                .no-subscription:hover .tooltip {
                     visibility: visible;
                     opacity: 1;
-                    transform: translateX(-50%) translateY(-5px);
+                    z-index: 2;
+
                 }
 
                 /* Add a small arrow at the bottom of the tooltip */
-                .tooltip-text::after {
+                .tooltip::after {
                     content: "";
                     position: absolute;
                     top: 100%;
@@ -1578,7 +1708,7 @@ input:checked + .slider:before {
                     border-color: rgba(0, 0, 0, 0.9) transparent transparent transparent;
                 }
 
-                /* Adjust heading margins to account for tooltip */
+                /* Adjust heading margins */
                 h3 {
                     margin: 0;
                 }

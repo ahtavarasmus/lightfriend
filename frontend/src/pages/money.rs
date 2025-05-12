@@ -151,57 +151,38 @@ pub fn pricing(props: &PricingProps) -> Html {
     html! {
         <div class="pricing-container">
             <div class="pricing-header">
-                <h1>{"Keep it Simple or Full Capability?"}</h1>
+                <h1>{"Your Personal AI Assistant"}</h1>
+                <p>{"Buy 135 hours of your life for 25 euros"}</p>
             </div>
 
-            <div class="pricing-grid">
-                <div class="pricing-card free">
-                    <div class="card-header">
-                        <h3>{"Free Plan"}</h3>
-                        <div class="price">
-                            <span class="amount">{"€0"}</span>
-                            <span class="period">{"/forever"}</span>
-                        </div>
-                    </div>
-                    <ul>
-                        <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="feature-logo" />{" Perplexity AI search"}</li>
-                        <li>{"☀️ Ask about the Weather"}</li>
-                        <li>{"🤖 Basic AI assistance"}</li>
-                    </ul>
-                    {
-                        if !props.is_logged_in {
-                            html! {
-                                <Link<Route> to={Route::Register} classes="forward-link signup-link">
-                                    <button class="iq-button signup-button pro-signup"><b>{"Sign up now"}</b></button>
-                                </Link<Route>>
-                            }
-                        } else {
-                            html! {
-                                <button class="iq-button disabled" disabled=true><b>{"Current Plan"}</b></button>
-                            }
-                        }
-                    }
-                </div>
-
+            <div class="pricing-grid single">
                 <div class="pricing-card subscription">
-                    <div class="popular-tag">{"Most Popular"}</div>
+                    <div class="popular-tag">{"All-Inclusive"}</div>
                     <div class="card-header">
-                        <h3>{"Pro Plan"}</h3>
+                        <h3>{"Subscription"}</h3>
                         <div class="price">
-                            <span class="amount">{"€10.00"}</span>
+                            <span class="amount">{"€25.00"}</span>
                             <span class="period">{"/month"}</span>
                         </div>
+                        <div class="includes">
+                            <p>{"Subscription includes:"}</p>
+                            <ul class="quota-list">
+                                <li>{"⏰ 4.5 hours of extra time per day"}</li>
+                                <li>{"📞 100-unit quota (1 message = 1 minute)"}</li>
+                                <li>{"🎯 up to 100 filtered notifications"}</li>
+                            </ul>
+                        </div>
                     </div>
                     <ul>
-                        <li><img src="/assets/whatsapplogo.png" alt="WhatsApp" class="feature-logo" />{" WhatsApp integration"}</li>
-                        <li>{"📧 Email access"}</li>
+                        <li><img src="/assets/whatsapplogo.png" alt="WhatsApp" class="feature-logo" />{"WhatsApp integration"}</li>
+                        <li>{"📧 Email access & monitoring"}</li>
                         <li>{"📅 Calendar management"}</li>
                         <li>{"✅ Task management"}</li>
-                        <li>{"🎵 Shazam song recognition"}</li>
                         <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="feature-logo" />{" Perplexity AI search"}</li>
-                        <li>{"☀️ Ask about the Weather"}</li>
-                        <li>{"🔄 24/7 automated monitoring (optional)"}</li>
-                        <li>{"📱 Up to 150 automatic notifications/month"}</li>
+                        <li>{"🎵 Shazam song recognition"}</li>
+                        <li>{"☀️ Weather updates"}</li>
+                        <li>{"🔄 24/7 automated monitoring"}</li>
+                        <li>{"🚀 Priority support"}</li>
                     </ul>
                     {
                         if props.is_logged_in && props.sub_tier.is_none() {
@@ -211,7 +192,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                         } else if !props.is_logged_in {
                             html! {
                                 <Link<Route> to={Route::Register} classes="forward-link signup-link">
-                                    <button class="iq-button signup-button pro-signup"><b>{"Sign up now"}</b></button>
+                                    <button class="iq-button signup-button pro-signup"><b>{"Buy Back Your Time Now"}</b></button>
                                 </Link<Route>>
                             }
                         } else {
@@ -224,49 +205,31 @@ pub fn pricing(props: &PricingProps) -> Html {
             </div>
 
             <div class="usage-pricing">
-                <h2>{"Talk & Text When You Need It"}</h2>
-                <p>{"Pay only for what you use with our flexible usage-based pricing"}</p>
+                <h2>{"Overage Rates"}</h2>
+                <p>{"After your monthly quota is used, these rates apply for additional usage"}</p>
                 
                 <div class="usage-grid">
                     <div class="pricing-card main">
-                        <div class="card-header">
-                            <h3>{"Voice Calls"}</h3>
+                    <div class="card-header">
+                        <h3>{"Additional Voice Calls"}</h3>
+                        <div class="price">
+                            <span class="amount">{"€0.20"}</span>
+                            <span class="period">{"/minute"}</span>
+                        </div>
+                    </div>
+                </div>
+
+
+                <div class="pricing-card main">
+                    <div class="card-header">
+                        <h3>{"Additional Messages"}</h3>
+                        <div class="price-container">
                             <div class="price">
                                 <span class="amount">{"€0.20"}</span>
-                                <span class="period">{"/minute"}</span>
+                                <span class="period">{"/message"}</span>
                             </div>
                         </div>
-                        <ul>
-                            <li>{"High-quality AI assistant voice calls"}</li>
-                            <li>{"Charged only when you take initiative"}</li>
-                            <li>{"24/7 availability"}</li>
-                        </ul>
                     </div>
-
-
-                    <div class="pricing-card main">
-                        <div class="card-header">
-                            <h3>{"SMS Messages"}</h3>
-                            <div class="price-container">
-                                <div class="us-price">
-                                    <div class="price">
-                                        <span class="region">{"US: "}</span>
-                                        <span class="amount">{"€0.09"}</span>
-                                        <span class="period">{"/message"}</span>
-                                    </div>
-                                </div>
-                                <div class="price">
-                                    <span class="region">{"International: "}</span>
-                                    <span class="amount">{"€0.20"}</span>
-                                    <span class="period">{"/message"}</span>
-                                </div>
-                            </div>
-                        </div>
-                        <ul>
-                            <li>{"AI assistant sms responses"}</li>
-                            <li>{"Charged only when you take initiative"}</li>
-                            <li>{"24/7 availability"}</li>
-                        </ul>
                     </div>
 
                 </div>
@@ -278,7 +241,8 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <div class="faq-grid">
                     <div class="faq-item">
                         <h3>{"How does billing work?"}</h3>
-                        <p>{"You’ll purchase credits in advance to use for voice calls and SMS messages. You can optionally enable automatic top-up to recharge your account with additional credits whenever your balance runs low, ensuring uninterrupted service. No minimum fees or hidden charges. Pro Plan is paid on montly basis and gives access to all the tools and 150 notification message monthly quota when if monitoring is set."}</p>
+                        <p>{"The Premium Plan is billed monthly at €25 and includes 60 messages or 60 minutes of voice calls. You can use these credits flexibly - for example, 30 messages and 30 minutes of calls. After your monthly quota is used, additional usage is billed at the pay-as-you-go rates. You can optionally enable automatic top-up to ensure uninterrupted service. No hidden fees or long-term commitments."}</p>
+
                     </div>
                     
                     <div class="faq-item">
@@ -457,6 +421,44 @@ pub fn pricing(props: &PricingProps) -> Html {
                     grid-template-columns: repeat(2, 1fr);
                     gap: 2rem;
                     margin: 4rem 0;
+                }
+
+                .pricing-grid.single {
+                    grid-template-columns: 1fr;
+                    max-width: 600px;
+                    margin: 4rem auto;
+                }
+
+                .quota-list {
+                    list-style: none;
+                    padding: 0;
+                    margin: 1rem 0;
+                    font-size: 1rem;
+                    color: #7EB2FF;
+                }
+
+                .quota-list li {
+                    padding: 0.3rem 0;
+                    text-align: center;
+                }
+
+                .includes {
+                    margin-top: 1.5rem;
+                    padding-top: 1.5rem;
+                    border-top: 1px solid rgba(30, 144, 255, 0.1);
+                }
+
+                .includes p {
+                    color: #999;
+                    font-size: 1rem;
+                    margin-bottom: 0.5rem;
+                }
+
+                .includes .value-prop {
+                    color: #7EB2FF;
+                    font-size: 1.1rem;
+                    margin-top: 1rem;
+                    font-weight: bold;
                 }
 
                 .usage-pricing {
