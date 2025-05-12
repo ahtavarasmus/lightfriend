@@ -9,12 +9,9 @@ pub async fn check_user_credits(
     user: &crate::models::user_models::User,
     event_type: &str,
 ) -> Result<(), String> {
-
-    let mut required_credits: f32 = 0.0; // for voice  
-    if event_type == "message" {
-        // Get message cost
-        // Deduct credits for the message
-        let required_credits= if user.phone_number.starts_with("+1") {
+    let message_cost = if user.discount || user.sub_tier == Some("tier 1".to_string()) {
+        // For discounted/tier 1 users, use phone number based pricing
+        if user.phone_number.starts_with("+1") {
             std::env::var("MESSAGE_COST_US")
                 .unwrap_or_else(|_| std::env::var("MESSAGE_COST").expect("MESSAGE_COST not set"))
                 .parse::<f32>()
@@ -24,12 +21,36 @@ pub async fn check_user_credits(
                 .expect("MESSAGE_COST not set")
                 .parse::<f32>()
                 .unwrap_or(0.20)
-        };
-    }
+        }
+    } else {
+        // For regular users, use flat rate
+        std::env::var("MESSAGE_COST")
+            .expect("MESSAGE_COST not set")
+            .parse::<f32>()
+            .unwrap_or(0.20)
+    };
 
-    // No sub credits left, check extra credits
-    if user.credits < required_credits {
-        return Err("Insufficient credits. You have used all your monthly credits and don't have enough extra credits.".to_string());
+    let voice_second_cost = std::env::var("VOICE_SECOND_COST")
+        .expect("VOICE_SECOND_COST not set")
+        .parse::<f32>()
+        .unwrap_or(0.0033);
+
+    // Check if user has subscription or discount
+    let use_regular_credits = user.discount || user.sub_tier == Some("tier 1".to_string());
+
+    if use_regular_credits {
+        // For discounted/tier 1 users, just check regular credits
+        let required_credits = if event_type == "message" { message_cost } else { 0.0 };
+        if user.credits < required_credits {
+            return Err("Insufficient credits.".to_string());
+        }
+    } else {
+        // For regular users, check credits_left first, then regular credits
+        let required_credits = if event_type == "message" { message_cost } else { 0.0 };
+        
+        if user.credits_left < required_credits && user.credits < required_credits {
+            return Err("Insufficient credits. You have used all your monthly quota and don't have enough extra credits.".to_string());
+        }
     }
 
     // Check credits threshold and handle automatic charging
@@ -72,31 +93,81 @@ pub fn deduct_user_credits(
             return Err("Database error occurred".to_string());
         }
     };
-    let message_cost= if user.phone_number.starts_with("+1") {
-        std::env::var("MESSAGE_COST_US")
-            .unwrap_or_else(|_| std::env::var("MESSAGE_COST").expect("MESSAGE_COST not set"))
-            .parse::<f32>()
-            .unwrap_or(0.10)
+
+    let message_cost = if user.discount || user.sub_tier == Some("tier 1".to_string()) {
+        // For discounted/tier 1 users, use phone number based pricing
+        if user.phone_number.starts_with("+1") {
+            std::env::var("MESSAGE_COST_US")
+                .unwrap_or_else(|_| std::env::var("MESSAGE_COST").expect("MESSAGE_COST not set"))
+                .parse::<f32>()
+                .unwrap_or(0.10)
+        } else {
+            std::env::var("MESSAGE_COST")
+                .expect("MESSAGE_COST not set")
+                .parse::<f32>()
+                .unwrap_or(0.20)
+        }
     } else {
+        // For regular users, use flat rate
         std::env::var("MESSAGE_COST")
             .expect("MESSAGE_COST not set")
             .parse::<f32>()
             .unwrap_or(0.20)
-    };    
-    let mut credits_cost = message_cost;
+    };
 
-    if event_type == "voice" {
+
+    let mut credits_cost = if event_type == "message" {
+        message_cost
+    } else {
         let voice_second_cost = std::env::var("VOICE_SECOND_COST")
             .expect("VOICE_SECOND_COST not set")
             .parse::<f32>()
             .unwrap_or(0.0033);
-        credits_cost = voice_seconds.unwrap_or(0) as f32 * voice_second_cost;
-    }
+        voice_seconds.unwrap_or(0) as f32 * voice_second_cost
+    };
 
-    let new_credits = user.credits - credits_cost;
-    if let Err(e) = state.user_repository.update_user_credits(user_id, new_credits) {
-        eprintln!("Failed to update user credits: {}", e);
-        return Err("Failed to process credits".to_string());
+    // Check if user has subscription or discount
+    let use_regular_credits = user.discount || user.sub_tier == Some("tier 1".to_string());
+
+    if use_regular_credits {
+        // For discounted/tier 1 users, just deduct from regular credits
+        let new_credits = user.credits - credits_cost;
+        if let Err(e) = state.user_repository.update_user_credits(user_id, new_credits) {
+            eprintln!("Failed to update user credits: {}", e);
+            return Err("Failed to process credits".to_string());
+        }
+    } else {
+        // For regular users, use credits_left first, then regular credits
+        if user.credits_left >= credits_cost {
+            // Deduct from credits_left
+            let new_credits_left = user.credits_left - credits_cost;
+            if let Err(e) = state.user_repository.update_user_credits_left(user_id, new_credits_left) {
+                eprintln!("Failed to update user credits_left: {}", e);
+                return Err("Failed to process credits".to_string());
+            }
+        } else {
+            // Use remaining credits_left and deduct rest from regular credits
+            let remaining_cost = if user.credits_left > 0.0 {
+                credits_cost - user.credits_left
+            } else {
+                credits_cost
+            };
+
+            // Set credits_left to 0 if there were any left
+            if user.credits_left > 0.0 {
+                if let Err(e) = state.user_repository.update_user_credits_left(user_id, 0.0) {
+                    eprintln!("Failed to update user credits_left: {}", e);
+                    return Err("Failed to process credits".to_string());
+                }
+            }
+
+            // Deduct remaining cost from regular credits
+            let new_credits = user.credits - remaining_cost;
+            if let Err(e) = state.user_repository.update_user_credits(user_id, new_credits) {
+                eprintln!("Failed to update user credits: {}", e);
+                return Err("Failed to process credits".to_string());
+            }
+        }
     }
 
     Ok(())

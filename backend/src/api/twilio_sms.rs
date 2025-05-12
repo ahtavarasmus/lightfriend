@@ -412,32 +412,29 @@ pub async fn handle_incoming_sms(
 }
 
 // Helper function to check if a tool is accessible based on user's status
-fn requires_subscription(tool_name: &str, has_sub: bool, has_discount: bool) -> bool {
-    // Subscribed users get access to all tools, regardless of discount status
-    if has_sub {
+fn requires_subscription(tool_name: &str, sub_tier: Option<String>, has_discount: bool) -> bool {
+    println!("\n=== Subscription Check Details ===");
+    println!("Tool name: {}", tool_name);
+    println!("Has subscription: {:#?}", sub_tier);
+    println!("Has discount: {}", has_discount);
+    
+    // Tier 2 subscribers get access to everything
+    if Some("tier 2".to_string()) == sub_tier {
+        println!("✅ User has tier 2 subscription - granting full access");
         return false;
+    } else if Some("tier 1".to_string()) == sub_tier || has_discount {
+        let allowed_tools = tool_name.contains("perplexity") ||
+            tool_name.contains("shazam") ||
+            tool_name.contains("weather") ||
+            tool_name.contains("assistant") ||
+            tool_name.contains("calendar") ||
+            tool_name.contains("email") ||
+            tool_name.contains("sms");
+        if allowed_tools {
+            return false;
+        }
     }
-
-    // Tools available to all users (free tier)
-    if matches!(tool_name, "ask_perplexity" | "get_weather") {
-        return false;
-    }
-
-    // Additional tools available to discount users
-    if has_discount {
-        return !matches!(tool_name,
-            "ask_perplexity" |
-            "get_weather" |
-            "use_shazam" |
-            "fetch_specific_email" |
-            "fetch_imap_emails" |
-            "calendar"
-        );
-    }
-
-
-    // If none of the above conditions are met, tool requires subscription
-    true
+    return true;
 }
 
 
@@ -1259,9 +1256,8 @@ pub async fn process_sms(
                 };
 
                 // Check if user has access to this tool
-                let has_sub = user.sub_tier.is_some();
-                if requires_subscription(name, has_sub, user.discount) {
-                    println!("User attempted to use subscription-only tool {} without proper subscription", name);
+                if requires_subscription(name, user.sub_tier.clone(), user.discount) {
+                    println!("Attempted to use subscription-only tool {} without proper subscription", name);
                     tool_answers.insert(tool_call_id, get_subscription_error(name));
                     continue;
                 }

@@ -111,100 +111,46 @@ pub async fn create_subscription_checkout(
 
     let price_id = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID")
                             .expect("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID must be set in environment");
-    let mut checkout_session: CheckoutSession;
     
-    if user.discount {
-
-        checkout_session = CheckoutSession::create(
-            &client,
-            CreateCheckoutSession {
-                success_url: Some(&format!("{}/profile?subscription=success", domain_url)),
-                cancel_url: Some(&format!("{}/profile?subscription=canceled", domain_url)),
-                mode: Some(stripe::CheckoutSessionMode::Subscription),
-                line_items: Some(vec![
-                    stripe::CreateCheckoutSessionLineItems {
-                        price: Some(price_id),
-                        quantity: Some(1),
-                        ..Default::default()
-                    }
-                ]),
-                customer: Some(customer_id.parse().unwrap()),
-                allow_promotion_codes: Some(true),
-                billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
-                automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
-                    enabled: true,
-                    liability: None,
-                }),
-                tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
-                    enabled: true,
-                }),
-                customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
-                    address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
-                    name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto), // Add this line
-                    shipping: None,
-                }),
-                subscription_data: Some(stripe::CreateCheckoutSessionSubscriptionData {
-                    trial_period_days: Some(3), // Set 3-day free trial
-                    trial_settings: Some(stripe::CreateCheckoutSessionSubscriptionDataTrialSettings {
-                        end_behavior: stripe::CreateCheckoutSessionSubscriptionDataTrialSettingsEndBehavior {
-                            missing_payment_method: stripe::CreateCheckoutSessionSubscriptionDataTrialSettingsEndBehaviorMissingPaymentMethod::Cancel,
-                        },
-                    }),
+    let checkout_session = CheckoutSession::create(
+        &client,
+        CreateCheckoutSession {
+            success_url: Some(&format!("{}/profile?subscription=success", domain_url)),
+            cancel_url: Some(&format!("{}/profile?subscription=canceled", domain_url)),
+            mode: Some(stripe::CheckoutSessionMode::Subscription),
+            line_items: Some(vec![
+                stripe::CreateCheckoutSessionLineItems {
+                    price: Some(price_id),
+                    quantity: Some(1),
                     ..Default::default()
-                }),
-                ..Default::default()
-            },
+                }
+            ]),
+            customer: Some(customer_id.parse().unwrap()),
+            allow_promotion_codes: Some(true),
+            billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
+            automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
+                enabled: true,
+                liability: None,
+            }),
+            tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
+                enabled: true,
+            }),
+            customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
+                address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
+                name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto), // Add this line
+                shipping: None,
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| {
+        println!("Stripe error details: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to create Subscription Checkout Session: {}", e)})),
         )
-        .await
-        .map_err(|e| {
-            println!("Stripe error details: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to create Subscription Checkout Session: {}", e)})),
-            )
-        })?;
-    } else {
-
-        checkout_session = CheckoutSession::create(
-            &client,
-            CreateCheckoutSession {
-                success_url: Some(&format!("{}/profile?subscription=success", domain_url)),
-                cancel_url: Some(&format!("{}/profile?subscription=canceled", domain_url)),
-                mode: Some(stripe::CheckoutSessionMode::Subscription),
-                line_items: Some(vec![
-                    stripe::CreateCheckoutSessionLineItems {
-                        price: Some(price_id),
-                        quantity: Some(1),
-                        ..Default::default()
-                    }
-                ]),
-                customer: Some(customer_id.parse().unwrap()),
-                allow_promotion_codes: Some(true),
-                billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
-                automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
-                    enabled: true,
-                    liability: None,
-                }),
-                tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
-                    enabled: true,
-                }),
-                customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
-                    address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
-                    name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto), // Add this line
-                    shipping: None,
-                }),
-                ..Default::default()
-            },
-        )
-        .await
-        .map_err(|e| {
-            println!("Stripe error details: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to create Subscription Checkout Session: {}", e)})),
-            )
-        })?;
-    }
+    })?;
 
 
     println!("Subscription checkout session created successfully");
@@ -305,6 +251,26 @@ pub async fn create_checkout_session(
     }
 
     println!("JWT token validated successfully");
+
+    // Check if user has an active subscription
+    let user = state
+        .user_repository
+        .find_by_id(user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)})),
+        ))?
+        .ok_or_else(|| (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "User not found"})),
+        ))?;
+
+    if user.sub_tier.is_none() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Active subscription required to purchase credits"})),
+        ));
+    }
     // Fetch user from the database
     let user = state
         .user_repository
@@ -547,12 +513,14 @@ pub async fn stripe_webhook(
                     // Update subscription tier and messages
                     state.user_repository.set_subscription_tier(
                         user.id,
-                        Some("tier 1"),
+                        Some("tier 2"),
                     ).ok();
-                    state.user_repository.update_proactive_messages_left(user.id, 150).ok();
+                    state.user_repository.update_proactive_messages_left(user.id, 100).ok();
+                    // Set initial credits_left for the subscription
+                    state.user_repository.update_user_credits_left(user.id, 20.0).ok();
                     // Enable proactive IMAP messaging for subscribed users
                     state.user_repository.update_imap_proactive(user.id, true).ok();
-                    println!("Updated subscription tier to 'tier 1', set 150 messages, and enabled proactive IMAP for user {}", user.id);
+                    println!("Updated subscription tier to 'tier 1', set 150 messages, 20.0 credits_left, and enabled proactive IMAP for user {}", user.id);
 
                     // Mark existing emails as processed to prevent spam
                     match crate::handlers::imap_handlers::fetch_emails_imap(&state, user.id, true, Some(100), true).await {
@@ -589,8 +557,9 @@ pub async fn stripe_webhook(
                 if is_renewal {
                     println!("Subscription renewal detected for customer: {} at period start: {}", customer_id, current_period_start);
                     if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
-                        state.user_repository.update_proactive_messages_left(user.id, 150).ok();
-                        println!("Reset to 150 messages for user {} on subscription renewal", user.id);
+                        state.user_repository.update_proactive_messages_left(user.id, 100).ok();
+                        state.user_repository.update_user_credits_left(user.id, 20.0).ok();
+                        println!("Reset to 150 messages and 20.0 credits_left for user {} on subscription renewal", user.id);
                     } else {
                         println!("No user found for customer ID: {}", customer_id);
                     }

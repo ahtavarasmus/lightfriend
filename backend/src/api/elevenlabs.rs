@@ -66,7 +66,7 @@ pub struct AgentConfig {
 
 
 // Helper function to check if a tool is accessible based on user's status
-fn requires_subscription(path: &str, has_sub: bool, has_discount: bool) -> bool {
+fn requires_subscription(path: &str, sub_tier: Option<String>, has_discount: bool) -> bool {
     // Extract the tool name from the path using a more robust method
     let tool_name = {
         let parts: Vec<&str> = path.split('/').collect();
@@ -84,38 +84,29 @@ fn requires_subscription(path: &str, has_sub: bool, has_discount: bool) -> bool 
     println!("\n=== Subscription Check Details ===");
     println!("Path: {}", path);
     println!("Tool name: {}", tool_name);
-    println!("Has subscription: {}", has_sub);
+    println!("Has subscription: {:#?}", sub_tier);
     println!("Has discount: {}", has_discount);
     
-    // Subscribed users get access to all tools
-    if has_sub {
-        println!("✅ User has subscription - granting access");
+    // Tier 2 subscribers get access to everything
+    if Some("tier 2".to_string())  == sub_tier {
+        println!("✅ User has tier 2 subscription - granting full access");
         return false;
-    }
-    
-    // Tools available to all users (free tier)
-    if matches!(tool_name, "perplexity" | "weather" | "sms") {
-        println!("✅ Tool is in free tier - granting access");
-        return false;
-    }
+    } else if Some("tier 1".to_string()) == sub_tier || has_discount {
 
-    // Additional tools available to discount users
-    if has_discount {
-        let has_access = matches!(tool_name,
+        let allowed_tools = matches!(tool_name, 
             "perplexity" |
-            "weather" |
-            "sms" |
             "shazam" |
+            "weather" |
+            "assistant" |
+            "calendar" |
             "email" |
-            "calendar"
+            "sms"
         );
-        println!("Discount user tool access check: {}", has_access);
-        return !has_access;
+        if allowed_tools {
+            return false;
+        } 
     }
-
-    println!("❌ Tool requires subscription - denying access");
-    // If none of the above conditions are met, tool requires subscription
-    true
+    return true;
 }
 
 pub async fn check_subscription_access(
@@ -170,7 +161,7 @@ pub async fn check_subscription_access(
     // Check if the tool requires subscription
     if requires_subscription(
         request.uri().path(),
-        user.sub_tier.as_deref() == Some("tier 1"),
+        user.sub_tier,
         user.discount
     ) {
         println!("❌ Tool requires subscription, user doesn't have access");
