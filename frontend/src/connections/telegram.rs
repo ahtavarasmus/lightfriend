@@ -226,6 +226,32 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
         })
     };
 
+    if props.user_id != 1 {
+        return html! {
+            <div class="telegram-connect">
+                <div class="service-header">
+                    <div class="service-name">
+                        <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" alt="Telegram"/>
+                        {"Telegram"}
+                    </div>
+                </div>
+                <div class="restricted-access">
+                    <p>{"This feature is currently in beta testing and not yet available for general use."}</p>
+                </div>
+                <style>
+                    {".restricted-access { 
+                        padding: 1rem;
+                        color: #999;
+                        text-align: center;
+                        margin-top: 1rem;
+                        background: rgba(0, 0, 0, 0.2);
+                        border-radius: 8px;
+                    }"}
+                </style>
+            </div>
+        };
+    }
+
     html! {
         <div class="telegram-connect">
             <div class="service-header">
@@ -306,43 +332,30 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                             </div>
                         </>
                     } else {
-                        if let Some(_) = &props.sub_tier {
-                            if *is_connecting {
-                                if let Some(link) = (*login_link).clone() {
-                                    <div class="login-link-container">
-                                        <p>{"Click the button below to connect your Telegram account:"}</p>
-                                        <a href={link} target="_blank" class="telegram-login-button">
-                                            {"Connect Telegram"}
-                                        </a>
-                                        <p class="instruction">{"1. Click the button above"}</p>
-                                        <p class="instruction">{"2. Log in to your Telegram account"}</p>
-                                        <p class="instruction">{"3. Authorize Lightfriend to access your messages"}</p>
-                                    </div>
-                                } else {
-                                    <div class="loading-container">
-                                        <p>{"Generating login link..."}</p>
-                                        <div class="loading-spinner"></div>
-                                    </div>
-                                }
+                        if *is_connecting {
+                            if let Some(link) = (*login_link).clone() {
+                                <div class="login-link-container">
+                                    <p>{"Click the button below to connect your Telegram account:"}</p>
+                                    <a href={link} target="_blank" class="telegram-login-button">
+                                        {"Connect Telegram"}
+                                    </a>
+                                    <p class="instruction">{"1. Click the button above"}</p>
+                                    <p class="instruction">{"2. Log in to your Telegram account"}</p>
+                                    <p class="instruction">{"3. Authorize Lightfriend to access your messages"}</p>
+                                </div>
                             } else {
-                                <p class="service-description">
-                                    {"Send and receive Telegram messages through SMS or voice calls."}
-                                </p>
-                                <button onclick={start_connection} class="connect-button">
-                                    {"Start Auth"}
-                                </button>
+                                <div class="loading-container">
+                                    <p>{"Generating login link..."}</p>
+                                    <div class="loading-spinner"></div>
+                                </div>
                             }
                         } else {
-                            <div class="upgrade-prompt">
-                                <div class="upgrade-content">
-                                    <h3>{"Pro Plan Required"}</h3>
-                                    <p>{"Telegram integration is available exclusively for Pro Plan subscribers."}</p>
-                                    <p>{"Upgrade to Pro Plan to connect your Telegram account and enjoy seamless integration."}</p>
-                                    <a href="/pricing" class="upgrade-button">
-                                        {"Upgrade to Pro Plan"}
-                                    </a>
-                                </div>
-                            </div>
+                            <p class="service-description">
+                                {"Send and receive Telegram messages through SMS or voice calls."}
+                            </p>
+                            <button onclick={start_connection} class="connect-button">
+                                {"Start Auth"}
+                            </button>
                         }
                     }
                 </div>

@@ -241,20 +241,20 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <div class="faq-grid">
                     <div class="faq-item">
                         <h3>{"How does billing work?"}</h3>
-                        <p>{"The Premium Plan is billed monthly at €25 and includes 60 messages or 60 minutes of voice calls. You can use these credits flexibly - for example, 30 messages and 30 minutes of calls. After your monthly quota is used, additional usage is billed at the pay-as-you-go rates. You can optionally enable automatic top-up to ensure uninterrupted service. No hidden fees or long-term commitments."}</p>
+                        <p>{"The Premium Plan is billed monthly at €25 and includes 100 messages or 100 minutes of voice calls. You can use these credits flexibly - for example, 50 messages and 50 minutes of calls. After your monthly quota is used, additional usage is billed at the pay-as-you-go rates. You can optionally enable automatic top-up to ensure uninterrupted service. Plan also includes 100 proactive messages which can be customized to your liking. No hidden fees or long-term commitments."}</p>
 
                     </div>
                     
                     <div class="faq-item">
-                        <h3>{"When will I get charged?"}</h3>
-                        <p>{"For voice calls, you are charged by the seconds when you initiate the call to lightfriend. The AI's responses during the call are included in this time."}</p>
-                        <p>{"For SMS messages, you are charged for each complete query. If the AI needs more information to properly answer your query, you'll see '(free reply)' at the end of its message. Your response to such messages is free since the AI needed clarification to complete your original request, otherwise messages are charged."}</p>
+                        <h3>{"What counts as a message/minute?"}</h3>
+                        <p>{"Voice calls are counted by the seconds when you initiate the call to lightfriend. The AI's responses during the call are included in this time."}</p>
+                        <p>{"Message is couted for each complete query you initiate. If the AI needs more information to properly answer your query, you'll see '(free reply)' at the end of its message. Your response to such messages is free since the AI needed clarification to complete your original request, otherwise messages are counted."}</p>
                         <p>{"For example:"}</p>
                         <ul class="example-list">
                             <li>{"You: What's the weather like?"}</li>
                             <li>{"AI: In which city? (free reply)"}</li>
                             <li>{"You: In Helsinki"}</li>
-                            <li>{"AI: The weather in Helsinki is... (this completes the interaction, you are charged once for the first message)"}</li>
+                            <li>{"AI: The weather in Helsinki is... (this completes the interaction and only one message is counted)"}</li>
                         </ul>
                     </div>
                     <div class="faq-item">
@@ -274,15 +274,8 @@ pub fn pricing(props: &PricingProps) -> Html {
 
                     <div class="faq-item">
                         <h3>{"What about refunds?"}</h3>
-                        <p>{"Due to the pay-as-you-go nature of our service, we don't offer refunds."}</p>
+                        <p>{"Due to the high cost of running the service, we don't offer refunds."}</p>
                     </div>
-
-                    <div class="faq-item">
-                        <h3>{""}</h3>
-                        <p>{""}</p>
-                    </div>
-
-
 
                 </div>
             </div>

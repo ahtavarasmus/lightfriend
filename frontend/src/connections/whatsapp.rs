@@ -528,7 +528,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                             }
                         </>
                     } else {
-                        if let Some(_) = &props.sub_tier {
                             if *is_connecting {
                                 if let Some(pairing_code) = (*qr_code).clone() {
                                     <div class="verification-code-container">
@@ -557,18 +556,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                                     {"Connect WhatsApp"}
                                 </button>
                             }
-                        } else {
-                            <div class="upgrade-prompt">
-                                <div class="upgrade-content">
-                                    <h3>{"Pro Plan Required"}</h3>
-                                    <p>{"WhatsApp integration is available exclusively for Pro Plan subscribers."}</p>
-                                    <p>{"Upgrade to Pro Plan to connect your WhatsApp account and enjoy seamless integration."}</p>
-                                    <a href="/pricing" class="upgrade-button">
-                                        {"Upgrade to Pro Plan"}
-                                    </a>
-                                </div>
-                            </div>
-                        }
                     }
                 </div>
             } else {

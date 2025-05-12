@@ -234,7 +234,6 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                     <p class="security-recommendation">{"Note: Calendar events are transmitted via SMS or voice calls. For sensitive event details, consider using Google Calendar directly."}</p>
                 </div>
             </div>
-            if let Some(sub_tier) = &props.sub_tier {
                 if *calendar_connected {
                     <div class="calendar-controls">
                         <button 
@@ -341,64 +340,6 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                         </button>
                     </div>
                 }
-            } else if props.discount {
-                if *calendar_connected {
-                    <div class="calendar-controls">
-                        <button 
-                            onclick={onclick_delete_calendar}
-                            class="disconnect-button"
-                        >
-                            {"Disconnect"}
-                        </button>
-                    </div>
-                } else {
-                    <div class="calendar-connect-options">
-                        <label class="calendar-checkbox">
-                            <input 
-                                type="checkbox"
-                                checked={*all_calendars}
-                                onchange={
-                                    let all_calendars = all_calendars.clone();
-                                    Callback::from(move |e: Event| {
-                                        let input: HtmlInputElement = e.target_unchecked_into();
-                                        all_calendars.set(input.checked());
-                                    })
-                                }
-                            />
-                            {"Access all calendars (including shared)"}
-                        </label>
-                        <button 
-                            onclick={onclick_calendar}
-                            class="connect-button"
-                        >
-                            if *connecting {
-                                {"Connecting..."}
-                            } else {
-                                {"Connect"}
-                            }
-                        </button>
-                    </div>
-                }
-            } else {
-                if *calendar_connected {
-                    <button 
-                        onclick={onclick_delete_calendar}
-                        class="disconnect-button"
-                    >
-                        {"Delete connection data"}
-                    </button>
-                }
-                <div class="upgrade-prompt">
-                    <div class="upgrade-content">
-                        <h3>{"Pro Plan Required"}</h3>
-                        <p>{"Google Calendar integration is available exclusively for Pro Plan subscribers."}</p>
-                        <p>{"Upgrade to Pro Plan to connect your Google Calendar account and enjoy seamless integration."}</p>
-                        <a href="/pricing" class="upgrade-button">
-                            {"Upgrade to Pro Plan"}
-                        </a>
-                    </div>
-                </div>
-            }
 
             if let Some(err) = (*error).as_ref() {
                 <div class="error-message">

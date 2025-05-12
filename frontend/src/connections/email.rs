@@ -323,7 +323,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
                 <a class="nice-link" href="https://myaccount.google.com/apppasswords" target="_blank">{"here"}</a>
                 {" (requires 2FA)."}
             </p>
-            if let Some(sub_tier) = &props.sub_tier {
                 if *imap_connected {
                     <div class="imap-controls">
                         <button 
@@ -521,84 +520,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
                         </button>
                     </div>
                 }
-            } else if props.discount {
-                if *imap_connected {
-                    <div class="imap-controls">
-                        <button 
-                            onclick={onclick_imap_disconnect}
-                            class="disconnect-button"
-                        >
-                            {"Disconnect"}
-                        </button>
-                    </div>
-                } else {
-                    <div class="imap-form">
-                        <select onchange={onchange_imap_provider}>
-                            { for providers.iter().map(|(id, name, _, _)| {
-                                html! {
-                                    <option value={id.to_string()} selected={*imap_provider == *id}>
-                                        {name}
-                                    </option>
-                                }
-                            })}
-                        </select>
-                        <input
-                            type="email"
-                            placeholder="Email address"
-                            value={(*imap_email).clone()}
-                            onchange={onchange_imap_email}
-                        />
-                        <input
-                            type="password"
-                            placeholder="Password or App Password"
-                            value={(*imap_password).clone()}
-                            onchange={onchange_imap_password}
-                        />
-                        if *imap_provider == "custom" {
-                            <>
-                                <input
-                                    type="text"
-                                    placeholder="IMAP Server (e.g., mail.privateemail.com)"
-                                    value={(*imap_server).clone()}
-                                    onchange={onchange_imap_server}
-                                />
-                                <input
-                                    type="number"
-                                    placeholder="IMAP Port (e.g., 993)"
-                                    value={(*imap_port).clone()}
-                                    onchange={onchange_imap_port}
-                                />
-                            </>
-                        }
-                        <button 
-                            onclick={onclick_imap_connect}
-                            class="connect-button"
-                        >
-                            {"Connect"}
-                        </button>
-                    </div>
-                }
-            } else {
-                if *imap_connected {
-                    <button 
-                        onclick={onclick_imap_disconnect}
-                        class="disconnect-button"
-                    >
-                        {"Delete connection data"}
-                    </button>
-                }
-
-                <div class="upgrade-prompt">
-                    <div class="upgrade-content">
-                        <h3>{"Pro Plan Required"}</h3>
-                        <p>{"IMAP Email integration is available exclusively for Pro Plan subscribers."}</p>
-                        <p>{"Upgrade to Pro Plan to connect your email account and enjoy seamless integration."}</p>
-                        <a href="/pricing" class="upgrade-button">
-                            {"Upgrade to Pro Plan"}
-                        </a>
-                    </div>
-                </div>
-            }
 
             if let Some(err) = (*error).as_ref() {
                 <div class="error-message">
