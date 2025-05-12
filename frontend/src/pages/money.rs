@@ -184,6 +184,9 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <li>{"🔄 24/7 automated monitoring"}</li>
                         <li>{"🚀 Priority support"}</li>
                     </ul>
+                    <div class="includes">
+                        <p>{"Dumbphone sold separately*"}</p>
+                    </div>
                     {
                         if props.is_logged_in && props.sub_tier.is_none() {
                             html! {
