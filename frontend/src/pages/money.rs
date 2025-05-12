@@ -152,7 +152,7 @@ pub fn pricing(props: &PricingProps) -> Html {
         <div class="pricing-container">
             <div class="pricing-header">
                 <h1>{"Your Personal AI Assistant"}</h1>
-                <p>{"Buy 135 hours of your life for 25 euros"}</p>
+                <p>{"Buy back 135 hours every month."}</p>
             </div>
 
             <div class="pricing-grid single">
