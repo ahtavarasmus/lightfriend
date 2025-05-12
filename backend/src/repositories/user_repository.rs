@@ -408,6 +408,7 @@ impl UserRepository {
         Ok(())
     }
 
+
     pub fn update_user_credits_left(&self, user_id: i32, new_credits_left: f32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table.find(user_id))

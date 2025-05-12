@@ -296,7 +296,7 @@ pub async fn create_checkout_session(
     // Check if user has a Stripe customer ID; if not, create one
     let customer_id = match state.user_repository.get_stripe_customer_id(user_id) {
         Ok(Some(id)) => {
-            println!("Found existing Stripe customer ID: {}", id);
+            println!("Found existing Stripe customer ID");
             // Try to retrieve the customer to verify it exists
             match Customer::retrieve(&client, &id.parse().unwrap(), &[]).await {
                 Ok(_customer) => {
@@ -346,7 +346,6 @@ pub async fn create_checkout_session(
     println!("Processing payment of {} EUR ({} cents)", amount_dollars, amount_cents);
 
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
-    println!("Using domain: {}", domain_url);
     
     // Create a Checkout Session with payment method attachment
     println!("Creating Stripe checkout session");
@@ -408,7 +407,6 @@ pub async fn create_checkout_session(
 
     println!("Checkout session ID saved to database");
     // Return the Checkout session URL to redirect the user
-    println!("Returning checkout URL: {}", checkout_session.url.as_ref().unwrap());
     Ok(Json(json!({
         "url": checkout_session.url.unwrap(), // Safe to unwrap as it's always present for Checkout
         "message": "Redirecting to Stripe Checkout for payment"
@@ -441,7 +439,7 @@ async fn create_new_customer(
         )
     })?;
 
-    println!("Created new Stripe customer: {}", customer.id);
+    println!("Created new Stripe customer");
     state
         .user_repository
         .set_stripe_customer_id(user_id, &customer.id.to_string())
@@ -515,12 +513,17 @@ pub async fn stripe_webhook(
                         user.id,
                         Some("tier 2"),
                     ).ok();
-                    state.user_repository.update_proactive_messages_left(user.id, 100).ok();
+                    // legacy subscription option
+                    if user.discount {
+                        state.user_repository.update_proactive_messages_left(user.id, 150).ok();
+                    } else {
+                        state.user_repository.update_proactive_messages_left(user.id, 100).ok();
+                        state.user_repository.update_user_credits_left(user.id, 20.0).ok();
+                    }
                     // Set initial credits_left for the subscription
-                    state.user_repository.update_user_credits_left(user.id, 20.0).ok();
                     // Enable proactive IMAP messaging for subscribed users
-                    state.user_repository.update_imap_proactive(user.id, true).ok();
-                    println!("Updated subscription tier to 'tier 1', set 150 messages, 20.0 credits_left, and enabled proactive IMAP for user {}", user.id);
+                    //state.user_repository.update_imap_proactive(user.id, true).ok();
+                    println!("Updated subscription tier to 'tier 1', set 100 messages, 20.0 credits_left, and enabled proactive IMAP for user {}", user.id);
 
                     // Mark existing emails as processed to prevent spam
                     match crate::handlers::imap_handlers::fetch_emails_imap(&state, user.id, true, Some(100), true).await {
@@ -555,13 +558,17 @@ pub async fn stripe_webhook(
                 let is_renewal = is_active && (now - current_period_start) < 60; // Within last minute
 
                 if is_renewal {
-                    println!("Subscription renewal detected for customer: {} at period start: {}", customer_id, current_period_start);
+                    println!("Subscription renewal detected for customer at period start: {}", current_period_start);
                     if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
-                        state.user_repository.update_proactive_messages_left(user.id, 100).ok();
-                        state.user_repository.update_user_credits_left(user.id, 20.0).ok();
+                        if user.discount {
+                            state.user_repository.update_proactive_messages_left(user.id, 150).ok();
+                        } else {
+                            state.user_repository.update_proactive_messages_left(user.id, 100).ok();
+                            state.user_repository.update_user_credits_left(user.id, 20.0).ok();
+                        }
                         println!("Reset to 150 messages and 20.0 credits_left for user {} on subscription renewal", user.id);
                     } else {
-                        println!("No user found for customer ID: {}", customer_id);
+                        println!("No user found for customer ID");
                     }
                 } else {
                     println!("Subscription updated but not a renewal (status: {:?}, period start: {})", subscription.status, current_period_start);
@@ -750,7 +757,7 @@ pub async fn automatic_charge(
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "No Stripe customer ID found for user"})),
         ))?;
-    println!("Stripe customer ID found: {}", customer_id);
+    println!("Stripe customer ID found");
 
     let payment_method_id = state
         .user_repository
@@ -763,7 +770,7 @@ pub async fn automatic_charge(
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "No Stripe payment method found for user"})),
         ))?;
-    println!("Stripe payment method ID found: {}", payment_method_id);
+    println!("Stripe payment method ID found");
 
     let charge_back_to = user.charge_back_to.unwrap_or(5.00);
     println!("User charge_back_to: {}, current credits: {}", charge_back_to, user.credits);
