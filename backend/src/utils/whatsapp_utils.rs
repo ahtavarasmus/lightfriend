@@ -82,11 +82,6 @@ pub async fn fetch_whatsapp_messages(
         return Err(anyhow!("WhatsApp bridge is not connected. Please log in first."));
     }
 
-    // Quick sync with shorter timeout
-    let sync_settings = matrix_sdk::config::SyncSettings::default().timeout(std::time::Duration::from_secs(5));
-    client.sync_once(sync_settings).await?;
-
-
     let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
         .unwrap_or_else(|_| "@whatsappbot:".to_string());
 
@@ -298,9 +293,6 @@ pub async fn send_whatsapp_message(
         return Err(anyhow!("WhatsApp bridge is not connected. Please log in first."));
     }
 
-    // Perform a quick sync to get latest room state
-    client.sync_once(matrix_sdk::config::SyncSettings::default()).await?;
-
     // Get all joined rooms
     let joined_rooms = client.joined_rooms();
     
@@ -430,11 +422,6 @@ pub async fn fetch_whatsapp_room_messages(
     }
 
     let client = crate::utils::matrix_auth::get_client(user_id, &state.user_repository, false).await?;
-    
-    // Faster sync with shorter timeout
-    let sync_settings = matrix_sdk::config::SyncSettings::default()
-        .timeout(std::time::Duration::from_secs(3));
-    client.sync_once(sync_settings).await?;
 
     let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
         .unwrap_or_else(|_| "@whatsappbot:".to_string());
@@ -632,10 +619,6 @@ pub async fn search_whatsapp_rooms(
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
         return Err(anyhow!("WhatsApp bridge is not connected. Please log in first."));
     }
-
-    // Perform a sync to ensure we have latest room state
-    let sync_settings = matrix_sdk::config::SyncSettings::default().timeout(std::time::Duration::from_secs(5));
-    client.sync_once(sync_settings).await?;
 
     // Get all joined rooms
     let joined_rooms = client.joined_rooms();
