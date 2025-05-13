@@ -127,8 +127,9 @@ pub fn deduct_user_credits(
     };
 
     // Check if user has subscription or discount
-    let use_regular_credits = user.discount || user.sub_tier == Some("tier 1".to_string());
+    let use_regular_credits = (user.discount || user.sub_tier == Some("tier 1".to_string())) && user.sub_tier != Some("tier 2".to_string());
 
+    println!("use regular credits: {}, sub_tier={:#?}", use_regular_credits, user.sub_tier);
     if use_regular_credits {
         // For discounted/tier 1 users, just deduct from regular credits
         let new_credits = user.credits - credits_cost;
@@ -153,6 +154,7 @@ pub fn deduct_user_credits(
                 credits_cost
             };
 
+            println!("User credits left: {}", user.credits_left);
             // Set credits_left to 0 if there were any left
             if user.credits_left > 0.0 {
                 if let Err(e) = state.user_repository.update_user_credits_left(user_id, 0.0) {
