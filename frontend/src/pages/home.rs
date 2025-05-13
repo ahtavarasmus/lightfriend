@@ -151,27 +151,53 @@ pub fn landing() -> Html {
                 </div>
             </div>
 
-            <div class="benefit-block lifestyle">
+        <div class="benefit-block solution-equation">
                 <div class="benefit-content">
                     <div class="section-header">
-                        <h2>{"Live Like You Mean It"}</h2>
+                        <h2>{"The Perfect Balance"}</h2>
                     </div>
-                    <div class="lifestyle-grid">
-                        <div class="lifestyle-item">
-                            <h3>{"Feel Alive Again"}</h3>
-                            <p>{"No more waking up to a dopamine crash. Start your day with clarity, not chaos."}</p>
+                    <div class="equation-grid">
+                        <div class="equation-item dumbphone">
+                            <img src="/assets/nokia.png" alt="Nokia phone" class="equation-image" />
+                            <h3>{"Dumbphone"}</h3>
+                            <div class="pros-cons">
+                                <div class="pros">
+                                    <span class="label">{"✓ Pros:"}</span>
+                                    <p>{"No distractions"}</p>
+                                    <p>{"Better sleep"}</p>
+                                    <p>{"More focus"}</p>
+                                </div>
+                                <div class="cons">
+                                    <span class="label">{"✗ Cons:"}</span>
+                                    <p>{"Do Not Disturb is permanent"}</p>
+                                    <p>{"As useful as a brick in today's world"}</p>
+                                    <p>{"Feel disconnected"}</p>
+                                </div>
+                            </div>
                         </div>
-                        <div class="lifestyle-item">
-                            <h3>{"Be Here Now"}</h3>
-                            <p>{"Real conversations. Deep focus. Moments that aren’t interrupted by pings."}</p>
+                        <div class="equation-symbol">{"+"}</div>
+                        <div class="equation-item lightfriend">
+                            <h3 class="nav-logo">{"LightFriend"}</h3>
+                            <div class="pros-cons">
+                                <span class="label">{"Adds:"}</span>
+                                <p>{"Universal SMS and voice calling interface to your digital life"}</p>
+                            </div>
                         </div>
-                        <div class="lifestyle-item">
-                            <h3>{"Stay You, Not Glued"}</h3>
-                            <p>{"Get texts, calls, and essentials—without the apps that hijack your brain."}</p>
+                        <div class="equation-symbol">{"="}</div>
+                        <div class="equation-item result">
+                            <img src="/assets/freedom_moment.png" alt="Freedom" class="equation-image" />
+                            <h3>{"Digital Freedom"}</h3>
+                            <div class="pros-cons">
+                                <span class="label">{"Result:"}</span>
+                                <p>{"Zero distractions"}</p>
+                                <p>{"Stay connected"}</p>
+                                <p>{"Perfect balance"}</p>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
+
         </section>
 
         <section class="main-features">
@@ -181,14 +207,14 @@ pub fn landing() -> Html {
             </div>
             <div class="feature-block on-demand">
                 <div class="feature-content">
-                    <h2>{"Your Life, Your Terms"}</h2>
-                    <p>{"Need your calendar? A WhatsApp reply? Just call or text LightFriend. It’s like a personal assistant, minus the smartphone trap."}</p>
+                    <h2>{"Everything just a call or text away"}</h2>
+                    <p>{"Need your calendar? A WhatsApp reply? Just call or text LightFriend."}</p>
                     <ul class="feature-list">
-                        <li><img src="/assets/whatsapplogo.png" alt="WhatsApp" class="feature-logo" /> {"WhatsApp without the rabbit hole"}</li>
-                        <li>{"📧 Emails, only when you need them"}</li>
-                        <li>{"📅 Calendar at your fingertips"}</li>
-                        <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="perplexity-logo" /> {"Search the web, no doomscroll"}</li>
-                        <li>{"☀️ Weather, tasks, even song IDs"}</li>
+                        <li><img src="/assets/whatsapplogo.png" alt="WhatsApp" class="feature-logo" /> {"WhatsApp"}</li>
+                        <li>{"📧 Emails"}</li>
+                        <li>{"📅 Calendar"}</li>
+                        <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI search"}</li>
+                        <li>{"☀️ Weather, Tasks and even Shazam"}</li>
                     </ul>
                     <div class="demo-link-container">
                         <a href="https://www.youtube.com/shorts/KrVdJbHPB-o" target="_blank" rel="noopener noreferrer" class="demo-link">
@@ -197,14 +223,14 @@ pub fn landing() -> Html {
                     </div>
                 </div>
                 <div class="feature-image">
-                    <img src="/assets/freedom_moment.png" alt="Person enjoying a screen-free moment" />
+                    <img src="/assets/train.png" alt="Showcase of dumbphone screen showing user getting traing tickets" />
                 </div>
             </div>
 
             <div class="feature-block proactive">
                 <div class="feature-content">
                     <h2>{"Only What Matters"}</h2>
-                    <p>{"LightFriend filters the noise, pinging you only for important stuff—like that urgent email or a friend’s text."}</p>
+                    <p>{"LightFriend filters the noise, pinging you only for important stuff, like that urgent email or a friend’s text from WhatsApp."}</p>
                     <ul class="feature-list">
                         <li>{"Smart alerts for key messages"}</li>
                         <li>{"Custom filters for your priorities"}</li>
@@ -1324,6 +1350,95 @@ pub fn landing() -> Html {
                         border: 1px solid rgba(30, 144, 255, 0.1);
                         border-radius: 24px;
                         transition: all 0.3s ease;
+                    }
+
+                    .equation-grid {
+                        display: grid;
+                        grid-template-columns: repeat(5, 1fr);
+                        gap: 1rem;
+                        align-items: center;
+                        margin-top: 3rem;
+                        padding: 2rem;
+                    }
+
+                    .equation-item {
+                        background: rgba(30, 30, 30, 0.7);
+                        border: 1px solid rgba(30, 144, 255, 0.1);
+                        border-radius: 16px;
+                        padding: 2rem;
+                        text-align: center;
+                        transition: all 0.3s ease;
+                    }
+
+                    .equation-item:hover {
+                        transform: translateY(-5px);
+                        box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
+                        border-color: rgba(30, 144, 255, 0.3);
+                    }
+
+                    .equation-image {
+                        width: 120px;
+                        height: 120px;
+                        object-fit: contain;
+                        margin-bottom: 1.5rem;
+                    }
+
+                    .equation-symbol {
+                        font-size: 3rem;
+                        color: #7EB2FF;
+                        text-align: center;
+                        font-weight: bold;
+                    }
+
+                    .equation-item h3 {
+                        color: #7EB2FF;
+                        font-size: 1.5rem;
+                        margin-bottom: 1.5rem;
+                    }
+
+                    .pros-cons {
+                        text-align: left;
+                    }
+
+                    .pros-cons .label {
+                        color: #7EB2FF;
+                        font-weight: bold;
+                        display: block;
+                        margin-bottom: 0.5rem;
+                    }
+
+                    .pros-cons p {
+                        color: #999;
+                        margin: 0.5rem 0;
+                        font-size: 0.9rem;
+                        padding-left: 1rem;
+                        position: relative;
+                    }
+
+                    .pros p::before {
+                        content: '•';
+                        position: absolute;
+                        left: 0;
+                        color: #1E90FF;
+                    }
+
+                    .cons p::before {
+                        content: '•';
+                        position: absolute;
+                        left: 0;
+                        color: #ff4444;
+                    }
+
+                    @media (max-width: 1200px) {
+                        .equation-grid {
+                            grid-template-columns: 1fr;
+                            gap: 2rem;
+                        }
+
+                        .equation-symbol {
+                            transform: rotate(90deg);
+                            margin: 1rem 0;
+                        }
                     }
 
                     .benefit-block:hover {
