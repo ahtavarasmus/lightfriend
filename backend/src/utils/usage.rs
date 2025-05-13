@@ -36,7 +36,7 @@ pub async fn check_user_credits(
         .unwrap_or(0.0033);
 
     // Check if user has subscription or discount
-    let use_regular_credits = user.discount || user.sub_tier == Some("tier 1".to_string());
+    let use_regular_credits = (user.discount || user.sub_tier == Some("tier 1".to_string())) && user.sub_tier != Some("tier 2".to_string());
 
     if use_regular_credits {
         // For discounted/tier 1 users, just check regular credits
