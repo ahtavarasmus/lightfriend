@@ -117,88 +117,17 @@ pub fn landing() -> Html {
 
         <div class="landing-page">
         <header class="hero">
-            <h1>{"Done Scrolling Your Life Away?"}</h1>
+            <h1>{"Break Free Without Vanishing"}</h1>
             <p class="hero-subtitle">
-                {"The average person spends 4.5 hours a day on social media. That’s 15 years of your life gone. LightFriend’s dumbphone revolution lets you break free—without vanishing."}
+                {"The average person spends 4.5 hours a day on social media. That's 15 years of your life gone. LightFriend's universal SMS and voice interface connects your digital life without the distractions."}
             </p>
+            <div class="hero-image">
+                <img src="/assets/nokia_hand.png" alt="Hand holding a Nokia phone" />
+            </div>
             <Link<Route> to={Route::Register} classes="forward-link">
                 <button class="hero-cta">{"Ditch the Scroll Now"}</button>
             </Link<Route>>
-        </header>
-
-        <section class="lifestyle-benefits">
-            <div class="benefit-block time-saved">
-                <div class="benefit-content">
-                    <h2>{"Reclaim Your Damn Time"}</h2>
-                    <div class="time-calculator">
-                        <div class="stat-block">
-                            <span class="stat-number">{"4.5"}</span>
-                            <span class="stat-label">{"Hours Daily"}</span>
-                        </div>
-                        <div class="stat-block">
-                            <span class="stat-number">{"1,642"}</span>
-                            <span class="stat-label">{"Hours Yearly"}</span>
-                        </div>
-                        <div class="stat-block highlight">
-                            <span class="stat-number">{"15"}</span>
-                            <span class="stat-label">{"Years of Life"}</span>
-                        </div>
-                    </div>
-                    <p class="source-note">
-                        {"Source: "}
-                        <a href="https://www.statista.com/topics/7863/social-media-and-generation-z-in-the-us/" target="_blank">{"Statista, Social Media & Gen Z"}</a>
-                    </p>
-                </div>
-            </div>
-
-        <div class="benefit-block solution-equation">
-                <div class="benefit-content">
-                    <div class="section-header">
-                        <h2>{"The Perfect Balance"}</h2>
-                    </div>
-                    <div class="equation-grid">
-                        <div class="equation-item dumbphone">
-                            <img src="/assets/nokia.png" alt="Nokia phone" class="equation-image" />
-                            <h3>{"Dumbphone"}</h3>
-                            <div class="pros-cons">
-                                <div class="pros">
-                                    <span class="label">{"✓ Pros:"}</span>
-                                    <p>{"No distractions"}</p>
-                                    <p>{"Better sleep"}</p>
-                                    <p>{"More focus"}</p>
-                                </div>
-                                <div class="cons">
-                                    <span class="label">{"✗ Cons:"}</span>
-                                    <p>{"Do Not Disturb is permanent"}</p>
-                                    <p>{"As useful as a brick in today's world"}</p>
-                                    <p>{"Feel disconnected"}</p>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="equation-symbol">{"+"}</div>
-                        <div class="equation-item lightfriend">
-                            <h3 class="nav-logo">{"LightFriend"}</h3>
-                            <div class="pros-cons">
-                                <span class="label">{"Adds:"}</span>
-                                <p>{"Universal SMS and voice calling interface to your digital life"}</p>
-                            </div>
-                        </div>
-                        <div class="equation-symbol">{"="}</div>
-                        <div class="equation-item result">
-                            <img src="/assets/freedom_moment.png" alt="Freedom" class="equation-image" />
-                            <h3>{"Digital Freedom"}</h3>
-                            <div class="pros-cons">
-                                <span class="label">{"Result:"}</span>
-                                <p>{"Zero distractions"}</p>
-                                <p>{"Stay connected"}</p>
-                                <p>{"Perfect balance"}</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-        </section>
+        </header>        
 
         <section class="main-features">
             <div class="section-header">
@@ -1331,6 +1260,38 @@ pub fn landing() -> Html {
                             rgba(30, 144, 255, 0.05),
                             transparent
                         );
+                        overflow: hidden;
+                    }
+
+                    .hero-image {
+                        position: relative;
+                        margin: 2rem 0;
+                        max-width: 500px;
+                        width: 100%;
+                        animation: float-gentle 6s ease-in-out infinite;
+                    }
+
+                    .hero-image img {
+                        width: 100%;
+                        height: auto;
+                        object-fit: contain;
+                        filter: drop-shadow(0 10px 20px rgba(30, 144, 255, 0.2));
+                    }
+
+                    @keyframes float-gentle {
+                        0%, 100% {
+                            transform: translateY(0);
+                        }
+                        50% {
+                            transform: translateY(-20px);
+                        }
+                    }
+
+                    @media (max-width: 768px) {
+                        .hero-image {
+                            max-width: 300px;
+                            margin: 1rem 0;
+                        }
                     }
 
                     .lifestyle-benefits {
