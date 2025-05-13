@@ -53,6 +53,7 @@ pub struct UserResponse {
     pub preferred_number: Option<String>,
     pub sub_tier: Option<String>,
     pub msgs_left: i32,
+    pub credits_left: f32,
 }
 
 #[derive(Debug, Deserialize)]

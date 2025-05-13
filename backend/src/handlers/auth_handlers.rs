@@ -28,25 +28,6 @@ pub async fn get_users(
     auth_user: AuthUser,
 ) -> Result<Json<Vec<UserResponse>>, (StatusCode, Json<serde_json::Value>)> {
     println!("Attempting to get all users");
-       
-    // Check if the user is admin
-    println!("Checking admin status for user ID: {}", auth_user.user_id);
-    if !state.user_repository.is_admin(auth_user.user_id).map_err(|e| {
-        println!("Database error while checking admin status: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error")}))
-        )
-    })? {
-        println!("User is not an admin");
-        return Err((
-            StatusCode::FORBIDDEN, 
-            Json(json!({"error": "Only admin can access this endpoint"}))
-        ));
-    }
-    println!("Admin status confirmed");
-
-    println!("Fetching all users from database");
     let users_list = state.user_repository.get_all_users().map_err(|e| {
         println!("Database error while fetching users: {}", e);
         (
@@ -70,6 +51,7 @@ pub async fn get_users(
             preferred_number: user.preferred_number,
             sub_tier: user.sub_tier,
             msgs_left: user.msgs_left,
+            credits_left: user.credits_left,
         })
         .collect();
 

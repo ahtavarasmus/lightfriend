@@ -314,6 +314,37 @@ async fn process_broadcast_messages(
 
 
 
+pub async fn update_monthly_credits(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Path((user_id, amount)): axum::extract::Path<(f32, f32)>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Get current user
+    let user = state.user_repository.find_by_id(user_id as i32)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        ))?
+        .ok_or_else(|| (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "User not found"}))
+        ))?;
+
+    // Calculate new credits count, ensuring it doesn't go below 0
+    let new_credits = (user.credits_left + amount).max(0.0);
+
+    // Update credits count
+    state.user_repository.update_user_credits_left(user.id, new_credits)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to update monthly credits: {}", e)}))
+        ))?;
+
+    Ok(Json(json!({
+        "message": "Monthly credits updated successfully",
+        "new_count": new_credits
+    })))
+}
+
 pub async fn update_user_messages(
     State(state): State<Arc<AppState>>,
     axum::extract::Path((user_id, amount)): axum::extract::Path<(i32, i32)>,

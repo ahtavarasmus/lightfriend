@@ -35,6 +35,7 @@ struct UserInfo {
     preferred_number: Option<String>,
     sub_tier: Option<String>,
     msgs_left: i32,
+    credits_left: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -871,7 +872,7 @@ pub fn admin_dashboard() -> Html {
                                                                         }
                                                                     </div>
                                                                 </td>
-                                                                <td>{format!("{:.2}", user.credits)}</td>
+                                                                <td>{format!("{:.2}€ + quota left: {:.2}€", user.credits, user.credits_left)}</td>
                                                             </tr>
                                                             if is_selected {
                                                                 <tr class="details-row">
@@ -1104,10 +1105,10 @@ pub fn admin_dashboard() -> Html {
                                                                                 Callback::from(move |_| {
                                                                                     let users = users.clone();
                                                                                     let error = error.clone();
-                                                                                    let new_tier = if current_tier.as_deref() == Some("tier 1") {
+                                                                                    let new_tier = if current_tier.as_deref() == Some("tier 2") {
                                                                                         "tier 0"
                                                                                     } else {
-                                                                                        "tier 1"
+                                                                                        "tier 2"
                                                                                     };
                                                                                     
                                                                                     wasm_bindgen_futures::spawn_local(async move {
@@ -1149,10 +1150,10 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                                                                             }}
                                                                             class="iq-button"
                                                                         >
-                                                                            {if user.sub_tier.as_deref() == Some("tier 1") {
-                                                                                "Remove Tier 1"
+                                                                            {if user.sub_tier.as_deref() == Some("tier 2") {
+                                                                                "Remove Tier 2"
                                                                             } else {
-                                                                                "Set Tier 1"
+                                                                                "Set Tier 2"
                                                                             }}
                                                                         </button>
                                                                         <button 
@@ -1250,6 +1251,102 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                                                                             class="iq-button reset"
                                                                         >
                                                                             {"Remove 10 Messages"}
+                                                                        </button>
+                                                                        <button 
+                                                                            onclick={{
+                                                                                let users = users.clone();
+                                                                                let error = error.clone();
+                                                                                let user_id = user.id;
+                                                                                Callback::from(move |_| {
+                                                                                    let users = users.clone();
+                                                                                    let error = error.clone();
+                                                                                    wasm_bindgen_futures::spawn_local(async move {
+                                                                                        if let Some(token) = window()
+                                                                                            .and_then(|w| w.local_storage().ok())
+                                                                                            .flatten()
+                                                                                            .and_then(|storage| storage.get_item("token").ok())
+                                                                                            .flatten()
+                                                                                        {
+                                                                                            match Request::post(&format!("{}/api/admin/monthly-credits/{}/{}", config::get_backend_url(), user_id, 10.0))
+                                                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                                                .send()
+                                                                                                .await
+                                                                                            {
+                                                                                                Ok(response) => {
+                                                                                                    if response.ok() {
+                                                                                                        // Refresh the users list
+                                                                                                        if let Ok(response) = Request::get(&format!("{}/api/admin/users", config::get_backend_url()))
+                                                                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                                                                            .send()
+                                                                                                            .await
+                                                                                                        {
+                                                                                                            if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
+                                                                                                                users.set(updated_users);
+                                                                                                            }
+                                                                                                        }
+                                                                                                    } else {
+                                                                                                        error.set(Some("Failed to add monthly credits".to_string()));
+                                                                                                    }
+                                                                                                }
+                                                                                                Err(_) => {
+                                                                                                    error.set(Some("Failed to send request".to_string()));
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    });
+                                                                                })
+                                                                            }}
+                                                                            class="iq-button"
+                                                                        >
+                                                                            {"Add 10€ Monthly Credits"}
+                                                                        </button>
+                                                                        <button 
+                                                                            onclick={{
+                                                                                let users = users.clone();
+                                                                                let error = error.clone();
+                                                                                let user_id = user.id;
+                                                                                Callback::from(move |_| {
+                                                                                    let users = users.clone();
+                                                                                    let error = error.clone();
+                                                                                    wasm_bindgen_futures::spawn_local(async move {
+                                                                                        if let Some(token) = window()
+                                                                                            .and_then(|w| w.local_storage().ok())
+                                                                                            .flatten()
+                                                                                            .and_then(|storage| storage.get_item("token").ok())
+                                                                                            .flatten()
+                                                                                        {
+                                                                                            match Request::post(&format!("{}/api/admin/monthly-credits/{}/{}", config::get_backend_url(), user_id, -10.0))
+                                                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                                                .send()
+                                                                                                .await
+                                                                                            {
+                                                                                                Ok(response) => {
+                                                                                                    if response.ok() {
+                                                                                                        // Refresh the users list
+                                                                                                        if let Ok(response) = Request::get(&format!("{}/api/admin/users", config::get_backend_url()))
+                                                                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                                                                            .send()
+                                                                                                            .await
+                                                                                                        {
+                                                                                                            if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
+                                                                                                                users.set(updated_users);
+                                                                                                            }
+                                                                                                        }
+                                                                                                    } else {
+                                                                                                        error.set(Some("Failed to remove monthly credits".to_string()));
+                                                                                                    }
+                                                                                                }
+                                                                                                Err(_) => {
+                                                                                                    error.set(Some("Failed to send request".to_string()));
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    });
+                                                                                })
+                                                                            }}
+                                                                            class="iq-button reset"
+                                                                        >
+                                                                            {"Remove 10€ Monthly Credits"}
                                                                         </button>
                                                                         <button 
                                                                             onclick={{
