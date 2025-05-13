@@ -6,10 +6,15 @@ pub async fn get_weather(location: &str, units: &str) -> Result<String, Box<dyn 
 
     let client = reqwest::Client::new();
     
-    // First, get coordinates using Open-Meteo Geocoding API
+    // Get API keys from environment
+    let geoapify_key = std::env::var("GEOAPIFY_API_KEY").expect("GEOAPIFY_API_KEY must be set");
+    let pirate_weather_key = std::env::var("PIRATE_WEATHER_API_KEY").expect("PIRATE_WEATHER_API_KEY must be set");
+    
+    // First, get coordinates using Geoapify
     let geocoding_url = format!(
-        "https://geocoding-api.open-meteo.com/v1/search?name={}&count=1&language=en&format=json",
-        urlencoding::encode(location)
+        "https://api.geoapify.com/v1/geocode/search?text={}&format=json&apiKey={}",
+        urlencoding::encode(location),
+        geoapify_key
     );
 
     let geocoding_response: serde_json::Value = client
@@ -27,32 +32,27 @@ pub async fn get_weather(location: &str, units: &str) -> Result<String, Box<dyn 
     }
 
     let result = &results[0];
-    let lat = result["latitude"].as_f64()
+    let lat = result["lat"].as_f64()
         .ok_or("Latitude not found")?;
-    let lon = result["longitude"].as_f64()
+    let lon = result["lon"].as_f64()
         .ok_or("Longitude not found")?;
-    let location_name = result["name"].as_str()
+    let location_name = result["formatted"].as_str()
         .unwrap_or(location);
 
     println!("Found coordinates for {}: lat={}, lon={}", location_name, lat, lon);
 
-    // Get weather data using coordinates
-    let temperature_unit = match units {
-        "imperial" => "fahrenheit",
-        _ => "celsius"
-    };
-
-    let wind_speed_unit = match units {
-        "imperial" => "mph",
-        _ => "ms"
+    // Get weather data using Pirate Weather
+    let unit_system = match units {
+        "imperial" => "us",
+        _ => "si"
     };
 
     let weather_url = format!(
-        "https://api.open-meteo.com/v1/forecast?latitude={}&longitude={}&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code&temperature_unit={}&wind_speed_unit={}",
+        "https://api.pirateweather.net/forecast/{}/{},{}?units={}&exclude=minutely,hourly,daily,alerts",
+        pirate_weather_key,
         lat,
         lon,
-        temperature_unit,
-        wind_speed_unit
+        unit_system
     );
 
     let weather_data: serde_json::Value = client
@@ -62,28 +62,13 @@ pub async fn get_weather(location: &str, units: &str) -> Result<String, Box<dyn 
         .json()
         .await?;
 
-    let current = weather_data["current"].as_object()
+    let current = weather_data["currently"].as_object()
         .ok_or("No current weather data")?;
 
-    let temp = current["temperature_2m"].as_f64().unwrap_or(0.0);
-    let humidity = current["relative_humidity_2m"].as_f64().unwrap_or(0.0);
-    let wind_speed = current["wind_speed_10m"].as_f64().unwrap_or(0.0);
-    let weather_code = current["weather_code"].as_i64().unwrap_or(0);
-
-    // Convert WMO weather code to description
-    let description = match weather_code {
-        0 => "clear sky",
-        1..=3 => "partly cloudy",
-        45..=48 => "foggy",
-        51..=57 => "drizzling",
-        61..=65 => "raining",
-        71..=77 => "snowing",
-        80..=82 => "rain showers",
-        85..=86 => "snow showers",
-        95 => "thunderstorm",
-        96..=99 => "thunderstorm with hail",
-        _ => "unknown weather"
-    };
+    let temp = current["temperature"].as_f64().unwrap_or(0.0);
+    let humidity = current["humidity"].as_f64().unwrap_or(0.0) * 100.0; // Convert from 0-1 to percentage
+    let wind_speed = current["windSpeed"].as_f64().unwrap_or(0.0);
+    let description = current["summary"].as_str().unwrap_or("unknown weather");
 
 
     let (temp_unit, speed_unit) = match units {
@@ -95,7 +80,7 @@ pub async fn get_weather(location: &str, units: &str) -> Result<String, Box<dyn 
         "The weather in {} is {} with a temperature of {} degrees {}. \
         The humidity is {}% and wind speed is {} {}.",
         location_name,
-        description,
+        description.to_lowercase(),
         temp.round(),
         temp_unit,
         humidity.round(),
