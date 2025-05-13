@@ -1265,7 +1265,7 @@ pub fn landing() -> Html {
 
                     .hero-image {
                         position: relative;
-                        margin: 2rem 0;
+                        margin: 2rem 0 4rem 0;  /* Increased bottom margin to 4rem */
                         max-width: 500px;
                         width: 100%;
                         animation: float-gentle 6s ease-in-out infinite;
@@ -1588,25 +1588,26 @@ pub fn landing() -> Html {
                         line-height: 1.6;
                     }
 
-                    .hero-cta {
-                        background: linear-gradient(
-                            45deg,
-                            #1E90FF,
-                            #4169E1
-                        );
-                        color: white;
-                        border: none;
-                        padding: 1rem 2.5rem;
-                        border-radius: 8px;
-                        font-size: 1.1rem;
-                        cursor: pointer;
-                        transition: all 0.3s ease;
-                        display: inline-flex;
-                        align-items: center;
-                        gap: 0.5rem;
-                        position: relative;
-                        overflow: hidden;
-                    }
+.hero-cta {
+    background: linear-gradient(
+        45deg,
+        #1E90FF,
+        #4169E1
+    );
+    color: white;
+    border: none;
+    padding: 1rem 2.5rem;
+    border-radius: 8px;
+    font-size: 1.1rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 3rem;  /* Added margin-bottom */
+}
 
                     .hero-cta::before {
                         content: '';
