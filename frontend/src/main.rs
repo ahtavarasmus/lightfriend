@@ -17,6 +17,7 @@ mod profile {
 }
 mod pages {
     pub mod home;
+    pub mod home_new;
     pub mod money;
     pub mod termsprivacy;
     pub mod blog;
@@ -41,7 +42,7 @@ mod admin {
 }
 
 use pages::{
-    home::Home,
+    home_new::HomeNew,
     blog::Blog,
     home::is_logged_in,
     termsprivacy::{TermsAndConditions, PrivacyPolicy},
