@@ -2,6 +2,8 @@ use yew::prelude::*;
 use yew_router::prelude::*;
 use log::{info, Level};
 use web_sys::{window, MouseEvent};
+use wasm_bindgen::closure::Closure;
+use wasm_bindgen::JsCast;
 
 mod config;
 mod profile {
@@ -17,7 +19,6 @@ mod profile {
 }
 mod pages {
     pub mod home;
-    pub mod home_new;
     pub mod money;
     pub mod termsprivacy;
     pub mod blog;
@@ -42,7 +43,7 @@ mod admin {
 }
 
 use pages::{
-    home_new::HomeNew,
+    home::Home,
     blog::Blog,
     home::is_logged_in,
     termsprivacy::{TermsAndConditions, PrivacyPolicy},
@@ -155,6 +156,28 @@ pub struct NavProps {
 pub fn nav(props: &NavProps) -> Html {
     let NavProps { logged_in, on_logout } = props;
     let menu_open = use_state(|| false);
+    let is_scrolled = use_state(|| false);
+
+    {
+        let is_scrolled = is_scrolled.clone();
+        use_effect_with_deps(move |_| {
+            let window = web_sys::window().unwrap();
+            let document = window.document().unwrap();
+            
+            let scroll_callback = Closure::wrap(Box::new(move || {
+                let scroll_top = document.document_element().unwrap().scroll_top();
+                is_scrolled.set(scroll_top > 600); // Increased threshold to match hero image height
+            }) as Box<dyn FnMut()>);
+            
+            window.add_event_listener_with_callback("scroll", scroll_callback.as_ref().unchecked_ref())
+                .unwrap();
+            
+            move || {
+                window.remove_event_listener_with_callback("scroll", scroll_callback.as_ref().unchecked_ref())
+                    .unwrap();
+            }
+        }, ());
+    }
     
     let handle_logout = {
         let on_logout = on_logout.clone();
@@ -186,7 +209,7 @@ let close_menu = {
     };
 
     html! {
-        <nav class="top-nav">
+        <nav class={classes!("top-nav", (*is_scrolled).then(|| "scrolled"))}>
             <div class="nav-content">
                 <Link<Route> to={Route::Home} classes="nav-logo">
                     {"lightfriend"}

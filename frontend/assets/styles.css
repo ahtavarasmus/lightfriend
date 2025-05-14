@@ -86,17 +86,21 @@ body {
     }
 }
 
-
 .top-nav {
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
     z-index: 1000;
-    background: rgba(26, 26, 26, 0.8);
-    backdrop-filter: blur(10px);
-    border-bottom: 1px solid rgba(30, 144, 255, 0.1);
+    border-bottom: 1px solid transparent;
     padding: 1rem 0;
+    transition: all 0.3s ease;
+}
+
+.top-nav.scrolled {
+    background-color: rgba(26, 26, 26, 0.95);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(30, 144, 255, 0.2);
 }
 
 .burger-menu {
@@ -134,14 +138,13 @@ body {
 .nav-logo {
     color: white;
     text-decoration: none;
-    font-size: 1.25rem;
+    font-size: 1.5rem;
     font-weight: 600;
     background: linear-gradient(45deg, #fff, #7EB2FF);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     transition: opacity 0.3s ease;
 }
-
 .nav-logo:hover {
     opacity: 0.8;
 }

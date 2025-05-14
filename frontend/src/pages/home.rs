@@ -117,17 +117,31 @@ pub fn landing() -> Html {
 
         <div class="landing-page">
         <header class="hero">
-            <h1>{"Break Free Without Vanishing"}</h1>
-            <p class="hero-subtitle">
-                {"The average person spends 4.5 hours a day on social media. LightFriend's universal SMS and voice interface connects your digital life to any dumbphone."}
-            </p>
-            <div class="hero-image">
-                <img src="/assets/nokia_hand.png" alt="Hand holding a Nokia phone" />
-            </div>
-            <Link<Route> to={Route::Register} classes="forward-link">
-                <button class="hero-cta">{"Start Using Now"}</button>
-            </Link<Route>>
+                <div class="hero-background"></div>
+                <div class="hero-content">
+                    <h1>{"Break Free Without Vanishing"}</h1>
+                    <p class="hero-subtitle">
+                        {"The average person spends 4.5 hours a day on social media."}
+                    </p>
+
+                </div>
         </header>        
+
+            <section class="intro-section">
+                <div class="intro-content">
+                    <div class="hero-image">
+                        <img src="/assets/nokia_hand.png" alt="Hand holding a Nokia phone" />
+                    </div>
+                    <div class="intro-text">
+                        <h2>{"Your Digital Life, Simplified"}</h2>
+                        <p>{"Access everything you need through simple SMS or voice calls. No smartphone required."}</p>
+                        <Link<Route> to={Route::Register} classes="forward-link">
+                            <button class="hero-cta">{"Start Using Now"}</button>
+                        </Link<Route>>
+                    </div>
+                </div>
+            </section>
+
 
         <section class="main-features">
             <div class="section-header">
@@ -316,6 +330,82 @@ pub fn landing() -> Html {
         </footer>
             <style>
                 {r#"
+.intro-section {
+    padding: 6rem 2rem;
+    background: #1a1a1a;
+    position: relative;
+    overflow: hidden;
+
+}
+
+.intro-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4rem;
+}
+
+.hero-image {
+    flex: 1;
+    max-width: 500px;
+    width: 100%;
+    animation: float-gentle 6s ease-in-out infinite;
+}
+
+.intro-text {
+    flex: 1;
+    text-align: left;
+}
+
+.intro-text h2 {
+    font-size: 2.5rem;
+    background: linear-gradient(45deg, #fff, #7EB2FF);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 1.5rem;
+}
+
+.intro-text p {
+    color: #999;
+    font-size: 1.2rem;
+    line-height: 1.6;
+}
+
+@media (max-width: 968px) {
+    .intro-content {
+        flex-direction: column;
+        text-align: center;
+        gap: 2rem;
+    }
+
+    .intro-text {
+        text-align: center;
+    }
+
+    .hero-image {
+        max-width: 400px;
+    }
+}
+
+@media (max-width: 768px) {
+    .intro-section {
+        padding: 4rem 1rem;
+    }
+
+    .intro-text h2 {
+        font-size: 2rem;
+    }
+
+    .intro-text p {
+        font-size: 1.1rem;
+    }
+
+    .hero-image {
+        max-width: 300px;
+    }
+}
                     .testimonials {
                         padding: 6rem 2rem;
                         text-align: center;
@@ -968,7 +1058,7 @@ pub fn landing() -> Html {
                             font-size: 1rem;
                         }
                     }
-.landing-page {
+                    .landing-page {
                     position: relative;
                     min-height: 100vh;
                     background-color: #1a1a1a;
@@ -1258,30 +1348,82 @@ pub fn landing() -> Html {
                         line-height: 1.6;
                     }
 
-                    .hero {
-                        min-height: 100vh;
+.hero {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    text-align: center;
+    padding: 8rem 0;
+    position: relative;
+    background: #1a1a1a;
+    z-index: 1;
+}
+
+.landing-page {
+
+    position: relative;
+    z-index: 2;
+}
+
+.hero-content {
                         display: flex;
                         flex-direction: column;
                         align-items: center;
                         justify-content: center;
-                        text-align: center;
-                        padding: 6rem 0;
                         position: relative;
-                        padding-top: 120px;
-                        background: linear-gradient(
-                            to bottom,
-                            rgba(30, 144, 255, 0.05),
-                            transparent
-                        );
-                        overflow: hidden;
+                        z-index: 2;
+                        padding: 180px 20px 0 20px;
+                        max-width: 400px;
+                        margin: 0 auto;
+                        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
                     }
+
+.hero-background {
+                        position: absolute;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background-image: url('/assets/boy_holding_dumbphone_in_crowded_place.png');
+                        background-size: cover;
+                        background-position: center;
+                        background-repeat: no-repeat;
+                        opacity: 1;
+                        z-index: 0;
+}
+
+/* Add a gradient overlay at the bottom of the hero background */
+.hero-background::after {
+                        content: '';
+                        position: absolute;
+                        bottom: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100px;
+                        background: linear-gradient(to bottom, transparent, #1a1a1a);
+}
+
+
+                    }
+
+
+
+
+    @media (max-width: 700px) {
+        .hero-background {
+            background-position: 70% center;
+        }
+    }
 
                     .hero-image {
                         position: relative;
-                        margin: 2rem 0 4rem 0;  /* Increased bottom margin to 4rem */
+                        margin: 0;
                         max-width: 500px;
                         width: 100%;
                         animation: float-gentle 6s ease-in-out infinite;
+                        z-index: 2;
                     }
 
                     .hero-image img {
@@ -1559,19 +1701,28 @@ pub fn landing() -> Html {
                     }
 
                     .hero h1 {
-                        font-size: 4.5rem;
+                        font-size: 3.4rem;
                         line-height: 1.1;
                         margin-bottom: 1.5rem;
                         background: linear-gradient(
                             45deg,
-                            #fff,
-                            rgba(126, 178, 255, 0.8)
+                            #2d2d2d,
+                            #1a1a1a
                         );
                         -webkit-background-clip: text;
                         -webkit-text-fill-color: transparent;
                         font-weight: 700;
-                        max-width: 900px;
+                        max-width: 400px;
                         position: relative;
+                        font-family: 'Inter', sans-serif;
+                        letter-spacing: -0.02em;
+                    }
+
+                    @media (max-width: 768px) {
+                        .hero h1 {
+                            font-size: 2.4rem;
+                            padding-top: 20px;
+                        }
                     }
 
                     .producthunt-badge {
