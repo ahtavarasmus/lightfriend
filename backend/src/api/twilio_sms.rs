@@ -2244,10 +2244,65 @@ pub async fn process_sms(
             (!fail, Some("Failed to get evaluation response".to_string()))
         }
     };
-    let final_response_with_notice = if is_clarifying {
-        format!("{} (free reply)", final_response)
+    // Check if this will be their last message with current credits
+    let mut warnings = Vec::new();
+    
+    // For regular users, check both credits_left and regular credits
+    if user.sub_tier == Some("tier 2".to_string()) {
+        let message_cost = std::env::var("MESSAGE_COST")
+            .expect("MESSAGE_COST not set")
+            .parse::<f32>()
+            .unwrap_or(0.20);
+
+        // Check if this is the last message they can send with credits_left
+        if user.credits_left >= message_cost && user.credits_left < message_cost * 2.0 {
+            warnings.push("⚠️ (Last message using your monthly quota)");
+        }
+
+        // Check if they're about to run out of extra credits
+        if user.credits_left < message_cost && user.credits >= message_cost && user.credits < message_cost * 2.0 {
+            warnings.push("⚠️ (Last message using your overage credits)");
+        }
+    } else if user.discount || user.time_to_live.unwrap_or(i32::MAX) < 1747170000{
+        // For discounted/tier 1 users, just check regular credits
+        let message_cost = if user.phone_number.starts_with("+1") {
+            std::env::var("MESSAGE_COST_US")
+                .unwrap_or_else(|_| std::env::var("MESSAGE_COST").expect("MESSAGE_COST not set"))
+                .parse::<f32>()
+                .unwrap_or(0.10)
+        } else {
+            std::env::var("MESSAGE_COST")
+                .expect("MESSAGE_COST not set")
+                .parse::<f32>()
+                .unwrap_or(0.20)
+        };
+
+        if user.credits >= message_cost && user.credits < message_cost * 2.0 {
+            warnings.push("⚠️ (Last message before out of credits)");
+        }
     } else {
-        final_response
+        let message_cost = std::env::var("MESSAGE_COST")
+            .expect("MESSAGE_COST not set")
+            .parse::<f32>()
+            .unwrap_or(0.20);
+        
+        if user.credits >= message_cost && user.credits < message_cost * 2.0 {
+            warnings.push("⚠️ (Last message before out of credits)");
+        }
+    }
+
+    let final_response_with_notice = if is_clarifying {
+        if warnings.is_empty() {
+            format!("{} (free reply)", final_response)
+        } else {
+            format!("{} (free reply)\n\n{}", final_response, warnings.join("\n"))
+        }
+    } else {
+        if warnings.is_empty() {
+            final_response
+        } else {
+            format!("{}\n\n{}", final_response, warnings.join("\n"))
+        }
     };
     println!("is_clarifying message: {}", is_clarifying);
     if is_clarifying {

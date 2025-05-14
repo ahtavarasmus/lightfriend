@@ -43,16 +43,18 @@ pub async fn check_user_credits(
         let required_credits = if event_type == "message" { message_cost } else { 0.0 };
         if user.credits < required_credits {
             // Send notification about depleted credits
-            /*
             if let Ok(conversation) = state.user_conversations.get_conversation(user, user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))).await {
-                let _ = crate::api::twilio_utils::send_conversation_message(
-                    &conversation.conversation_sid,
-                    &conversation.twilio_number,
-                    "Insufficient credits. Please recharge to continue using the service.",
-                    false
-                ).await;
+                let conversation_sid = conversation.conversation_sid.clone();
+                let twilio_number = conversation.twilio_number.clone();
+                tokio::spawn(async move {
+                    let _ = crate::api::twilio_utils::send_conversation_message(
+                        &conversation_sid,
+                        &twilio_number,
+                        "Insufficient credits. Please recharge to continue using the service.",
+                        false
+                    ).await;
+                });
             }
-            */
             return Err("Insufficient credits.".to_string());
         }
     } else {
@@ -61,16 +63,18 @@ pub async fn check_user_credits(
         
         if user.credits_left < required_credits && user.credits < required_credits {
             // Send notification about depleted credits and monthly quota
-            /*
             if let Ok(conversation) = state.user_conversations.get_conversation(user, user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))).await {
-                let _ = crate::api::twilio_utils::send_conversation_message(
-                    &conversation.conversation_sid,
-                    &conversation.twilio_number,
-                    "Your credits and monthly quota have been depleted. Please recharge your credits to continue using the service.",
-                    false
-                ).await;
+                let conversation_sid = conversation.conversation_sid.clone();
+                let twilio_number = conversation.twilio_number.clone();
+                tokio::spawn(async move {
+                    let _ = crate::api::twilio_utils::send_conversation_message(
+                        &conversation_sid,
+                        &twilio_number,
+                        "Your credits and monthly quota have been depleted. Please recharge your credits to continue using the service.",
+                        false
+                    ).await;
+                });
             }
-            */
             return Err("Insufficient credits. You have used all your monthly quota and don't have enough extra credits.".to_string());
         }
     }
