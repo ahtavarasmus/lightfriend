@@ -119,20 +119,19 @@ pub fn landing() -> Html {
         <header class="hero">
             <h1>{"Break Free Without Vanishing"}</h1>
             <p class="hero-subtitle">
-                {"The average person spends 4.5 hours a day on social media. LightFriend's universal SMS and voice interface connects your digital life without the distractions."}
+                {"The average person spends 4.5 hours a day on social media. LightFriend's universal SMS and voice interface connects your digital life to any dumbphone."}
             </p>
             <div class="hero-image">
                 <img src="/assets/nokia_hand.png" alt="Hand holding a Nokia phone" />
             </div>
             <Link<Route> to={Route::Register} classes="forward-link">
-                <button class="hero-cta">{"Ditch the Scroll Now"}</button>
+                <button class="hero-cta">{"Start Using Now"}</button>
             </Link<Route>>
         </header>        
 
         <section class="main-features">
             <div class="section-header">
                 <h2>{"Freedom, Not Isolation"}</h2>
-                <p class="section-subtitle">{"LightFriend keeps you connected without the addiction."}</p>
             </div>
             <div class="feature-block on-demand">
                 <div class="feature-content">
@@ -343,23 +342,28 @@ pub fn landing() -> Html {
                         margin: 0 auto;
                     }
 
-                    .testimonial-card {
-                        background: rgba(30, 30, 30, 0.7);
-                        border: 1px solid rgba(30, 144, 255, 0.1);
-                        border-radius: 16px;
-                        padding: 2rem;
-                        text-align: left;
-                        transition: all 0.3s ease;
-                        display: flex;
-                        flex-direction: column;
-                        justify-content: space-between;
-                    }
+.testimonial-card {
+    background: rgba(30, 30, 30, 0.7);
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: left;
+    transition: transform 1.5s cubic-bezier(0.4, 0, 0.2, 1),
+                border-color 1.5s ease,
+                box-shadow 1.5s ease;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: relative;
+    overflow: hidden;
+}
 
-                    .testimonial-card:hover {
-                        transform: translateY(-5px);
-                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
-                        border-color: rgba(30, 144, 255, 0.3);
-                    }
+
+.testimonial-card:hover {
+    transform: translateY(-5px) scale(1.02);
+    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
+    border-color: rgba(30, 144, 255, 0.3);
+}
 
                     .testimonial-content {
                         margin-bottom: 1.5rem;
@@ -795,11 +799,11 @@ pub fn landing() -> Html {
                         );
                     }
 
-                    .step:hover {
-                        transform: translateY(-5px);
-                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
-                        border-color: rgba(30, 144, 255, 0.4);
-                    }
+.step:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
+    border-color: rgba(30, 144, 255, 0.4);
+}
 
                     .step h3 {
                         color: #1E90FF;
@@ -985,26 +989,35 @@ pub fn landing() -> Html {
                 .main-features {
                     max-width: 1200px;
                     margin: 0 auto;
-                    padding: 4rem 2rem;
+                    padding: 2rem 2rem;
                 }
 
-                .feature-block {
-                    display: flex;
-                    align-items: center;
-                    gap: 4rem;
-                    margin-bottom: 6rem;
-                    background: rgba(30, 30, 30, 0.5);
-                    border: 1px solid rgba(30, 144, 255, 0.1);
-                    border-radius: 24px;
-                    padding: 3rem;
-                    transition: all 0.3s ease;
-                }
+.feature-block {
+    display: flex;
+    align-items: center;
+    gap: 4rem;
+    margin-bottom: 6rem;
+    background: linear-gradient(
+        180deg,
+        rgba(30, 144, 255, 0.08) 0%,
+        rgba(30, 144, 255, 0.03) 100%
+    );
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    border-radius: 24px;
+    padding: 3rem;
+    transition: transform 1.8s cubic-bezier(0.4, 0, 0.2, 1), 
+                border-color 1.8s ease, 
+                box-shadow 1.8s ease;
+    position: relative;
+    overflow: hidden;
 
-                .feature-block:hover {
-                    transform: translateY(-5px);
-                    box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
-                    border-color: rgba(30, 144, 255, 0.3);
-                }
+}
+
+.feature-block:hover {
+    transform: translateY(-5px) scale(1.02);
+    box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
+    border-color: rgba(30, 144, 255, 0.3);
+}
 
                 .feature-content {
                     flex: 1;
@@ -1600,13 +1613,14 @@ pub fn landing() -> Html {
     border-radius: 8px;
     font-size: 1.1rem;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: transform 1.5s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 1.5s ease;
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
     position: relative;
     overflow: hidden;
-    margin-bottom: 3rem;  /* Added margin-bottom */
+    margin-bottom: 3rem;
 }
 
                     .hero-cta::before {
@@ -1634,26 +1648,11 @@ pub fn landing() -> Html {
                         transform: translateX(100%);
                     }
 
-                    .hero-cta:hover {
-                        transform: translateY(-2px);
-                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
-                    }
+.hero-cta:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
+}
 
-                    /* Add floating elements effect */
-                    .hero::before,
-                    .hero::after {
-                        content: '';
-                        position: absolute;
-                        width: 300px;
-                        height: 300px;
-                        border-radius: 50%;
-                        background: radial-gradient(
-                            circle,
-                            rgba(30, 144, 255, 0.1),
-                            transparent
-                        );
-                        z-index: -1;
-                    }
 
                     .hero::before {
                         top: 10%;
@@ -1715,11 +1714,11 @@ pub fn landing() -> Html {
                         transition: all 0.3s ease;
                     }
 
-                    .feature-item:hover {
-                        transform: translateY(-5px);
-                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
-                        border-color: rgba(30, 144, 255, 0.4);
-                    }
+.feature-item:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
+    border-color: rgba(30, 144, 255, 0.4);
+}
 
                     .feature-item h3 {
                         margin: 1rem 0;
@@ -3302,21 +3301,6 @@ pub fn Home() -> Html {
                         box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
                     }
 
-                    /* Add floating elements effect */
-                    .hero::before,
-                    .hero::after {
-                        content: '';
-                        position: absolute;
-                        width: 300px;
-                        height: 300px;
-                        border-radius: 50%;
-                        background: radial-gradient(
-                            circle,
-                            rgba(30, 144, 255, 0.1),
-                            transparent
-                        );
-                        z-index: -1;
-                    }
 
                     .hero::before {
                         top: 10%;

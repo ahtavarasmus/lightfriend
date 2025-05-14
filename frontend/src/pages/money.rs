@@ -302,14 +302,37 @@ pub fn pricing(props: &PricingProps) -> Html {
                     background: linear-gradient(45deg, #1E90FF, #4169E1);
                     border: none;
                     color: white;
-                    padding: 0.8rem 1.5rem;
+                    padding: 1rem 2rem;
                     border-radius: 8px;
-                    font-size: 1rem;
+                    font-size: 1.1rem;
                     cursor: pointer;
-                    transition: all 0.3s ease;
+                    transition: all 1s cubic-bezier(0.4, 0, 0.2, 1);
                     text-transform: uppercase;
                     letter-spacing: 1px;
+                    position: relative;
+                    overflow: hidden;
                 }
+
+                .signup-button::before {
+                    content: '';
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: linear-gradient(
+                        45deg,
+                        transparent,
+                        rgba(255, 255, 255, 0.1),
+                        transparent
+                    );
+                    transform: translateX(-100%);
+                    transition: transform 1.5s cubic-bezier(0.4, 0, 0.2, 1);
+                }
+
+.signup-button:hover::before {
+    transform: translateX(100%);
+}
 
                 .signup-button:hover {
                     transform: translateY(-2px);
@@ -351,20 +374,38 @@ pub fn pricing(props: &PricingProps) -> Html {
                     box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
                 }
 
-                .pricing-card.subscription {
-                    background: rgba(30, 144, 255, 0.15);
-                    border: 1px solid rgba(30, 144, 255, 0.3);
-                    transform: scale(1.05);
-                    position: relative;
-                    overflow: hidden;
-                }
+.pricing-card.subscription {
+    background: rgba(30, 30, 30, 0.7);
+    border: 1px solid rgba(30, 144, 255, 0.3);
+    transform: scale(1.05);
+    position: relative;
+    overflow: hidden;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    transition: transform 1.8s cubic-bezier(0.4, 0, 0.2, 1), border-color 1.8s ease, box-shadow 1.8s ease;
+}
 
-                .pricing-card.subscription:hover {
-                    transform: scale(1.08);
-                    border-color: rgba(30, 144, 255, 0.5);
-                    box-shadow: 0 8px 32px rgba(30, 144, 255, 0.25);
-                    background: rgba(30, 144, 255, 0.2);
-                }
+.pricing-card.subscription::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 100%;
+    background: linear-gradient(
+        180deg,
+        rgba(30, 144, 255, 0.15) 0%,
+        rgba(30, 144, 255, 0.05) 100%
+    );
+    z-index: -1;
+}
+
+.pricing-card.subscription:hover {
+    transform: scale(1.08);
+    border-color: rgba(30, 144, 255, 0.5);
+    box-shadow: 0 8px 32px rgba(30, 144, 255, 0.25);
+
+}
 
                 .popular-tag {
                     position: absolute;
@@ -385,25 +426,72 @@ pub fn pricing(props: &PricingProps) -> Html {
                     margin-right: 0.2em;
                 }
 
-                .pricing-container {
-                    margin: 2rem auto;
-                    padding: 6rem 6rem;
-                    min-height: 100vh;
-                    background: #1a1a1a;
-                }
+.pricing-container {
+    margin: 0 auto;
+    padding: 6rem 2rem;
+    min-height: 100vh;
+    background: #1a1a1a;
+    position: relative;
+    overflow: hidden;
+}
+
+.pricing-container::before,
+.pricing-container::after {
+    content: '';
+    position: absolute;
+    width: 300px;
+    height: 300px;
+    border-radius: 50%;
+    background: radial-gradient(
+        circle,
+        rgba(30, 144, 255, 0.1),
+        transparent
+    );
+    z-index: 0;
+}
+
+.pricing-container::before {
+    top: 10%;
+    left: 5%;
+    animation: float 20s infinite alternate;
+}
+
+.pricing-container::after {
+    bottom: 10%;
+    right: 5%;
+    animation: float 15s infinite alternate-reverse;
+}
+
+@keyframes float {
+    0% {
+        transform: translate(0, 0);
+    }
+    100% {
+        transform: translate(20px, 20px);
+    }
+}
 
                 .pricing-header {
                     text-align: center;
                     margin-bottom: 4rem;
                 }
 
-                .pricing-header h1 {
-                    font-size: 3.5rem;
-                    background: linear-gradient(45deg, #fff, #7EB2FF);
-                    -webkit-background-clip: text;
-                    -webkit-text-fill-color: transparent;
-                    margin-bottom: 1.5rem;
-                }
+.pricing-header h1 {
+    font-size: 4.5rem;
+    line-height: 1.1;
+    margin-bottom: 1.5rem;
+    background: linear-gradient(
+        45deg,
+        #fff,
+        rgba(126, 178, 255, 0.8)
+    );
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    font-weight: 700;
+    max-width: 900px;
+    position: relative;
+    margin: 0 auto 1.5rem;
+}
 
                 .pricing-header p {
                     color: #999;
@@ -462,13 +550,15 @@ pub fn pricing(props: &PricingProps) -> Html {
                     text-align: center;
                 }
 
-                .usage-pricing h2 {
-                    font-size: 2.5rem;
-                    background: linear-gradient(45deg, #fff, #7EB2FF);
-                    -webkit-background-clip: text;
-                    -webkit-text-fill-color: transparent;
-                    margin-bottom: 1rem;
-                }
+.usage-pricing h2 {
+    font-size: 3rem;
+    background: linear-gradient(45deg, #fff, #7EB2FF);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 1rem;
+    font-weight: 700;
+    text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
+}
 
                 .usage-pricing p {
                     color: #999;
@@ -482,14 +572,14 @@ pub fn pricing(props: &PricingProps) -> Html {
                     gap: 2rem;
                 }
 
-                .pricing-card {
-                    background: rgba(30, 30, 30, 0.7);
-                    border: 1px solid rgba(30, 144, 255, 0.1);
-                    border-radius: 16px;
-                    padding: 2rem;
-                    transition: all 0.3s ease;
-                    backdrop-filter: blur(10px);
-                }
+.pricing-card {
+    background: rgba(30, 30, 30, 0.7);
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    border-radius: 16px;
+    padding: 2rem;
+    transition: transform 1.2s cubic-bezier(0.4, 0, 0.2, 1), border-color 1.2s ease, box-shadow 1.2s ease;
+    backdrop-filter: blur(10px);
+}
 
                 .pricing-card:hover {
                     transform: translateY(-5px);
@@ -677,12 +767,16 @@ pub fn pricing(props: &PricingProps) -> Html {
                     border-top: 1px solid rgba(30, 144, 255, 0.1);
                 }
 
-                .pricing-faq h2 {
-                    text-align: center;
-                    font-size: 2.5rem;
-                    color: #7EB2FF;
-                    margin-bottom: 3rem;
-                }
+.pricing-faq h2 {
+    text-align: center;
+    font-size: 3rem;
+    background: linear-gradient(45deg, #fff, #7EB2FF);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 3rem;
+    font-weight: 700;
+    text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
+}
 
                 .faq-grid {
                     display: flex;
@@ -693,14 +787,32 @@ pub fn pricing(props: &PricingProps) -> Html {
                 }
 
 
-                .faq-item {
-                    background: rgba(30, 30, 30, 0.7);
-                    border: 1px solid rgba(30, 144, 255, 0.1);
-                    border-radius: 16px;
-                    padding: 2.5rem;
-                    backdrop-filter: blur(10px);
-                    transition: all 0.3s ease;
-                }
+.faq-item {
+    background: rgba(30, 30, 30, 0.7);
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    border-radius: 16px;
+    padding: 2.5rem;
+    backdrop-filter: blur(10px);
+    transition: transform 1.5s cubic-bezier(0.4, 0, 0.2, 1), border-color 1.5s ease, box-shadow 1.5s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.faq-item::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 100%;
+    background: linear-gradient(
+        180deg,
+        rgba(30, 144, 255, 0.05) 0%,
+        transparent 100%
+    );
+    z-index: -1;
+
+}
 
                 .faq-item:hover {
 
