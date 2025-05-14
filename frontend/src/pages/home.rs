@@ -180,7 +180,7 @@ pub fn landing() -> Html {
                     </ul>
                 </div>
                 <div class="feature-image">
-                    <img src="/assets/peaceful_connection.png" alt="Person receiving a meaningful notification" />
+                    <img src="/assets/notifications.png" alt="Person receiving a meaningful notification" />
                 </div>
             </div>
 
@@ -357,6 +357,10 @@ pub fn landing() -> Html {
 .intro-text {
     flex: 1;
     text-align: left;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding-top: 2rem;
 }
 
 .intro-text h2 {
@@ -378,10 +382,16 @@ pub fn landing() -> Html {
         flex-direction: column;
         text-align: center;
         gap: 2rem;
+        padding-top: 2rem;
     }
 
     .intro-text {
         text-align: center;
+        align-items: center;
+    }
+
+    .intro-text .hero-cta {
+        margin: 1.5rem auto;
     }
 
     .hero-image {
@@ -1771,7 +1781,13 @@ pub fn landing() -> Html {
     gap: 0.5rem;
     position: relative;
     overflow: hidden;
-    margin-bottom: 3rem;
+    margin: 2rem 0 3rem 0;
+}
+
+@media (min-width: 769px) {
+    .hero-cta {
+        margin: 3rem 0 3rem 0;
+    }
 }
 
                     .hero-cta::before {
