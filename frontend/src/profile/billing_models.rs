@@ -25,7 +25,7 @@ pub struct UserProfile {
     pub phone_number: String,
     pub nickname: Option<String>,
     pub verified: bool,
-    pub time_to_live: i32,
+    pub time_to_live: Option<i32>,
     pub time_to_delete: bool,
     pub credits: f32,
     pub info: Option<String>,

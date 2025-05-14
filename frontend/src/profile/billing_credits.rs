@@ -567,7 +567,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                             
                             <div class="auto-topup-container">
                                 {
-                                    if user_profile.sub_tier.is_some() {
+                                    if user_profile.sub_tier.is_some() || user_profile.time_to_live.unwrap_or(i32::MAX) < 1747170000 {
                                         html! {
                                             <>
                                                 if user_profile.stripe_payment_method_id.is_some() {

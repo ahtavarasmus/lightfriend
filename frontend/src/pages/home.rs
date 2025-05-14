@@ -119,7 +119,7 @@ pub fn landing() -> Html {
         <header class="hero">
             <h1>{"Break Free Without Vanishing"}</h1>
             <p class="hero-subtitle">
-                {"The average person spends 4.5 hours a day on social media. That's 15 years of your life gone. LightFriend's universal SMS and voice interface connects your digital life without the distractions."}
+                {"The average person spends 4.5 hours a day on social media. LightFriend's universal SMS and voice interface connects your digital life without the distractions."}
             </p>
             <div class="hero-image">
                 <img src="/assets/nokia_hand.png" alt="Hand holding a Nokia phone" />
