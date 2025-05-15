@@ -241,36 +241,6 @@ pub async fn create_checkout_session(
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     println!("Starting create_checkout_session for user_id: {}", user_id);
 
-
-    // Check if user is accessing their own data or is an admin
-    if auth_user.user_id != user_id && !auth_user.is_admin {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "Access denied"})),
-        ));
-    }
-
-    println!("JWT token validated successfully");
-
-    // Check if user has an active subscription
-    let user = state
-        .user_repository
-        .find_by_id(user_id)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)})),
-        ))?
-        .ok_or_else(|| (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "User not found"})),
-        ))?;
-
-    if user.sub_tier.is_none() {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "Active subscription required to purchase credits"})),
-        ));
-    }
     // Fetch user from the database
     let user = state
         .user_repository
