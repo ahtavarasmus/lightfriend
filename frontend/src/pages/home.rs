@@ -5,6 +5,7 @@ use web_sys::{Element, HtmlElement, HtmlElement as HtmlElementTrait};
 use crate::pages::proactive::Proactive;
 use yew_router::prelude::*;
 use crate::Route;
+use yew_router::components::Link;
 use crate::config;
 use web_sys::{window, HtmlInputElement};
 use gloo_net::http::Request;
@@ -249,9 +250,12 @@ let scroll_callback = Closure::wrap(Box::new(move || {
         <section class="main-features">
             <div class="section-header">
                 <h2>{"Freedom, Not Isolation"}</h2>
-                <div class="section-intro">
-                    <p>{"Access everything you need through simple SMS or voice calls. No smartphone required."}</p>
-                </div>
+                    <div class="section-intro">
+                        <p>{"Access everything you need through simple SMS or voice calls. No smartphone required."}</p>
+                        <Link<Route> to={Route::Register} classes="forward-link">
+                            <button class="hero-cta">{"Start Your Journey"}</button>
+                        </Link<Route>>
+                    </div>
             </div>
             <div class="feature-block on-demand">
                 <div class="feature-content">
@@ -428,11 +432,11 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                         {" and "}
                         <a href="https://x.com/rasmuscodes" target="_blank" rel="noopener noreferrer">{"x.com/rasmuscodes"}</a>
                     </p>
-                    <div class="legal-links">
-                        <a href="/terms">{"Terms & Conditions"}</a>
-                        {" | "}
-                        <a href="/privacy">{"Privacy Policy"}</a>
-                    </div>
+                                <div class="legal-links">
+                                    <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
+                                    {" | "}
+                                    <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
+                                </div>
                 </div>
             </div>
         </footer>
@@ -452,12 +456,47 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     right: 0;
     will-change: opacity;
     height: 100vh;
-    z-index: 2;
+    z-index: 1;
     scroll-snap-type: y mandatory;
     overflow-y: scroll;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none; /* Firefox */
     -ms-overflow-style: none;  /* Internet Explorer 10+ */
+    pointer-events: none;
+}
+
+.intro-section.visible {
+    pointer-events: auto;
+    z-index: 1;
+}
+
+.main-features {
+    position: relative;
+    z-index: 2;
+}
+
+.footer-cta {
+    position: relative;
+    z-index: 2;
+}
+
+.hero {
+    position: relative;
+    z-index: 2;
+}
+
+.hero-content {
+    position: relative;
+    z-index: 2;
+    pointer-events: auto;
+}
+
+.hero-background {
+    z-index: 0;
+}
+
+.intro-section.visible {
+    pointer-events: auto;
 }
 
 .intro-section::-webkit-scrollbar {
@@ -1486,17 +1525,17 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                         }
                     }
 .landing-page {
-                    position: relative;
-                    min-height: 100vh;
-                    background-color: transparent;
-                    color: #ffffff;
-                    font-family: system-ui, -apple-system, sans-serif;
-                    margin: 0 auto;
-                    width: 100%;
-                    overflow-x: hidden;
-                    box-sizing: border-box;
-                    z-index: 1;
-                }
+    position: relative;
+    min-height: 100vh;
+    background-color: transparent;
+    color: #ffffff;
+    font-family: system-ui, -apple-system, sans-serif;
+    margin: 0 auto;
+    width: 100%;
+    overflow-x: hidden;
+    box-sizing: border-box;
+    z-index: 0;
+}
 
                 .hero {
                     text-align: center;
@@ -1509,10 +1548,11 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     margin: 0 auto;
     padding: 2rem 2rem;
     position: relative;
-    z-index: 1;
+    z-index: 3;
     background: transparent;
     opacity: 1;
     margin-bottom: 4rem;
+    pointer-events: auto;
 }
 
 .feature-block {
@@ -1757,9 +1797,10 @@ let scroll_callback = Closure::wrap(Box::new(move || {
 
 .footer-cta {
     position: relative;
-    z-index: 1;
+    z-index: 3;
     margin-top: 0;
     background: rgba(26, 26, 26, 0.9);
+    pointer-events: auto;
 }
 
 .footer-cta::before {
@@ -1822,16 +1863,17 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                         z-index: 2;
                     }
 
-                    .hero-content {
-                        position: relative;
-                        z-index: 2;
-                        width: 100%;
-                        height: 100%;
-                        display: flex;
-                        flex-direction: column;
-                        justify-content: flex-end;
-                        padding: 40px;
-                    }
+.hero-content {
+    position: relative;
+    z-index: 3;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    padding: 40px;
+    pointer-events: auto;
+}
 
                     .hero-title {
                         font-size: 3.4rem;
@@ -1894,17 +1936,18 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                         }
                     }
 .hero-background {
-                        position: fixed;
-                        top: 0;
-                        left: 0;
-                        width: 100%;
-                        height: 100vh;
-                        background-image: url('/assets/boy_holding_dumbphone_in_crowded_place.png');
-                        background-size: cover;
-                        background-position: center;
-                        background-repeat: no-repeat;
-                        opacity: 1;
-                        z-index: 0;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100vh;
+    background-image: url('/assets/boy_holding_dumbphone_in_crowded_place.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    opacity: 1;
+    z-index: -2;
+    pointer-events: none;
 }
 
 /* Add a gradient overlay only at the bottom of the hero background */
@@ -2187,6 +2230,10 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                         margin-top: 3rem;
                         backdrop-filter: blur(10px);
                         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        justify-content: center;
                     }
 
                     .section-intro h3 {
@@ -2203,6 +2250,27 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                         margin-bottom: 2rem;
                         text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
                         letter-spacing: 0.01em;
+                        width: 100%;
+                        text-align: center;
+                    }
+
+                    .section-intro .hero-cta {
+                        margin: 1rem auto;
+                        display: block;
+                    }
+
+                    .legal-links {
+                        margin-top: 1rem;
+                    }
+
+                    .legal-links a {
+                        color: #666;
+                        text-decoration: none;
+                        transition: color 0.3s ease;
+                    }
+
+                    .legal-links a:hover {
+                        color: #7EB2FF;
                     }
 
                     @media (max-width: 768px) {
