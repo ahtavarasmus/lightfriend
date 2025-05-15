@@ -19,6 +19,7 @@ mod profile {
 }
 mod pages {
     pub mod home;
+    pub mod landing;
     pub mod money;
     pub mod termsprivacy;
     pub mod blog;
