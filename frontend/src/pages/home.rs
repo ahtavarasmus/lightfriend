@@ -113,8 +113,6 @@ pub fn landing() -> Html {
 let scroll_callback = Closure::wrap(Box::new(move || {
                 // Handle intro section visibility and image transitions
                 if let Some(intro_section) = document.query_selector(".intro-section").ok().flatten() {
-                    // Add touch-action manipulation for better mobile scrolling
-                    let _ = intro_section.set_attribute("style", "touch-action: pan-y pinch-zoom;");
                     let intro_html = intro_section.clone().dyn_into::<web_sys::HtmlElement>().unwrap();
                     let scroll_pos = window_clone.scroll_y().unwrap();
                     let window_height = window_clone.inner_height().unwrap().as_f64().unwrap();
@@ -238,14 +236,7 @@ let scroll_callback = Closure::wrap(Box::new(move || {
 
 
             <section class="intro-section">
-                    <div class="intro-content">
-                        <div class="intro-text">
-                            <h2>{"Your Digital Life, Simplified"}</h2>
-                            <p>{"Access everything you need through simple SMS or voice calls. No smartphone required."}</p>
-                            <Link<Route> to={Route::Register} classes="forward-link">
-                                <button class="hero-cta">{"Start Using Now"}</button>
-                            </Link<Route>>
-                        </div>
+            <div class="intro-content">
                         <div class="sticky-image">
                             <img src="/assets/whatsappexample.png" alt="WhatsApp example interface" class="example-image whatsapp-image" />
                             <img src="/assets/emailexample.png" alt="Email example interface" class="example-image email-image" />
@@ -258,6 +249,9 @@ let scroll_callback = Closure::wrap(Box::new(move || {
         <section class="main-features">
             <div class="section-header">
                 <h2>{"Freedom, Not Isolation"}</h2>
+                <div class="section-intro">
+                    <p>{"Access everything you need through simple SMS or voice calls. No smartphone required."}</p>
+                </div>
             </div>
             <div class="feature-block on-demand">
                 <div class="feature-content">
@@ -462,13 +456,13 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     scroll-snap-type: y mandatory;
     overflow-y: scroll;
     -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; /* Firefox */
+    -ms-overflow-style: none;  /* Internet Explorer 10+ */
 }
 
-/* Hide scrollbar but keep functionality */
 .intro-section::-webkit-scrollbar {
-    display: none;
+    display: none; /* Safari and Chrome */
 }
-
 
 @media (max-width: 768px) {
     .intro-section {
@@ -566,7 +560,6 @@ let scroll_callback = Closure::wrap(Box::new(move || {
         position: fixed !important;
         top: 50% !important;
         left: 50% !important;
-        transform: translate(-50%, -50%) !important;
         width: 280px !important;
         height: 280px !important;
         margin: 0 !important;
@@ -578,7 +571,6 @@ let scroll_callback = Closure::wrap(Box::new(move || {
         max-width: 280px;
         height: auto;
         left: 50%;
-        transform: translate(-50%, -50%);
         top: 50%;
     }
 
@@ -609,48 +601,16 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     will-change: opacity;
     z-index: 5;
     scroll-snap-align: center;
-}
-.sticky-image {
-    position: sticky;
-    top: 20vh;
-    width: 400px;
-    height: 600px;
-    flex-shrink: 0;
-    margin-left: auto; /* Push to right side */
-    z-index: 5;
-    scroll-snap-align: start;
     scroll-snap-stop: always;
 }
 
 @media (max-width: 768px) {
-    .sticky-image {
-        height: 100vh;
-        width: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        scroll-snap-align: center;
-        scroll-snap-stop: always;
-        margin: 0;
-        padding: 2rem;
-        box-sizing: border-box;
-    }
-}
-
-@media (max-width: 768px) {
     .example-image {
-        position: relative;
-        max-width: 100%;
+        position: absolute;
+        max-width: 280px;
         height: auto;
-        margin: auto;
         scroll-snap-align: center;
         scroll-snap-stop: always;
-    }
-
-    .example-image.visible {
-        position: relative;
-        display: block;
-        opacity: 1;
     }
 }
 
@@ -672,6 +632,23 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     flex-shrink: 0;
     margin-left: auto; /* Push to right side */
     z-index: 5;
+    scroll-snap-align: center;
+    scroll-snap-stop: always;
+}
+
+@media (max-width: 768px) {
+    .sticky-image {
+        position: fixed !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        width: 480px !important;
+        height: 480px !important;
+        margin: 0 !important;
+        z-index: 10;
+        scroll-snap-align: center;
+        scroll-snap-stop: always;
+    }
 }
 
 .whatsapp-image, .email-image, .calendar-image {
@@ -702,7 +679,7 @@ let scroll_callback = Closure::wrap(Box::new(move || {
 
                         .example-image {
                             width: 100%;
-                            max-width: 300px;
+                            max-width: 100%;
                             margin: 0 auto;
                         }
 
@@ -2188,15 +2165,59 @@ let scroll_callback = Closure::wrap(Box::new(move || {
 
                     .section-header {
                         text-align: center;
-                        margin-bottom: 3rem;
+                        margin-bottom: 4rem;
                     }
 
                     .section-header h2 {
                         font-size: 3rem;
-                        margin-bottom: 1rem;
+                        margin-bottom: 2rem;
                         background: linear-gradient(45deg, #fff, #7EB2FF);
                         -webkit-background-clip: text;
                         -webkit-text-fill-color: transparent;
+                    }
+
+                    .section-intro {
+                        max-width: 600px;
+                        margin: 0 auto;
+                        text-align: center;
+                        padding: 2rem;
+                        background: rgba(26, 26, 26, 0.85);
+                        border: 1px solid rgba(30, 144, 255, 0.1);
+                        border-radius: 16px;
+                        margin-top: 3rem;
+                        backdrop-filter: blur(10px);
+                        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+                    }
+
+                    .section-intro h3 {
+                        font-size: 2rem;
+                        color: #fff;
+                        margin-bottom: 1rem;
+                        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+                    }
+
+                    .section-intro p {
+                        color: #e0e0e0;
+                        font-size: 1.2rem;
+                        line-height: 1.6;
+                        margin-bottom: 2rem;
+                        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+                        letter-spacing: 0.01em;
+                    }
+
+                    @media (max-width: 768px) {
+                        .section-intro {
+                            padding: 1.5rem;
+                            margin-top: 2rem;
+                        }
+
+                        .section-intro h3 {
+                            font-size: 1.5rem;
+                        }
+
+                        .section-intro p {
+                            font-size: 1rem;
+                        }
                     }
 
                     .section-subtitle {
