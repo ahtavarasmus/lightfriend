@@ -113,6 +113,8 @@ pub fn landing() -> Html {
 let scroll_callback = Closure::wrap(Box::new(move || {
                 // Handle intro section visibility and image transitions
                 if let Some(intro_section) = document.query_selector(".intro-section").ok().flatten() {
+                    // Add touch-action manipulation for better mobile scrolling
+                    let _ = intro_section.set_attribute("style", "touch-action: pan-y pinch-zoom;");
                     let intro_html = intro_section.clone().dyn_into::<web_sys::HtmlElement>().unwrap();
                     let scroll_pos = window_clone.scroll_y().unwrap();
                     let window_height = window_clone.inner_height().unwrap().as_f64().unwrap();
@@ -449,7 +451,7 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     width: 100%;
     opacity: 0;
     visibility: hidden;
-    transition: opacity 2s cubic-bezier(0.4, 0, 0.2, 1); /* Increased from 0.8s to 2s */
+    transition: opacity 2s cubic-bezier(0.4, 0, 0.2, 1);
     position: fixed;
     top: 0;
     left: 0;
@@ -457,6 +459,29 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     will-change: opacity;
     height: 100vh;
     z-index: 2;
+    scroll-snap-type: y mandatory;
+    overflow-y: scroll;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Hide scrollbar but keep functionality */
+.intro-section::-webkit-scrollbar {
+    display: none;
+}
+
+
+@media (max-width: 768px) {
+    .intro-section {
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .intro-section.visible {
+        background: rgba(26, 26, 26, 0.4);
+        backdrop-filter: blur(5px);
+    }
 }
 
 .intro-section.sticky {
@@ -509,54 +534,63 @@ let scroll_callback = Closure::wrap(Box::new(move || {
         flex-direction: column;
         text-align: center;
         gap: 2rem;
-        padding-top: 300px; /* Make space for the images */
+        padding-top: 2rem;
+    }
+
+    .intro-text {
+        text-align: center;
+        align-items: center;
+        margin-top: 0 !important;
+    }
+
+    .intro-text .hero-cta {
+        margin: 1.5rem auto;
+    }
+
+    .hero-image {
+        max-width: 400px;
+        position: relative;
+        top: 0;
+    }
+}
+
+@media (max-width: 768px) {
+    .intro-content {
+        flex-direction: column;
+        text-align: center;
+        gap: 2rem;
+        padding-top: 0;
     }
 
     .sticky-image {
-        position: absolute !important;
-        top: 0;
-        left: 50%;
-        transform: translateY(20%);
-        width: 100%;
-        max-width: 300px;
-        height: 100px;
-        margin: 0 auto;
+        position: fixed !important;
+        top: 50% !important;
+        left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        width: 280px !important;
+        height: 280px !important;
+        margin: 0 !important;
         z-index: 10;
-        display: flex;
-        justify-content: center;
-        align-items: center;
     }
 
     .example-image {
         position: absolute;
-        max-width: 100%;
+        max-width: 280px;
         height: auto;
         left: 50%;
         transform: translate(-50%, -50%);
-        margin: 0 auto;
+        top: 50%;
     }
 
     .intro-text {
-        width: 100%;
-        text-align: center;
-        align-items: center;
-        margin-top: 0;
-        padding: 0 1rem;
-    }
-}
-
-@media (max-width: 480px) {
-    .sticky-image {
-        max-width: 280px;
-        height: 280px;
-    }
-
-    .example-image {
-        max-width: 280px;
-    }
-
-    .intro-content {
-        padding-top: 280px;
+        margin-top: 100vh !important;
+        padding: 2rem;
+        background: rgba(26, 26, 26, 0.95);
+        border-radius: 16px;
+        border: 1px solid rgba(30, 144, 255, 0.1);
+        backdrop-filter: blur(10px);
+        position: relative;
+        z-index: 20;
     }
 }
 .example-image {
@@ -574,6 +608,50 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     max-width: 400px;
     will-change: opacity;
     z-index: 5;
+    scroll-snap-align: center;
+}
+.sticky-image {
+    position: sticky;
+    top: 20vh;
+    width: 400px;
+    height: 600px;
+    flex-shrink: 0;
+    margin-left: auto; /* Push to right side */
+    z-index: 5;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+}
+
+@media (max-width: 768px) {
+    .sticky-image {
+        height: 100vh;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        scroll-snap-align: center;
+        scroll-snap-stop: always;
+        margin: 0;
+        padding: 2rem;
+        box-sizing: border-box;
+    }
+}
+
+@media (max-width: 768px) {
+    .example-image {
+        position: relative;
+        max-width: 100%;
+        height: auto;
+        margin: auto;
+        scroll-snap-align: center;
+        scroll-snap-stop: always;
+    }
+
+    .example-image.visible {
+        position: relative;
+        display: block;
+        opacity: 1;
+    }
 }
 
 .example-image.visible {
