@@ -251,9 +251,8 @@ let scroll_callback = Closure::wrap(Box::new(move || {
             <div class="section-header">
                 <h2>{"Freedom, Not Isolation"}</h2>
                     <div class="section-intro">
-                        <p>{"Access everything you need through simple SMS or voice calls. No smartphone required."}</p>
                         <Link<Route> to={Route::Register} classes="forward-link">
-                            <button class="hero-cta">{"Start Your Journey"}</button>
+                            <button class="hero-cta">{"Start Your Dumbphone Journey"}</button>
                         </Link<Route>>
                     </div>
             </div>
@@ -2213,7 +2212,6 @@ let scroll_callback = Closure::wrap(Box::new(move || {
 
                     .section-header h2 {
                         font-size: 3rem;
-                        margin-bottom: 2rem;
                         background: linear-gradient(45deg, #fff, #7EB2FF);
                         -webkit-background-clip: text;
                         -webkit-text-fill-color: transparent;
@@ -2224,12 +2222,7 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                         margin: 0 auto;
                         text-align: center;
                         padding: 2rem;
-                        background: rgba(26, 26, 26, 0.85);
-                        border: 1px solid rgba(30, 144, 255, 0.1);
                         border-radius: 16px;
-                        margin-top: 3rem;
-                        backdrop-filter: blur(10px);
-                        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
                         display: flex;
                         flex-direction: column;
                         align-items: center;

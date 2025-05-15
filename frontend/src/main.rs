@@ -196,8 +196,7 @@ let toggle_menu = {
 
 let close_menu = {
     let menu_open = menu_open.clone();
-    Callback::from(move |e: MouseEvent| {
-        e.prevent_default();
+    Callback::from(move |_: MouseEvent| {
         menu_open.set(false);
     })
 };
@@ -221,6 +220,7 @@ let close_menu = {
                     <span></span>
                 </button>
                 <div class={menu_class}>
+                    <button class="close-menu" onclick={close_menu.clone()}>{"✕"}</button>
                     {
                         if !*logged_in {
                             html! {
