@@ -1,5 +1,7 @@
 use yew::prelude::*;
 use crate::auth::connect::Connect;
+use wasm_bindgen::prelude::*;
+use web_sys::{Element, HtmlElement, HtmlElement as HtmlElementTrait};
 use crate::pages::proactive::Proactive;
 use yew_router::prelude::*;
 use crate::Route;
@@ -103,6 +105,113 @@ pub fn is_logged_in() -> bool {
 
 #[function_component(Landing)]
 pub fn landing() -> Html {
+    use_effect(|| {
+        let window = web_sys::window().unwrap();
+        let document = window.document().unwrap();
+        let window_clone = window.clone();
+        
+let scroll_callback = Closure::wrap(Box::new(move || {
+                // Handle intro section visibility and image transitions
+                if let Some(intro_section) = document.query_selector(".intro-section").ok().flatten() {
+                    let intro_html = intro_section.clone().dyn_into::<web_sys::HtmlElement>().unwrap();
+                    let scroll_pos = window_clone.scroll_y().unwrap();
+                    let window_height = window_clone.inner_height().unwrap().as_f64().unwrap();
+                    
+                    let sticky_scroll = scroll_pos - (window_height * 0.5);  // Increased to 0.5 to delay appearance
+                    let sticky_duration = window_height * 4.0;  // Keep this the same
+                    
+                    // Calculate intro section opacity based on scroll position
+                    if sticky_scroll > sticky_duration * 0.75 {
+                        let fade_progress = ((sticky_scroll - (sticky_duration * 0.75)) / (sticky_duration * 0.25)).min(1.0);
+                        let intro_opacity = (1.0 - fade_progress).max(0.0);
+                        let _ = intro_html.set_attribute("style", &format!(
+                            "opacity: {}; position: fixed; top: 0; left: 0; width: 100%; z-index: 2;", 
+                            intro_opacity
+                        ));
+                    } else {
+                        let _ = intro_html.set_attribute("style", "opacity: 1; position: fixed; top: 0; left: 0; width: 100%; z-index: 2;");
+                    }
+                    
+                    // Show intro section when scrolled past hero
+                    let current_classes = intro_section.class_name();
+                    let base_classes = "intro-section";
+                    
+                    if scroll_pos > window_height * 0.4 {  // Decreased to 0.4 to start transition earlier
+                        if !current_classes.contains("visible") {
+
+                            intro_section.set_class_name(&format!("{} visible", base_classes));
+                        }
+                        
+                        // Calculate relative scroll position within the sticky section
+                        let sticky_scroll = scroll_pos - (window_height * 0.4);  // Increased to match the above change
+                        let sticky_duration = window_height * 2.0; // Reduced from 4.0 to 2.0
+                        
+                        // Handle image transitions based on sticky scroll position
+                        if let Some(whatsapp_image) = document.query_selector(".whatsapp-image").ok().flatten() {
+                            if let Some(email_image) = document.query_selector(".email-image").ok().flatten() {
+                                if let Some(calendar_image) = document.query_selector(".calendar-image").ok().flatten() {
+                                    // Reset all images first
+                                    whatsapp_image.set_class_name("whatsapp-image example-image");
+                                    email_image.set_class_name("email-image example-image");
+                                    calendar_image.set_class_name("calendar-image example-image");
+
+                                    if sticky_scroll < sticky_duration * 0.25 {
+                                        // First quarter: show WhatsApp image
+                                        whatsapp_image.set_class_name("whatsapp-image example-image visible");
+                                        let _ = intro_html.set_attribute("style", "opacity: 1");
+                                    } else if sticky_scroll < sticky_duration * 0.5 {
+                                        // Second quarter: show email image
+                                        email_image.set_class_name("email-image example-image visible");
+                                        let _ = intro_html.set_attribute("style", "opacity: 1");
+                                    } else if sticky_scroll < sticky_duration * 0.75 {
+                                        // Third quarter: show calendar image
+                                        calendar_image.set_class_name("calendar-image example-image visible");
+                                        let _ = intro_html.set_attribute("style", "opacity: 1");
+                                    } else {
+                                        // Final quarter: fade out intro section
+                                        calendar_image.set_class_name("calendar-image example-image visible");
+                                        let _ = intro_html.set_attribute("style", "opacity: 0");
+                                    }
+                                }
+                            }
+                        }
+
+                        // Add sticky class when in the sticky range
+                        if sticky_scroll < sticky_duration {
+                            if !current_classes.contains("sticky") {
+                                intro_section.set_class_name(&format!("{} visible sticky", base_classes));
+                            }
+                        } else {
+                            // Remove sticky class after duration
+                            if current_classes.contains("sticky") {
+                                intro_section.set_class_name(&format!("{} visible", base_classes));
+                            }
+                        }
+                    } else {
+                        // Reset to base classes when not visible
+                        intro_section.set_class_name(base_classes);
+                        let _ = intro_html.set_attribute("style", "opacity: 0");
+                    }
+                }
+
+        }) as Box<dyn FnMut()>);
+
+        window.add_event_listener_with_callback(
+            "scroll",
+            scroll_callback.as_ref().unchecked_ref(),
+        ).unwrap();
+
+        // Initial check
+        scroll_callback.as_ref().unchecked_ref::<web_sys::js_sys::Function>().call0(&JsValue::NULL).unwrap();
+
+        let scroll_callback = scroll_callback;  // Move ownership to closure
+        move || {
+            window.remove_event_listener_with_callback(
+                "scroll",
+                scroll_callback.as_ref().unchecked_ref(),
+            ).unwrap();
+        }
+    });
 
     let is_privacy_expanded = use_state(|| false);
     let onclick = {
@@ -119,30 +228,28 @@ pub fn landing() -> Html {
         <header class="hero">
                 <div class="hero-background"></div>
                 <div class="hero-content">
-                    <h1>{"Break Free Without Vanishing"}</h1>
+                    <div class="hero-title">{"Break Free Without Vanishing"}</div>
 
                 </div>
         </header>        
 
-            <div class="quote-section">
-                <p class="quote-text">
-                    {"The average person spends 4.5 hours a day on social media."}
-                </p>
-            </div>
+
 
             <section class="intro-section">
-                <div class="intro-content">
-                    <div class="hero-image">
-                        <img src="/assets/nokia_hand.png" alt="Hand holding a Nokia phone" />
+                    <div class="intro-content">
+                        <div class="intro-text">
+                            <h2>{"Your Digital Life, Simplified"}</h2>
+                            <p>{"Access everything you need through simple SMS or voice calls. No smartphone required."}</p>
+                            <Link<Route> to={Route::Register} classes="forward-link">
+                                <button class="hero-cta">{"Start Using Now"}</button>
+                            </Link<Route>>
+                        </div>
+                        <div class="sticky-image">
+                            <img src="/assets/whatsappexample.png" alt="WhatsApp example interface" class="example-image whatsapp-image" />
+                            <img src="/assets/emailexample.png" alt="Email example interface" class="example-image email-image" />
+                            <img src="/assets/calendarexample.png" alt="Calendar example interface" class="example-image calendar-image" />
+                        </div>
                     </div>
-                    <div class="intro-text">
-                        <h2>{"Your Digital Life, Simplified"}</h2>
-                        <p>{"Access everything you need through simple SMS or voice calls. No smartphone required."}</p>
-                        <Link<Route> to={Route::Register} classes="forward-link">
-                            <button class="hero-cta">{"Start Using Now"}</button>
-                        </Link<Route>>
-                    </div>
-                </div>
             </section>
 
 
@@ -337,29 +444,207 @@ pub fn landing() -> Html {
                 {r#"
 .intro-section {
     padding: 6rem 2rem;
-    background: #1a1a1a;
-    position: relative;
-    overflow: hidden;
-
+    background: transparent;
+    min-height: 100vh;
+    width: 100%;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 2s cubic-bezier(0.4, 0, 0.2, 1); /* Increased from 0.8s to 2s */
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    will-change: opacity;
+    height: 100vh;
+    z-index: 2;
 }
 
+.intro-section.sticky {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 2;
+}
+
+.intro-section.visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+    pointer-events: auto;
+    z-index: 3;
+    transition: opacity 0.8s ease;
+}
+
+.intro-section.visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+    pointer-events: auto;
+    z-index: 3;
+}
+
+.intro-section.sticky {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+}
+
+/* Add space after sticky section to prevent content jump */
+/* Remove this rule as we're handling spacing with margin-bottom */
 .intro-content {
     max-width: 1200px;
     margin: 0 auto;
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: 4rem;
+    position: relative;
+    padding: 0 2rem;
 }
 
-.hero-image {
-    flex: 1;
-    max-width: 500px;
+@media (max-width: 1024px) {
+    .intro-content {
+        flex-direction: column;
+        text-align: center;
+        gap: 2rem;
+        padding-top: 300px; /* Make space for the images */
+    }
+
+    .sticky-image {
+        position: absolute !important;
+        top: 0;
+        left: 50%;
+        transform: translateY(20%);
+        width: 100%;
+        max-width: 300px;
+        height: 100px;
+        margin: 0 auto;
+        z-index: 10;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .example-image {
+        position: absolute;
+        max-width: 100%;
+        height: auto;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        margin: 0 auto;
+    }
+
+    .intro-text {
+        width: 100%;
+        text-align: center;
+        align-items: center;
+        margin-top: 0;
+        padding: 0 1rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .sticky-image {
+        max-width: 280px;
+        height: 280px;
+    }
+
+    .example-image {
+        max-width: 280px;
+    }
+
+    .intro-content {
+        padding-top: 280px;
+    }
+}
+.example-image {
+    position: absolute;
+    top: 0;
+    left: 0;
     width: 100%;
-    animation: float-gentle 6s ease-in-out infinite;
+    height: 100%;
+    object-fit: contain;
+    border-radius: 12px;
+
+    opacity: 0;
+    transition: opacity 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+    max-width: 400px;
+    will-change: opacity;
+    z-index: 5;
 }
 
-.quote-section {
+.example-image.visible {
+    opacity: 1;
+    z-index: 6;
+}
+
+.example-image.visible {
+    opacity: 1;
+    z-index: 2;
+}
+
+.sticky-image {
+    position: sticky;
+    top: 20vh;
+    width: 400px;
+    height: 600px;
+    flex-shrink: 0;
+    margin-left: auto; /* Push to right side */
+    z-index: 5;
+}
+
+.whatsapp-image, .email-image, .calendar-image {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+}
+
+@media (max-width: 768px) {
+                        .intro-section {
+                            padding: 1rem;
+                        }
+
+                        .intro-content {
+                            flex-direction: column;
+                            text-align: center;
+                            padding: 1rem;
+                            gap: 2rem;
+                        }
+
+                        .sticky-image {
+                            width: 100%;
+                            height: 400px;
+                            margin: 2rem auto;
+                        }
+
+                        .example-image {
+                            width: 100%;
+                            max-width: 300px;
+                            margin: 0 auto;
+                        }
+
+                        .intro-text {
+                            text-align: center;
+                            align-items: center;
+                        }
+                    }
+
+                    .hero-image {
+                        flex: 1;
+                        max-width: 500px;
+                        width: 100%;
+                        position: sticky;
+                        top: 100px;
+                        height: fit-content;
+                        animation: float-gentle 6s ease-in-out infinite;
+                    }
+
+                    .quote-section {
                         padding: 4rem 2rem;
                         text-align: center;
                         background: #1a1a1a;
@@ -411,7 +696,10 @@ pub fn landing() -> Html {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    padding-top: 2rem;
+    position: relative;
+    z-index: 2;
+    padding-right: 2rem;
+    margin-top: 50vh; /* Added this line to move the text lower */
 }
 
 .intro-text h2 {
@@ -428,27 +716,29 @@ pub fn landing() -> Html {
     line-height: 1.6;
 }
 
-@media (max-width: 968px) {
-    .intro-content {
-        flex-direction: column;
-        text-align: center;
-        gap: 2rem;
-        padding-top: 2rem;
-    }
+                    @media (max-width: 968px) {
+                        .intro-content {
+                            flex-direction: column;
+                            text-align: center;
+                            gap: 2rem;
+                            padding-top: 2rem;
+                        }
 
-    .intro-text {
-        text-align: center;
-        align-items: center;
-    }
+                        .intro-text {
+                            text-align: center;
+                            align-items: center;
+                        }
 
-    .intro-text .hero-cta {
-        margin: 1.5rem auto;
-    }
+                        .intro-text .hero-cta {
+                            margin: 1.5rem auto;
+                        }
 
-    .hero-image {
-        max-width: 400px;
-    }
-}
+                        .hero-image {
+                            max-width: 400px;
+                            position: relative;
+                            top: 0;
+                        }
+                    }
 
 @media (max-width: 768px) {
     .intro-section {
@@ -689,10 +979,7 @@ pub fn landing() -> Html {
                         font-size: 0.9rem;
                     }
 
-                    .feature-block.privacy {
-                        background: rgba(30, 30, 30, 0.8);
-                        border: 1px solid rgba(30, 144, 255, 0.15);
-                    }
+
 
                     .feature-block.privacy:hover {
                         border-color: rgba(30, 144, 255, 0.4);
@@ -900,10 +1187,34 @@ pub fn landing() -> Html {
                         }
                     }
 
-                    .how-it-works {
-                        padding: 6rem 2rem;
-                        text-align: center;
-                    }
+.how-it-works {
+    padding: 6rem 2rem;
+    text-align: center;
+    position: relative;
+    z-index: 1;
+    margin-top: 0;
+}
+
+.how-it-works::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+        to bottom,
+        rgba(26, 26, 26, 0),
+        rgba(26, 26, 26, 0.7),
+        rgba(26, 26, 26, 0.9)
+    );
+    z-index: -1;
+    pointer-events: none;
+}
+
+.how-it-works * {
+    pointer-events: auto;
+}
 
                     .how-it-works h2 {
                         font-size: 3rem;
@@ -1119,16 +1430,17 @@ pub fn landing() -> Html {
                             font-size: 1rem;
                         }
                     }
-                    .landing-page {
+.landing-page {
                     position: relative;
                     min-height: 100vh;
-                    background-color: #1a1a1a;
+                    background-color: transparent;
                     color: #ffffff;
                     font-family: system-ui, -apple-system, sans-serif;
                     margin: 0 auto;
                     width: 100%;
                     overflow-x: hidden;
                     box-sizing: border-box;
+                    z-index: 1;
                 }
 
                 .hero {
@@ -1137,23 +1449,24 @@ pub fn landing() -> Html {
                     margin: 0 auto;
                 }
 
-                .main-features {
-                    max-width: 1200px;
-                    margin: 0 auto;
-                    padding: 2rem 2rem;
-                }
+.main-features {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem 2rem;
+    position: relative;
+    z-index: 1;
+    background: transparent;
+    opacity: 1;
+    margin-bottom: 4rem;
+}
 
 .feature-block {
     display: flex;
     align-items: center;
     gap: 4rem;
     margin-bottom: 6rem;
-    background: linear-gradient(
-        180deg,
-        rgba(30, 144, 255, 0.08) 0%,
-        rgba(30, 144, 255, 0.03) 100%
-    );
-    border: 1px solid rgba(30, 144, 255, 0.1);
+    background: rgba(30, 30, 30, 0.8);
+    border: 1px solid rgba(30, 144, 255, 0.15);
     border-radius: 24px;
     padding: 3rem;
     transition: transform 1.8s cubic-bezier(0.4, 0, 0.2, 1), 
@@ -1373,17 +1686,42 @@ pub fn landing() -> Html {
 
 
 
-                    .footer-cta {
-                        padding: 6rem 0;
-                        background: linear-gradient(
-                            to bottom,
-                            transparent,
-                            rgba(30, 144, 255, 0.05)
-                        );
-                        border-top: 1px solid rgba(30, 144, 255, 0.1);
-                        text-align: left;
-                        position: relative;
-                    }
+.footer-cta {
+    padding: 6rem 0;
+    background: linear-gradient(
+        to bottom,
+        transparent,
+        rgba(30, 144, 255, 0.05)
+    );
+    border-top: 1px solid rgba(30, 144, 255, 0.1);
+    text-align: left;
+    position: relative;
+    z-index: 1;
+    margin-top: 0;
+}
+
+.footer-cta {
+    position: relative;
+    z-index: 1;
+    margin-top: 0;
+    background: rgba(26, 26, 26, 0.9);
+}
+
+.footer-cta::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(
+        to bottom,
+        rgba(26, 26, 26, 0.9),
+        rgba(26, 26, 26, 0.95)
+    );
+    z-index: -1;
+    pointer-events: none;
+}
 
                     .footer-content {
                         max-width: 800px;
@@ -1409,44 +1747,103 @@ pub fn landing() -> Html {
                         line-height: 1.6;
                     }
 
-.hero {
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: flex-start;
-    text-align: center;
-    padding: 8rem 0;
-    position: relative;
-    background: #1a1a1a;
-    z-index: 1;
-}
-
-.landing-page {
-
-    position: relative;
-    z-index: 2;
-}
-
-.hero-content {
+                    .hero {
+                        height: 100vh;
                         display: flex;
                         flex-direction: column;
                         align-items: center;
-                        justify-content: center;
+                        justify-content: flex-start;
+                        text-align: center;
+                        padding: 8rem 0;
                         position: relative;
-                        z-index: 2;
-                        padding: 180px 20px 0 20px;
-                        max-width: 400px;
-                        margin: 0 auto;
-                        text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+                        background: transparent;
+                        z-index: 1;
+                        margin-bottom: 200vh; /* Increased to give more space for the transition */
                     }
 
-.hero-background {
+                    .landing-page {
+
+                        position: relative;
+                        z-index: 2;
+                    }
+
+                    .hero-content {
+                        position: relative;
+                        z-index: 2;
+                        width: 100%;
+                        height: 100%;
+                        display: flex;
+                        flex-direction: column;
+                        justify-content: flex-end;
+                        padding: 40px;
+                    }
+
+                    .hero-title {
+                        font-size: 3.4rem;
+                        line-height: 1.1;
+                        color: rgba(255, 255, 255, 0.85);
+                        font-weight: 200;
+                        max-width: 400px;
+                        font-family: 'Cormorant Garamond', serif;
+                        letter-spacing: 0.02em;
+                        text-align: left;
+                        margin-bottom: 20px;
                         position: absolute;
+                        bottom: 40px;
+                        left: 10%;
+                        text-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+                        font-style: italic;
+                        transform: translateZ(0);
+                        animation: whisperIn 1.5s ease-out forwards;
+                    }
+
+                    @keyframes whisperIn {
+                        0% {
+                            opacity: 0;
+                            transform: translateY(20px);
+                        }
+                        100% {
+                            opacity: 1;
+                            transform: translateY(0);
+                        }
+                    }
+
+                    /* Add subtle glow effect on hover */
+                    .hero-title:hover {
+                        color: rgba(255, 255, 255, 0.95);
+                        text-shadow: 
+                            0 4px 8px rgba(0, 0, 0, 0.2),
+                            0 0 20px rgba(255, 255, 255, 0.1);
+                        transition: all 0.5s ease;
+                    }
+
+
+
+                    @media (max-width: 768px) {
+                        .hero-content {
+                            padding: 20px;
+                        }
+
+                        .hero-title {
+                            font-size: 2.4rem;
+                            bottom: 20px;
+                            left: 20px;
+                            max-width: 300px;
+                            bottom: 100px;
+                        }
+
+                        .hero-subtitle {
+                            font-size: 1rem;
+                            right: 20px;
+                            max-width: 200px;
+                        }
+                    }
+.hero-background {
+                        position: fixed;
                         top: 0;
                         left: 0;
                         width: 100%;
-                        height: 100%;
+                        height: 100vh;
                         background-image: url('/assets/boy_holding_dumbphone_in_crowded_place.png');
                         background-size: cover;
                         background-position: center;
@@ -1455,15 +1852,19 @@ pub fn landing() -> Html {
                         z-index: 0;
 }
 
-/* Add a gradient overlay at the bottom of the hero background */
+/* Add a gradient overlay only at the bottom of the hero background */
 .hero-background::after {
                         content: '';
                         position: absolute;
                         bottom: 0;
                         left: 0;
                         width: 100%;
-                        height: 100px;
-                        background: linear-gradient(to bottom, transparent, #1a1a1a);
+                        height: 50%;
+                        background: linear-gradient(to bottom, 
+                            rgba(26, 26, 26, 0) 0%,
+
+                            rgba(26, 26, 26, 1) 100%
+                        );
 }
 
 

@@ -642,32 +642,7 @@ button[type="submit"].loading::after {
 }
 
 /* Modern Pricing Page Styles */
-.pricing-container {
-    margin: 2rem auto;
-    padding: 6rem 6rem;
-    min-height: 100vh;
-    background: #1a1a1a;
-}
 
-.pricing-header {
-    text-align: center;
-    margin-bottom: 4rem;
-}
-
-.pricing-header h1 {
-    font-size: 3.5rem;
-    background: linear-gradient(45deg, #fff, #7EB2FF);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    margin-bottom: 1.5rem;
-}
-
-.pricing-header p {
-    color: #999;
-    font-size: 1.2rem;
-    max-width: 600px;
-    margin: 0 auto;
-}
 
 .pricing-grid {
     display: grid;

@@ -166,7 +166,7 @@ pub fn nav(props: &NavProps) -> Html {
             
             let scroll_callback = Closure::wrap(Box::new(move || {
                 let scroll_top = document.document_element().unwrap().scroll_top();
-                is_scrolled.set(scroll_top > 600); // Increased threshold to match hero image height
+                is_scrolled.set(scroll_top > 2500); // Increased threshold to match hero image height
             }) as Box<dyn FnMut()>);
             
             window.add_event_listener_with_callback("scroll", scroll_callback.as_ref().unchecked_ref())

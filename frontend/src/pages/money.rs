@@ -430,36 +430,39 @@ pub fn pricing(props: &PricingProps) -> Html {
     margin: 0 auto;
     padding: 6rem 2rem;
     min-height: 100vh;
-    background: #1a1a1a;
+    background: transparent;
     position: relative;
     overflow: hidden;
-}
-
-.pricing-container::before,
-.pricing-container::after {
-    content: '';
-    position: absolute;
-    width: 300px;
-    height: 300px;
-    border-radius: 50%;
-    background: radial-gradient(
-        circle,
-        rgba(30, 144, 255, 0.1),
-        transparent
-    );
-    z-index: 0;
+    z-index: 1;
 }
 
 .pricing-container::before {
-    top: 10%;
-    left: 5%;
-    animation: float 20s infinite alternate;
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100vh;
+    background-image: url('/assets/human_looking_at_field.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    opacity: 1;
+    z-index: -1;
 }
 
 .pricing-container::after {
-    bottom: 10%;
-    right: 5%;
-    animation: float 15s infinite alternate-reverse;
+    content: '';
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 50%;
+    background: linear-gradient(to bottom, 
+        rgba(26, 26, 26, 0) 0%,
+        rgba(26, 26, 26, 1) 100%
+    );
+    z-index: -1;
 }
 
 @keyframes float {
@@ -473,39 +476,53 @@ pub fn pricing(props: &PricingProps) -> Html {
 
                 .pricing-header {
                     text-align: center;
+                    color: rgba(0, 0, 0, 0.8);
                     margin-bottom: 4rem;
                 }
 
-.pricing-header h1 {
-    font-size: 4.5rem;
-    line-height: 1.1;
-    margin-bottom: 1.5rem;
-    background: linear-gradient(
-        45deg,
-        #fff,
-        rgba(126, 178, 255, 0.8)
-    );
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    font-weight: 700;
-    max-width: 900px;
-    position: relative;
-    margin: 0 auto 1.5rem;
+                .pricing-header h1 {
+                    font-size: 3.4rem;
+                    line-height: 1.1;
+                    font-weight: 400;
+                    max-width: 400px;
+                    font-family: 'Cormorant Garamond', serif;
+                    letter-spacing: 0.02em;
+                    text-align: center;
+                    margin: 0 auto 20px;
+                    text-shadow: 0 2px 4px rgba(255, 255, 255, 0.3);
+                    font-style: italic;
+                    transform: translateZ(0);
+                    animation: whisperIn 1.5s ease-out forwards;
+                }
+
+@keyframes whisperIn {
+    0% {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
                 .pricing-header p {
-                    color: #999;
+                    color: rgba(0, 0, 0, 0.8);
                     font-size: 1.2rem;
                     max-width: 600px;
                     margin: 0 auto;
+                    text-shadow: 0 1px 2px rgba(255, 255, 255, 0.3);
+                    font-weight: 500;
                 }
 
-                .pricing-grid {
-                    display: grid;
-                    grid-template-columns: repeat(2, 1fr);
-                    gap: 2rem;
-                    margin: 4rem 0;
-                }
+.pricing-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2rem;
+    margin: 4rem 0;
+    position: relative;
+    z-index: 2;
+}
 
                 .pricing-grid.single {
                     grid-template-columns: 1fr;
@@ -761,11 +778,13 @@ pub fn pricing(props: &PricingProps) -> Html {
                     border-bottom: none;
                 }
 
-                .pricing-faq {
-                    margin-top: 6rem;
-                    padding-top: 6rem;
-                    border-top: 1px solid rgba(30, 144, 255, 0.1);
-                }
+.pricing-faq {
+    margin-top: 6rem;
+    padding-top: 6rem;
+    border-top: 1px solid rgba(30, 144, 255, 0.1);
+    position: relative;
+    z-index: 2;
+}
 
 .pricing-faq h2 {
     text-align: center;
@@ -778,13 +797,18 @@ pub fn pricing(props: &PricingProps) -> Html {
     text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
 }
 
-                .faq-grid {
-                    display: flex;
-                    flex-direction: column;
-                    gap: 2.5rem;
-                    max-width: 800px;
-                    margin: 0 auto;
-                }
+.faq-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 2.5rem;
+    max-width: 800px;
+    margin: 0 auto;
+    position: relative;
+    z-index: 2;
+    background: rgba(26, 26, 26, 0.9);
+    padding: 2rem;
+    border-radius: 16px;
+}
 
 
 .faq-item {
