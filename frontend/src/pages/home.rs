@@ -120,12 +120,15 @@ pub fn landing() -> Html {
                 <div class="hero-background"></div>
                 <div class="hero-content">
                     <h1>{"Break Free Without Vanishing"}</h1>
-                    <p class="hero-subtitle">
-                        {"The average person spends 4.5 hours a day on social media."}
-                    </p>
 
                 </div>
         </header>        
+
+            <div class="quote-section">
+                <p class="quote-text">
+                    {"The average person spends 4.5 hours a day on social media."}
+                </p>
+            </div>
 
             <section class="intro-section">
                 <div class="intro-content">
@@ -233,6 +236,7 @@ pub fn landing() -> Html {
             </div>
         </section>
 
+        /* i don't these fit rn
         <section class="testimonials">
             <h2>{"Real People, Real Freedom"}</h2>
             <div class="testimonials-grid">
@@ -283,6 +287,7 @@ pub fn landing() -> Html {
                 </div>
             </div>
         </section>
+        */
 
         <section class="how-it-works">
             <h2>{"Escape the Scroll in 3 Steps"}</h2>
@@ -353,6 +358,52 @@ pub fn landing() -> Html {
     width: 100%;
     animation: float-gentle 6s ease-in-out infinite;
 }
+
+.quote-section {
+                        padding: 4rem 2rem;
+                        text-align: center;
+                        background: #1a1a1a;
+                        position: relative;
+                    }
+
+                    .quote-text {
+                        font-size: 1.5rem;
+                        color: rgba(255, 255, 255, 0.9);
+
+                        max-width: 800px;
+                        margin: 0 auto;
+                        line-height: 1.6;
+
+                        position: relative;
+                    }
+
+
+
+                    @media (max-width: 768px) {
+                        .quote-section {
+                            padding: 3rem 1rem;
+                        }
+
+                        .quote-text {
+                            font-size: 1.2rem;
+                        }
+
+                        .quote-text::before,
+                        .quote-text::after {
+                            font-size: 2rem;
+                        }
+
+                        .quote-text::before {
+                            left: -1rem;
+                            top: -0.5rem;
+                        }
+
+                        .quote-text::after {
+                            right: -1rem;
+                            bottom: -1.5rem;
+                        }
+                    }
+
 
 .intro-text {
     flex: 1;
@@ -1756,7 +1807,8 @@ pub fn landing() -> Html {
 
                     .hero-subtitle {
                         font-size: 1.2rem;
-                        color: #999;
+                        color: rgba(255, 255, 255, 0.9);
+                        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
                         max-width: 600px;
                         margin: 0 auto 3rem;
                         line-height: 1.6;
