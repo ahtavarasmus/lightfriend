@@ -23,6 +23,7 @@ mod pages {
     pub mod money;
     pub mod termsprivacy;
     pub mod blog;
+    pub mod why;
     pub mod proactive;
 }
 
@@ -46,6 +47,7 @@ mod admin {
 use pages::{
     home::Home,
     blog::Blog,
+    why::Why,
     home::is_logged_in,
     termsprivacy::{TermsAndConditions, PrivacyPolicy},
     money::{Pricing, PricingWrapper},
@@ -64,6 +66,8 @@ use admin::dashboard::AdminDashboard;
 
 #[derive(Clone, Routable, PartialEq)]
 pub enum Route {
+    #[at("/why")]
+    Why,
     #[at("/the-other-stuff")]
     Blog,
     #[at("/")]
@@ -89,6 +93,10 @@ pub enum Route {
 
 fn switch(routes: Route) -> Html {
     match routes {
+        Route::Why => {
+            info!("Rendering Why page");
+            html! { <Why /> }
+        },
         Route::Blog => {
             info!("Rendering Blog page");
             html! { <Blog /> }
@@ -225,11 +233,18 @@ let close_menu = {
                     {
                         if !*logged_in {
                             html! {
-                                <div onclick={close_menu.clone()}>
-                                    <Link<Route> to={Route::Blog} classes="nav-link">
-                                        {"The Other Stuff"}
-                                    </Link<Route>>
-                                </div>
+                                <>
+                                    <div onclick={close_menu.clone()}>
+                                        <Link<Route> to={Route::Why} classes="nav-link">
+                                            {"Why?"}
+                                        </Link<Route>>
+                                    </div>
+                                    <div onclick={close_menu.clone()}>
+                                        <Link<Route> to={Route::Blog} classes="nav-link">
+                                            {"The Other Stuff"}
+                                        </Link<Route>>
+                                    </div>
+                                </>
                             }
                         } else {
                             html! {}
