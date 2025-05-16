@@ -554,8 +554,6 @@ let scroll_callback = Closure::wrap(Box::new(move || {
         position: absolute;
         max-width: 280px;
         height: auto;
-        scroll-snap-align: center;
-        scroll-snap-stop: always;
     }
 }
 
@@ -588,8 +586,6 @@ let scroll_callback = Closure::wrap(Box::new(move || {
         height: 480px !important;
         margin: 0 !important;
         z-index: 10;
-        scroll-snap-align: center;
-        scroll-snap-stop: always;
     }
 }
 
