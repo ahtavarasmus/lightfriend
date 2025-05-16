@@ -367,7 +367,6 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     will-change: opacity;
     height: 100vh;
     z-index: 1;
-    scroll-snap-type: y mandatory;
     overflow-y: scroll;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none; /* Firefox */
@@ -542,15 +541,12 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     height: 100%;
     object-fit: contain;
     border-radius: 12px;
-
     opacity: 0;
     transition: opacity 0.8s cubic-bezier(0.4, 0, 0.2, 1);
     pointer-events: none;
     max-width: 400px;
     will-change: opacity;
     z-index: 5;
-    scroll-snap-align: center;
-    scroll-snap-stop: always;
 }
 
 @media (max-width: 768px) {
@@ -581,10 +577,7 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     flex-shrink: 0;
     margin-left: auto; /* Push to right side */
     z-index: 5;
-    scroll-snap-align: center;
-    scroll-snap-stop: always;
 }
-
 @media (max-width: 768px) {
     .sticky-image {
         position: fixed !important;
