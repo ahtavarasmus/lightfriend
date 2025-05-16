@@ -805,7 +805,6 @@ pub fn pricing(props: &PricingProps) -> Html {
     margin: 0 auto;
     position: relative;
     z-index: 2;
-    background: rgba(26, 26, 26, 0.9);
     padding: 2rem;
     border-radius: 16px;
 }
