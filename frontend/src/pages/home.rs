@@ -340,7 +340,7 @@ pub fn Home() -> Html {
                         </div>
                         
                         <p class="instruction-text">
-                            {"Select the best number for you above."}
+                            {"Select the best number for you above. (If there is no local number for you, you can email rasmus@ahtava.com and he will figure out if its possible)"}
                             <br/>
                             <br/>
                         </p>
