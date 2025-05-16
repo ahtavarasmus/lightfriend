@@ -359,18 +359,20 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     width: 100%;
     opacity: 0;
     visibility: hidden;
-    transition: opacity 2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1);
     position: fixed;
     top: 0;
     left: 0;
     right: 0;
-    will-change: opacity;
+    will-change: opacity, transform;
     height: 100vh;
     z-index: 1;
     overflow-y: scroll;
+    transform: translateZ(0); /*force gpu acc*/
     -webkit-overflow-scrolling: touch;
+    -webkit-backface-visibility: hidden;
     scrollbar-width: none; /* Firefox */
-    -ms-overflow-style: none;  /* Internet Explorer 10+ */
+    backface-visibility: hidden;
     pointer-events: none;
 }
 
@@ -496,6 +498,26 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     }
 }
 
+.example-image {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    border-radius: 12px;
+    opacity: 0;
+    transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    pointer-events: none;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+    backface-visibility: hidden;
+    -webkit-backface-visibility: hidden;
+    max-width: 400px;
+    will-change: opacity;
+    z-index: 5;
+}
+
 @media (max-width: 768px) {
     .intro-content {
         flex-direction: column;
@@ -508,8 +530,13 @@ let scroll_callback = Closure::wrap(Box::new(move || {
         position: fixed !important;
         top: 50% !important;
         left: 50% !important;
+        transform: translate(-50%, -50%) !important;
         width: 280px !important;
         height: 280px !important;
+        transform: translate3d(-50%, -50%, 0) !important; /* Force GPU acceleration */
+        -webkit-transform: translate3d(-50%, -50%, 0) !important;
+        backface-visibility: hidden;
+        -webkit-backface-visibility: hidden;
         margin: 0 !important;
         z-index: 10;
     }
@@ -533,21 +560,7 @@ let scroll_callback = Closure::wrap(Box::new(move || {
         z-index: 20;
     }
 }
-.example-image {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    border-radius: 12px;
-    opacity: 0;
-    transition: opacity 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-    max-width: 400px;
-    will-change: opacity;
-    z-index: 5;
-}
+
 
 @media (max-width: 768px) {
     .example-image {
