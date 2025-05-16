@@ -159,7 +159,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <div class="pricing-card subscription">
                     <div class="popular-tag">{"All-Inclusive"}</div>
                     <div class="card-header">
-                        <h3>{"Subscription"}</h3>
+                        <h3>{"Escape Plan"}</h3>
                         <div class="price">
                             <span class="amount">{"€25.00"}</span>
                             <span class="period">{"/month"}</span>
