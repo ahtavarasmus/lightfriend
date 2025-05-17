@@ -39,11 +39,13 @@ pub fn connect(props: &ConnectProps) -> Html {
     let calendar_connected = use_state(|| false);
     let memory_connected = use_state(|| false);
     let email_connected = use_state(|| false);
+    let whatsapp_connected = use_state(|| false);
 
     {
         let calendar_connected = calendar_connected.clone();
         let memory_connected = memory_connected.clone();
         let email_connected = email_connected.clone();
+        let whatsapp_connected = whatsapp_connected.clone();
         use_effect_with_deps(
             move |_| {
                 if let Some(window) = web_sys::window() {
@@ -105,6 +107,24 @@ pub fn connect(props: &ConnectProps) -> Html {
                                     }
                                 }
                             });
+                            // whatsapp status check
+                            spawn_local({
+                                let whatsapp_connected = whatsapp_connected.clone();
+                                let token = token.clone();
+                                async move {
+                                    if let Ok(response) = Request::get(&format!("{}/api/auth/whatsapp/status", config::get_backend_url()))
+                                        .header("Authorization", &format!("Bearer {}", token))
+                                        .send()
+                                        .await
+                                    {
+                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                            if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                                whatsapp_connected.set(connected);
+                                            }
+                                        }
+                                    }
+                                }
+                            });
                         }
                     }
                 }
@@ -113,42 +133,7 @@ pub fn connect(props: &ConnectProps) -> Html {
             (),
         );
     }
-    let connecting_tasks = use_state(|| false);
-    let all_calendars = use_state(|| false);
     
-    // Track expanded state for each service group
-// Track WhatsApp connection status
-let whatsapp_connected = use_state(|| false);
-
-// Effect to fetch WhatsApp status
-{
-    let whatsapp_connected = whatsapp_connected.clone();
-    use_effect_with_deps(
-        move |_| {
-            if let Some(window) = web_sys::window() {
-                if let Ok(Some(storage)) = window.local_storage() {
-                    if let Ok(Some(token)) = storage.get_item("token") {
-                        spawn_local(async move {
-                            if let Ok(response) = Request::get(&format!("{}/api/auth/whatsapp/status", config::get_backend_url()))
-                                .header("Authorization", &format!("Bearer {}", token))
-                                .send()
-                                .await
-                            {
-                                if let Ok(data) = response.json::<serde_json::Value>().await {
-                                    if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
-                                        whatsapp_connected.set(connected);
-                                    }
-                                }
-                            }
-                        });
-                    }
-                }
-            }
-            || ()
-        },
-        (),
-    );
-}
 
 let group_states = use_state(|| {
     let mut map = std::collections::HashMap::new();
