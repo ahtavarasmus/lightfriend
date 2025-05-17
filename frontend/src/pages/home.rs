@@ -202,7 +202,7 @@ pub fn Home() -> Html {
                                     } else if credits > 0.0 && profile.credits_left <= 0.0 {
                                         html! {
                                             <span class="credits-status">
-                                                {format!("You have {}€ worth of credits left! ", credits)}
+                                                {format!("You have {:.2}€ worth of credits left! ", credits)}
                                             </span>
                                         }
                                     } else {
