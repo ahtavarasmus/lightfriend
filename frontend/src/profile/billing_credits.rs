@@ -861,7 +861,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                 <div class="billing-info">
                     //<PaymentMethodButton user_id={user_profile.id} /> 
                 </div>
-                <UsageGraph user_id={user_profile.id} />
+                //<UsageGraph user_id={user_profile.id} />
             </div>
         </div>
         <style>
