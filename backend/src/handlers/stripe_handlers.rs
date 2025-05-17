@@ -109,8 +109,13 @@ pub async fn create_subscription_checkout(
 
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
 
-    let price_id = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID")
-                            .expect("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID must be set in environment");
+    let price_id= if user.phone_number.starts_with("+1") {
+        std::env::var("STRIPE_SUBSCRIPTION_US_PRICE_ID")
+                            .expect("STRIPE_SUBSCRIPTION_US_PRICE_ID must be set in environment")
+    } else {
+        std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID")
+                            .expect("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID must be set in environment")
+    };
     
     let checkout_session = CheckoutSession::create(
         &client,
