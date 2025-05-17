@@ -42,18 +42,37 @@ pub async fn check_user_credits(
         // For discounted/tier 1 users, just check regular credits
         let required_credits = if event_type == "message" { message_cost } else { 0.0 };
         if user.credits < required_credits || user.credits < 0.0 {
-            // Send notification about depleted credits
-            if let Ok(conversation) = state.user_conversations.get_conversation(user, user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))).await {
-                let conversation_sid = conversation.conversation_sid.clone();
-                let twilio_number = conversation.twilio_number.clone();
-                tokio::spawn(async move {
-                    let _ = crate::api::twilio_utils::send_conversation_message(
-                        &conversation_sid,
-                        &twilio_number,
-                        "Insufficient credits. Please recharge to continue using the service.",
-                        false
-                    ).await;
-                });
+            // Check if enough time has passed since the last notification (24 hours)
+            let current_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+            
+            let should_notify = match user.last_credits_notification {
+                None => true,
+                Some(last_time) => (current_time - last_time) >= 24 * 3600 // 24 hours in seconds
+            };
+
+            if should_notify {
+                // Send notification about depleted credits
+                if let Ok(conversation) = state.user_conversations.get_conversation(user, user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))).await {
+                    let conversation_sid = conversation.conversation_sid.clone();
+                    let twilio_number = conversation.twilio_number.clone();
+                    
+                    // Update the last notification timestamp
+                    if let Err(e) = state.user_repository.update_last_credits_notification(user.id, current_time) {
+                        eprintln!("Failed to update last_credits_notification: {}", e);
+                    }
+                    
+                    tokio::spawn(async move {
+                        let _ = crate::api::twilio_utils::send_conversation_message(
+                            &conversation_sid,
+                            &twilio_number,
+                            "Insufficient credits. Please recharge to continue using the service.",
+                            false
+                        ).await;
+                    });
+                }
             }
             return Err("Insufficient credits.".to_string());
         }
@@ -62,18 +81,37 @@ pub async fn check_user_credits(
         let required_credits = if event_type == "message" { message_cost } else { 0.0 };
         
         if (user.credits_left < 0.0 || user.credits_left < required_credits) && (user.credits < 0.0 || user.credits < required_credits) {
-            // Send notification about depleted credits and monthly quota
-            if let Ok(conversation) = state.user_conversations.get_conversation(user, user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))).await {
-                let conversation_sid = conversation.conversation_sid.clone();
-                let twilio_number = conversation.twilio_number.clone();
-                tokio::spawn(async move {
-                    let _ = crate::api::twilio_utils::send_conversation_message(
-                        &conversation_sid,
-                        &twilio_number,
-                        "Your credits and monthly quota have been depleted. Please recharge your credits to continue using the service.",
-                        false
-                    ).await;
-                });
+            // Check if enough time has passed since the last notification (24 hours)
+            let current_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+            
+            let should_notify = match user.last_credits_notification {
+                None => true,
+                Some(last_time) => (current_time - last_time) >= 24 * 3600 // 24 hours in seconds
+            };
+
+            if should_notify {
+                // Send notification about depleted credits and monthly quota
+                if let Ok(conversation) = state.user_conversations.get_conversation(user, user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))).await {
+                    let conversation_sid = conversation.conversation_sid.clone();
+                    let twilio_number = conversation.twilio_number.clone();
+                    
+                    // Update the last notification timestamp
+                    if let Err(e) = state.user_repository.update_last_credits_notification(user.id, current_time) {
+                        eprintln!("Failed to update last_credits_notification: {}", e);
+                    }
+                    
+                    tokio::spawn(async move {
+                        let _ = crate::api::twilio_utils::send_conversation_message(
+                            &conversation_sid,
+                            &twilio_number,
+                            "Your credits and monthly quota have been depleted. Please recharge your credits to continue using the service.",
+                            false
+                        ).await;
+                    });
+                }
             }
             return Err("Insufficient credits. You have used all your monthly quota and don't have enough extra credits.".to_string());
         }
@@ -158,7 +196,7 @@ pub fn deduct_user_credits(
     println!("use regular credits: {}, sub_tier={:#?}", use_regular_credits, user.sub_tier);
     if use_regular_credits {
         // For discounted/tier 1 users, just deduct from regular credits
-        let new_credits = user.credits - credits_cost;
+        let new_credits = (user.credits - credits_cost).max(0.0);  // Ensure credits don't go below 0
         if let Err(e) = state.user_repository.update_user_credits(user_id, new_credits) {
             eprintln!("Failed to update user credits: {}", e);
             return Err("Failed to process credits".to_string());
@@ -190,7 +228,7 @@ pub fn deduct_user_credits(
             }
 
             // Deduct remaining cost from regular credits
-            let new_credits = user.credits - remaining_cost;
+            let new_credits = (user.credits - remaining_cost).max(0.0);  // Ensure credits don't go below 0
             if let Err(e) = state.user_repository.update_user_credits(user_id, new_credits) {
                 eprintln!("Failed to update user credits: {}", e);
                 return Err("Failed to process credits".to_string());

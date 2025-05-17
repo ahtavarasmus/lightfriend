@@ -54,6 +54,7 @@ pub struct User {
     pub discount: bool, // if user can get discounted credits(for early adopters)
     pub encrypted_matrix_password: Option<String>,
     pub encrypted_matrix_secret_storage_recovery_key: Option<String>,
+    pub last_credits_notification: Option<i32>, // Unix timestamp of last insufficient credits notification
 }
 
 #[derive(Queryable, Selectable, Insertable)]

@@ -770,6 +770,15 @@ impl UserRepository {
         Ok(())
     }
 
+
+    pub fn update_last_credits_notification(&self, user_id: i32, timestamp: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::last_credits_notification.eq(timestamp))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
     pub fn has_auto_topup_enabled(&self, user_id: i32) -> Result<bool, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let charge_when_under = users::table
