@@ -41,7 +41,7 @@ pub async fn check_user_credits(
     if use_regular_credits {
         // For discounted/tier 1 users, just check regular credits
         let required_credits = if event_type == "message" { message_cost } else { 0.0 };
-        if user.credits < required_credits {
+        if user.credits < required_credits || user.credits < 0.0 {
             // Send notification about depleted credits
             if let Ok(conversation) = state.user_conversations.get_conversation(user, user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))).await {
                 let conversation_sid = conversation.conversation_sid.clone();
@@ -61,7 +61,7 @@ pub async fn check_user_credits(
         // For regular users, check credits_left first, then regular credits
         let required_credits = if event_type == "message" { message_cost } else { 0.0 };
         
-        if user.credits_left < required_credits && user.credits < required_credits {
+        if (user.credits_left < 0.0 || user.credits_left < required_credits) && (user.credits < 0.0 || user.credits < required_credits) {
             // Send notification about depleted credits and monthly quota
             if let Ok(conversation) = state.user_conversations.get_conversation(user, user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))).await {
                 let conversation_sid = conversation.conversation_sid.clone();
