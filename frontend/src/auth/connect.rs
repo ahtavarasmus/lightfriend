@@ -25,13 +25,176 @@ pub struct Connect {
 }
 */
 
+#[derive(Clone, PartialEq)]
+struct ServiceGroupState {
+    expanded: bool,
+    service_count: usize,
+    connected_count: usize,
+}
+
 #[function_component(Connect)]
 pub fn connect(props: &ConnectProps) -> Html {
     let error = use_state(|| None::<String>);
     let connecting = use_state(|| false);
     let calendar_connected = use_state(|| false);
+    let memory_connected = use_state(|| false);
+    let email_connected = use_state(|| false);
+
+    {
+        let calendar_connected = calendar_connected.clone();
+        let memory_connected = memory_connected.clone();
+        let email_connected = email_connected.clone();
+        use_effect_with_deps(
+            move |_| {
+                if let Some(window) = web_sys::window() {
+                    if let Ok(Some(storage)) = window.local_storage() {
+                        if let Ok(Some(token)) = storage.get_item("token") {
+                            // Calendar status check
+                            spawn_local({
+                                let calendar_connected = calendar_connected.clone();
+                                let token = token.clone();
+                                async move {
+                                    if let Ok(response) = Request::get(&format!("{}/api/auth/google/calendar/status", config::get_backend_url()))
+                                        .header("Authorization", &format!("Bearer {}", token))
+                                        .send()
+                                        .await
+                                    {
+                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                            if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                                calendar_connected.set(connected);
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+
+                            // Memory (Tasks) status check
+                            spawn_local({
+                                let memory_connected = memory_connected.clone();
+                                let token = token.clone();
+                                async move {
+                                    if let Ok(response) = Request::get(&format!("{}/api/auth/google/tasks/status", config::get_backend_url()))
+                                        .header("Authorization", &format!("Bearer {}", token))
+                                        .send()
+                                        .await
+                                    {
+                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                            if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                                memory_connected.set(connected);
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+
+                            // Email status check
+                            spawn_local({
+                                let email_connected = email_connected.clone();
+                                let token = token.clone();
+                                async move {
+                                    if let Ok(response) = Request::get(&format!("{}/api/auth/imap/status", config::get_backend_url()))
+                                        .header("Authorization", &format!("Bearer {}", token))
+                                        .send()
+                                        .await
+                                    {
+                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                            if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                                email_connected.set(connected);
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+                || ()
+            },
+            (),
+        );
+    }
     let connecting_tasks = use_state(|| false);
     let all_calendars = use_state(|| false);
+    
+    // Track expanded state for each service group
+// Track WhatsApp connection status
+let whatsapp_connected = use_state(|| false);
+
+// Effect to fetch WhatsApp status
+{
+    let whatsapp_connected = whatsapp_connected.clone();
+    use_effect_with_deps(
+        move |_| {
+            if let Some(window) = web_sys::window() {
+                if let Ok(Some(storage)) = window.local_storage() {
+                    if let Ok(Some(token)) = storage.get_item("token") {
+                        spawn_local(async move {
+                            if let Ok(response) = Request::get(&format!("{}/api/auth/whatsapp/status", config::get_backend_url()))
+                                .header("Authorization", &format!("Bearer {}", token))
+                                .send()
+                                .await
+                            {
+                                if let Ok(data) = response.json::<serde_json::Value>().await {
+                                    if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                        whatsapp_connected.set(connected);
+                                    }
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+            || ()
+        },
+        (),
+    );
+}
+
+let group_states = use_state(|| {
+    let mut map = std::collections::HashMap::new();
+    map.insert("search", ServiceGroupState { expanded: false, service_count: 4, connected_count: 2 });
+    map.insert("calendar", ServiceGroupState { expanded: false, service_count: 1, connected_count: 0 });
+    map.insert("memory", ServiceGroupState { expanded: false, service_count: 1, connected_count: 0 });
+    map.insert("email", ServiceGroupState { expanded: false, service_count: 1, connected_count: 0 });
+    map.insert("messaging", ServiceGroupState { expanded: false, service_count: 2, connected_count: 0 });
+    map.insert("management", ServiceGroupState { expanded: false, service_count: 2, connected_count: 2 });
+    map
+});
+
+// Update messaging connected count when WhatsApp status changes
+{
+    let group_states = group_states.clone();
+    let whatsapp_connected = whatsapp_connected.clone();
+    use_effect_with_deps(
+        move |whatsapp_connected| {
+            let mut new_states = (*group_states).clone();
+            if let Some(state) = new_states.get_mut("messaging") {
+                state.connected_count = if **whatsapp_connected { 1 } else { 0 };
+            }
+            group_states.set(new_states);
+            || ()
+        },
+        whatsapp_connected,
+    );
+}
+
+    // Update email connected count when status changes
+    {
+        let group_states = group_states.clone();
+        let email_connected = email_connected.clone();
+        use_effect_with_deps(
+            move |email_connected| {
+                let mut new_states = (*group_states).clone();
+                if let Some(state) = new_states.get_mut("email") {
+                    state.connected_count = if **email_connected { 1 } else { 0 };
+                    state.expanded = false; 
+                }
+                group_states.set(new_states);
+                || ()
+            },
+            email_connected,
+        );
+    }
 
     // Predefined providers (you can expand this list)
     let providers = vec![
@@ -88,11 +251,37 @@ pub fn connect(props: &ConnectProps) -> Html {
 
                     // Information Search Services
                     <div class="service-group">
-                        <h3 class="service-group-title">
+                        <h3 class="service-group-title" 
+                            onclick={let group_states = group_states.clone();
+                                Callback::from(move |_| {
+                                    let mut new_states = (*group_states).clone();
+                                    if let Some(state) = new_states.get_mut("search") {
+                                        state.expanded = !state.expanded;
+                                    }
+                                    group_states.set(new_states);
+                                })
+                            }
+
+                        >
                             <i class="fa-solid fa-globe"></i>
                             {"Internet Search"}
+                            <div class="group-summary">
+                                <span class="service-count">{"3 tools ready!"}</span>
+                                <i class={if group_states.get("search").map(|s| s.expanded).unwrap_or(false) {
+                                    "fas fa-chevron-up"
+                                } else {
+                                    "fas fa-chevron-down"
+                                }}></i>
+                            </div>
                         </h3>
-                        <div class="service-list">
+<div class={classes!(
+                            "service-list",
+                            if group_states.get("search").map(|s| s.expanded).unwrap_or(false) {
+                                "expanded"
+                            } else {
+                                "collapsed"
+                            }
+                        )}>
                             // Perplexity
                             <div class="service-item">
                                 <div class="service-header">
@@ -199,43 +388,110 @@ pub fn connect(props: &ConnectProps) -> Html {
 
                     // Calendar Services
                     <div class="service-group">
-                        <h3 class="service-group-title">
+                        <h3 class="service-group-title"
+                            onclick={let group_states = group_states.clone();
+                                Callback::from(move |_| {
+                                    let mut new_states = (*group_states).clone();
+                                    if let Some(state) = new_states.get_mut("calendar") {
+                                        state.expanded = !state.expanded;
+                                    }
+                                    group_states.set(new_states);
+                                })
+                            }
+                        >
                             <i class="fas fa-calendar"></i>
                             {"Calendar"}
+                            <div class="group-summary">
+                                <span class="service-count">
+                                    {format!("{}/1 Connected", 
+                                        if *calendar_connected { 1 } else { 0 }
+                                    )}
+                                </span>
+                                <i class={if group_states.get("calendar").map(|s| s.expanded).unwrap_or(false) {
+                                    "fas fa-chevron-up"
+                                } else {
+                                    "fas fa-chevron-down"
+                                }}></i>
+                            </div>
                         </h3>
-                        <div class="service-list">
+                        <div class={classes!(
+                            "service-list",
+                            if group_states.get("calendar").map(|s| s.expanded).unwrap_or(false) {
+                                "expanded"
+                            } else {
+                                "collapsed"
+                            }
+                        )}>
                             <CalendarConnect 
                                 user_id={props.user_id} 
                                 sub_tier={props.sub_tier.clone()} 
                                 discount={props.discount}
+                                on_connection_change={{
+                                    let group_states = group_states.clone();
+                                    Some(Callback::from(move |connected: bool| {
+                                        let mut new_states = (*group_states).clone();
+                                        if let Some(state) = new_states.get_mut("calendar") {
+                                            state.connected_count = if connected { 1 } else { 0 };
+                                        }
+                                        group_states.set(new_states);
+                                    }))
+                                }}
                             />
-                        </div>
 
-                        <br/>
-                        // Outlook Calendar (Coming Soon)
-                        <div class="service-item coming-soon">
-                            <div class="service-header">
-                                <div class="service-name">
-                                    <img src="https://upload.wikimedia.org/wikipedia/commons/d/df/Microsoft_Office_Outlook_%282018%E2%80%93present%29.svg" alt="Outlook Calendar"/>
-                                    {"Outlook Calendar"}
-                                    <span class="coming-soon-tag">{"Coming Soon"}</span>
+                            <br/>
+                            // Outlook Calendar (Coming Soon)
+                            <div class="service-item coming-soon">
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        <img src="https://upload.wikimedia.org/wikipedia/commons/d/df/Microsoft_Office_Outlook_%282018%E2%80%93present%29.svg" alt="Outlook Calendar"/>
+                                        {"Outlook Calendar"}
+                                        <span class="coming-soon-tag">{"Coming Soon"}</span>
+                                    </div>
                                 </div>
+                                <p class="service-description">
+                                    {"Manage your Outlook Calendar events through SMS or voice calls."}
+                                </p>
+                                <button class="connect-button" disabled=true>
+                                    {"Connect"}
+                                </button>
                             </div>
-                            <p class="service-description">
-                                {"Manage your Outlook Calendar events through SMS or voice calls."}
-                            </p>
-                            <button class="connect-button" disabled=true>
-                                {"Connect"}
-                            </button>
                         </div>
                     </div>
                     <div class="service-group">
-                        <h3 class="service-group-title">
+                        <h3 class="service-group-title"
+                            onclick={let group_states = group_states.clone();
+                                Callback::from(move |_| {
+                                    let mut new_states = (*group_states).clone();
+                                    if let Some(state) = new_states.get_mut("memory") {
+                                        state.expanded = !state.expanded;
+                                    }
+                                    group_states.set(new_states);
+                                })
+                            }
+                        >
                             <i class="fa-solid fa-database"></i>
                             {"Memory"}
+                            <div class="group-summary">
+                                <span class="service-count">
+                                    {format!("{}/1 Connected", 
+                                        if *memory_connected { 1 } else { 0 }
+                                    )}
+                                </span>
+                                <i class={if group_states.get("memory").map(|s| s.expanded).unwrap_or(false) {
+                                    "fas fa-chevron-up"
+                                } else {
+                                    "fas fa-chevron-down"
+                                }}></i>
+                            </div>
                         </h3>
-                        <div class="service-list">
-                     
+                        <div class={classes!(
+                            "service-list",
+                            if group_states.get("memory").map(|s| s.expanded).unwrap_or(false) {
+                                "expanded"
+                            } else {
+                                "collapsed"
+                            }
+                        )}>
                             <TasksConnect 
                                 user_id={props.user_id}
                                 sub_tier={props.sub_tier.clone()}
@@ -247,12 +503,46 @@ pub fn connect(props: &ConnectProps) -> Html {
 
                     // Email Services
                     <div class="service-group">
-                        <h3 class="service-group-title">
+                        <h3 class="service-group-title"
+                            onclick={let group_states = group_states.clone();
+
+                                Callback::from(move |_| {
+                                    let mut new_states = (*group_states).clone();
+                                    if let Some(state) = new_states.get_mut("email") {
+                                        state.expanded = !state.expanded;
+
+                                    }
+                                    group_states.set(new_states);
+                                })
+                            }
+                        >
                             <i class="fas fa-envelope"></i>
                             {"Email"}
+                            <div class="group-summary">
+                                <span class="service-count">
+                                    {format!("{}/1 Connected", 
+                                        if let Some(state) = group_states.get("email") {
+                                            state.connected_count
+                                        } else {
+                                            0
+                                        }
+                                    )}
+                                </span>
+                                <i class={if group_states.get("email").map(|s| s.expanded).unwrap_or(false) {
+                                    "fas fa-chevron-up"
+                                } else {
+                                    "fas fa-chevron-down"
+                                }}></i>
+                            </div>
                         </h3>
-                        <div class="service-list">
-
+                        <div class={classes!(
+                            "service-list",
+                            if group_states.get("email").map(|s| s.expanded).unwrap_or(false) {
+                                "expanded"
+                            } else {
+                                "collapsed"
+                            }
+                        )}>
                             <EmailConnect 
                                 user_id={props.user_id}
                                 sub_tier={props.sub_tier.clone()}
@@ -265,11 +555,44 @@ pub fn connect(props: &ConnectProps) -> Html {
 
                     // Messaging Services 
                     <div class="service-group">
-                        <h3 class="service-group-title">
+                        <h3 class="service-group-title"
+                            onclick={let group_states = group_states.clone();
+                                Callback::from(move |_| {
+                                    let mut new_states = (*group_states).clone();
+                                    if let Some(state) = new_states.get_mut("messaging") {
+                                        state.expanded = !state.expanded;
+                                    }
+                                    group_states.set(new_states);
+                                })
+                            }
+                        >
                             <i class="fas fa-comments"></i>
                             {"Messaging"}
+                            <div class="group-summary">
+                                <span class="service-count">
+                                    {format!("{}/1 Connected", 
+                                        if let Some(state) = group_states.get("messaging") {
+                                            state.connected_count
+                                        } else {
+                                            0
+                                        }
+                                    )}
+                                </span>
+                                <i class={if group_states.get("messaging").map(|s| s.expanded).unwrap_or(false) {
+                                    "fas fa-chevron-up"
+                                } else {
+                                    "fas fa-chevron-down"
+                                }}></i>
+                            </div>
                         </h3>
-                        <div class="service-list">
+                        <div class={classes!(
+                            "service-list",
+                            if group_states.get("messaging").map(|s| s.expanded).unwrap_or(false) {
+                                "expanded"
+                            } else {
+                                "collapsed"
+                            }
+                        )}>
 
                             <WhatsappConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount}/>
                             {
@@ -307,11 +630,36 @@ pub fn connect(props: &ConnectProps) -> Html {
 
                     // Management Tools
                     <div class="service-group">
-                        <h3 class="service-group-title">
+                        <h3 class="service-group-title"
+                            onclick={let group_states = group_states.clone();
+                                Callback::from(move |_| {
+                                    let mut new_states = (*group_states).clone();
+                                    if let Some(state) = new_states.get_mut("management") {
+                                        state.expanded = !state.expanded;
+                                    }
+                                    group_states.set(new_states);
+                                })
+                            }
+                        >
                             <i class="fa-solid fa-plus"></i>
                             {"Management tools"}
+                            <div class="group-summary">
+                                <span class="service-count">{"2 tools ready!"}</span>
+                                <i class={if group_states.get("management").map(|s| s.expanded).unwrap_or(false) {
+                                    "fas fa-chevron-up"
+                                } else {
+                                    "fas fa-chevron-down"
+                                }}></i>
+                            </div>
                         </h3>
-                        <div class="service-list">
+                        <div class={classes!(
+                            "service-list",
+                            if group_states.get("management").map(|s| s.expanded).unwrap_or(false) {
+                                "expanded"
+                            } else {
+                                "collapsed"
+                            }
+                        )}>
                             // Waiting Checks
                             <div class="service-item">
                                 <div class="service-header">
@@ -407,6 +755,214 @@ pub fn connect(props: &ConnectProps) -> Html {
                         </div>
                     }
 <style>
+        {r#"
+.group-summary {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.9rem;
+    color: #999;
+}
+
+.service-count {
+
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
+}
+
+/* Internet Search */
+.service-group:nth-child(1) .service-count {
+    background: rgba(96, 165, 250, 0.1);
+    color: #60A5FA;
+}
+
+/* Calendar */
+.service-group:nth-child(2) .service-count {
+    background: rgba(167, 139, 250, 0.1);
+    color: #A78BFA;
+}
+
+/* Memory */
+.service-group:nth-child(3) .service-count {
+    background: rgba(52, 211, 153, 0.1);
+    color: #34D399;
+}
+
+/* Email */
+.service-group:nth-child(4) .service-count {
+    background: rgba(245, 158, 11, 0.1);
+    color: #F59E0B;
+}
+
+/* Messaging */
+.service-group:nth-child(5) .service-count {
+    background: rgba(236, 72, 153, 0.1);
+    color: #EC4899;
+}
+
+/* Management */
+.service-group:nth-child(6) .service-count {
+    background: rgba(34, 211, 238, 0.1);
+    color: #22D3EE;
+}
+
+.service-group-title {
+    cursor: pointer;
+    user-select: none;
+    transition: all 0.3s ease;
+}
+
+.service-group-title:hover {
+    color: #1E90FF;
+}
+
+.service-group-title i.fa-chevron-up,
+.service-group-title i.fa-chevron-down {
+    font-size: 0.8rem;
+    transition: transform 0.3s ease;
+}
+
+.service-group-title:hover i.fa-chevron-up,
+.service-group-title:hover i.fa-chevron-down {
+    transform: translateY(-2px);
+}
+
+.service-list {
+    transition: all 0.3s ease-in-out;
+    overflow: hidden;
+}
+
+.service-list.collapsed {
+    max-height: 0;
+    opacity: 0;
+    margin: 0;
+    padding: 0;
+}
+
+.service-list.expanded {
+    max-height: 2000px;
+    opacity: 1;
+    margin-top: 1.5rem;
+}
+
+.service-group {
+    margin-bottom: 2rem;
+    background: rgba(30, 30, 30, 0.7);
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    border-radius: 16px;
+    padding: 1.5rem;
+    backdrop-filter: blur(10px);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.service-group-title {
+    font-size: 1.2rem;
+
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+/* Internet Search - Blue */
+.service-group:nth-child(1) .service-group-title {
+    color: #60A5FA;
+}
+.service-group:nth-child(1) .service-group-title:hover {
+    background: rgba(96, 165, 250, 0.1);
+}
+
+/* Calendar - Purple */
+.service-group:nth-child(2) .service-group-title {
+    color: #A78BFA;
+}
+.service-group:nth-child(2) .service-group-title:hover {
+    background: rgba(167, 139, 250, 0.1);
+}
+
+/* Memory - Green */
+.service-group:nth-child(3) .service-group-title {
+    color: #34D399;
+}
+.service-group:nth-child(3) .service-group-title:hover {
+    background: rgba(52, 211, 153, 0.1);
+}
+
+/* Email - Orange */
+.service-group:nth-child(4) .service-group-title {
+    color: #F59E0B;
+}
+.service-group:nth-child(4) .service-group-title:hover {
+    background: rgba(245, 158, 11, 0.1);
+}
+
+/* Messaging - Pink */
+.service-group:nth-child(5) .service-group-title {
+    color: #EC4899;
+}
+.service-group:nth-child(5) .service-group-title:hover {
+    background: rgba(236, 72, 153, 0.1);
+}
+
+/* Management - Cyan */
+.service-group:nth-child(6) .service-group-title {
+    color: #22D3EE;
+}
+.service-group:nth-child(6) .service-group-title:hover {
+    background: rgba(34, 211, 238, 0.1);
+}
+
+.service-group-title:hover {
+    background: rgba(30, 144, 255, 0.1);
+}
+
+.service-item {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+    transition: all 0.3s ease;
+}
+
+.service-item:last-child {
+    margin-bottom: 0;
+}
+
+.service-item:hover {
+    transform: translateY(-2px);
+    border-color: rgba(30, 144, 255, 0.2);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.service-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+}
+
+.service-name {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 1.1rem;
+    color: #fff;
+}
+
+.service-description {
+    color: #999;
+    font-size: 0.95rem;
+    line-height: 1.5;
+    margin-bottom: 1rem;
+}
 {"
 .connect-section {
     max-width: 800px;
@@ -878,9 +1434,8 @@ pub fn connect(props: &ConnectProps) -> Html {
 
 
 
-                        "}
+                        "#}
                     </style>
                 </div>
             }
-
 }

@@ -530,761 +530,62 @@ pub fn connected_services(props: &Props) -> Html {
                                             {"Enable proactive notifications for IMAP email based on your filters."}
                                         </p>
                                     </div>
-                                    <div class="filter-section">
-                                        <h3>{"Filter Activity Log"}</h3>
-                                        <div class="judgment-list">
-                                            {
-                                                if let Some(judgments) = &*email_judgments {
-                                                    judgments.iter().map(|judgment| {
-                                                        let date = format_timestamp(judgment.email_timestamp);
-                                                        let processed_date = format_timestamp(judgment.processed_at);
-                                                        html! {
-                                                            <div class={classes!(
-                                                                "judgment-item",
-                                                                if judgment.should_notify { "notify" } else { "no-notify" }
-                                                            )}>
-                                                                <div class="judgment-header">
-                                                                    <span class="judgment-date">{date}</span>
-                                                                    <span class={classes!(
-                                                                        "judgment-status",
-                                                                        if judgment.should_notify { "notify" } else { "no-notify" }
-                                                                    )}>
-                                                                        {if judgment.should_notify { "Notified" } else { "Skipped" }}
-                                                                    </span>
-                                                                </div>
-                                                                <div class="judgment-score">
-                                                                    <span class="score-label">{"Importance Score: "}</span>
-                                                                    <span class="score-value">{judgment.score}{" / 10"}</span>
-                                                                </div>
-                                                                <div class="judgment-reason">
-                                                                    <span class="reason-label">{"Reason: "}</span>
-                                                                    <span class="reason-text">{&judgment.reason}</span>
-                                                                </div>
-                                                                <div class="judgment-processed">
-                                                                    <span class="processed-label">{"Processed: "}</span>
-                                                                    <span class="processed-date">{processed_date}</span>
-                                                                </div>
-                                                            </div>
-                                                        }
-                                                    }).collect::<Html>()
-                                                } else {
-                                                    html! {
-                                                        <div class="loading-judgments">
-                                                            {"Loading filter activity..."}
-                                                        </div>
-                                                    }
-                                                }
-                                            }
-                                        </div>
-                                    </div>
-
-                                    <div class="filter-section">
-                                        <h3>{"Keywords"}</h3>
-                                        <div class="keyword-input">
-                                        <input
-                                            type="text"
-                                            placeholder="Add new keyword"
-                                            value={(*new_keyword).clone()}
-                                            onchange={
-                                                let new_keyword = new_keyword.clone();
-                                                move |e: Event| {
-                                                    let input: HtmlInputElement = e.target_unchecked_into();
-                                                    new_keyword.set(input.value());
-                                                }
-                                            }
-                                            onkeypress={
-                                                let new_keyword = new_keyword.clone();
-                                                let services_state = services_state.clone();
-                                                let selected_service = selected_service.clone();
-                                                Callback::from(move |e: KeyboardEvent| {
-                                                    if e.key() == "Enter" {
-                                                        e.prevent_default();
-                                                        let keyword = (*new_keyword).clone();
-                                                        if !keyword.is_empty() {
-                                                            if let Some(service_type) = (*selected_service).clone() {
-                                                                let services_state = services_state.clone();
-                                                                let new_keyword = new_keyword.clone();
-                                                                wasm_bindgen_futures::spawn_local(async move {
-                                                                    if let Some(token) = window()
-                                                                        .and_then(|w| w.local_storage().ok())
-                                                                        .flatten()
-                                                                        .and_then(|storage| storage.get_item("token").ok())
-                                                                        .flatten()
-                                                                    {
-                                                                        let request = Request::post(&format!("{}/api/filters/keyword/{}", config::get_backend_url(), service_type))
-                                                                            .header("Authorization", &format!("Bearer {}", token))
-                                                                            .json(&json!({ "keyword": keyword, "service_type": service_type.clone() }))
-                                                                            .expect("Failed to build request");
-
-                                                                        if let Ok(_) = request.send().await {
-                                                                            // Refresh the keywords list after adding
-                                                                            if let Ok(keywords_response) = Request::get(&format!("{}/api/filters/keywords/{}", config::get_backend_url(), service_type))
-                                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                                .send()
-                                                                                .await
-                                                                            {
-                                                                                if let Ok(keywords) = keywords_response.json::<Vec<String>>().await {
-                                                                                    let mut updated_services = (*services_state).clone();
-                                                                                    if let Some(service) = updated_services.iter_mut().find(|s| s.service_type == service_type) {
-                                                                                service.filter_settings = Some(FilterSettings {
-                                                                                    keywords,
-                                                                                    priority_senders: Vec::new(),
-                                                                                    waiting_checks: Vec::new(),
-                                                                                    importance_priority: None,
-                                                                                });
-                                                                            }
-                                                                            services_state.set(updated_services);
-                                                                            new_keyword.set(String::new());
-                                                                        }
+                                    {
+                                        if *is_proactive {
+                                            html! {
+                                                <div class="filter-section">
+                                                    <h3>{"Filter Activity Log"}</h3>
+                                                    <div class="judgment-list">
+                                                        {
+                                                            if let Some(judgments) = &*email_judgments {
+                                                                judgments.iter().map(|judgment| {
+                                                                    let date = format_timestamp(judgment.email_timestamp);
+                                                                    let processed_date = format_timestamp(judgment.processed_at);
+                                                                    html! {
+                                                                        <div class={classes!(
+                                                                            "judgment-item",
+                                                                            if judgment.should_notify { "notify" } else { "no-notify" }
+                                                                        )}>
+                                                                            <div class="judgment-header">
+                                                                                <span class="judgment-date">{date}</span>
+                                                                                <span class={classes!(
+                                                                                    "judgment-status",
+                                                                                    if judgment.should_notify { "notify" } else { "no-notify" }
+                                                                                )}>
+                                                                                    {if judgment.should_notify { "Notified" } else { "Skipped" }}
+                                                                                </span>
+                                                                            </div>
+                                                                            <div class="judgment-score">
+                                                                                <span class="score-label">{"Importance Score: "}</span>
+                                                                                <span class="score-value">{judgment.score}{" / 10"}</span>
+                                                                            </div>
+                                                                            <div class="judgment-reason">
+                                                                                <span class="reason-label">{"Reason: "}</span>
+                                                                                <span class="reason-text">{&judgment.reason}</span>
+                                                                            </div>
+                                                                            <div class="judgment-processed">
+                                                                                <span class="processed-label">{"Processed: "}</span>
+                                                                                <span class="processed-date">{processed_date}</span>
+                                                                            </div>
+                                                                        </div>
                                                                     }
-                                                                }
-                                                            }
-                                                            });
-                                                            }
-                                                        }
-                                                    }
-                                                })
-                                            }
-                                        />
-                                        <button onclick={
-                                            let new_keyword = new_keyword.clone();
-                                            let services_state = services_state.clone();
-                                            let selected_service = selected_service.clone();
-                                            Callback::from(move |_| {
-                                                let keyword = (*new_keyword).clone();
-                                                if !keyword.is_empty() {
-                                                    if let Some(service_type) = (*selected_service).clone() {
-                                                        let services_state = services_state.clone();
-                                                        let new_keyword = new_keyword.clone();
-                                                        wasm_bindgen_futures::spawn_local(async move {
-                                                            if let Some(token) = window()
-                                                                .and_then(|w| w.local_storage().ok())
-                                                                .flatten()
-                                                                .and_then(|storage| storage.get_item("token").ok())
-                                                                .flatten()
-                                                            {
-                                                                let request = Request::post(&format!("{}/api/filters/keyword/{}", config::get_backend_url(), service_type))
-                                                                    .header("Authorization", &format!("Bearer {}", token))
-                                                                    .json(&json!({ "keyword": keyword, "service_type": service_type.clone() }))
-                                                                    .expect("Failed to build request");
-
-                                                                if let Ok(_) = request.send().await {
-                                                                    // Refresh the keywords list after adding
-                                                                    if let Ok(keywords_response) = Request::get(&format!("{}/api/filters/keywords/{}", config::get_backend_url(), service_type))
-                                                                        .header("Authorization", &format!("Bearer {}", token))
-                                                                        .send()
-                                                                        .await
-                                                                    {
-                                                                        if let Ok(keywords) = keywords_response.json::<Vec<String>>().await {
-                                                                            let mut updated_services = (*services_state).clone();
-                                                                            if let Some(service) = updated_services.iter_mut().find(|s| s.service_type == service_type) {
-                                                                            service.filter_settings = Some(FilterSettings {
-                                                                                    keywords,
-                                                                                    priority_senders: Vec::new(),
-                                                                                    waiting_checks: Vec::new(),
-                                                                                    importance_priority: None,
-                                                                                });
-                                                                            }
-                                                                            services_state.set(updated_services);
-                                                                            new_keyword.set(String::new());
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        });
-                                                    }
-                                                }
-                                            })
-                                        }>{"Add"}</button>
-                                </div>
-
-                                        <ul class="keyword-list">
-                                            {
-                                                settings.keywords.iter().map(|keyword| {
-                                                    let keyword_clone = keyword.clone();
-                                                    let services_state = services_state.clone();
-                                                    let selected_service = selected_service.clone();
-                                                    html! {
-                                                        <li class="keyword-item">
-                                                            <span>{keyword}</span>
-                                                            <button class="delete-btn" onclick={
-                                                                let keyword = keyword_clone.clone();
-                                                                let services_state = services_state.clone();
-                                                                let selected_service = selected_service.clone();
-                                                                Callback::from(move |_| {
-                                                                    let keyword = keyword.clone();
-                                                                    let services_state = services_state.clone();
-                                                                    let selected_service = selected_service.clone();
-                                                                    
-                                                                    if let Some(service_type) = (*selected_service).clone() {
-                                                                        wasm_bindgen_futures::spawn_local(async move {
-                                                                            if let Some(token) = window()
-                                                                                .and_then(|w| w.local_storage().ok())
-                                                                                .flatten()
-                                                                                .and_then(|storage| storage.get_item("token").ok())
-                                                                                .flatten()
-                                                                            {
-                                                                                let request = Request::delete(&format!("{}/api/filters/keyword/{}/{}", config::get_backend_url(), service_type, keyword))
-                                                                                    .header("Authorization", &format!("Bearer {}", token))
-                                                                                    .send()
-                                                                                    .await;
-
-                                                                                if let Ok(_) = request {
-                                                                                    // Refresh the keywords list after deleting
-                                                                                    if let Ok(keywords_response) = Request::get(&format!("{}/api/filters/keywords/{}", config::get_backend_url(), service_type))
-                                                                                        .header("Authorization", &format!("Bearer {}", token))
-                                                                                        .send()
-                                                                                        .await
-                                                                                    {
-                                                                                        if let Ok(keywords) = keywords_response.json::<Vec<String>>().await {
-                                                                                            let mut updated_services = (*services_state).clone();
-                                                                                            if let Some(service) = updated_services.iter_mut().find(|s| s.service_type == service_type) {
-                                                                                service.filter_settings = Some(FilterSettings {
-                                                                                    keywords,
-                                                                                    priority_senders: Vec::new(),
-                                                                                    waiting_checks: Vec::new(),
-                                                                                    importance_priority: None,
-                                                                                });
-
-                                                                                            }
-                                                                                            services_state.set(updated_services);
-                                                                                        }
-
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                        });
-                                                                    }
-                                                                })
-                                                            }>{"×"}</button>
-                                                        </li>
-                                                    }
-                                                }).collect::<Html>()
-                                            }
-                                        </ul>
-                                    </div>
-
-                                    <div class="filter-section">
-                                        <h3>{"Priority Senders"}</h3>
-                                        <div class="filter-input">
-                                            <input
-                                                type="text"
-                                                placeholder="Add priority sender"
-                                                value={(*new_priority_sender).clone()}
-                                                onchange={
-                                                    let new_priority_sender = new_priority_sender.clone();
-                                                    move |e: Event| {
-                                                        let input: HtmlInputElement = e.target_unchecked_into();
-                                                        new_priority_sender.set(input.value());
-                                                    }
-                                                }
-                                                onkeypress={
-                                                    let new_priority_sender = new_priority_sender.clone();
-                                                    let services_state = services_state.clone();
-                                                    let selected_service = selected_service.clone();
-                                                    Callback::from(move |e: KeyboardEvent| {
-                                                        if e.key() == "Enter" {
-                                                            e.prevent_default();
-                                                            let sender = (*new_priority_sender).clone();
-                                                            if !sender.is_empty() {
-                                                                if let Some(service_type) = (*selected_service).clone() {
-                                                                    let services_state = services_state.clone();
-                                                                    let new_priority_sender = new_priority_sender.clone();
-                                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                                        if let Some(token) = window()
-                                                                            .and_then(|w| w.local_storage().ok())
-                                                                            .flatten()
-                                                                            .and_then(|storage| storage.get_item("token").ok())
-                                                                            .flatten()
-                                                                        {
-                                                                            let request = Request::post(&format!("{}/api/filters/priority-sender/{}", config::get_backend_url(), service_type))
-                                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                                .json(&json!({ "sender": sender, "service_type": service_type.clone() }))
-                                                                                .expect("Failed to build request");
-
-                                                                            if let Ok(_) = request.send().await {
-                                                                                // Refresh the priority senders list after adding
-                                                                                if let Ok(senders_response) = Request::get(&format!("{}/api/filters/priority-senders/{}", config::get_backend_url(), service_type))
-                                                                                    .header("Authorization", &format!("Bearer {}", token))
-                                                                                    .send()
-                                                                                    .await
-                                                                                {
-                                                                                    if let Ok(senders) = senders_response.json::<Vec<PrioritySender>>().await {
-                                                                                        let mut updated_services = (*services_state).clone();
-                                                                                        if let Some(service) = updated_services.iter_mut().find(|s| s.service_type == service_type) {
-                                                                                            if let Some(settings) = &mut service.filter_settings {
-                                                                                                settings.priority_senders = senders;
-                                                                                            }
-                                                                                        }
-                                                                                        services_state.set(updated_services);
-                                                                                        new_priority_sender.set(String::new());
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    });
+                                                                }).collect::<Html>()
+                                                            } else {
+                                                                html! {
+                                                                    <div class="loading-judgments">
+                                                                        {"Loading filter activity..."}
+                                                                    </div>
                                                                 }
                                                             }
                                                         }
-                                                    })
-                                                }
-                                            />
-                                            <button onclick={
-                                                let new_priority_sender = new_priority_sender.clone();
-                                                let services_state = services_state.clone();
-                                                let selected_service = selected_service.clone();
-                                                Callback::from(move |_| {
-                                                    let sender = (*new_priority_sender).clone();
-                                                    if !sender.is_empty() {
-                                                        if let Some(service_type) = (*selected_service).clone() {
-                                                            let services_state = services_state.clone();
-                                                            let new_priority_sender = new_priority_sender.clone();
-                                                            wasm_bindgen_futures::spawn_local(async move {
-                                                                if let Some(token) = window()
-                                                                    .and_then(|w| w.local_storage().ok())
-                                                                    .flatten()
-                                                                    .and_then(|storage| storage.get_item("token").ok())
-                                                                    .flatten()
-                                                                {
-                                                                    let request = Request::post(&format!("{}/api/filters/priority-sender/{}", config::get_backend_url(), service_type))
-                                                                        .header("Authorization", &format!("Bearer {}", token))
-                                                                        .json(&json!({ "sender": sender, "service_type": service_type.clone() }))
-                                                                        .expect("Failed to build request");
-
-                                                                    if let Ok(_) = request.send().await {
-                                                                        // Refresh the priority senders list after adding
-                                                                        if let Ok(senders_response) = Request::get(&format!("{}/api/filters/priority-senders/{}", config::get_backend_url(), service_type))
-                                                                            .header("Authorization", &format!("Bearer {}", token))
-                                                                            .send()
-                                                                            .await
-                                                                        {
-                                                                            if let Ok(senders) = senders_response.json::<Vec<PrioritySender>>().await {
-                                                                                let mut updated_services = (*services_state).clone();
-                                                                                if let Some(service) = updated_services.iter_mut().find(|s| s.service_type == service_type) {
-                                                                                    if let Some(settings) = &mut service.filter_settings {
-                                                                                        settings.priority_senders = senders;
-                                                                                    }
-                                                                                }
-                                                                                services_state.set(updated_services);
-                                                                                new_priority_sender.set(String::new());
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            });
-                                                        }
-                                                    }
-                                                })
-                                            }>{"Add"}</button>
-                                        </div>
-                                        <ul class="filter-list">
-                                            {
-                                                settings.priority_senders.iter().map(|sender| {
-                                                    let sender_clone = sender.sender.clone();
-                                                    let services_state = services_state.clone();
-                                                    let selected_service = selected_service.clone();
-                                                    html! {
-                                                        <li class="filter-item">
-                                                            <span>{&sender.sender}</span>
-                                                            <button class="delete-btn" onclick={
-                                                                let sender = sender_clone.clone();
-                                                                let services_state = services_state.clone();
-                                                                let selected_service = selected_service.clone();
-                                                                Callback::from(move |_| {
-                                                                    let sender = sender.clone();
-                                                                    let services_state = services_state.clone();
-                                                                    let selected_service = selected_service.clone();
-                                                                    
-                                                                    if let Some(service_type) = (*selected_service).clone() {
-                                                                        wasm_bindgen_futures::spawn_local(async move {
-                                                                            if let Some(token) = window()
-                                                                                .and_then(|w| w.local_storage().ok())
-                                                                                .flatten()
-                                                                                .and_then(|storage| storage.get_item("token").ok())
-                                                                                .flatten()
-                                                                            {
-                                                                                let request = Request::delete(&format!("{}/api/filters/priority-sender/{}/{}", config::get_backend_url(), service_type, sender))
-                                                                                    .header("Authorization", &format!("Bearer {}", token))
-                                                                                    .send()
-                                                                                    .await;
-
-                                                                                if let Ok(_) = request {
-                                                                                    // Refresh the priority senders list after deleting
-                                                                                    if let Ok(senders_response) = Request::get(&format!("{}/api/filters/priority-senders/{}", config::get_backend_url(), service_type))
-                                                                                        .header("Authorization", &format!("Bearer {}", token))
-                                                                                        .send()
-                                                                                        .await
-                                                                                    {
-                                                                                        if let Ok(senders) = senders_response.json::<Vec<PrioritySender>>().await {
-                                                                                            let mut updated_services = (*services_state).clone();
-                                                                                            if let Some(service) = updated_services.iter_mut().find(|s| s.service_type == service_type) {
-                                                                                                if let Some(settings) = &mut service.filter_settings {
-                                                                                                    settings.priority_senders = senders;
-                                                                                                }
-                                                                                            }
-                                                                                            services_state.set(updated_services);
-                                                                                        }
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                        });
-                                                                    }
-                                                                })
-                                                            }>{"×"}</button>
-                                                        </li>
-                                                    }
-                                                }).collect::<Html>()
+                                                    </div>
+                                                </div>
                                             }
-                                        </ul>
-                                    </div>
-
-                                    <div class="filter-section">
-                                        <h3>{"Waiting Checks"}</h3>
-                                        <div class="waiting-check-input">
-                                            <div class="waiting-check-fields">
-                                                <input
-                                                    type="text"
-                                                    placeholder="Content to wait for"
-                                                    value={(*new_waiting_check_content).clone()}
-                                                    onchange={
-                                                        let new_waiting_check_content = new_waiting_check_content.clone();
-                                                        move |e: Event| {
-                                                            let input: HtmlInputElement = e.target_unchecked_into();
-                                                            new_waiting_check_content.set(input.value());
-                                                        }
-                                                    }
-                                                />
-                                                <label class="date-label">
-                                                    <input
-                                                        type="date"
-                                                        value={format_date_for_input(*new_waiting_check_due_date)}
-                                                    onchange={
-                                                        let new_waiting_check_due_date = new_waiting_check_due_date.clone();
-                                                        move |e: Event| {
-                                                            let input: HtmlInputElement = e.target_unchecked_into();
-                                                            if let Ok(timestamp) = parse_date_to_timestamp(&input.value()) {
-                                                                new_waiting_check_due_date.set(timestamp);
-                                                            }
-                                                        }
-                                                    }
-                                                    />
-                                                </label>
-                                                <label>
-                                                    <input 
-                                                        type="checkbox"
-                                                        checked={*new_waiting_check_remove}
-                                                        onchange={
-                                                            let new_waiting_check_remove = new_waiting_check_remove.clone();
-                                                            move |e: Event| {
-                                                                let input: HtmlInputElement = e.target_unchecked_into();
-                                                                new_waiting_check_remove.set(input.checked());
-                                                            }
-                                                        }
-                                                    />
-                                                    {"Remove when found"}
-                                                </label>
-                                            </div>
-                                            <button onclick={
-                                                let new_waiting_check_content = new_waiting_check_content.clone();
-                                                let new_waiting_check_due_date = new_waiting_check_due_date.clone();
-                                                let new_waiting_check_remove = new_waiting_check_remove.clone();
-                                                let services_state = services_state.clone();
-                                                let selected_service = selected_service.clone();
-                                                Callback::from(move |_| {
-                                                    let content = (*new_waiting_check_content).clone();
-                                                    if !content.is_empty() {
-                                                        if let Some(service_type) = (*selected_service).clone() {
-                                                            let services_state = services_state.clone();
-                                                            let new_waiting_check_content = new_waiting_check_content.clone();
-                                                            let new_waiting_check_due_date = new_waiting_check_due_date.clone();
-                                                            let new_waiting_check_remove = new_waiting_check_remove.clone();
-                                                            wasm_bindgen_futures::spawn_local(async move {
-                                                                if let Some(token) = window()
-                                                                    .and_then(|w| w.local_storage().ok())
-                                                                    .flatten()
-                                                                    .and_then(|storage| storage.get_item("token").ok())
-                                                                    .flatten()
-                                                                {
-                                                                    let request = Request::post(&format!("{}/api/filters/waiting-check/{}", config::get_backend_url(), service_type))
-                                                                        .header("Authorization", &format!("Bearer {}", token))
-                                                                        .json(&json!({
-                                                                            "waiting_type": "content",
-                                                                            "content": content,
-                                                                            "due_date": *new_waiting_check_due_date,
-                                                                            "remove_when_found": *new_waiting_check_remove,
-                                                                            "service_type": service_type.clone()
-                                                                        }))
-                                                                        .expect("Failed to build request");
-
-                                                                    if let Ok(_) = request.send().await {
-                                                                        // Refresh the waiting checks list after adding
-                                                                        if let Ok(checks_response) = Request::get(&format!("{}/api/filters/waiting-checks/{}", config::get_backend_url(), service_type))
-                                                                            .header("Authorization", &format!("Bearer {}", token))
-                                                                            .send()
-                                                                            .await
-                                                                        {
-                                                                            if let Ok(checks) = checks_response.json::<Vec<WaitingCheck>>().await {
-                                                                                let mut updated_services = (*services_state).clone();
-                                                                                if let Some(service) = updated_services.iter_mut().find(|s| s.service_type == service_type) {
-                                                                                    if let Some(settings) = &mut service.filter_settings {
-                                                                                        settings.waiting_checks = checks;
-                                                                                    }
-                                                                                }
-                                                                                services_state.set(updated_services);
-                                                                                new_waiting_check_content.set(String::new());
-                                                                                new_waiting_check_due_date.set(0);
-                                                                                new_waiting_check_remove.set(false);
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            });
-                                                        }
-                                                    }
-                                                })
-                                            }>{"Add"}</button>
-                                        </div>
-                                        <ul class="filter-list">
-                                            {
-                                                settings.waiting_checks.iter().map(|check| {
-                                                    let content_clone = check.content.clone();
-                                                    let services_state = services_state.clone();
-                                                    let selected_service = selected_service.clone();
-                                                    html! {
-                                                        <li class="filter-item">
-                                                            <span>{&check.content}</span>
-                                                            <span class="due-date">{format_timestamp(check.due_date)}</span>
-                                                            <span class="remove-when-found">{
-                                                                if check.remove_when_found {
-                                                                    "Remove when found"
-                                                                } else {
-                                                                    "Keep after found"
-                                                                }
-                                                            }</span>
-                                                            <button class="delete-btn" onclick={
-                                                                let content = content_clone.clone();
-                                                                let services_state = services_state.clone();
-                                                                let selected_service = selected_service.clone();
-                                                                Callback::from(move |_| {
-                                                                    let content = content.clone();
-                                                                    let services_state = services_state.clone();
-                                                                    let selected_service = selected_service.clone();
-                                                                    
-                                                                    if let Some(service_type) = (*selected_service).clone() {
-                                                                        wasm_bindgen_futures::spawn_local(async move {
-                                                                            if let Some(token) = window()
-                                                                                .and_then(|w| w.local_storage().ok())
-                                                                                .flatten()
-                                                                                .and_then(|storage| storage.get_item("token").ok())
-                                                                                .flatten()
-                                                                            {
-                                                                                let request = Request::delete(&format!("{}/api/filters/waiting-check/{}/{}", config::get_backend_url(), service_type, content))
-                                                                                    .header("Authorization", &format!("Bearer {}", token))
-                                                                                    .send()
-                                                                                    .await;
-
-                                                                                if let Ok(_) = request {
-                                                                                    // Refresh the waiting checks list after deleting
-                                                                                    if let Ok(checks_response) = Request::get(&format!("{}/api/filters/waiting-checks/{}", config::get_backend_url(), service_type))
-                                                                                        .header("Authorization", &format!("Bearer {}", token))
-                                                                                        .send()
-                                                                                        .await
-                                                                                    {
-                                                                                        if let Ok(checks) = checks_response.json::<Vec<WaitingCheck>>().await {
-                                                                                            let mut updated_services = (*services_state).clone();
-                                                                                            if let Some(service) = updated_services.iter_mut().find(|s| s.service_type == service_type) {
-                                                                                                if let Some(settings) = &mut service.filter_settings {
-                                                                                                    settings.waiting_checks = checks;
-                                                                                                }
-                                                                                            }
-                                                                                            services_state.set(updated_services);
-                                                                                        }
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                        });
-                                                                    }
-                                                                })
-                                                            }>{"×"}</button>
-                                                        </li>
-                                                    }
-                                                }).collect::<Html>()
-                                            }
-                                        </ul>
-                                    </div>
-
-                                    <div class="filter-section">
-
-                                        <h3>{"Importance Priority"}</h3>
-
-                                        <div class="filter-input">
-                                            <div class="importance-input-group">
-                                                <input
-                                                    type="number"
-                                                    min="1"
-                                                    max="10"
-                                                    placeholder="Priority threshold (1-10)"
-                                                    value={(*importance_value).to_string()}
-                                                oninput={
-                                                    let importance_value = importance_value.clone();
-                                                    let is_modified = is_modified.clone();
-                                                    Callback::from(move |e: InputEvent| {
-                                                        let input: HtmlInputElement = e.target_unchecked_into();
-                                                        let new_value = input.value().parse::<i32>().unwrap_or(7);
-                                                        if new_value != *importance_value {
-                                                            importance_value.set(new_value);
-                                                            is_modified.set(true);
-                                                        }
-                                                    })
-                                                }
-                                                />
-                                                <span class="priority-label">{"out of 10"}</span>
-                                            </div>
-                                            {
-                                                if *is_modified {
-                                                    html! {
-                                                        <button
-                                                            class="save-btn"
-                                                            onclick={
-                                                                let services_state = services_state.clone();
-                                                                let selected_service = selected_service.clone();
-                                                                let importance_value = importance_value.clone();
-                                                                let is_modified = is_modified.clone();
-                                                                Callback::from(move |_| {
-                                                                    if let Some(service_type) = (*selected_service).clone() {
-                                                                        let services_state = services_state.clone();
-                                                                        let threshold = *importance_value;
-                                                                        let importance_value = importance_value.clone();
-                                                                        let is_modified = is_modified.clone();
-                                                                        
-                                                                        wasm_bindgen_futures::spawn_local(async move {
-                                                                            if let Some(token) = window()
-                                                                                .and_then(|w| w.local_storage().ok())
-                                                                                .flatten()
-                                                                                .and_then(|storage| storage.get_item("token").ok())
-                                                                                .flatten()
-                                                                            {
-                                                                                let request = Request::post(&format!("{}/api/filters/importance-priority/{}", config::get_backend_url(), service_type))
-                                                                                    .header("Authorization", &format!("Bearer {}", token))
-                                                                                    .json(&json!({
-                                                                                        "threshold": threshold,
-                                                                                        "service_type": service_type.clone()
-                                                                                    }))
-                                                                                    .expect("Failed to build request");
-
-                                                                                if let Ok(_) = request.send().await {
-                                                                                    // Update the state
-                                                                                    let mut updated_services = (*services_state).clone();
-                                                                                    if let Some(service) = updated_services.iter_mut().find(|s| s.service_type == service_type) {
-                                                                                        if let Some(settings) = &mut service.filter_settings {
-                                                                                            settings.importance_priority = Some(ImportancePriority {
-                                                                                                threshold,
-                                                                                            });
-                                                                                            // Update the importance value state to match the service
-                                                                                            importance_value.set(threshold);
-                                                                                        }
-                                                                                    }
-                                                                                    services_state.set(updated_services);
-                                                                                    is_modified.set(false);
-                                                                                }
-                                                                            }
-                                                                        });
-                                                                    }
-                                                                })
-                                                            }
-                                                        >
-                                                            {"Save"}
-                                                        </button>
-                                                    }
-                                                } else {
-                                                    html! {}
-                                                }
-                                            }
-
-                                            <style>
-                                                {r#"
-                                                .coming-soon-container {
-                                                    background: rgba(30, 30, 30, 0.5);
-                                                    border: 1px solid rgba(30, 144, 255, 0.1);
-                                                    border-radius: 12px;
-                                                    padding: 2rem;
-                                                    text-align: center;
-                                                    margin-top: 2rem;
-                                                    backdrop-filter: blur(10px);
-                                                }
-
-                                                .coming-soon-content {
-                                                    max-width: 600px;
-                                                    margin: 0 auto;
-                                                }
-
-                                                .coming-soon-content h3 {
-                                                    color: #7EB2FF;
-                                                    font-size: 1.8rem;
-                                                    margin-bottom: 1rem;
-                                                }
-
-                                                .coming-soon-content p {
-                                                    color: rgba(255, 255, 255, 0.8);
-                                                    font-size: 1.1rem;
-                                                    line-height: 1.6;
-                                                    margin-bottom: 2rem;
-                                                }
-
-                                                .features-preview {
-                                                    background: rgba(30, 144, 255, 0.05);
-                                                    border: 1px solid rgba(30, 144, 255, 0.1);
-                                                    border-radius: 8px;
-                                                    padding: 1.5rem;
-                                                    text-align: left;
-                                                }
-
-                                                .features-preview h4 {
-                                                    color: #7EB2FF;
-                                                    font-size: 1.2rem;
-                                                    margin-bottom: 1rem;
-                                                }
-
-                                                .features-preview ul {
-                                                    list-style: none;
-                                                    padding: 0;
-                                                    margin: 0;
-                                                }
-
-                                                .features-preview li {
-                                                    color: #fff;
-                                                    font-size: 1rem;
-                                                    margin-bottom: 0.8rem;
-                                                    padding-left: 1.5rem;
-                                                    position: relative;
-                                                }
-
-                                                .features-preview li:before {
-                                                    content: "→";
-                                                    position: absolute;
-                                                    left: 0;
-                                                    color: #7EB2FF;
-                                                }
-
-                                                @media (max-width: 768px) {
-                                                    .coming-soon-container {
-                                                        padding: 1.5rem;
-                                                        margin: 1rem;
-                                                    }
-
-                                                    .coming-soon-content h3 {
-                                                        font-size: 1.5rem;
-                                                    }
-
-                                                    .coming-soon-content p {
-                                                        font-size: 1rem;
-                                                    }
-                                                }
-                                                "#}
-                                            </style>
-                                        </div>
-                                    </div>
-                                </div>
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                            </div>
                             }
                         } else {
                             html! {}
@@ -1310,31 +611,43 @@ pub fn connected_services(props: &Props) -> Html {
             }
 
             {
-                if let Some(selected) = (*selected_service).clone() {
-                    if selected == "imap" {
-                        if let Some(service) = (*services_state).iter().find(|s| s.service_type == "imap") {
-                            if let Some(settings) = &service.filter_settings {
-                                let priority_senders: Vec<String> = settings.priority_senders.iter()
-                                    .map(|sender| sender.sender.clone())
-                                    .collect();
-                                
-                                let waiting_checks: Vec<String> = settings.waiting_checks.iter()
-                                    .map(|check| check.content.clone())
-                                    .collect();
+                if *is_proactive {
+                    if let Some(selected) = (*selected_service).clone() {
+                        if selected == "imap" {
+                            if let Some(service) = (*services_state).iter().find(|s| s.service_type == "imap") {
+                                if let Some(settings) = &service.filter_settings {
+                                    let priority_senders: Vec<String> = settings.priority_senders.iter()
+                                        .map(|sender| sender.sender.clone())
+                                        .collect();
+                                    
+                                    let waiting_checks: Vec<String> = settings.waiting_checks.iter()
+                                        .map(|check| check.content.clone())
+                                        .collect();
 
-                                let threshold = settings.importance_priority
-                                    .as_ref()
-                                    .map(|ip| ip.threshold)
-                                    .unwrap_or(7);
+                                    let threshold = settings.importance_priority
+                                        .as_ref()
+                                        .map(|ip| ip.threshold)
+                                        .unwrap_or(7);
 
-                                html! {
-                                    <ImapGeneralChecks 
-                                        on_update={Callback::from(|_| {})}
-                                        keywords={settings.keywords.clone()}
-                                        priority_senders={priority_senders}
-                                        waiting_checks={waiting_checks}
-                                        threshold={threshold}
-                                    />
+                                    html! {
+                                        <ImapGeneralChecks 
+                                            on_update={Callback::from(|_| {})}
+                                            keywords={settings.keywords.clone()}
+                                            priority_senders={priority_senders}
+                                            waiting_checks={waiting_checks}
+                                            threshold={threshold}
+                                        />
+                                    }
+                                } else {
+                                    html! {
+                                        <ImapGeneralChecks 
+                                            on_update={Callback::from(|_| {})}
+                                            keywords={vec![]}
+                                            priority_senders={vec![]}
+                                            waiting_checks={vec![]}
+                                            threshold={7}
+                                        />
+                                    }
                                 }
                             } else {
                                 html! {
@@ -1348,15 +661,7 @@ pub fn connected_services(props: &Props) -> Html {
                                 }
                             }
                         } else {
-                            html! {
-                                <ImapGeneralChecks 
-                                    on_update={Callback::from(|_| {})}
-                                    keywords={vec![]}
-                                    priority_senders={vec![]}
-                                    waiting_checks={vec![]}
-                                    threshold={7}
-                                />
-                            }
+                            html! {}
                         }
                     } else {
                         html! {}
@@ -1791,6 +1096,22 @@ pub fn connected_services(props: &Props) -> Html {
                     margin: 0;
                     line-height: 1.4;
                     padding-left: 0.2rem;
+                }
+
+                .inactive-message {
+                    background: rgba(30, 30, 30, 0.5);
+                    border: 1px solid rgba(30, 144, 255, 0.1);
+                    border-radius: 8px;
+                    padding: 1.5rem;
+                    margin-top: 1rem;
+                    text-align: center;
+                }
+
+                .inactive-message p {
+                    color: rgba(255, 255, 255, 0.7);
+                    font-size: 1rem;
+                    margin: 0;
+                    line-height: 1.5;
                 }
 
                 .proactive-title {

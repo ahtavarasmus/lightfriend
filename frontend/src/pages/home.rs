@@ -1359,9 +1359,7 @@ pub fn Home() -> Html {
                     }
 
                     .feature-suggestion {
-                        margin-top: 1.5rem;
-                        padding-top: 1.5rem;
-                        border-top: 1px solid rgba(30, 144, 255, 0.1);
+                        margin-top: 1rem;
                         color: #999;
                         font-size: 0.9rem;
                     }

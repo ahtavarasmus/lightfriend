@@ -10,6 +10,8 @@ pub struct CalendarProps {
     pub user_id: i32,
     pub sub_tier: Option<String>,
     pub discount: bool,
+    #[prop_or_default]
+    pub on_connection_change: Option<Callback<bool>>,
 }
 
 #[function_component(CalendarConnect)]
@@ -22,6 +24,7 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
     // Check connection status on component mount
     {
         let calendar_connected = calendar_connected.clone();
+        let on_connection_change = props.on_connection_change.clone();
         use_effect_with_deps(
             move |_| {
                 if let Some(window) = web_sys::window() {
@@ -29,6 +32,7 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                         if let Ok(Some(token)) = storage.get_item("token") {
                             // Check Google Calendar status
                             let calendar_connected = calendar_connected.clone();
+                            let on_connection_change = on_connection_change.clone();
                             spawn_local(async move {
                                 let request = Request::get(&format!("{}/api/auth/google/calendar/status", config::get_backend_url()))
                                     .header("Authorization", &format!("Bearer {}", token))
@@ -40,6 +44,9 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                                         if let Ok(data) = response.json::<serde_json::Value>().await {
                                             if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
                                                 calendar_connected.set(connected);
+                                                if let Some(callback) = on_connection_change {
+                                                    callback.emit(connected);
+                                                }
                                             }
                                         }
                                     } else {
@@ -137,9 +144,11 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
     let onclick_delete_calendar = {
         let calendar_connected = calendar_connected.clone();
         let error = error.clone();
+        let on_connection_change = props.on_connection_change.clone();
         Callback::from(move |_: MouseEvent| {
             let calendar_connected = calendar_connected.clone();
             let error = error.clone();
+            let on_connection_change = on_connection_change.clone();
 
             if let Some(window) = web_sys::window() {
                 if let Ok(Some(storage)) = window.local_storage() {
@@ -154,6 +163,9 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                                 Ok(response) => {
                                     if response.ok() {
                                         calendar_connected.set(false);
+                                        if let Some(callback) = on_connection_change {
+                                            callback.emit(false);
+                                        }
                                     } else {
                                         if let Ok(error_data) = response.json::<serde_json::Value>().await {
                                             if let Some(error_msg) = error_data.get("error").and_then(|e| e.as_str()) {
