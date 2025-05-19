@@ -1081,7 +1081,7 @@ pub async fn process_sms(
         "chat_name".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The exact chat name/room name to send the message to. Must be confirmed first using search_whatsapp_rooms.".to_string()),
+            description: Some("The chat name or room name to send the message to. Doesn't have to be exact since fuzzy search is used.".to_string()),
             ..Default::default()
         }),
     );
@@ -1205,7 +1205,7 @@ pub async fn process_sms(
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
                 name: String::from("search_whatsapp_rooms"),
-                description: Some(String::from("Searches for WhatsApp rooms/contacts by name. Always use this before sending any message and confirm that recipient is found and it is correct.")),
+                description: Some(String::from("Searches for WhatsApp rooms/contacts by name.")),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
                     properties: Some(whatsapp_search_properties),
