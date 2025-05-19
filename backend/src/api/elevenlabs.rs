@@ -978,6 +978,15 @@ pub struct WhatsAppConfirmPayload {
     message: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CalendarEventConfirmPayload {
+    summary: String,
+    start_time: String,
+    duration_minutes: i32,
+    description: Option<String>,
+    add_notification: Option<bool>,
+}
+
 pub async fn handle_email_search_tool_call(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
@@ -1353,6 +1362,12 @@ pub async fn handle_whatsapp_confirm_send(
             ).await {
                 Ok(message_sid) => {
                     println!("Successfully sent confirmation SMS with SID: {}", message_sid);
+                    // set the confirm event message flag for the user so we know to continue conversation with sms
+                    if let Err(e) = state.user_repository.set_confirm_send_event(user_id, true) {
+                        error!("Failed to set confirm send event flag: {}", e);
+                        // Continue execution even if setting flag fails
+                    }
+                    
                     Ok(Json(json!({
                         "status": "success",
                         "message": "Confirmation message sent",
@@ -1378,6 +1393,113 @@ pub async fn handle_whatsapp_confirm_send(
                 StatusCode::NOT_FOUND,
                 Json(json!({
                     "error": "Failed to find WhatsApp room",
+                    "details": e.to_string()
+                }))
+            ))
+        }
+    }
+}
+
+pub async fn handle_calendar_event_confirm(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    Json(payload): Json<CalendarEventConfirmPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Starting calendar event confirmation for event: {}", payload.summary);
+
+    // Extract user_id from query parameters
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing or invalid user_id"
+                }))
+            ));
+        }
+    };
+
+    // Get user from database
+    let user = match state.user_repository.find_by_id(user_id) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": "User not found"
+                }))
+            ));
+        }
+        Err(e) => {
+            error!("Error fetching user: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to fetch user"
+                }))
+            ));
+        }
+    };
+
+    // Format the confirmation message
+    let confirmation_message = if let Some(desc) = payload.description {
+        format!(
+            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes with description: '{}'",
+            payload.summary, payload.start_time, payload.duration_minutes, desc
+        )
+    } else {
+        format!(
+            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes",
+            payload.summary, payload.start_time, payload.duration_minutes
+        )
+    };
+
+    // Get conversation for the user
+    let conversation = match state.user_conversations.get_conversation(
+        &user, 
+        user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
+    ).await {
+        Ok(conv) => conv,
+        Err(e) => {
+            error!("Failed to get conversation: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to get or create conversation"
+                }))
+            ));
+        }
+    };
+
+    // Send the confirmation SMS
+    match crate::api::twilio_utils::send_conversation_message(
+        &conversation.conversation_sid,
+        &conversation.twilio_number,
+        &confirmation_message,
+        false, // Don't redact the body since we need to extract event details from this message
+    ).await {
+        Ok(message_sid) => {
+            println!("Successfully sent calendar confirmation SMS with SID: {}", message_sid);
+            // Set the confirm event message flag for the user
+            if let Err(e) = state.user_repository.set_confirm_send_event(user_id, true) {
+                error!("Failed to set confirm send event flag: {}", e);
+                // Continue execution even if setting flag fails
+            }
+            
+            Ok(Json(json!({
+                "status": "success",
+                "message": "Confirmation message sent",
+                "event_summary": payload.summary,
+                "message_sid": message_sid
+            })))
+        }
+        Err(e) => {
+            error!("Failed to send confirmation SMS: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to send confirmation message",
                     "details": e.to_string()
                 }))
             ))

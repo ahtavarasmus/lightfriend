@@ -514,15 +514,161 @@ pub async fn process_sms(
     // if AI decides it needs more information we should put this as false so next message knows whatsup
     let mut redact_the_body = true;
     if let Some(last_ai_message) = last_msg {
-        if last_ai_message.body.contains("(yes-> send, no -> discard)") {
-            println!("last message contained yes or no");
+        if user.confirm_send_event {
+            println!("last message was confirmation to send event since the flag was set");
             let user_response = payload.body.trim().to_lowercase();
             
-            // Extract chat name and message content from the confirmation message
-            if let Some(captures) = regex::Regex::new(r"Confirm the sending of WhatsApp message to '([^']+)' with content: '([^']+)'")
+            // Check for calendar event confirmation
+            if let Some(captures) = regex::Regex::new(r"Confirm creating calendar event: '([^']+)' starting at '([^']+)' for (\d+) minutes(\s*with description: '([^']+)')?(?:\s*\(free reply\))?")
                 .ok()
                 .and_then(|re| re.captures(&last_ai_message.body)) {
+
                 
+                let summary = captures.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
+                let start_time = captures.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
+                let duration = captures.get(3).and_then(|m| m.as_str().parse::<i32>().ok()).unwrap_or_default();
+                let description = captures.get(5).map(|m| m.as_str().to_string());
+
+                // Redact the confirmation message
+                if let Err(e) = crate::api::twilio_utils::redact_message(
+                    &conversation.conversation_sid,
+                    &last_ai_message.sid,
+                    "Calendar event confirmation message redacted"
+                ).await {
+                    eprintln!("Failed to redact calendar confirmation message: {}", e);
+                }
+
+                match user_response.as_str() {
+                    "yes" => {
+                        // Reset the confirmation flag
+                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                            eprintln!("Failed to reset confirm_send_event flag: {}", e);
+                        }
+
+                        // Create the calendar event
+                        let event_request = crate::handlers::google_calendar::CreateEventRequest {
+                            start_time: match chrono::DateTime::parse_from_rfc3339(&start_time) {
+                                Ok(dt) => dt.with_timezone(&chrono::Utc),
+                                Err(e) => {
+                                    eprintln!("Failed to parse start time: {}", e);
+                                    if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                                        &conversation.conversation_sid,
+                                        &conversation.twilio_number,
+                                        "Failed to create calendar event due to invalid start time.",
+                                        true,
+                                    ).await {
+                                        eprintln!("Failed to send error message: {}", e);
+                                    }
+                                    return (
+                                        StatusCode::OK,
+                                        [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                        axum::Json(TwilioResponse {
+                                            message: "Failed to create calendar event".to_string(),
+                                        })
+                                    );
+                                }
+                            },
+                            duration_minutes: duration,
+                            summary,
+                            description,
+                            add_notification: true,
+                        };
+ 
+                        let auth_user = crate::handlers::auth_middleware::AuthUser {
+                            user_id: user.id, 
+                            is_admin: false,
+                        };
+
+                        match crate::handlers::google_calendar::create_calendar_event(
+                            State(state.clone()),
+                            auth_user,
+                            Json(event_request),
+                        ).await {
+                            Ok(_) => {
+                                // Send confirmation via Twilio
+                                let confirmation_msg = "Calendar event created successfully!";
+                                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                                    &conversation.conversation_sid,
+                                    &conversation.twilio_number,
+                                    confirmation_msg,
+                                    true,
+                                ).await {
+                                    eprintln!("Failed to send confirmation message: {}", e);
+                                }
+
+                                // Deduct credits for the confirmation response
+                                if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
+                                    eprintln!("Failed to deduct user credits for calendar confirmation: {}", e);
+                                }
+
+                                return (
+                                    StatusCode::OK,
+                                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                    axum::Json(TwilioResponse {
+                                        message: confirmation_msg.to_string(),
+                                    })
+                                );
+                            }
+                            Err((status, Json(error))) => {
+                                let error_msg = format!("Failed to create calendar event: {} (not charged)", error["error"].as_str().unwrap_or("Unknown error"));
+                                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                                    &conversation.conversation_sid,
+                                    &conversation.twilio_number,
+                                    &error_msg,
+                                    true,
+                                ).await {
+                                    eprintln!("Failed to send error message: {}", e);
+                                }
+                                return (
+                                    StatusCode::OK,
+                                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                    axum::Json(TwilioResponse {
+                                        message: error_msg,
+                                    })
+                                );
+                            }
+                        }
+                    }
+                    "no" => {
+                        // Reset the confirmation flag
+                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                            eprintln!("Failed to reset confirm_send_event flag: {}", e);
+                        }
+
+                        // Send cancellation confirmation
+                        let cancel_msg = "Calendar event creation cancelled.";
+                        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                            &conversation.conversation_sid,
+                            &conversation.twilio_number,
+                            cancel_msg,
+                            true,
+                        ).await {
+                            eprintln!("Failed to send cancellation confirmation: {}", e);
+                        }
+
+                        return (
+                            StatusCode::OK,
+                            [(axum::http::header::CONTENT_TYPE, "application/json")],
+                            axum::Json(TwilioResponse {
+                                message: cancel_msg.to_string(),
+                            })
+                        );
+                    }
+                    _ => {
+                        // Reset the confirmation flag since we're treating this as a new message
+                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                            eprintln!("Failed to reset confirm_send_event flag: {}", e);
+                        }
+                        // Continue with normal message processing
+                    }
+                }
+            }
+            
+            // Extract chat name and message content from the confirmation message
+            if let Some(captures) = regex::Regex::new(r"Confirm the sending of WhatsApp message to '([^']+)' with content: '([^']+)'(?:\s*\(free reply\))?")
+                .ok()
+                .and_then(|re| re.captures(&last_ai_message.body)) {
+
                 let chat_name = captures.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
                 println!("chatname: {}",chat_name);
                 let message_content = captures.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
@@ -547,6 +693,11 @@ pub async fn process_sms(
                             &message_content,
                         ).await {
                             Ok(_) => {
+                                // Reset the confirmation flag
+                                if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                                    eprintln!("Failed to reset confirm_send_event flag: {}", e);
+                                }
+
                                 // Send confirmation via Twilio
                                 println!("sending messages since user said yes");
                                 let confirmation_msg = format!("Message sent successfully to {}", chat_name);
@@ -595,6 +746,11 @@ pub async fn process_sms(
                         }
                     }
                     "no" => {
+                        // Reset the confirmation flag
+                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                            eprintln!("Failed to reset confirm_send_event flag: {}", e);
+                        }
+
                         // Send cancellation confirmation via Twilio
                         println!("User said not so we are sending message discarded confirmation");
                         let cancel_msg = "Message sending cancelled.";
@@ -617,6 +773,10 @@ pub async fn process_sms(
                     }
                     _ => {
                         println!("User said something else than yes or no so continuing");
+                        // Reset the confirmation flag since we're treating this as a new message
+                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                            eprintln!("Failed to reset confirm_send_event flag: {}", e);
+                        }
                         // If user provided something else than yes/no, treat it as a new message
                         // and continue with normal message processing
                     }
@@ -672,7 +832,7 @@ pub async fn process_sms(
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes.\n\n### Tool Usage Guidelines:\n- **For tools that fetch information** (e.g., `fetch_whatsapp_messages`, `fetch_imap_emails`, `ask_perplexity`, `get_weather`, `calendar`, `fetch_tasks`):\n  - Use them directly to gather data.\n  - Provide all relevant details in the response immediately.\n- **For tools that perform actions** (e.g., `send_whatsapp_message`, `create_task`):\n  - Confirm details with the user before proceeding.\n  - **For `send_whatsapp_message`**:\n    - Use `search_whatsapp_rooms` first to find and confirm the exact recipient.\n    - Show search results to the user and wait for confirmation before sending.\n\n### Date and Time Handling:\n- Use **RFC3339/ISO8601 format** (e.g., '2024-03-23T14:30:00Z') for all date/time inputs.\n- If no specific time is mentioned:\n  - Use the **current time** for start and **24 hours ahead** for end or the otherway around depending on the tool.\n- Always consider the user's timezone: {} with offset {}.\n- For queries about:\n  - **\"Today\"**: Use 00:00 to 23:59 of the current day.\n  - **\"Tomorrow\"**: Use 00:00 to 23:59 of the next day.\n\n### Additional Guidelines:\n- **Weather Queries**: If no location is specified, assume the user’s home location from user info.\n- **Email Queries**: For `fetch_specific_email`, provide the whole message body or a summary if too long—never just the subject.\n- **WhatsApp Fetching**: Use the room name directly from the user’s message/context without searching rooms.\n\nNever use markdown or HTML in responses. User information: {}. Always use tools to fetch the latest information before answering.", formatted_time, timezone_str, offset, user_info)),
+        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes. Always use all tools immidiately that you think will be needed to complete the user's query and base your response to those responses.\n\n### Tool Usage Guidelines:\n- Provide all relevant details in the response immediately. \n- Tools that involve sending or creating something(eg. send_whatsapp_message), you can call them straight away using the available information without confirming with the user. These tools will send extra confirmation message to user anyways before doing anything.\n\n### Date and Time Handling:\n- Use **RFC3339/ISO8601 format** (e.g., '2024-03-23T14:30:00Z') for all date/time inputs.\n- If no specific time is mentioned:\n  - Use the **current time** for start and **24 hours ahead** for end or the otherway around depending on the tool.\n- Always consider the user's timezone: {} with offset {}.\n- For queries about:\n  - **\"Today\"**: Use 00:00 to 23:59 of the current day.\n  - **\"Tomorrow\"**: Use 00:00 to 23:59 of the next day.\n\n### Additional Guidelines:\n- **Weather Queries**: If no location is specified, assume the user’s home location from user info.\n- **Email Queries**: For `fetch_specific_email`, provide the whole message body or a summary if too long—never just the subject.\n- **WhatsApp Fetching**: Use the room name directly from the user’s message/context without searching rooms.\n\nNever use markdown or HTML in responses. User information: {}. Always use tools to fetch the latest information before answering.", formatted_time, timezone_str, offset, user_info)),
     }];
     
     // Process the message body to remove "forget" if it exists at the start
@@ -814,6 +974,48 @@ pub async fn process_sms(
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
             description: Some("End time in RFC3339 format in UTC (e.g., '2024-03-16T00:00:00Z')".to_string()),
+            ..Default::default()
+        }),
+    );
+    // Add calendar event properties
+    let mut calendar_event_properties = HashMap::new();
+    calendar_event_properties.insert(
+        "summary".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("The title/summary of the calendar event".to_string()),
+            ..Default::default()
+        }),
+    );
+    calendar_event_properties.insert(
+        "start_time".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Start time in RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z')".to_string()),
+            ..Default::default()
+        }),
+    );
+    calendar_event_properties.insert(
+        "duration_minutes".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Number),
+            description: Some("Duration of the event in minutes".to_string()),
+            ..Default::default()
+        }),
+    );
+    calendar_event_properties.insert(
+        "description".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Optional description of the event. Do not add unless user asks specifically.".to_string()),
+            ..Default::default()
+        }),
+    );
+    calendar_event_properties.insert(
+        "add_notification".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some("Whether to add a notification reminder (defaults to true unless specified)".to_string()),
             ..Default::default()
         }),
     );
@@ -967,7 +1169,7 @@ pub async fn process_sms(
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
                 name: String::from("send_whatsapp_message"),
-                description: Some(String::from("Sends a WhatsApp message to a specific chat. IMPORTANT: Before using this, you MUST first use search_whatsapp_rooms to confirm the recipient exists and get their exact chat name. Never send a message without confirming the recipient first and getting the confirmation from the user!")),
+                description: Some(String::from("Sends a WhatsApp message to a specific chat. This tool will first make a confirmation message for the user, which they can then confirm or not. The chat_name will be used to fuzzy search for the actual chat name and then confirmed with the user.")),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
                     properties: Some(whatsapp_send_properties),
@@ -1098,6 +1300,18 @@ pub async fn process_sms(
         chat_completion::Tool {
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
+                name: String::from("create_calendar_event"),
+                description: Some(String::from("Creates a new Google Calendar event. Use this when user wants to schedule or add an event to their calendar. This tool will first make a confirmation message for the user, which they can then confirm or not.")),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(calendar_event_properties),
+                    required: Some(vec![String::from("summary"), String::from("start_time"), String::from("duration_minutes")]),
+                },
+            },
+        },
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
                 name: String::from("fetch_tasks"),
                 description: Some(String::from("Fetches the user's Google Tasks. Use this when user asks about their tasks, reminders, or ideas.")),
                 parameters: types::FunctionParameters {
@@ -1119,6 +1333,7 @@ pub async fn process_sms(
                 },
             },
         },
+        
     ];
 
     let api_key = match env::var("OPENROUTER_API_KEY") {
@@ -1470,6 +1685,47 @@ pub async fn process_sms(
                             tool_answers.insert(tool_call_id, "Sorry, I couldn't set up the email monitoring. Please try again.".to_string());
                         }
                     }
+                } else if name == "create_calendar_event" {
+                    println!("Executing create_calendar_event tool call");
+                    #[derive(Deserialize)]
+                    struct CalendarEventArgs {
+                        summary: String,
+                        start_time: String,
+                        duration_minutes: i32,
+                        description: Option<String>,
+                        add_notification: Option<bool>,
+                    }
+
+                    let args: CalendarEventArgs = match serde_json::from_str(arguments) {
+                        Ok(args) => args,
+                        Err(e) => {
+                            eprintln!("Failed to parse calendar event arguments: {}", e);
+                            tool_answers.insert(tool_call_id, "Failed to parse calendar event request.".to_string());
+                            continue;
+                        }
+                    };
+
+                    // Set the confirmation flag
+                    if let Err(e) = state.user_repository.set_confirm_send_event(user.id, true) {
+                        eprintln!("Failed to set confirm_send_event flag: {}", e);
+                        tool_answers.insert(tool_call_id, "Failed to prepare calendar event creation.".to_string());
+                        continue;
+                    }
+
+                    // Format the confirmation message
+                    let confirmation_msg = if let Some(desc) = args.description {
+                        format!(
+                            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes with description: '{}' (free reply)",
+                            args.summary, args.start_time, args.duration_minutes, desc
+                        )
+                    } else {
+                        format!(
+                            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes (free reply)",
+                            args.summary, args.start_time, args.duration_minutes
+                        )
+                    };
+
+                    tool_answers.insert(tool_call_id, confirmation_msg);
                 } else if name == "create_task" {
                     println!("Executing create_task tool call");
                     #[derive(Deserialize)]
@@ -1588,22 +1844,43 @@ pub async fn process_sms(
                         }
                     };
 
-                    match crate::utils::whatsapp_utils::send_whatsapp_message(
+                    // First search for the chat room
+                    match crate::utils::whatsapp_utils::search_whatsapp_rooms(
                         &state,
                         user.id,
                         &args.chat_name,
-                        &args.message,
                     ).await {
-                        Ok(_) => {
-                            tool_answers.insert(tool_call_id, 
-                                format!("Message sent successfully to {}", args.chat_name)
+                        Ok(rooms) => {
+                            if rooms.is_empty() {
+                                tool_answers.insert(tool_call_id, format!("No WhatsApp contacts found matching '{}'.", args.chat_name));
+                                continue;
+                            }
+
+                            // Get the best match (first result)
+                            let best_match = &rooms[0];
+                            let exact_name = best_match.display_name.trim_end_matches(" (WA)").to_string();
+
+                            // Set the confirmation flag
+                            if let Err(e) = state.user_repository.set_confirm_send_event(user.id, true) {
+                                eprintln!("Failed to set confirm_send_event flag: {}", e);
+                                tool_answers.insert(tool_call_id, "Failed to prepare WhatsApp message sending.".to_string());
+                                continue;
+                            }
+
+                            // Format the confirmation message with the found contact name
+                            let confirmation_msg = format!(
+                                "Confirm the sending of WhatsApp message to '{}' with content: '{}' (free reply)",
+                                exact_name, args.message
                             );
+
+                            tool_answers.insert(tool_call_id, confirmation_msg);
                         }
                         Err(e) => {
-                            eprintln!("Failed to send WhatsApp message: {}", e);
-                            tool_answers.insert(tool_call_id,  
-                                format!("Failed to send WhatsApp message: {}. Please make sure you're connected to WhatsApp bridge and the recipient exists.", e)
+                            eprintln!("Failed to search WhatsApp rooms: {}", e);
+                            tool_answers.insert(tool_call_id, 
+                                "Failed to find WhatsApp contact. Please make sure you're connected to WhatsApp bridge.".to_string()
                             );
+                            continue;
                         }
                     }
                 } else if name == "search_whatsapp_rooms" {
@@ -2095,7 +2372,8 @@ pub async fn process_sms(
             }
         };
 
-    // Create evaluation function properties
+    
+
     let mut eval_properties = HashMap::new();
     eval_properties.insert(
         "success".to_string(),

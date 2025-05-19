@@ -758,6 +758,14 @@ impl UserRepository {
         Ok(logs)
     }
 
+    pub fn set_confirm_send_event(&self, user_id: i32, confirm: bool) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::confirm_send_event.eq(confirm))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
     pub fn update_usage_log_timestamps(&self, sid: &str, recharge_threshold_timestamp: Option<i32>, zero_credits_timestamp: Option<i32>) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(usage_logs::table)

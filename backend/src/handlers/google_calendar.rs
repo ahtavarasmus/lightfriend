@@ -8,8 +8,8 @@ use axum::{
 use serde_json::json;
 use serde::{Deserialize, Serialize};
 use oauth2::TokenResponse;
-use reqwest::header::{AUTHORIZATION, ACCEPT};
-use chrono::{DateTime, Utc};
+use reqwest::header::{AUTHORIZATION, ACCEPT, CONTENT_TYPE};
+use chrono::{DateTime, Utc, Duration};
 
 use crate::AppState;
 
@@ -54,6 +54,43 @@ struct CalendarListEntry {
 #[derive(Debug, Deserialize)]
 struct CalendarListResponse {
     pub items: Vec<CalendarListEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateEventRequest {
+    pub start_time: DateTime<Utc>,
+    pub duration_minutes: i32,
+    pub summary: String,
+    pub description: Option<String>,
+    pub add_notification: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct GoogleCalendarEvent {
+    summary: String,
+    description: Option<String>,
+    start: GoogleDateTime,
+    end: GoogleDateTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reminders: Option<Reminders>,
+}
+
+#[derive(Debug, Serialize)]
+struct GoogleDateTime {
+    dateTime: String,
+    timeZone: String,
+}
+
+#[derive(Debug, Serialize)]
+struct Reminders {
+    useDefault: bool,
+    overrides: Vec<ReminderOverride>,
+}
+
+#[derive(Debug, Serialize)]
+struct ReminderOverride {
+    method: String,
+    minutes: i32,
 }
 
 pub async fn google_calendar_status(
@@ -142,6 +179,124 @@ impl std::fmt::Display for CalendarError {
             CalendarError::ApiError(msg) => write!(f, "API error: {}", msg),
             CalendarError::ParseError(msg) => write!(f, "Parse error: {}", msg),
         }
+    }
+}
+
+pub async fn create_calendar_event(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(event_request): Json<CreateEventRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Creating new calendar event for user: {}", auth_user.user_id);
+
+    // Check if user has active Google Calendar connection
+    match state.user_repository.has_active_google_calendar(auth_user.user_id) {
+        Ok(has_connection) => {
+            if !has_connection {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": "No active Google Calendar connection found"
+                    }))
+                ));
+            }
+        },
+        Err(e) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": format!("Failed to check calendar connection: {}", e)
+                }))
+            ));
+        }
+    }
+
+    // Get tokens
+    let (access_token, refresh_token) = match state.user_repository.get_google_calendar_tokens(auth_user.user_id) {
+        Ok(Some((access, refresh))) => (access, refresh),
+        Ok(None) => return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({
+                "error": "No active Google Calendar connection found"
+            }))
+        )),
+        Err(e) => return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": format!("Failed to get calendar tokens: {}", e)
+            }))
+        )),
+    };
+
+    // Calculate end time
+    let end_time = event_request.start_time + Duration::minutes(event_request.duration_minutes as i64);
+
+    // Create event payload
+    let event = GoogleCalendarEvent {
+        summary: event_request.summary,
+        description: event_request.description,
+        start: GoogleDateTime {
+            dateTime: event_request.start_time.to_rfc3339(),
+            timeZone: "UTC".to_string(),
+        },
+        end: GoogleDateTime {
+            dateTime: end_time.to_rfc3339(),
+            timeZone: "UTC".to_string(),
+        },
+        reminders: if event_request.add_notification {
+            Some(Reminders {
+                useDefault: false,
+                overrides: vec![
+                    ReminderOverride {
+                        method: "popup".to_string(),
+                        minutes: 10,
+                    }
+                ],
+            })
+        } else {
+            None
+        },
+    };
+
+    // Create HTTP client
+    let client = reqwest::Client::new();
+
+    // Make the API request
+    let response = client
+        .post("https://www.googleapis.com/calendar/v3/calendars/primary/events")
+        .header(AUTHORIZATION, format!("Bearer {}", access_token))
+        .header(CONTENT_TYPE, "application/json")
+        .json(&event)
+        .send()
+        .await
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": format!("Failed to create event: {}", e)
+            }))
+        ))?;
+
+    // Handle response
+    if response.status().is_success() {
+        let created_event: serde_json::Value = response.json().await.map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": format!("Failed to parse response: {}", e)
+            }))
+        ))?;
+
+        Ok(Json(json!({
+            "message": "Event created successfully",
+            "event": created_event
+        })))
+    } else {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": format!("Failed to create event: {}", error_text)
+            }))
+        ))
     }
 }
 

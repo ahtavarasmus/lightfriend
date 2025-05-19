@@ -217,6 +217,7 @@ diesel::table! {
         encrypted_matrix_password -> Nullable<Text>,
         encrypted_matrix_secret_storage_recovery_key -> Nullable<Text>,
         last_credits_notification -> Nullable<Integer>,
+        confirm_send_event -> Bool,
     }
 }
 

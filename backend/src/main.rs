@@ -254,6 +254,7 @@ async fn main() {
         .route("/api/call/sms", post(elevenlabs::handle_send_sms_tool_call))
         .route("/api/call/shazam", get(elevenlabs::handle_shazam_tool_call))
         .route("/api/call/calendar", get(elevenlabs::handle_calendar_tool_call))
+        .route("/api/call/calendar/confirm", get(elevenlabs::handle_calendar_event_confirm))
         .route("/api/call/email", get(elevenlabs::handle_email_fetch_tool_call))
         .route("/api/call/email/specific", post(elevenlabs::handle_email_search_tool_call))
         .route("/api/call/email/waiting_check", post(elevenlabs::handle_create_waiting_check_email_tool_call))
@@ -323,6 +324,7 @@ async fn main() {
         .route("/api/auth/google/calendar/status", get(google_calendar::google_calendar_status))
         .route("/api/auth/google/calendar/email", get(google_calendar::get_calendar_email))
         .route("/api/calendar/events", get(google_calendar::handle_calendar_fetching_route))
+        .route("/api/calendar/create", post(google_calendar::create_calendar_event))
 
         // Google Tasks routes
         .route("/api/auth/google/tasks/login", get(google_tasks_auth::google_tasks_login))
