@@ -1700,7 +1700,7 @@ pub async fn process_sms(
                         Ok(args) => args,
                         Err(e) => {
                             eprintln!("Failed to parse calendar event arguments: {}", e);
-                            tool_answers.insert(tool_call_id, "Failed to parse calendar event request.".to_string());
+
                             continue;
                         }
                     };
@@ -1708,8 +1708,21 @@ pub async fn process_sms(
                     // Set the confirmation flag
                     if let Err(e) = state.user_repository.set_confirm_send_event(user.id, true) {
                         eprintln!("Failed to set confirm_send_event flag: {}", e);
-                        tool_answers.insert(tool_call_id, "Failed to prepare calendar event creation.".to_string());
-                        continue;
+                        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                            &conversation.conversation_sid,
+                            &conversation.twilio_number,
+                            "Failed to prepare calendar event creation. (not charged, contact rasmus@ahtava.com)",
+                            true,
+                        ).await {
+                            eprintln!("Failed to send error message: {}", e);
+                        }
+                        return (
+                            StatusCode::OK,
+                            [(axum::http::header::CONTENT_TYPE, "application/json")],
+                            axum::Json(TwilioResponse {
+                                message: "Failed to prepare calendar event creation".to_string(),
+                            })
+                        );
                     }
 
                     // Format the confirmation message
@@ -1725,7 +1738,37 @@ pub async fn process_sms(
                         )
                     };
 
-                    tool_answers.insert(tool_call_id, confirmation_msg);
+                    // Send the confirmation message
+                    match crate::api::twilio_utils::send_conversation_message(
+                        &conversation.conversation_sid,
+                        &conversation.twilio_number,
+                        &confirmation_msg,
+                        false, // Don't redact since we need to extract info from this message later
+                    ).await {
+                        Ok(_) => {
+                            // Deduct credits for the confirmation message
+                            if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
+                                eprintln!("Failed to deduct user credits: {}", e);
+                            }
+                            return (
+                                StatusCode::OK,
+                                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                axum::Json(TwilioResponse {
+                                    message: "Calendar event confirmation sent".to_string(),
+                                })
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to send confirmation message: {}", e);
+                            return (
+                                StatusCode::OK,
+                                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                axum::Json(TwilioResponse {
+                                    message: "Failed to send calendar event confirmation".to_string(),
+                                })
+                            );
+                        }
+                    }
                 } else if name == "create_task" {
                     println!("Executing create_task tool call");
                     #[derive(Deserialize)]
@@ -1839,8 +1882,21 @@ pub async fn process_sms(
                         Ok(args) => args,
                         Err(e) => {
                             eprintln!("Failed to parse WhatsApp send arguments: {}", e);
-                            tool_answers.insert(tool_call_id, "Failed to parse message sending request.".to_string());
-                            continue;
+                            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                                &conversation.conversation_sid,
+                                &conversation.twilio_number,
+                                "Failed to parse message sending request. (not charged, contact rasmus@ahtava.com)",
+                                true,
+                            ).await {
+                                eprintln!("Failed to send error message: {}", e);
+                            }
+                            return (
+                                StatusCode::OK,
+                                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                axum::Json(TwilioResponse {
+                                    message: "Failed to parse WhatsApp message request".to_string(),
+                                })
+                            );
                         }
                     };
 
@@ -1852,8 +1908,22 @@ pub async fn process_sms(
                     ).await {
                         Ok(rooms) => {
                             if rooms.is_empty() {
-                                tool_answers.insert(tool_call_id, format!("No WhatsApp contacts found matching '{}'.", args.chat_name));
-                                continue;
+                                let error_msg = format!("No WhatsApp contacts found matching '{}'.", args.chat_name);
+                                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                                    &conversation.conversation_sid,
+                                    &conversation.twilio_number,
+                                    &error_msg,
+                                    true,
+                                ).await {
+                                    eprintln!("Failed to send error message: {}", e);
+                                }
+                                return (
+                                    StatusCode::OK,
+                                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                    axum::Json(TwilioResponse {
+                                        message: error_msg,
+                                    })
+                                );
                             }
 
                             // Get the best match (first result)
@@ -1863,8 +1933,21 @@ pub async fn process_sms(
                             // Set the confirmation flag
                             if let Err(e) = state.user_repository.set_confirm_send_event(user.id, true) {
                                 eprintln!("Failed to set confirm_send_event flag: {}", e);
-                                tool_answers.insert(tool_call_id, "Failed to prepare WhatsApp message sending.".to_string());
-                                continue;
+                                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                                    &conversation.conversation_sid,
+                                    &conversation.twilio_number,
+                                    "Failed to prepare WhatsApp message sending. (not charged, contact rasmus@ahtava.com)",
+                                    true,
+                                ).await {
+                                    eprintln!("Failed to send error message: {}", e);
+                                }
+                                return (
+                                    StatusCode::OK,
+                                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                    axum::Json(TwilioResponse {
+                                        message: "Failed to prepare WhatsApp message sending".to_string(),
+                                    })
+                                );
                             }
 
                             // Format the confirmation message with the found contact name
@@ -1873,14 +1956,56 @@ pub async fn process_sms(
                                 exact_name, args.message
                             );
 
-                            tool_answers.insert(tool_call_id, confirmation_msg);
+                            // Send the confirmation message
+                            match crate::api::twilio_utils::send_conversation_message(
+                                &conversation.conversation_sid,
+                                &conversation.twilio_number,
+                                &confirmation_msg,
+                                false, // Don't redact since we need to extract info from this message later
+                            ).await {
+                                Ok(_) => {
+                                    // Deduct credits for the confirmation message
+                                    if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
+                                        eprintln!("Failed to deduct user credits: {}", e);
+                                    }
+                                    return (
+                                        StatusCode::OK,
+                                        [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                        axum::Json(TwilioResponse {
+                                            message: "WhatsApp message confirmation sent".to_string(),
+                                        })
+                                    );
+                                }
+                                Err(e) => {
+                                    eprintln!("Failed to send confirmation message: {}", e);
+                                    return (
+                                        StatusCode::OK,
+                                        [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                        axum::Json(TwilioResponse {
+                                            message: "Failed to send WhatsApp confirmation".to_string(),
+                                        })
+                                    );
+                                }
+                            }
                         }
                         Err(e) => {
                             eprintln!("Failed to search WhatsApp rooms: {}", e);
-                            tool_answers.insert(tool_call_id, 
-                                "Failed to find WhatsApp contact. Please make sure you're connected to WhatsApp bridge.".to_string()
+                            let error_msg = "Failed to find WhatsApp contact. Please make sure you're connected to WhatsApp bridge.";
+                            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                                &conversation.conversation_sid,
+                                &conversation.twilio_number,
+                                error_msg,
+                                true,
+                            ).await {
+                                eprintln!("Failed to send error message: {}", e);
+                            }
+                            return (
+                                StatusCode::OK,
+                                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                axum::Json(TwilioResponse {
+                                    message: error_msg.to_string(),
+                                })
                             );
-                            continue;
                         }
                     }
                 } else if name == "search_whatsapp_rooms" {
