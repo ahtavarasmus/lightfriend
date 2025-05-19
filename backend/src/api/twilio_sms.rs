@@ -519,7 +519,7 @@ pub async fn process_sms(
             let user_response = payload.body.trim().to_lowercase();
             
             // Check for calendar event confirmation
-            if let Some(captures) = regex::Regex::new(r"Confirm creating calendar event: '([^']+)' starting at '([^']+)' for (\d+) minutes(\s*with description: '([^']+)')?(?:\s*\(free reply\))?")
+            if let Some(captures) = regex::Regex::new(r"Confirm creating calendar event: '([^']+)' starting at '([^']+)' for (\d+) minutes(\s*with description: '([^']+)')?.*")
                 .ok()
                 .and_then(|re| re.captures(&last_ai_message.body)) {
 
@@ -665,7 +665,7 @@ pub async fn process_sms(
             }
             
             // Extract chat name and message content from the confirmation message
-            if let Some(captures) = regex::Regex::new(r"Confirm the sending of WhatsApp message to '([^']+)' with content: '([^']+)'(?:\s*\(free reply\))?")
+            if let Some(captures) = regex::Regex::new(r"Confirm the sending of WhatsApp message to '([^']+)' with content: '([^']+)'.*?(?:\(yes->|$)")
                 .ok()
                 .and_then(|re| re.captures(&last_ai_message.body)) {
 
@@ -1728,12 +1728,12 @@ pub async fn process_sms(
                     // Format the confirmation message
                     let confirmation_msg = if let Some(desc) = args.description {
                         format!(
-                            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes with description: '{}' (free reply)",
+                            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes with description: '{}' (yes-> send, no -> discard) (free reply)",
                             args.summary, args.start_time, args.duration_minutes, desc
                         )
                     } else {
                         format!(
-                            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes (free reply)",
+                            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes (yes-> send, no -> discard) (free reply)",
                             args.summary, args.start_time, args.duration_minutes
                         )
                     };
@@ -1952,7 +1952,7 @@ pub async fn process_sms(
 
                             // Format the confirmation message with the found contact name
                             let confirmation_msg = format!(
-                                "Confirm the sending of WhatsApp message to '{}' with content: '{}' (free reply)",
+                                "Confirm the sending of WhatsApp message to '{}' with content: '{}' (yes-> send, no -> discard) (free reply)",
                                 exact_name, args.message
                             );
 
