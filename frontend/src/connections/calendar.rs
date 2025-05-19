@@ -263,6 +263,63 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                                     if let Some(window) = web_sys::window() {
                                         if let Ok(Some(storage)) = window.local_storage() {
                                             if let Ok(Some(token)) = storage.get_item("token") {
+                                                // Get current time for the test event
+                                                let now = web_sys::js_sys::Date::new_0();
+                                                let start_time = now.to_iso_string().as_string().unwrap();
+                                                
+                                                let test_event = json!({
+                                                    "start_time": start_time,
+                                                    "duration_minutes": 30,
+                                                    "summary": "Test Event",
+                                                    "description": "This is a test event created by the test button",
+                                                    "add_notification": true
+                                                });
+
+                                                spawn_local(async move {
+                                                    match Request::post(&format!("{}/api/calendar/create", config::get_backend_url()))
+                                                        .header("Authorization", &format!("Bearer {}", token))
+                                                        .json(&test_event)
+                                                        .unwrap()
+                                                        .send()
+                                                        .await {
+                                                        Ok(response) => {
+                                                            if response.status() == 200 {
+                                                                web_sys::console::log_1(&"Test event created successfully".into());
+                                                            } else {
+                                                                error.set(Some("Failed to create test event".to_string()));
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            error.set(Some(format!("Network error: {}", e)));
+                                                        }
+                                                    }
+                                                });
+                                            }
+                                        }
+                                    }
+                                })
+                            };
+                            html! {
+                                <button 
+                                    onclick={onclick_test}
+                                    class="test-button"
+                                >
+                                    {"Create Test Event"}
+                                </button>
+                            }
+                            } else {
+                                html! {}
+                            }
+                        }
+                        {
+                            if props.user_id == 1 {
+                                let onclick_test = {
+                                let error = error.clone();
+                                Callback::from(move |_: MouseEvent| {
+                                    let error = error.clone();
+                                    if let Some(window) = web_sys::window() {
+                                        if let Ok(Some(storage)) = window.local_storage() {
+                                            if let Ok(Some(token)) = storage.get_item("token") {
                                                 // Get today's start and end times in RFC3339 format
                                                 let now = web_sys::js_sys::Date::new_0();
                                                 let today_start = web_sys::js_sys::Date::new_0();
@@ -359,6 +416,23 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                 </div>
             }
             <style>
+                {r#"
+                    .test-button {
+                        background-color: #4CAF50;
+                        color: white;
+                        padding: 8px 16px;
+                        border: none;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        margin-left: 10px;
+                        font-size: 14px;
+                        transition: background-color 0.3s;
+                    }
+
+                    .test-button:hover {
+                        background-color: #45a049;
+                    }
+                "#}
                 {r#"
                     .info-button {
                         background: none;
