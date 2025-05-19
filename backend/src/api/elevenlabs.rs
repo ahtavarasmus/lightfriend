@@ -1445,12 +1445,12 @@ pub async fn handle_calendar_event_confirm(
     // Format the confirmation message
     let confirmation_message = if let Some(desc) = payload.description {
         format!(
-            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes with description: '{}'",
+            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes with description: '{}' (yes-> send, no -> discard)",
             payload.summary, payload.start_time, payload.duration_minutes, desc
         )
     } else {
         format!(
-            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes",
+            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes (yes-> send, no -> discard)",
             payload.summary, payload.start_time, payload.duration_minutes
         )
     };
