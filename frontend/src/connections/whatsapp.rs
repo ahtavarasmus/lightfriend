@@ -276,7 +276,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         <li>{"Fetch WhatsApp Messages: Get recent WhatsApp messages from a specific time period"}</li>
                         <li>{"Fetch Chat Messages: Get messages from a specific WhatsApp chat or contact"}</li>
                         <li>{"Search Contacts: Search for WhatsApp contacts or chat rooms by name"}</li>
-                        <li>{"Send Message: Send a WhatsApp message to a specific recipient (will ask for confirmation before sending) (Voice call tool sends the proposed recipient and message content to you by SMS for you to confirm with simple yes or no. (by typing 'yes', proposed message will be sent and you will be charged for the SMS message. Typing 'no', will discard the message and you will not be charged. Typing anything else is considered just normal new message query.) When sending a message to someone, they may need to first send something to you before lightfriend can find their contact info."}</li>
+                        <li>{"Send Message: Give message content and recipient name and lightfriend will confirm with you the message to be sent. Reply with yes or no to send or discard the suggestion. Voice call will also confirm the suggestion through SMS first."}</li>
                     </ul>
                     </div>
 

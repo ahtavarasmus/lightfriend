@@ -201,13 +201,13 @@ pub fn pricing(props: &PricingProps) -> Html {
                         </div>
                     </div>
                     <ul>
-                        <li><img src="/assets/whatsapplogo.png" alt="WhatsApp" class="feature-logo" />{"WhatsApp integration"}</li>
-                        <li>{"📧 Email access & monitoring"}</li>
-                        <li>{"📅 Calendar management"}</li>
-                        <li>{"✅ Task management"}</li>
+                        <li><img src="/assets/whatsapplogo.png" alt="WhatsApp" class="feature-logo" />{"Fetch & Send WhatsApp Messages"}</li>
+                        <li>{"📧 Fetch & Monitor Email Messages"}</li>
+                        <li>{"📅 Fetch & Create Calendar Events"}</li>
+                        <li>{"✅ Fetch & Add Tasks"}</li>
                         <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="feature-logo" />{" Perplexity AI search"}</li>
-                        <li>{"🎵 Shazam song recognition"}</li>
-                        <li>{"☀️ Weather updates"}</li>
+                        <li>{"🎵 Recognize Songs with Shazam"}</li>
+                        <li>{"☀️ Get Weather updates"}</li>
                         <li>{"🔄 24/7 automated monitoring"}</li>
                         <li>{"🚀 Priority support"}</li>
                     </ul>

@@ -222,9 +222,10 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                 <h4>{"How It Works"}</h4>
 
                 <div class="info-subsection">
-                    <h5>{"SMS and Voice Call Tools "}</h5>
+                    <h5>{"SMS and Voice Call Tools"}</h5>
                     <ul>
                         <li>{"Fetch Specific Timeframe: Fetch your calendar events between start and end time"}</li>
+                        <li>{"Create New Event: Give event start time, duration and content and lightfriend will confirm with you the event to be created. Reply with yes or no to add or discard the suggestion. Voice call will also confirm the suggestion through SMS first."}</li>
                     </ul>
                 </div>
                 <div class="info-subsection">
