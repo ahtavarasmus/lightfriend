@@ -261,42 +261,108 @@ pub async fn create_calendar_event(
     // Create HTTP client
     let client = reqwest::Client::new();
 
-    // Make the API request
-    let response = client
-        .post("https://www.googleapis.com/calendar/v3/calendars/primary/events")
-        .header(AUTHORIZATION, format!("Bearer {}", access_token))
-        .header(CONTENT_TYPE, "application/json")
-        .json(&event)
-        .send()
-        .await
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "error": format!("Failed to create event: {}", e)
-            }))
-        ))?;
+    // Helper function to create event with given token
+    async fn create_event_with_token(
+        client: &reqwest::Client,
+        access_token: &str,
+        event: &GoogleCalendarEvent,
+    ) -> Result<serde_json::Value, String> {
+        let response = client
+            .post("https://www.googleapis.com/calendar/v3/calendars/primary/events")
+            .header(AUTHORIZATION, format!("Bearer {}", access_token))
+            .header(CONTENT_TYPE, "application/json")
+            .json(event)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to create event: {}", e))?;
 
-    // Handle response
-    if response.status().is_success() {
-        let created_event: serde_json::Value = response.json().await.map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "error": format!("Failed to parse response: {}", e)
-            }))
-        ))?;
+        if response.status().is_success() {
+            response.json().await
+                .map_err(|e| format!("Failed to parse response: {}", e))
+        } else {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            Err(format!("Failed to create event: {}", error_text))
+        }
+    }
 
-        Ok(Json(json!({
-            "message": "Event created successfully",
-            "event": created_event
-        })))
-    } else {
-        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-        Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "error": format!("Failed to create event: {}", error_text)
-            }))
-        ))
+    // First attempt with current access token
+    let result = create_event_with_token(&client, &access_token, &event).await;
+
+    match result {
+        Ok(created_event) => {
+            Ok(Json(json!({
+                "message": "Event created successfully",
+                "event": created_event
+            })))
+        },
+        Err(e) => {
+            // Check if error might be due to expired token
+            if e.contains("401") {
+                tracing::info!("Access token expired, attempting to refresh");
+                
+                // Create HTTP client for token refresh
+                let http_client = reqwest::ClientBuilder::new()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .expect("Client should build");
+
+                // Try to refresh the token
+                let token_result = state
+                    .google_calendar_oauth_client
+                    .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token.clone()))
+                    .request_async(&http_client)
+                    .await
+                    .map_err(|e| (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": format!("Failed to refresh token: {}", e)
+                        }))
+                    ))?;
+
+                let new_access_token = token_result.access_token().secret();
+                let expires_in = token_result.expires_in()
+                    .unwrap_or_default()
+                    .as_secs() as i32;
+
+                // Update the access token in the database
+                state.user_repository.update_google_calendar_access_token(
+                    auth_user.user_id,
+                    new_access_token.as_str(),
+                    expires_in,
+                ).map_err(|e| (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": format!("Failed to update access token: {}", e)
+                    }))
+                ))?;
+
+                // Retry with new token
+                match create_event_with_token(&client, new_access_token.as_str(), &event).await {
+                    Ok(created_event) => {
+                        Ok(Json(json!({
+                            "message": "Event created successfully after token refresh",
+                            "event": created_event
+                        })))
+                    },
+                    Err(retry_error) => {
+                        Err((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": format!("Failed to create event after token refresh: {}", retry_error)
+                            }))
+                        ))
+                    }
+                }
+            } else {
+                // If error is not token-related, return the original error
+                Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": e
+                    }))
+                ))
+            }
+        }
     }
 }
 
