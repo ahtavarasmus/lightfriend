@@ -59,7 +59,7 @@ use auth::{
     verify::Verify,
 };
 
-use profile::profile::Profile;
+use profile::profile::Billing;
 use admin::dashboard::AdminDashboard;
 
 
@@ -78,8 +78,8 @@ pub enum Route {
     Register,
     #[at("/admin")]
     Admin,
-    #[at("/profile")]
-    Profile,
+    #[at("/billing")]
+    Billing,
     #[at("/verify")]
     Verify,
     #[at("/terms")]
@@ -117,9 +117,9 @@ fn switch(routes: Route) -> Html {
             info!("Rendering Admin page");
             html! { <AdminDashboard /> }
         },
-        Route::Profile => {
-            info!("Rendering Profile page");
-            html! { <Profile /> }
+        Route::Billing => {
+            info!("Rendering Billing page");
+            html! { <Billing /> }
         },
         Route::Verify => {
             info!("Rendering Verify page");
@@ -261,8 +261,8 @@ let close_menu = {
                             html! {
                                 <>
                                     <div onclick={close_menu.clone()}>
-                                        <Link<Route> to={Route::Profile} classes="nav-profile-link">
-                                            {"Profile"}
+                                        <Link<Route> to={Route::Billing} classes="nav-profile-link">
+                                            {"Billing"}
                                         </Link<Route>>
                                     </div>
                                     <button onclick={

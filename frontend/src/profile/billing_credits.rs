@@ -518,15 +518,24 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                             {"These are the overage credits you've purchased. They don't expire and can be used for voice calls or messages when monthly quota is used up."}
                                         </div>
 
-                                        <span>
-                                            {
-                                                if one_time_credits < 0.0 {
-                                                    format!("{:.2}€ (0 minutes/messages)", one_time_credits)
-                                                } else {
-                                                    format!("{:.2}€ ({:.0}min {:.0}s or {:.0} messages)", one_time_credits, one_time_minutes, one_time_seconds, one_time_messages)
+                                    <div class="credits-amount">
+                                        <span class="amount">{format!("{:.2}€", one_time_credits)}</span>
+                                        {
+                                            if one_time_credits < 0.0 {
+                                                html! {
+                                                    <span class="usage-estimate">{" (0 minutes/messages)"}</span>
+                                                }
+                                            } else {
+                                                html! {
+                                                    <div class="usage-estimate">
+                                                        <span class="time-estimate">{format!("({:.0}min {:.0}s", one_time_minutes, one_time_seconds)}</span>
+                                                        <span class="or">{"or"}</span>
+                                                        <span class="message-estimate">{format!("{:.0} messages)", one_time_messages)}</span>
+                                                    </div>
                                                 }
                                             }
-                                        </span>
+                                        }
+                                    </div>
                                     </div>
                                     <div class="credits-card monthly-credits">
                                         <div class="credits-header">{"Monthly Quota Left"}</div>
@@ -536,15 +545,23 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                         </div>
 
 
-                                        <span>
-                                            {
-                                                if monthly_credits < 0.0 {
-                                                    format!("0 minutes/messages")
-                                                } else {
-                                                    format!("{:.0}min {:.0}s or {:.0} messages", monthly_minutes, monthly_seconds, monthly_messages)
+                                    <div class="credits-amount">
+                                        {
+                                            if monthly_credits < 0.0 {
+                                                html! {
+                                                    <span class="usage-estimate">{"0 minutes/messages"}</span>
+                                                }
+                                            } else {
+                                                html! {
+                                                    <div class="usage-estimate">
+                                                        <span class="time-estimate">{format!("{:.0}min {:.0}s", monthly_minutes, monthly_seconds)}</span>
+                                                        <span class="or">{"or"}</span>
+                                                        <span class="message-estimate">{format!("{:.0} messages", monthly_messages)}</span>
+                                                    </div>
                                                 }
                                             }
-                                        </span>
+                                        }
+                                    </div>
                                     </div>
                                     <div class="credits-card proactive-messages">
                                         <div class="credits-header">{"Monthly Proactive Messages"}</div>
@@ -552,15 +569,19 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                             {"These are your remaining proactive notifications for this month. Lightfriend uses these to notify you about important events, emails, and calendar updates."}
                                         </div>
 
-                                        <span>
-                                            {
-                                                if user_profile.msgs_left <= 0 {
-                                                    "0 messages left".to_string()
-                                                } else {
-                                                    format!("{} messages left", user_profile.msgs_left)
-                                                }
-                                            }
-                                        </span>
+                                        <div class="credits-amount">
+                                            <div class="usage-estimate">
+                                                <span class="message-estimate">
+                                                    {
+                                                        if user_profile.msgs_left <= 0 {
+                                                            "0 messages left".to_string()
+                                                        } else {
+                                                            format!("{} messages left", user_profile.msgs_left)
+                                                        }
+                                                    }
+                                                </span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -887,8 +908,20 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
 .credits-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 1.5rem;
-    margin-top: 1rem;
+    gap: 2rem;
+    margin-top: 2rem;
+    animation: fadeInUp 0.6s ease-out forwards;
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 @media (max-width: 1200px) {
@@ -904,14 +937,41 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
 }
 
 .credits-card {
-    background: linear-gradient(to bottom, rgba(30, 144, 255, 0.05), rgba(30, 144, 255, 0.02));
-    border-radius: 16px;
-    padding: 2rem;
-
+    background: linear-gradient(145deg, rgba(30, 144, 255, 0.08), rgba(30, 144, 255, 0.03));
+    border-radius: 20px;
+    padding: 2.5rem;
     border: 1px solid rgba(30, 144, 255, 0.2);
-    transition: all 0.3s ease;
-    backdrop-filter: blur(5px);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    backdrop-filter: blur(10px);
     position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 200px;
+}
+
+.credits-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(30, 144, 255, 0.3), transparent);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.credits-card:hover::before {
+    opacity: 1;
+}
+
+.credits-card:hover {
+    transform: translateY(-8px) scale(1.02);
+    box-shadow: 0 20px 40px rgba(30, 144, 255, 0.15);
+    border-color: rgba(30, 144, 255, 0.4);
+    background: linear-gradient(145deg, rgba(30, 144, 255, 0.12), rgba(30, 144, 255, 0.05));
 }
 
 .credits-card.proactive-messages {
@@ -934,12 +994,55 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
     border-color: rgba(30, 144, 255, 0.4);
 }
 
-.credits-card span {
+.credits-amount {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: flex-start;
+}
+
+.credits-amount .amount {
     color: #e0e0e0;
-    font-size: 1.2rem;
-    font-weight: 500;
+    font-size: 1.4rem;
+    font-weight: 600;
     display: block;
     line-height: 1.6;
+}
+
+.usage-estimate {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    color: #999;
+    font-size: 1rem;
+}
+
+.time-estimate {
+    color: #7EB2FF;
+    font-weight: 500;
+}
+
+.or {
+    color: #666;
+    font-size: 0.9rem;
+    font-style: italic;
+}
+
+.message-estimate {
+    color: #7EB2FF;
+    font-weight: 500;
+}
+
+@media (max-width: 768px) {
+    .credits-amount {
+        align-items: center;
+    }
+    
+    .usage-estimate {
+        justify-content: center;
+        text-align: center;
+    }
 }
 
 .credits-header {

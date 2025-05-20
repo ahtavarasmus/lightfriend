@@ -38,6 +38,8 @@ pub struct UserProfile {
     pub msgs_left: i32,
     pub credits_left: f32,
     pub discount: bool,
+    pub notify: bool,
+    pub preferred_number: Option<String>,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]

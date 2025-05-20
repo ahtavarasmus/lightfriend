@@ -127,6 +127,7 @@ pub fn why() -> Html {
     padding: 6rem 2rem;
     background: rgba(26, 26, 26, 0.75);
     backdrop-filter: blur(5px);
+    margin-top: 2rem;
     border: 1px solid rgba(30, 144, 255, 0.1);
     margin-bottom: 2rem;
 }

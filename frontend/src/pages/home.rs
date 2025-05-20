@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 use crate::pages::landing::Landing;
+use crate::profile::settings::SettingsPage;
+use crate::profile::billing_models::UserProfile;
 
 fn render_notification_settings(profile: Option<&UserProfile>) -> Html {
     html! {
@@ -76,23 +78,13 @@ const PHONE_NUMBERS: &[(&str, &str, Option<&str>)] = &[
     ("aus", "+61489260976", None),
 ];
 
-#[derive(Deserialize, Clone)]
-struct UserProfile {
-    id: i32,
-    verified: bool,
-    time_to_delete: bool,
-    preferred_number: Option<String>,
-    notify: bool,
-    sub_tier: Option<String>,
-    discount: bool,
-    credits: f32,
-    credits_left: f32,
-}
+
 
 #[derive(Clone, PartialEq)]
 enum DashboardTab {
     Connections,
     Proactive,
+    Personal,
 }
 
 pub fn is_logged_in() -> bool {
@@ -105,9 +97,6 @@ pub fn is_logged_in() -> bool {
     }
     false
 }
-
-
-
 
 
 #[function_component]
@@ -236,8 +225,8 @@ pub fn Home() -> Html {
                                     html! {
                                         <div class="subscription-promo">
                                             <p>{"Buy Overage Credits"}</p>
-                                            <Link<Route> to={Route::Profile} classes="promo-link">
-                                                {"Profile →"}
+                                            <Link<Route> to={Route::Billing} classes="promo-link">
+                                                {"Billing →"}
                                             </Link<Route>>
                                         </div>
                                     }
@@ -364,6 +353,15 @@ pub fn Home() -> Html {
                             }}
                         >
                             {"Proactive"}
+                        </button>
+                        <button 
+                            class={classes!("tab-button", (*active_tab == DashboardTab::Personal).then(|| "active"))}
+                            onclick={{
+                                let active_tab = active_tab.clone();
+                                Callback::from(move |_| active_tab.set(DashboardTab::Personal))
+                            }}
+                        >
+                            {"Personal"}
                         </button>
                     </div>
                         {
@@ -492,6 +490,29 @@ pub fn Home() -> Html {
                                                 }
                                             } else {
                                                 html! {}
+                                            }
+                                        }
+                                    </div>
+                                },
+                                DashboardTab::Personal => html! {
+                                    <div class="personal-tab">
+                                        {
+                                            if let Some(profile) = (*profile_data).as_ref() {
+                                                html! {
+                                                    <SettingsPage 
+                                                        user_profile={profile.clone()}
+                                                        on_profile_update={{
+                                                            let profile_data = profile_data.clone();
+                                                            Callback::from(move |updated_profile| {
+                                                                profile_data.set(Some(updated_profile));
+                                                            })
+                                                        }}
+                                                    />
+                                                }
+                                            } else {
+                                                html! {
+                                                    <div class="loading-profile">{"Loading profile..."}</div>
+                                                }
                                             }
                                         }
                                     </div>

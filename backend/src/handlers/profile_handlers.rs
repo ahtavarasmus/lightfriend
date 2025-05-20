@@ -212,6 +212,7 @@ pub async fn update_profile(
     auth_user: AuthUser,
     Json(update_req): Json<UpdateProfileRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    println!("here");
  
     use regex::Regex;
     let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();

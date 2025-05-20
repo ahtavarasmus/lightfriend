@@ -120,8 +120,8 @@ pub async fn create_subscription_checkout(
     let checkout_session = CheckoutSession::create(
         &client,
         CreateCheckoutSession {
-            success_url: Some(&format!("{}/profile?subscription=success", domain_url)),
-            cancel_url: Some(&format!("{}/profile?subscription=canceled", domain_url)),
+            success_url: Some(&format!("{}/billing?subscription=success", domain_url)),
+            cancel_url: Some(&format!("{}/billing?subscription=canceled", domain_url)),
             mode: Some(stripe::CheckoutSessionMode::Subscription),
             line_items: Some(vec![
                 stripe::CreateCheckoutSessionLineItems {
@@ -210,7 +210,7 @@ pub async fn create_customer_portal_session(
 
     // Store the formatted URL in a variable first
     let return_url = format!(
-        "{}/profile",
+        "{}/billing",
         std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set")
     );
     create_session.return_url = Some(&return_url);
@@ -327,8 +327,8 @@ pub async fn create_checkout_session(
     let checkout_session = CheckoutSession::create(
         &client,
         CreateCheckoutSession {
-            success_url: Some(&format!("{}/profile", domain_url)), // Redirect after success
-            cancel_url: Some(&format!("{}/profile", domain_url)), // Redirect after cancellation
+            success_url: Some(&format!("{}/billing", domain_url)), // Redirect after success
+            cancel_url: Some(&format!("{}/billing", domain_url)), // Redirect after cancellation
             payment_method_types: Some(vec![stripe::CreateCheckoutSessionPaymentMethodTypes::Card]), // Allow card payments
             mode: Some(stripe::CheckoutSessionMode::Payment), // One-time payment mode
             line_items: Some(vec![

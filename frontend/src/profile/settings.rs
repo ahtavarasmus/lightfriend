@@ -144,6 +144,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     phone_number: (*phone_number).clone(),
                                     nickname: Some((*nickname).clone()),
                                     info: Some((*info).clone()),
+                                    preferred_number: (*user_profile).preferred_number.clone(),
                                     timezone: Some((*timezone).clone()),
                                     timezone_auto: Some(*timezone_auto),
                                     verified: (*user_profile).verified,
@@ -157,6 +158,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     msgs_left: (*user_profile).msgs_left,
                                     credits_left: (*user_profile).credits_left,
                                     discount: (*user_profile).discount,
+                                    notify: (*user_profile).notify,
                                 };
 
                                 // Notify parent component

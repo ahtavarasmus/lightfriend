@@ -6,22 +6,20 @@ use crate::config;
 use gloo_net::http::Request;
 use wasm_bindgen_futures::spawn_local;
 use crate::profile::billing_models::UserProfile;
-use crate::profile::settings::SettingsPage;
 use crate::profile::billing_credits::BillingPage;
 use web_sys::UrlSearchParams;
 
 #[derive(Clone, PartialEq)]
-enum ProfileTab {
-    Settings,
+enum BillingTab {
     Billing,
 }
 
 #[function_component]
-pub fn Profile() -> Html {
+pub fn Billing() -> Html {
     let profile = use_state(|| None::<UserProfile>);
     let error = use_state(|| None::<String>);
     let success = use_state(|| None::<String>);
-    let active_tab = use_state(|| ProfileTab::Settings);
+    let active_tab = use_state(|| BillingTab::Billing);
     let navigator = use_navigator().unwrap();
     let location = use_location().unwrap();
 
@@ -34,7 +32,7 @@ pub fn Profile() -> Html {
             if let Ok(params) = UrlSearchParams::new_with_str(query) {
                 if params.has("subscription") && params.get("subscription").unwrap_or_default() == "success" {
                     success.set(Some("Subscription activated successfully! You can now connect your services at the home and setup monitoring at the 'Proactive' tab if you'd like.".to_string()));
-                    active_tab.set(ProfileTab::Settings);
+                    active_tab.set(BillingTab::Billing);
                     
                     // Clean up the URL after showing the message
                     if let Some(window) = window() {
@@ -42,7 +40,22 @@ pub fn Profile() -> Html {
                             let _ = history.replace_state_with_url(
                                 &wasm_bindgen::JsValue::NULL,
                                 "",
-                                Some("/profile")
+                                Some("/billing")
+                            );
+                        }
+                    }
+                }
+                if params.has("subscription") && params.get("subscription").unwrap_or_default() == "canceled" {
+                    success.set(Some("Subscription canceled successfully.".to_string()));
+                    active_tab.set(BillingTab::Billing);
+                    
+                    // Clean up the URL after showing the message
+                    if let Some(window) = window() {
+                        if let Ok(history) = window.history() {
+                            let _ = history.replace_state_with_url(
+                                &wasm_bindgen::JsValue::NULL,
+                                "",
+                                Some("/billing")
                             );
                         }
                     }
@@ -122,8 +135,118 @@ pub fn Profile() -> Html {
 
     html! {
         <>
-            <style>
-                {".success-message {
+        <style>
+
+            {r#"
+                    /* Profile Container Styles */
+                    .profile-container {
+                        max-width: 1200px;
+                        margin: 0 auto;
+                        padding: 2rem;
+                        animation: fadeIn 0.5s ease-out;
+                    }
+
+                    @keyframes fadeIn {
+                        from {
+                            opacity: 0;
+                            transform: translateY(10px);
+                        }
+                        to {
+                            opacity: 1;
+                            transform: translateY(0);
+                        }
+                    }
+
+                    .profile-panel {
+                        background: rgba(30, 30, 30, 0.7);
+                        border: 1px solid rgba(30, 144, 255, 0.1);
+                        border-radius: 24px;
+                        padding: 2rem;
+                        margin-top: 5rem;
+                        backdrop-filter: blur(10px);
+                        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+                    }
+
+                    .profile-header {
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        margin-bottom: 3rem;
+                        padding-bottom: 1.5rem;
+                        border-bottom: 1px solid rgba(30, 144, 255, 0.1);
+                    }
+
+                    .header-content {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 0.5rem;
+                    }
+
+                    .profile-title {
+                        font-size: 2.5rem;
+                        background: linear-gradient(45deg, #fff, #7EB2FF);
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                        margin: 0;
+                        font-weight: 700;
+                    }
+
+                    .profile-subtitle {
+                        color: #999;
+                        font-size: 1.1rem;
+                        margin: 0;
+                    }
+
+                    .back-link {
+                        display: flex;
+                        align-items: center;
+                        gap: 0.5rem;
+                        color: #7EB2FF;
+                        text-decoration: none;
+                        font-size: 1rem;
+                        transition: all 0.3s ease;
+                        padding: 0.5rem 1rem;
+                        border-radius: 8px;
+                        border: 1px solid rgba(30, 144, 255, 0.2);
+                        background: rgba(30, 144, 255, 0.05);
+                    }
+
+                    .back-link:hover {
+                        transform: translateX(-5px);
+                        background: rgba(30, 144, 255, 0.1);
+                        border-color: rgba(30, 144, 255, 0.3);
+                    }
+
+                    .back-icon {
+                        font-size: 1.2rem;
+                    }
+
+                    @media (max-width: 768px) {
+                        .profile-container {
+                            padding: 1rem;
+                        }
+
+                        .profile-panel {
+                            padding: 1.5rem;
+                            border-radius: 16px;
+                        }
+
+                        .profile-header {
+                            flex-direction: column;
+                            align-items: flex-start;
+                            gap: 1rem;
+                            margin-bottom: 2rem;
+                        }
+
+                        .profile-title {
+                            font-size: 2rem;
+                        }
+
+                        .back-link {
+                            align-self: flex-start;
+                        }
+                    }
+                .success-message {
                     background-color: rgba(76, 175, 80, 0.1);
                     border: 1px solid rgba(76, 175, 80, 0.3);
                     border-radius: 8px;
@@ -157,36 +280,32 @@ pub fn Profile() -> Html {
                 @keyframes fadeIn {
                     from { opacity: 0; transform: translateY(-10px); }
                     to { opacity: 1; transform: translateY(0); }
-                }"}
+                "#}
             </style>
             <div class="profile-container">
                 <div class="profile-panel">
                     <div class="profile-header">
-                        <h1 class="profile-title">{"Profile"}</h1>
+                        <div class="header-content">
+                            <h1 class="profile-title">{"Billing"}</h1>
+                            <p class="profile-subtitle">{"Manage your subscription and credits"}</p>
+                        </div>
                         <Link<Route> to={Route::Home} classes="back-link">
                             {"Back to Home"}
                         </Link<Route>>
                     </div>
+                    /* if we want to add tabs in the future
                     <div class="profile-tabs">
                         <button 
-                            class={classes!("tab-button", (*active_tab == ProfileTab::Settings).then(|| "active"))}
+                            class={classes!("tab-button", (*active_tab == BillingTab::Billing).then(|| "active"))}
                             onclick={{
                                 let active_tab = active_tab.clone();
-                                Callback::from(move |_| active_tab.set(ProfileTab::Settings))
-                            }}
-                        >
-                            {"Settings"}
-                        </button>
-                        <button 
-                            class={classes!("tab-button", (*active_tab == ProfileTab::Billing).then(|| "active"))}
-                            onclick={{
-                                let active_tab = active_tab.clone();
-                                Callback::from(move |_| active_tab.set(ProfileTab::Billing))
+                                Callback::from(move |_| active_tab.set(BillingTab::Billing))
                             }}
                         >
                             {"Billing"}
                         </button>
                     </div>
+                    */
                     {
                         if let Some(error_msg) = (*error).as_ref() {
                             html! {
@@ -211,24 +330,13 @@ pub fn Profile() -> Html {
                     {
                         if let Some(user_profile) = profile_data {
                             match *active_tab {
-                                ProfileTab::Settings => html! {
-                                    <SettingsPage 
-                                        user_profile={user_profile.clone()}
-                                        on_profile_update={{
-                                            let profile = profile.clone();
-                                            Callback::from(move |updated_profile: UserProfile| {
-                                                profile.set(Some(updated_profile));
-                                            })
-                                        }}
-                                    />
-                                },
-                                ProfileTab::Billing => html! {
+                                BillingTab::Billing => html! {
                                     <BillingPage user_profile={user_profile.clone()} />
                                 }
                             }
                         } else {
                             html! {
-                                <div class="loading-profile">{"Loading profile..."}</div>
+                                <div class="loading-profile">{"Loading billing..."}</div>
                             }
                         }
                     }
