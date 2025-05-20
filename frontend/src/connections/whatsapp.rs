@@ -931,6 +931,30 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         transform: scale(1.1);
                     }
 
+                    #whatsapp-info {
+                        max-height: 400px;
+                        overflow-y: auto;
+                        scrollbar-width: thin;
+                        scrollbar-color: rgba(30, 144, 255, 0.5) rgba(30, 144, 255, 0.1);
+                    }
+
+                    #whatsapp-info::-webkit-scrollbar {
+                        width: 8px;
+                    }
+
+                    #whatsapp-info::-webkit-scrollbar-track {
+                        background: rgba(30, 144, 255, 0.1);
+                        border-radius: 4px;
+                    }
+
+                    #whatsapp-info::-webkit-scrollbar-thumb {
+                        background: rgba(30, 144, 255, 0.5);
+                        border-radius: 4px;
+                    }
+
+                    #whatsapp-info::-webkit-scrollbar-thumb:hover {
+                        background: rgba(30, 144, 255, 0.7);
+                    }
 
                     .security-notice {
                         background: rgba(30, 144, 255, 0.1);

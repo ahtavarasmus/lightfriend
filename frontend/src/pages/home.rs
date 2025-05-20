@@ -1246,10 +1246,31 @@ pub fn Home() -> Html {
                     }
 
                     .info-section {
+                        max-height: 400px;
+                        overflow-y: auto;
+                        scrollbar-width: thin;
+                        scrollbar-color: rgba(30, 144, 255, 0.5) rgba(30, 144, 255, 0.1);
                         border-radius: 12px;
-                        padding: 2rem;
                         margin: 1.5rem 0;
                         text-align: center;
+                    }
+
+                    .info-section::-webkit-scrollbar {
+                        width: 8px;
+                    }
+
+                    .info-section::-webkit-scrollbar-track {
+                        background: rgba(30, 144, 255, 0.1);
+                        border-radius: 4px;
+                    }
+
+                    .info-section::-webkit-scrollbar-thumb {
+                        background: rgba(30, 144, 255, 0.5);
+                        border-radius: 4px;
+                    }
+
+                    .info-section::-webkit-scrollbar-thumb:hover {
+                        background: rgba(30, 144, 255, 0.7);
                     }
 
                     .status-section {

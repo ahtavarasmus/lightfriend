@@ -1006,7 +1006,6 @@ let group_states = use_state(|| {
 .info-section {
     background: rgba(30, 144, 255, 0.05);
     border-radius: 8px;
-    padding: 1rem;
     margin-top: 1rem;
     border: 1px solid rgba(30, 144, 255, 0.1);
 }
@@ -1018,7 +1017,6 @@ let group_states = use_state(|| {
 
 .info-section ul {
     margin: 0;
-    padding-left: 1.2rem;
     color: #999;
 }
 

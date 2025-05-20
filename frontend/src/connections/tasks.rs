@@ -347,11 +347,32 @@ pub fn tasks_connect(props: &TasksConnectProps) -> Html {
                     }
 
                     .info-section {
+                        max-height: 400px;
+                        overflow-y: auto;
+                        scrollbar-width: thin;
+                        scrollbar-color: rgba(30, 144, 255, 0.5) rgba(30, 144, 255, 0.1);
                         border-radius: 12px;
-                        padding: 1.5rem;
                         margin-top: 1rem;
                         font-size: 0.95rem;
                         line-height: 1.6;
+                    }
+
+                    .info-section::-webkit-scrollbar {
+                        width: 8px;
+                    }
+
+                    .info-section::-webkit-scrollbar-track {
+                        background: rgba(30, 144, 255, 0.1);
+                        border-radius: 4px;
+                    }
+
+                    .info-section::-webkit-scrollbar-thumb {
+                        background: rgba(30, 144, 255, 0.5);
+                        border-radius: 4px;
+                    }
+
+                    .info-section::-webkit-scrollbar-thumb:hover {
+                        background: rgba(30, 144, 255, 0.7);
                     }
 
                     .info-section h4 {
@@ -363,7 +384,6 @@ pub fn tasks_connect(props: &TasksConnectProps) -> Html {
 
                     .info-subsection {
                         margin-bottom: 2rem;
-                        padding: 1.2rem;
                         border-radius: 8px;
                     }
 
@@ -380,7 +400,6 @@ pub fn tasks_connect(props: &TasksConnectProps) -> Html {
 
                     .info-subsection ul {
                         margin: 0;
-                        padding-left: 1.2rem;
                         list-style-type: none;
                     }
 
