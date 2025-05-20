@@ -1503,6 +1503,7 @@ pub fn Home() -> Html {
                         margin-bottom: 2rem;
                         border-bottom: 1px solid rgba(30, 144, 255, 0.1);
                         padding-bottom: 1rem;
+                        flex-wrap: wrap;
                     }
 
                     .tab-button {
@@ -1514,6 +1515,21 @@ pub fn Home() -> Html {
                         font-size: 1rem;
                         transition: all 0.3s ease;
                         position: relative;
+                        white-space: nowrap;
+                        flex: 1;
+                        min-width: fit-content;
+                    }
+
+                    @media (max-width: 480px) {
+                        .dashboard-tabs {
+                            gap: 0.5rem;
+                            justify-content: center;
+                        }
+
+                        .tab-button {
+                            padding: 0.5rem 0.75rem;
+                            font-size: 0.9rem;
+                        }
                     }
 
                     .tab-button::after {
