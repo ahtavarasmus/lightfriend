@@ -62,7 +62,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                 // Check IMAP service
                 if let Ok(imap_users) = state.user_repository.get_active_imap_connection_users() {
-                    if imap_users.contains(&user.id) && user.imap_proactive {
+                    if imap_users.contains(&user.id) && state.user_repository.get_imap_proactive(user.id).unwrap_or(false) {
                         info!("Checking IMAP messages for user {}", user.id);
                         match imap_handlers::fetch_emails_imap(&state, user.id, true, Some(10), true).await {
                             Ok(emails) => {

@@ -27,6 +27,10 @@ mod pages {
     pub mod proactive;
 }
 
+mod proactive {
+    pub mod email;
+}
+
 mod connections {
     pub mod email;
     pub mod calendar;
