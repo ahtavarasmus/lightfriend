@@ -27,6 +27,20 @@ pub struct CalendarEvent {
     pub start: EventDateTime,
     pub end: EventDateTime,
     pub status: Option<String>,
+    pub reminders: Option<EventReminders>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct EventReminders {
+    #[serde(rename = "useDefault")]
+    pub use_default: bool,
+    pub overrides: Vec<ReminderOverride>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ReminderOverride {
+    pub method: String,
+    pub minutes: i32,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -84,11 +98,11 @@ struct GoogleDateTime {
 #[derive(Debug, Serialize)]
 struct Reminders {
     useDefault: bool,
-    overrides: Vec<ReminderOverride>,
+    overrides: Vec<CreateEventReminderOverride>,
 }
 
 #[derive(Debug, Serialize)]
-struct ReminderOverride {
+struct CreateEventReminderOverride {
     method: String,
     minutes: i32,
 }
@@ -247,7 +261,7 @@ pub async fn create_calendar_event(
             Some(Reminders {
                 useDefault: false,
                 overrides: vec![
-                    ReminderOverride {
+                    CreateEventReminderOverride {
                         method: "popup".to_string(),
                         minutes: 10,
                     }

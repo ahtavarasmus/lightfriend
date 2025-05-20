@@ -20,7 +20,7 @@ use crate::{
         ImapConnection, NewImapConnection, Bridge, NewBridge, WaitingCheck, 
         NewWaitingCheck, PrioritySender, NewPrioritySender, Keyword, 
         NewKeyword, ImportancePriority, NewImportancePriority, NewGoogleTasks,
-        TaskNotification, NewTaskNotification,
+        TaskNotification, NewTaskNotification, ProactiveSettings
     },
     handlers::auth_dtos::NewUser,
     schema::{
@@ -914,20 +914,59 @@ impl UserRepository {
 
     // Update user's imap_proactive setting
     pub fn update_imap_proactive(&self, user_id: i32, proactive: bool) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::imap_proactive.eq(proactive))
-            .execute(&mut conn)?;
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        // Check if settings exist for this user
+        let existing_settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
+
+        match existing_settings {
+            Some(settings) => {
+                // Update existing settings
+                diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+                    .set((
+                        proactive_settings::imap_proactive.eq(proactive),
+                        proactive_settings::updated_at.eq(current_time),
+                    ))
+                    .execute(&mut conn)?;
+            },
+            None => {
+                // Create new settings
+                let new_settings = ProactiveSettings {
+                    id: None,
+                    user_id,
+                    imap_proactive: proactive,
+                    imap_general_checks: None,
+                    proactive_calendar: false, // default value
+                    created_at: current_time,
+                    updated_at: current_time,
+                };
+                diesel::insert_into(proactive_settings::table)
+                    .values(&new_settings)
+                    .execute(&mut conn)?;
+            }
+        }
         Ok(())
     }
 
     pub fn get_imap_proactive(&self, user_id: i32) -> Result<bool, DieselError> {
+        use crate::schema::proactive_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let proactive = users::table
-            .find(user_id)
-            .select(users::imap_proactive)
-            .first::<bool>(&mut conn)?;
-        Ok(proactive)
+        
+        let settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
+
+        Ok(settings.map_or(false, |s| s.imap_proactive))
     }
 
     // Get the user's subscription tier
@@ -966,21 +1005,115 @@ impl UserRepository {
 
     // Update user's custom IMAP general checks
     pub fn update_imap_general_checks(&self, user_id: i32, checks: Option<&str>) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::imap_general_checks.eq(checks))
-            .execute(&mut conn)?;
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        // Check if settings exist for this user
+        let existing_settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
+
+        match existing_settings {
+            Some(_) => {
+                // Update existing settings
+                diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+                    .set((
+                        proactive_settings::imap_general_checks.eq(checks.map(|s| s.to_string())),
+                        proactive_settings::updated_at.eq(current_time),
+                    ))
+                    .execute(&mut conn)?;
+            },
+            None => {
+                // Create new settings
+                let new_settings = ProactiveSettings {
+                    id: None,
+                    user_id,
+                    imap_proactive: false, // default value
+                    imap_general_checks: checks.map(|s| s.to_string()),
+                    proactive_calendar: false, // default value
+                    created_at: current_time,
+                    updated_at: current_time,
+                };
+                diesel::insert_into(proactive_settings::table)
+                    .values(&new_settings)
+                    .execute(&mut conn)?;
+            }
+        }
         Ok(())
     }
 
-    pub fn get_imap_general_checks(&self, user_id: i32) -> Result<String, DieselError> {
+    pub fn update_proactive_calendar(&self, user_id: i32, proactive: bool) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let checks = users::table
-            .find(user_id)
-            .select(users::imap_general_checks)
-            .first::<Option<String>>(&mut conn)?;
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        // Check if settings exist for this user
+        let existing_settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
+
+        match existing_settings {
+            Some(_) => {
+                // Update existing settings
+                diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+                    .set((
+                        proactive_settings::proactive_calendar.eq(proactive),
+                        proactive_settings::updated_at.eq(current_time),
+                    ))
+                    .execute(&mut conn)?;
+            },
+            None => {
+                // Create new settings
+                let new_settings = ProactiveSettings {
+                    id: None,
+                    user_id,
+                    imap_proactive: false, // default value
+                    imap_general_checks: None,
+                    proactive_calendar: proactive,
+                    created_at: current_time,
+                    updated_at: current_time,
+                };
+                diesel::insert_into(proactive_settings::table)
+                    .values(&new_settings)
+                    .execute(&mut conn)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn get_proactive_calendar(&self, user_id: i32) -> Result<bool, DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
+
+        Ok(settings.map_or(false, |s| s.proactive_calendar))
+    }
+
+    pub fn get_imap_general_checks(&self, user_id: i32) -> Result<String, DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
             
-        Ok(checks.unwrap_or_else(|| {
+        Ok(settings.and_then(|s| s.imap_general_checks).unwrap_or_else(|| {
             // Default general checks prompt
             String::from("
                 Step 1: Check for Urgency Indicators

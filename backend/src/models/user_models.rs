@@ -17,6 +17,7 @@ use crate::schema::processed_emails;
 use crate::schema::email_judgments;
 use crate::schema::google_tasks;
 use crate::schema::task_notifications;
+use crate::schema::proactive_settings;
 
 
 
@@ -47,8 +48,6 @@ pub struct User {
     pub timezone_auto: Option<bool>,
     pub sub_tier: Option<String>,
     pub msgs_left: i32, // proactive messages for the monthly sub, resets every month to bought amount
-    pub imap_general_checks: Option<String>,
-    pub imap_proactive: bool,
     pub matrix_device_id: Option<String>,
     pub credits_left: f32, // free credits that reset every month while in the monthly sub. will always be consumed before one time credits
     pub discount: bool, // if user can get discounted credits(for early adopters)
@@ -57,6 +56,21 @@ pub struct User {
     pub last_credits_notification: Option<i32>, // Unix timestamp of last insufficient credits notification
     pub confirm_send_event: bool, // flag that gets set when user wants to send something from voice call and it needs to be confirmed using sms
 }
+
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = proactive_settings)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct ProactiveSettings {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub imap_proactive: bool,
+    pub imap_general_checks: Option<String>,
+    pub proactive_calendar: bool,
+    pub created_at: i32,
+    pub updated_at: i32,
+}
+
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = task_notifications)]

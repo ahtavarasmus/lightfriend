@@ -37,7 +37,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 Ok(users) => {
                     let mut subscribed_users = Vec::new();
                     for user in users {
-                        match state.user_repository.has_valid_subscription_tier_with_messages(user.id, "tier 1") {
+                        match state.user_repository.has_valid_subscription_tier_with_messages(user.id, "tier 2") {
                             Ok(true) => {
                                 subscribed_users.push(user);
                             },
@@ -570,7 +570,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 }
 
                 // Check if we should continue processing other services
-                match state.user_repository.has_valid_subscription_tier_with_messages(user.id, "tier 1") {
+                match state.user_repository.has_valid_subscription_tier_with_messages(user.id, "tier 2") {
                     Ok(false) => {
                         continue;
                     },
@@ -739,7 +739,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
             for user in users {
                 // Check if user has messages left and valid subscription
-                match state.user_repository.has_valid_subscription_tier_with_messages(user.id, "tier 1") {
+                match state.user_repository.has_valid_subscription_tier_with_messages(user.id, "tier 2") {
                     Ok(true) => (),
                     Ok(false) => {
                         info!("User {} does not have valid subscription or messages left", user.id);
@@ -747,6 +747,19 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     },
                     Err(e) => {
                         error!("Failed to check subscription status for user {}: {}", user.id, e);
+                        continue;
+                    }
+                }
+
+                // Check if user has enabled proactive calendar notifications
+                match state.user_repository.get_proactive_calendar(user.id) {
+                    Ok(true) => (),
+                    Ok(false) => {
+                        info!("User {} has not enabled proactive calendar notifications", user.id);
+                        continue;
+                    },
+                    Err(e) => {
+                        error!("Failed to check proactive calendar setting for user {}: {}", user.id, e);
                         continue;
                     }
                 }
@@ -930,6 +943,137 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     }).expect("Failed to create task cleanup job");
 
     sched.add(task_cleanup_job).await.expect("Failed to add task cleanup job to scheduler");
+
+    // Create a job that runs every 5 minutes to check for upcoming calendar events
+    let state_clone = Arc::clone(&state);
+    let calendar_notification_job = Job::new_async("0 */5 * * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            info!("Running calendar notification check...");
+            
+            // Get all users with valid Google Calendar connection
+            let users = match state.user_repository.get_all_users() {
+                Ok(users) => users,
+                Err(e) => {
+                    error!("Failed to fetch users: {}", e);
+                    return;
+                }
+            };
+
+            for user in users {
+                // Check if user has messages left and valid subscription
+                match state.user_repository.has_valid_subscription_tier_with_messages(user.id, "tier 2") {
+                    Ok(true) => (),
+                    Ok(false) => {
+                        info!("User {} does not have valid subscription or messages left", user.id);
+                        continue;
+                    },
+                    Err(e) => {
+                        error!("Failed to check subscription status for user {}: {}", user.id, e);
+                        continue;
+                    }
+                }
+                // Check if user has enabled proactive calendar notifications
+                match state.user_repository.get_proactive_calendar(user.id) {
+                    Ok(true) => (),
+                    Ok(false) => {
+                        info!("User {} has not enabled proactive calendar notifications", user.id);
+                        continue;
+                    },
+                    Err(e) => {
+                        error!("Failed to check proactive calendar setting for user {}: {}", user.id, e);
+                        continue;
+                    }
+                }
+
+                // Check if user has active Google Calendar connection
+                match state.user_repository.has_active_google_calendar(user.id) {
+                    Ok(true) => (),
+                    Ok(false) => continue,
+                    Err(e) => {
+                        error!("Failed to check Google Calendar status for user {}: {}", user.id, e);
+                        continue;
+                    }
+                }
+
+                // Calculate time window for events (next 10 minutes)
+                let now = chrono::Utc::now();
+                let window_end = now + chrono::Duration::minutes(10);
+
+                // Fetch events in the time window
+                match crate::handlers::google_calendar::fetch_calendar_events(
+                    &state,
+                    user.id,
+                    crate::handlers::google_calendar::TimeframeQuery {
+                        start: now,
+                        end: window_end,
+                    }
+                ).await {
+                    Ok(events) => {
+                        for event in events {
+                            // Check if event has a 5-minute reminder
+                            if let Some(reminders) = event.reminders {
+                                if !reminders.use_default && reminders.overrides.iter().any(|r| r.minutes == 5) {
+                                    // Calculate when the reminder should trigger
+                                    if let Some(start_time) = event.start.date_time {
+                                        let reminder_time = start_time - chrono::Duration::minutes(5);
+                                        let current_time = chrono::Utc::now();
+                                        
+                                        // Check if we're within the notification window (between now and next 5 minutes)
+                                        if current_time <= reminder_time && reminder_time <= current_time + chrono::Duration::minutes(5) {
+                                            // Get the user's preferred number or default
+                                            let sender_number = match user.preferred_number.clone() {
+                                                Some(number) => {
+                                                    info!("Using user's preferred number: {}", number);
+                                                    number
+                                                },
+                                                None => {
+                                                    let number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set");
+                                                    info!("Using default SHAZAM_PHONE_NUMBER: {}", number);
+                                                    number
+                                                },
+                                            };
+
+                                            // Get the conversation for the user
+                                            let conversation_result = state.user_conversations.get_conversation(&user, sender_number)
+                                                .await
+                                                .map_err(|e| e.to_string());
+
+                                            match conversation_result {
+                                                Ok(conversation) => {
+                                                    // Format notification message
+                                                    let notification = format!(
+                                                        "Reminder: Your event '{}' starts in 5 minutes{}",
+                                                        event.summary.unwrap_or_else(|| "Untitled Event".to_string()),
+                                                        event.description.map_or("".to_string(), |desc| format!("\nDetails: {}", desc))
+                                                    );
+
+                                                    // Send notification
+                                                    match crate::api::twilio_utils::send_conversation_message(
+                                                        &conversation.conversation_sid,
+                                                        &conversation.twilio_number,
+                                                        &notification,
+                                                        true,
+                                                    ).await {
+                                                        Ok(_) => info!("Successfully sent calendar reminder to user {}", user.id),
+                                                        Err(e) => error!("Failed to send calendar reminder: {}", e),
+                                                    }
+                                                },
+                                                Err(e) => error!("Failed to get conversation for user {}: {}", user.id, e),
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    Err(e) => error!("Failed to fetch calendar events for user {}: {}", user.id, e),
+                }
+            }
+        })
+    }).expect("Failed to create calendar notification job");
+
+    sched.add(calendar_notification_job).await.expect("Failed to add calendar notification job to scheduler");
 
     // Create a job that runs daily to manage Matrix sync tasks
     let state_clone = Arc::clone(&state);

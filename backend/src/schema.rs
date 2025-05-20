@@ -123,6 +123,18 @@ diesel::table! {
 }
 
 diesel::table! {
+    proactive_settings (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        imap_proactive -> Bool,
+        imap_general_checks -> Nullable<Text>,
+        proactive_calendar -> Bool,
+        created_at -> Integer,
+        updated_at -> Integer,
+    }
+}
+
+diesel::table! {
     processed_emails (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -209,8 +221,6 @@ diesel::table! {
         timezone_auto -> Nullable<Bool>,
         sub_tier -> Nullable<Text>,
         msgs_left -> Integer,
-        imap_general_checks -> Nullable<Text>,
-        imap_proactive -> Bool,
         matrix_device_id -> Nullable<Text>,
         credits_left -> Float,
         discount -> Bool,
@@ -239,6 +249,7 @@ diesel::joinable!(imap_connection -> users (user_id));
 diesel::joinable!(importance_priorities -> users (user_id));
 diesel::joinable!(keywords -> users (user_id));
 diesel::joinable!(priority_senders -> users (user_id));
+diesel::joinable!(proactive_settings -> users (user_id));
 diesel::joinable!(processed_emails -> users (user_id));
 diesel::joinable!(subscriptions -> users (user_id));
 diesel::joinable!(waiting_checks -> users (user_id));
@@ -254,6 +265,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     importance_priorities,
     keywords,
     priority_senders,
+    proactive_settings,
     processed_emails,
     subscriptions,
     task_notifications,
