@@ -959,9 +959,9 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
     sched.add(task_cleanup_job).await.expect("Failed to add task cleanup job to scheduler");
 
-    // Create a job that runs every 5 minutes to check for upcoming calendar events
+    // Create a job that runs every minute to check for upcoming calendar events
     let state_clone = Arc::clone(&state);
-    let calendar_notification_job = Job::new_async("0 */5 * * * *", move |_, _| {
+    let calendar_notification_job = Job::new_async("0 * * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
             info!("Running calendar notification check...");
@@ -1019,10 +1019,10 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     }
                 }
 
-                // Calculate time window for events (±30 minutes from now)
+                // Calculate time window for events (±5 minutes from now for more precise checking)
                 let now = chrono::Utc::now();
-                let window_start = now - chrono::Duration::minutes(30);
-                let window_end = now + chrono::Duration::minutes(30);
+                let window_start = now - chrono::Duration::minutes(5);
+                let window_end = now + chrono::Duration::minutes(5);
 
                 // Fetch events in the time window
                 match crate::handlers::google_calendar::fetch_calendar_events(
@@ -1045,13 +1045,19 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         // Check if the reminder time has passed
                                         // Only process events that occurred after the last activation time
                                         if current_time >= reminder_time && start_time.timestamp() as i32 > last_activated {
-                                            // Check if we've already sent a notification for this event
+                                            // Clone all necessary data before the async block
                                             let event_id = event.id.clone();
+                                            let minutes = reminder.minutes;
+                                            let reminder_time_key = format!("{}_{}", event_id, minutes);
                                             let notification_exists = state.user_repository
-                                                .check_calendar_notification_exists(user.id, &event_id)
+                                                .check_calendar_notification_exists(user.id, &reminder_time_key)
                                                 .unwrap_or(true); // Skip if error occurs
 
                                             if !notification_exists {
+                                                // Clone event details we need for the notification
+                                                let event_summary = event.summary.clone().unwrap_or_else(|| "Untitled Event".to_string());
+                                                let event_description = event.description.clone();
+                                                
                                                 // Get the user's preferred number or default
                                                 let sender_number = match user.preferred_number.clone() {
                                                     Some(number) => {
@@ -1070,46 +1076,45 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                     // Format notification message
                                                     let notification = format!(
                                                         "Reminder: Your event '{}' starts in {} minutes{}",
-                                                        event.summary.clone().unwrap_or_else(|| "Untitled Event".to_string()),
-                                                        reminder.minutes,
-                                                        event.description.clone().map_or("".to_string(), |desc| format!("\nDetails: {}", desc))
+                                                        event_summary,
+                                                        minutes,
+                                                        event_description.map_or("".to_string(), |desc| format!("\nDetails: {}", desc))
                                                     );
 
+                                                    // Clone necessary values for the new thread
+                                                    let conversation_sid = conversation.conversation_sid.clone();
+                                                    let twilio_number = conversation.twilio_number.clone();
+                                                    let notification_clone = notification.clone();
+                                                    let state_clone = Arc::clone(&state);
+                                                    let user_id = user.id;
+                                                    let reminder_time_key = reminder_time_key.clone();
+                                                    let current_timestamp = current_time.timestamp() as i32;
 
-                                                // Clone necessary values for the new thread
-                                                let conversation_sid = conversation.conversation_sid.clone();
-                                                let twilio_number = conversation.twilio_number.clone();
-                                                let notification_clone = notification.clone();
-                                                let state_clone = Arc::clone(&state);
-                                                let user_id = user.id;
-                                                let event_id_clone = event_id.clone();
-                                                let current_time = current_time;
-
-                                                // Spawn a new thread for sending the notification
-                                                tokio::spawn(async move {
-                                                    match crate::api::twilio_utils::send_conversation_message(
-                                                        &conversation_sid,
-                                                        &twilio_number,
-                                                        &notification_clone,
-                                                        true,
-                                                    ).await {
-                                                        Ok(_) => {
-                                                            info!("Successfully sent calendar reminder to user {}", user_id);
-                                                            
-                                                            // Record the notification
-                                                            let new_notification = crate::models::user_models::NewCalendarNotification {
-                                                                user_id,
-                                                                event_id: event_id_clone,
-                                                                notification_time: current_time.timestamp() as i32,
-                                                            };
-                                                            
-                                                            if let Err(e) = state_clone.user_repository.create_calendar_notification(&new_notification) {
-                                                                error!("Failed to record calendar notification: {}", e);
-                                                            }
-                                                        },
-                                                        Err(e) => error!("Failed to send calendar reminder: {}", e),
-                                                    }
-                                                });
+                                                    // Spawn a new thread for sending the notification
+                                                    tokio::spawn(async move {
+                                                        match crate::api::twilio_utils::send_conversation_message(
+                                                            &conversation_sid,
+                                                            &twilio_number,
+                                                            &notification_clone,
+                                                            true,
+                                                        ).await {
+                                                            Ok(_) => {
+                                                                info!("Successfully sent calendar reminder to user {}", user_id);
+                                                                
+                                                                // Record the notification
+                                                                let new_notification = crate::models::user_models::NewCalendarNotification {
+                                                                    user_id,
+                                                                    event_id: reminder_time_key,
+                                                                    notification_time: current_timestamp,
+                                                                };
+                                                                
+                                                                if let Err(e) = state_clone.user_repository.create_calendar_notification(&new_notification) {
+                                                                    error!("Failed to record calendar notification: {}", e);
+                                                                }
+                                                            },
+                                                            Err(e) => error!("Failed to send calendar reminder: {}", e),
+                                                        }
+                                                    });
                                                 }
                                             }
                                         }
