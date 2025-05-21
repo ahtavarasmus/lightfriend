@@ -1024,12 +1024,12 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             // Get the user's preferred number or default
                                             let sender_number = match user.preferred_number.clone() {
                                                 Some(number) => {
-                                                    info!("Using user's preferred number: {}", number);
+                                                    println!("Using user's preferred number: {}", number);
                                                     number
                                                 },
                                                 None => {
                                                     let number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set");
-                                                    info!("Using default SHAZAM_PHONE_NUMBER: {}", number);
+                                                    println!("Using default SHAZAM_PHONE_NUMBER: {}", number);
                                                     number
                                                 },
                                             };
@@ -1048,6 +1048,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                         event.description.map_or("".to_string(), |desc| format!("\nDetails: {}", desc))
                                                     );
 
+                                                    println!("formatted reminder message");
                                                     // Send notification
                                                     match crate::api::twilio_utils::send_conversation_message(
                                                         &conversation.conversation_sid,
@@ -1055,7 +1056,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                         &notification,
                                                         true,
                                                     ).await {
-                                                        Ok(_) => info!("Successfully sent calendar reminder to user {}", user.id),
+                                                        Ok(_) => println!("Successfully sent calendar reminder to user {}", user.id),
                                                         Err(e) => error!("Failed to send calendar reminder: {}", e),
                                                     }
                                                 },
