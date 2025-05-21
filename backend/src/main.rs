@@ -387,6 +387,9 @@ async fn main() {
         .route("/api/profile/imap-proactive", get(profile_handlers::get_imap_proactive))
         .route("/api/profile/email-judgments", get(profile_handlers::get_email_judgments))
 
+        .route("/api/profile/calendar-proactive", get(profile_handlers::get_calendar_proactive))
+        .route("/api/profile/calendar-proactive", post(profile_handlers::update_calendar_proactive))
+
 
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
 

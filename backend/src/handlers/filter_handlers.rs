@@ -417,16 +417,14 @@ pub async fn get_connected_services(
     let mut services = Vec::new();
 
     // Check Google Calendar
-    /*
     if let Ok(true) = state.user_repository.has_active_google_calendar(auth_user.user_id) {
         services.push(ConnectedService {
             service_type: "calendar".to_string(),
-            identifier: "".to_string(),  // Using access token email as identifier
+            identifier: "(google)".to_string(),  // Using access token email as identifier
         });
     }
-    */
 
-    // Check IMAP
+    // Check Email
     if let Ok(Some((email, _, _, _))) = state.user_repository.get_imap_credentials(auth_user.user_id) {
         services.push(ConnectedService {
             service_type: "imap".to_string(),

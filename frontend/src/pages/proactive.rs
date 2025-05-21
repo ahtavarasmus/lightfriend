@@ -106,8 +106,8 @@ pub struct Props {
 // Helper functions
 fn get_service_display_name(service_type: &str) -> String {
     match service_type {
-        "imap" => "IMAP Email",
-        "calendar" => "Google Calendar",
+        "imap" => "Email",
+        "calendar" => "Calendar",
         _ => service_type,
     }.to_string()
 }
@@ -144,7 +144,7 @@ pub fn connected_services(props: &Props) -> Html {
     let selected_service = use_state(|| None::<String>);
     let is_proactive = use_state(|| false);
     let filter_settings = use_state(|| None::<FilterSettings>);
-
+    let is_calendar_proactive = use_state(|| false);
 
     // Function to fetch keywords for a specific service
     let fetch_keywords = {
@@ -221,6 +221,41 @@ pub fn connected_services(props: &Props) -> Html {
         }, ());
     }
 
+    // Fetch CALENDAR proactive state on mount
+    {
+        let is_calendar_proactive = is_calendar_proactive.clone();
+        let error = error.clone();
+
+        use_effect_with_deps(move |_| {
+            if let Some(token) = window()
+                .and_then(|w| w.local_storage().ok())
+                .flatten()
+                .and_then(|s| s.get_item("token").ok())
+                .flatten()
+            {
+                spawn_local(async move {
+                    if let Ok(resp) = Request::get(&format!(
+                        "{}/api/profile/calendar-proactive", config::get_backend_url()
+                    ))
+                    .header("Authorization", &format!("Bearer {}", token))
+                    .send()
+                    .await
+                    {
+                        if let Ok(json) = resp.json::<serde_json::Value>().await {
+                            if let Some(val) = json.get("proactive").and_then(|v| v.as_bool()) {
+                                is_calendar_proactive.set(val);
+                            }
+                        }
+                    } else {
+                        error.set(Some("Failed to fetch calendar state".into()));
+                    }
+                });
+            }
+            || ()
+        }, ());
+    }
+
+
     // Fetch connected services and their keywords on mount
     {
         let services_state = services_state.clone();
@@ -241,7 +276,8 @@ pub fn connected_services(props: &Props) -> Html {
                         .send()
                         .await
                     {
-                        if let Ok(services) = response.json::<Vec<ConnectedService>>().await {
+                    if let Ok(mut services) = response.json::<Vec<ConnectedService>>().await {
+                            
                             let mut service_states = Vec::new();
 
                             // For each service, fetch its keywords
@@ -346,6 +382,8 @@ pub fn connected_services(props: &Props) -> Html {
         let services_state = services_state.clone();
         let selected_service = selected_service.clone();
         let on_service_click = on_service_click.clone();
+        let is_calendar_proactive = is_calendar_proactive.clone();
+        let is_proactive = is_proactive.clone();
 
         move || {
             (*services_state).iter().map(|service| {
@@ -368,10 +406,36 @@ pub fn connected_services(props: &Props) -> Html {
                         )}
                         onclick={onclick}
                     >
-                        <i class={classes!(
-                            "service-icon",
-                            format!("{}-icon", service.service_type)
-                        )}></i>
+                        <div class="service-status">
+                            {
+                                if service.service_type == "imap" {
+                                    if *is_proactive {
+                                        html! { <span class="status-dot active" title="Active"></span> }
+                                    } else {
+                                        html! { <span class="status-dot" title="Inactive"></span> }
+                                    }
+                                } else if service.service_type == "calendar" {
+                                    if *is_calendar_proactive {
+                                        html! { <span class="status-dot active" title="Active"></span> }
+                                    } else {
+                                        html! { <span class="status-dot" title="Inactive"></span> }
+                                    }
+                                } else {
+                                    html! { <span class="status-dot" title="Inactive"></span> }
+                                }
+                            }
+                        </div>
+                        {
+                            if service.service_type == "imap" {
+                                html! {
+                                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%234285f4' d='M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48H48zM0 176V384c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V176L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z'/%3E%3C/svg%3E" alt="IMAP"/>
+                                }
+                            } else {
+                                html! {
+                                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 448 512'%3E%3Cpath fill='%234285f4' d='M152 24c0-13.3-10.7-24-24-24s-24 10.7-24 24V64H64C28.7 64 0 92.7 0 128v16 48V448c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V192 144 128c0-35.3-28.7-64-64-64H344V24c0-13.3-10.7-24-24-24s-24 10.7-24 24V64H152V24zM48 192H400V448c0 8.8-7.2 16-16 16H64c-8.8 0-16-7.2-16-16V192z'/%3E%3C/svg%3E" alt="Calendar"/>
+                                }
+                            }
+                        }
                         <h3>{get_service_display_name(&service.service_type)}</h3>
                         <p class="service-identifier">{&service.identifier}</p>
                     </div>
@@ -382,22 +446,76 @@ pub fn connected_services(props: &Props) -> Html {
 
     html! {
         <div class="proactive-container">
-            <h2>{"Proactive messaging"}</h2>
-            /*
+            <h2>{"Proactive Notifications"}</h2>
             <div class="service-boxes-container">
                 {render_service_grid()}
             </div>
-            */
             
             {
                 if let Some(selected) = (*selected_service).clone() {
                     if let Some(service) = (*services_state).iter().find(|s| s.service_type == selected) {
                         if service.service_type == "calendar" {
                             html! {
-                                <div class="coming-soon-container">
-                                    <div class="coming-soon-content">
-                                        <h3>{"Google Calendar Proactive Coming Soon!"}</h3>
-                                        <p>{"We're working hard to bring you smart notifications for your Google Calendar events."}</p>
+                                <div class="filters-container">
+                                    <div class="proactive-toggle-section">
+                                        <div class="notify-toggle">
+                                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 448 512'%3E%3Cpath fill='%234285f4' d='M152 24c0-13.3-10.7-24-24-24s-24 10.7-24 24V64H64C28.7 64 0 92.7 0 128v16 48V448c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V192 144 128c0-35.3-28.7-64-64-64H344V24c0-13.3-10.7-24-24-24s-24 10.7-24 24V64H152V24zM48 192H400V448c0 8.8-7.2 16-16 16H64c-8.8 0-16-7.2-16-16V192z'/%3E%3C/svg%3E" alt="Calendar"/>
+                                            <span class="proactive-title">{"CALENDAR EVENT NOTIFICATIONS"}</span>
+                                            <span class="toggle-status">
+                                                {if *is_calendar_proactive { "Active" } else { "Inactive" }}
+                                            </span>
+                                            <label class="switch"
+                                                   onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={*is_calendar_proactive}
+                                                    onchange={Callback::from({
+                                                        let flag = is_calendar_proactive.clone();
+                                                        let error = error.clone();
+                                                        move |e: Event| {
+                                                            let el: HtmlInputElement = e.target_unchecked_into();
+                                                            let val = el.checked();
+                                                            let handle = flag.clone();
+                                                            let error_handle = error.clone();
+                                                            if let Some(tok) = window()
+                                                                .and_then(|w| w.local_storage().ok())
+                                                                .flatten()
+                                                                .and_then(|s| s.get_item("token").ok())
+                                                                .flatten()
+                                                            {
+                                                                spawn_local(async move {
+                                                                    match Request::post(&format!(
+                                                                        "{}/api/profile/calendar-proactive",
+                                                                        config::get_backend_url()
+                                                                    ))
+                                                                    .header("Authorization", &format!("Bearer {}", tok))
+                                                                    .json(&json!({ "proactive": val }))
+                                                                    .expect("Failed to create request")
+                                                                    .send()
+                                                                    .await {
+                                                                        Ok(response) => {
+                                                                            if response.ok() {
+                                                                                handle.set(val);
+                                                                                error_handle.set(None);
+                                                                            } else {
+                                                                                error_handle.set(Some("Failed to update calendar proactive state".to_string()));
+                                                                            }
+                                                                        }
+                                                                        Err(_) => {
+                                                                            error_handle.set(Some("Network error while updating calendar proactive state".to_string()));
+                                                                        }
+                                                                    }
+                                                                });
+                                                            }
+                                                        }
+                                                    })}
+                                                />
+                                                <span class="slider round"></span>
+                                            </label>
+                                        </div>
+                                        <p class="notification-description">
+                                            {"Enable notifications for your Google Calendar events. When your calendar event has a reminder set, you will be reminded about it through SMS. Lightfriend fetches upcoming event reminders from google every five minutes. No calendar event data is stored on lightfriend's servers."}
+                                        </p>
                                     </div>
                                 </div>
                             }
@@ -407,11 +525,13 @@ pub fn connected_services(props: &Props) -> Html {
                                     <div class="proactive-toggle-section">
                                         <div class="notify-toggle">
                                             <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%234285f4' d='M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48H48zM0 176V384c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V176L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z'/%3E%3C/svg%3E" alt="IMAP"/>
-                                            <span class="proactive-title">{"Proactive EMAIL"}</span>
+                                            <span class="proactive-title">{"IMPORTANT EMAIL NOTIFICATIONS"}</span>
                                             <span class="toggle-status">
                                                 {if *is_proactive { "Active" } else { "Inactive" }}
                                             </span>
-                                            <label class="switch">
+                                            <label class="switch"
+                                                   onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+
                                                 <input 
                                                     type="checkbox" 
                                                     checked={*is_proactive}
@@ -448,11 +568,24 @@ pub fn connected_services(props: &Props) -> Html {
                                             </label>
                                         </div>
                                         <p class="notification-description">
-                                            {"Enable proactive notifications for IMAP email based on your filters."}
+                                            {"Enable notifications for specific emails based on your filters. Lightfriend fetches emails from your email server every minute and processes new emails based on the importance criteria below. If some criteria is met, you will be notified about the email through SMS. No email data will be stored on lightfriend's servers expect email ids to prevent processing same email twice."}
                                         </p>
                                     </div> // end proactive-toggle-section
                                     {
                                         if *is_proactive {
+                                            let priority_senders: Vec<String> = settings.priority_senders.iter()
+                                                .map(|sender| sender.sender.clone())
+                                                .collect();
+                                            
+                                            let waiting_checks: Vec<String> = settings.waiting_checks.iter()
+                                                .map(|check| check.content.clone())
+                                                .collect();
+
+                                            let threshold = settings.importance_priority
+                                                .as_ref()
+                                                .map(|ip| ip.threshold)
+                                                .unwrap_or(7);
+
                                             html! {
                                                 <>
                                                 <FilterActivityLog />
@@ -532,6 +665,14 @@ pub fn connected_services(props: &Props) -> Html {
                                                     })}
                                                 />
 
+                                                <ImapGeneralChecks 
+                                                    on_update={Callback::from(|_| {})}
+                                                    keywords={settings.keywords.clone()}
+                                                    priority_senders={priority_senders}
+                                                    waiting_checks={waiting_checks}
+                                                    threshold={threshold}
+                                                />
+
                                                 </>
                                             }
                                         } else {
@@ -540,6 +681,58 @@ pub fn connected_services(props: &Props) -> Html {
                                     }
                                 </div>
                             }
+
+                        } else if selected == "calendar_push" {
+                            html! {
+                                <div class="filters-container">
+                                    <div class="proactive-toggle-section">
+                                        <div class="notify-toggle">
+                                            <i class="service-icon calendar-icon"></i>
+                                            <span class="proactive-title">{"Proactive CALENDAR"}</span>
+                                            <span class="toggle-status">
+                                                {if *is_calendar_proactive { "Active" } else { "Inactive" }}
+                                            </span>
+                                            <label class="switch">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={*is_calendar_proactive}
+                                                    onchange={Callback::from({
+                                                        let flag = is_calendar_proactive.clone();
+                                                        move |e: Event| {
+                                                            let el: HtmlInputElement = e.target_unchecked_into();
+                                                            let val = el.checked();
+                                                            let handle = flag.clone();
+                                                            if let Some(tok) = window()
+                                                                .and_then(|w| w.local_storage().ok())
+                                                                .flatten()
+                                                                .and_then(|s| s.get_item("token").ok())
+                                                                .flatten()
+                                                            {
+                                                                spawn_local(async move {
+                                                                    let _ = Request::post(&format!(
+                                                                        "{}/api/profile/calendar-proactive",
+                                                                        config::get_backend_url()
+                                                                    ))
+                                                                    .header("Authorization", &format!("Bearer {}", tok))
+                                                                    .json(&json!({ "proactive": val }))
+                                                                    .unwrap()
+                                                                    .send()
+                                                                    .await;
+                                                                    handle.set(val);
+                                                                });
+                                                            }
+                                                        }
+                                                    })}
+                                                />
+                                                <span class="slider round"></span>
+                                            </label>
+                                        </div>
+                                        <p class="notification-description">
+                                            {"Turn on calendar push notifications (more settings coming soon)."}
+                                        </p>
+                                    </div>
+                                </div>
+                                }
                         } else {
                             html! {}
                         }
@@ -563,66 +756,7 @@ pub fn connected_services(props: &Props) -> Html {
                 }
             }
 
-            {
-                if *is_proactive {
-                    if let Some(selected) = (*selected_service).clone() {
-                        if selected == "imap" {
-                            if let Some(service) = (*services_state).iter().find(|s| s.service_type == "imap") {
-                                if let Some(settings) = &service.filter_settings {
-                                    let priority_senders: Vec<String> = settings.priority_senders.iter()
-                                        .map(|sender| sender.sender.clone())
-                                        .collect();
-                                    
-                                    let waiting_checks: Vec<String> = settings.waiting_checks.iter()
-                                        .map(|check| check.content.clone())
-                                        .collect();
 
-                                    let threshold = settings.importance_priority
-                                        .as_ref()
-                                        .map(|ip| ip.threshold)
-                                        .unwrap_or(7);
-
-                                    html! {
-                                        <ImapGeneralChecks 
-                                            on_update={Callback::from(|_| {})}
-                                            keywords={settings.keywords.clone()}
-                                            priority_senders={priority_senders}
-                                            waiting_checks={waiting_checks}
-                                            threshold={threshold}
-                                        />
-                                    }
-                                } else {
-                                    html! {
-                                        <ImapGeneralChecks 
-                                            on_update={Callback::from(|_| {})}
-                                            keywords={vec![]}
-                                            priority_senders={vec![]}
-                                            waiting_checks={vec![]}
-                                            threshold={7}
-                                        />
-                                    }
-                                }
-                            } else {
-                                html! {
-                                    <ImapGeneralChecks 
-                                        on_update={Callback::from(|_| {})}
-                                        keywords={vec![]}
-                                        priority_senders={vec![]}
-                                        waiting_checks={vec![]}
-                                        threshold={7}
-                                    />
-                                }
-                            }
-                        } else {
-                            html! {}
-                        }
-                    } else {
-                        html! {}
-                    }
-                } else {
-                    html! {}
-                }
-            }
 
             <style>
                 {r#"
@@ -659,6 +793,33 @@ pub fn connected_services(props: &Props) -> Html {
                     gap: 0.3rem;
                     min-width: 120px;
                     max-width: 150px;
+                    position: relative;
+                }
+
+                .service-status {
+                    position: absolute;
+                    top: 8px;
+                    right: 8px;
+                }
+
+                .status-dot {
+                    width: 10px;
+                    height: 10px;
+                    background-color: rgba(255, 255, 255, 0.3);
+                    border-radius: 50%;
+                    display: inline-block;
+                    transition: all 0.3s ease;
+                }
+
+                .status-dot.active {
+                    background-color: #4CAF50;
+                    box-shadow: 0 0 8px rgba(76, 175, 80, 0.5);
+                }
+
+                .service-box img {
+                    width: 24px;
+                    height: 24px;
+                    margin-bottom: 0.5rem;
                 }
 
                 .service-box:hover {

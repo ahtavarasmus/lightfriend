@@ -340,6 +340,51 @@ pub struct EmailJudgmentResponse {
     pub reason: String,
 }
 
+#[derive(Serialize)]
+pub struct CalendarProactiveResponse {
+    proactive: bool,
+}
+
+pub async fn get_calendar_proactive(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<CalendarProactiveResponse>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_repository.get_proactive_calendar(auth_user.user_id) {
+        Ok(proactive) => Ok(Json(CalendarProactiveResponse { proactive })),
+        Err(e) => {
+            tracing::error!("Failed to get calendar proactive setting: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to get calendar proactive setting: {}", e)}))
+            ))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct CalendarProactiveRequest {
+    proactive: bool,
+}
+
+pub async fn update_calendar_proactive(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<CalendarProactiveRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_repository.update_proactive_calendar(auth_user.user_id, request.proactive) {
+        Ok(_) => Ok(Json(json!({
+            "message": "Calendar proactive setting updated successfully"
+        }))),
+        Err(e) => {
+            tracing::error!("Failed to update calendar proactive setting: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to update calendar proactive setting: {}", e)}))
+            ))
+        }
+    }
+}
+
 pub async fn get_email_judgments(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
