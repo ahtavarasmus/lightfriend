@@ -31,8 +31,8 @@ SELECT
     COALESCE(imap_proactive, false),
     imap_general_checks,
     false,  -- Default value for new proactive_calendar field
-    unixepoch(),
-    unixepoch()
+    strftime('%s', 'now'),
+    strftime('%s', 'now')
 FROM users;
 
 -- Remove the columns from users table
