@@ -18,6 +18,7 @@ use crate::schema::email_judgments;
 use crate::schema::google_tasks;
 use crate::schema::task_notifications;
 use crate::schema::proactive_settings;
+use crate::schema::calendar_notifications;
 
 
 
@@ -69,6 +70,8 @@ pub struct ProactiveSettings {
     pub proactive_calendar: bool,
     pub created_at: i32,
     pub updated_at: i32,
+    pub proactive_calendar_last_activated: i32,
+    pub proactive_email_last_activated: i32,
 }
 
 
@@ -361,6 +364,23 @@ pub struct NewGoogleCalendar{
     pub created_on: i32,
     pub description: String,
     pub expires_in: i32,
+}
+
+#[derive(Debug, Queryable, Insertable)]
+#[diesel(table_name = calendar_notifications)]
+pub struct CalendarNotification {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub event_id: String,
+    pub notification_time: i32,
+}
+
+#[derive(Debug, Insertable)]
+#[diesel(table_name = calendar_notifications)]
+pub struct NewCalendarNotification {
+    pub user_id: i32,
+    pub event_id: String,
+    pub notification_time: i32,
 }
 
 #[derive(Queryable, Selectable, Insertable)]

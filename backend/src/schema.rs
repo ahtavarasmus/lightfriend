@@ -13,6 +13,15 @@ diesel::table! {
 }
 
 diesel::table! {
+    calendar_notifications (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        event_id -> Text,
+        notification_time -> Integer,
+    }
+}
+
+diesel::table! {
     conversations (id) {
         id -> Integer,
         user_id -> Integer,
@@ -131,6 +140,8 @@ diesel::table! {
         proactive_calendar -> Bool,
         created_at -> Integer,
         updated_at -> Integer,
+        proactive_calendar_last_activated -> Integer,
+        proactive_email_last_activated -> Integer,
     }
 }
 
@@ -243,6 +254,7 @@ diesel::table! {
 }
 
 diesel::joinable!(bridges -> users (user_id));
+diesel::joinable!(calendar_notifications -> users (user_id));
 diesel::joinable!(conversations -> users (user_id));
 diesel::joinable!(gmail -> users (user_id));
 diesel::joinable!(imap_connection -> users (user_id));
@@ -256,6 +268,7 @@ diesel::joinable!(waiting_checks -> users (user_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     bridges,
+    calendar_notifications,
     conversations,
     email_judgments,
     gmail,

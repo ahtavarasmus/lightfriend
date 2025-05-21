@@ -929,12 +929,18 @@ impl UserRepository {
             .optional()?;
 
         match existing_settings {
-            Some(settings) => {
+            Some(_) => {
                 // Update existing settings
+
+                let existing_settings = proactive_settings::table
+                    .filter(proactive_settings::user_id.eq(user_id))
+                    .first::<ProactiveSettings>(&mut conn)?;
+
                 diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
                     .set((
                         proactive_settings::imap_proactive.eq(proactive),
                         proactive_settings::updated_at.eq(current_time),
+                        proactive_settings::proactive_email_last_activated.eq(if proactive { current_time } else { existing_settings.proactive_email_last_activated }),
                     ))
                     .execute(&mut conn)?;
             },
@@ -948,6 +954,8 @@ impl UserRepository {
                     proactive_calendar: false, // default value
                     created_at: current_time,
                     updated_at: current_time,
+                    proactive_calendar_last_activated: current_time,
+                    proactive_email_last_activated: current_time,
                 };
                 diesel::insert_into(proactive_settings::table)
                     .values(&new_settings)
@@ -958,6 +966,10 @@ impl UserRepository {
     }
 
     pub fn get_imap_proactive(&self, user_id: i32) -> Result<bool, DieselError> {
+        self.get_imap_proactive_status(user_id).map(|(enabled, _)| enabled)
+    }
+
+    pub fn get_imap_proactive_status(&self, user_id: i32) -> Result<(bool, i32), DieselError> {
         use crate::schema::proactive_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
@@ -966,7 +978,7 @@ impl UserRepository {
             .first::<ProactiveSettings>(&mut conn)
             .optional()?;
 
-        Ok(settings.map_or(false, |s| s.imap_proactive))
+        Ok(settings.map_or((false, 0), |s| (s.imap_proactive, s.proactive_email_last_activated)))
     }
 
     // Get the user's subscription tier
@@ -1039,6 +1051,8 @@ impl UserRepository {
                     proactive_calendar: false, // default value
                     created_at: current_time,
                     updated_at: current_time,
+                    proactive_calendar_last_activated: current_time,
+                    proactive_email_last_activated: current_time,
                 };
                 diesel::insert_into(proactive_settings::table)
                     .values(&new_settings)
@@ -1066,10 +1080,16 @@ impl UserRepository {
         match existing_settings {
             Some(_) => {
                 // Update existing settings
+
+                let existing_settings = proactive_settings::table
+                    .filter(proactive_settings::user_id.eq(user_id))
+                    .first::<ProactiveSettings>(&mut conn)?;
+
                 diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
                     .set((
                         proactive_settings::proactive_calendar.eq(proactive),
                         proactive_settings::updated_at.eq(current_time),
+                        proactive_settings::proactive_calendar_last_activated.eq(if proactive { current_time } else { existing_settings.proactive_calendar_last_activated }),
                     ))
                     .execute(&mut conn)?;
             },
@@ -1083,6 +1103,8 @@ impl UserRepository {
                     proactive_calendar: proactive,
                     created_at: current_time,
                     updated_at: current_time,
+                    proactive_calendar_last_activated: current_time,
+                    proactive_email_last_activated: current_time,
                 };
                 diesel::insert_into(proactive_settings::table)
                     .values(&new_settings)
@@ -1093,6 +1115,10 @@ impl UserRepository {
     }
 
     pub fn get_proactive_calendar(&self, user_id: i32) -> Result<bool, DieselError> {
+        self.get_proactive_calendar_status(user_id).map(|(enabled, _)| enabled)
+    }
+
+    pub fn get_proactive_calendar_status(&self, user_id: i32) -> Result<(bool, i32), DieselError> {
         use crate::schema::proactive_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
@@ -1101,7 +1127,7 @@ impl UserRepository {
             .first::<ProactiveSettings>(&mut conn)
             .optional()?;
 
-        Ok(settings.map_or(false, |s| s.proactive_calendar))
+        Ok(settings.map_or((false, 0), |s| (s.proactive_calendar, s.proactive_calendar_last_activated)))
     }
 
     pub fn get_imap_general_checks(&self, user_id: i32) -> Result<String, DieselError> {
@@ -1889,6 +1915,44 @@ impl UserRepository {
             .load::<crate::models::user_models::EmailJudgment>(&mut conn)?;
 
         Ok(judgments)
+    }
+
+    // Clean up old calendar notifications
+    pub fn cleanup_old_calendar_notifications(&self, older_than_timestamp: i32) -> Result<(), DieselError> {
+        use crate::schema::calendar_notifications;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::delete(calendar_notifications::table)
+            .filter(calendar_notifications::notification_time.lt(older_than_timestamp))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    // Create a new calendar notification
+    pub fn create_calendar_notification(&self, new_notification: &crate::models::user_models::NewCalendarNotification) -> Result<(), DieselError> {
+        use crate::schema::calendar_notifications;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        diesel::insert_into(calendar_notifications::table)
+            .values(new_notification)
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    // Check if a calendar notification exists
+    pub fn check_calendar_notification_exists(&self, user_id: i32, event_id: &str) -> Result<bool, DieselError> {
+        use crate::schema::calendar_notifications;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let count = calendar_notifications::table
+            .filter(calendar_notifications::user_id.eq(user_id))
+            .filter(calendar_notifications::event_id.eq(event_id))
+            .count()
+            .get_result::<i64>(&mut conn)?;
+
+        Ok(count > 0)
     }
 
     pub fn create_gmail_connection(
