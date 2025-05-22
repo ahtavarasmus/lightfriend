@@ -20,7 +20,6 @@ use std::env;
 
 use crate::handlers::imap_handlers;
 use crate::api::twilio_utils;
-use crate::handlers::google_tasks::{self, Task};
 
 pub async fn start_scheduler(state: Arc<AppState>) {
     let sched = JobScheduler::new().await.expect("Failed to create scheduler");
@@ -1071,8 +1070,28 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                     },
                                                 };
 
+                                                // Check if we should process this notification based on messages left
+                                                let should_continue = match state.user_repository.decrease_messages_left(user.id) {
+                                                    Ok(msgs_left) => {
+                                                        info!("User {} has {} messages left after decrease", user.id, msgs_left);
+                                                        msgs_left > 0
+                                                    },
+                                                    Err(e) => {
+                                                        error!("Failed to decrease messages left for user {}: {}", user.id, e);
+                                                        false
+                                                    }
+                                                };
+
+                                                if !should_continue {
+                                                    info!("Skipping calendar notification for user {} due to no messages left", user.id);
+                                                    continue;
+                                                }
+
                                                 // Get the conversation for the user
                                                 if let Ok(conversation) = state.user_conversations.get_conversation(&user, sender_number).await {
+                                                    // Check if this is the final message
+                                                    let is_final_message = user.msgs_left <= 1;
+
                                                     // Format notification message
                                                     let notification = format!(
                                                         "Reminder: Your event '{}' starts in {} minutes{}",
@@ -1081,10 +1100,17 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                         event_description.map_or("".to_string(), |desc| format!("\nDetails: {}", desc))
                                                     );
 
+                                                    // Append final message notice if needed
+                                                    let final_notification = if is_final_message {
+                                                        format!("{}\n\nNote: This is your final proactive message for this month. Your message quota will reset at the start of next month.", notification)
+                                                    } else {
+                                                        notification
+                                                    };
+
                                                     // Clone necessary values for the new thread
                                                     let conversation_sid = conversation.conversation_sid.clone();
                                                     let twilio_number = conversation.twilio_number.clone();
-                                                    let notification_clone = notification.clone();
+                                                    let notification_clone = final_notification.clone();
                                                     let state_clone = Arc::clone(&state);
                                                     let user_id = user.id;
                                                     let reminder_time_key = reminder_time_key.clone();
@@ -1166,13 +1192,24 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     Ok(client) => {
                                         info!("Starting Matrix sync for user {}", user_id);
                                         
-                                        // Add message handler
-                                        use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
-                                        use matrix_sdk::room::Room;
-                                        use matrix_sdk::Client as MatrixClient;
-                                        client.add_event_handler(|ev: OriginalSyncRoomMessageEvent, room: Room, client: MatrixClient| async move {
-                                            crate::utils::whatsapp_utils::handle_whatsapp_message(ev, room, client).await;
-                                        });
+                                        // Only add message handler if user has proactive WhatsApp enabled
+                                        match state_clone.user_repository.get_proactive_whatsapp(user_id) {
+                                            Ok(true) => {
+                                                info!("Adding WhatsApp message handler for user {} (proactive enabled)", user_id);
+                                                use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
+                                                use matrix_sdk::room::Room;
+                                                use matrix_sdk::Client as MatrixClient;
+                                                client.add_event_handler(|ev: OriginalSyncRoomMessageEvent, room: Room, client: MatrixClient| async move {
+                                                    crate::utils::whatsapp_utils::handle_whatsapp_message(ev, room, client).await;
+                                                });
+                                            },
+                                            Ok(false) => {
+                                                info!("Skipping WhatsApp message handler for user {} (proactive disabled)", user_id);
+                                            },
+                                            Err(e) => {
+                                                error!("Failed to check proactive WhatsApp status for user {}: {}", user_id, e);
+                                            }
+                                        }
 
                                         if let Err(e) = client.sync(matrix_sdk::config::SyncSettings::default()).await {
                                             error!("Matrix sync error for user {}: {}", user_id, e);

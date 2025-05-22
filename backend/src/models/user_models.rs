@@ -421,7 +421,7 @@ pub struct WaitingCheck {
     pub due_date: i32,
     pub content: String,
     pub remove_when_found: bool,
-    pub service_type: String,
+    pub service_type: String,// like email, whatsapp, .. 
 }
 
 #[derive(Insertable)]
@@ -431,7 +431,7 @@ pub struct NewWaitingCheck {
     pub due_date: i32,
     pub content: String,
     pub remove_when_found: bool,
-    pub service_type: String,
+    pub service_type: String,// like email, whatsapp, .. 
 }
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -477,7 +477,7 @@ pub struct ImportancePriority {
     pub id: Option<i32>,
     pub user_id: i32,
     pub threshold: i32,
-    pub service_type: String,
+    pub service_type: String,// like email, whatsapp, .. 
 }
 
 #[derive(Insertable)]
@@ -485,5 +485,5 @@ pub struct ImportancePriority {
 pub struct NewImportancePriority {
     pub user_id: i32,
     pub threshold: i32,
-    pub service_type: String,
+    pub service_type: String,// like email, whatsapp, .. 
 }

@@ -5,6 +5,7 @@ use gloo_net::http::Request;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{window, js_sys, HtmlInputElement, KeyboardEvent, InputEvent, Event};
 use wasm_bindgen::JsValue;
+use serde_json::json;
 use crate::config;
 use crate::pages::proactive::{PrioritySender, EmailJudgmentResponse, WaitingCheck, ImportancePriority};
 use super::common::{format_timestamp, KeywordsSection, PrioritySendersSection, ImportancePrioritySection};

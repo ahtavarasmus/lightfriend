@@ -739,24 +739,6 @@ pub async fn fetch_calendar_events(
 
     match result {
         Ok(events) => {
-            // Print out reminders for each event
-            // TODO remove
-            for event in &events {
-                if let Some(summary) = &event.summary {
-                    println!("Event: {}", summary);
-                    if let Some(reminders) = &event.reminders {
-                        println!("  Use default reminders: {}", reminders.use_default);
-                        println!("  Reminder overrides:");
-                        for override_reminder in &reminders.overrides {
-                            println!("    - Method: {}, Minutes before: {}", 
-                                override_reminder.method, 
-                                override_reminder.minutes);
-                        }
-                    } else {
-                        println!("  No reminders set");
-                    }
-                }
-            }
             Ok(events)
         },
         Err(CalendarError::ApiError(e)) if e.contains("401") => {
