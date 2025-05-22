@@ -1180,50 +1180,45 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                         }
                     });
 
-                    // Start sync tasks for new active users
-                    for user_id in users {
-                        if !sync_tasks.contains_key(&user_id) {
-                            println!("Starting new sync task for user {}", user_id);
-                            
-                            // Create a new sync task
-                            let state_clone = Arc::clone(&state);
-                            let handle = tokio::spawn(async move {
-                                match crate::utils::matrix_auth::get_client(user_id, &state_clone.user_repository, false).await {
-                                    Ok(client) => {
-                                        info!("Starting Matrix sync for user {}", user_id);
-                                        
-                                        // Only add message handler if user has proactive WhatsApp enabled
-                                        match state_clone.user_repository.get_proactive_whatsapp(user_id) {
-                                            Ok(true) => {
-                                                info!("Adding WhatsApp message handler for user {} (proactive enabled)", user_id);
-                                                use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
-                                                use matrix_sdk::room::Room;
-                                                use matrix_sdk::Client as MatrixClient;
-                                                client.add_event_handler(|ev: OriginalSyncRoomMessageEvent, room: Room, client: MatrixClient| async move {
-                                                    crate::utils::whatsapp_utils::handle_whatsapp_message(ev, room, client).await;
-                                                });
-                                            },
-                                            Ok(false) => {
-                                                info!("Skipping WhatsApp message handler for user {} (proactive disabled)", user_id);
-                                            },
-                                            Err(e) => {
-                                                error!("Failed to check proactive WhatsApp status for user {}: {}", user_id, e);
+                        // Start sync tasks for new active users
+                        for user_id in users {
+                            if !sync_tasks.contains_key(&user_id) {
+                                println!("Starting new sync task for user {}", user_id);
+                                
+                                // Create a new sync task
+                                let state_clone = Arc::clone(&state);
+                                let handle = tokio::spawn(async move {
+                                    match crate::utils::matrix_auth::get_client(user_id, &state_clone.user_repository, false).await {
+                                        Ok(client) => {
+                                            info!("Starting Matrix sync for user {}", user_id);
+                                            
+                                            // Always add WhatsApp message handler - it will check proactive status internally
+                                            info!("Adding WhatsApp message handler for user {}", user_id);
+                                            use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
+                                            use matrix_sdk::room::Room;
+                                            use matrix_sdk::Client as MatrixClient;
+                                            let state_for_handler = Arc::clone(&state_clone);
+                                            client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room, client: MatrixClient| {
+                                                let state = Arc::clone(&state_for_handler);
+                                                async move {
+                                                    crate::utils::whatsapp_utils::handle_whatsapp_message(ev, room, client, state).await;
+                                                }
+                                            });
+
+                                            if let Err(e) = client.sync(matrix_sdk::config::SyncSettings::default()).await {
+                                                error!("Matrix sync error for user {}: {}", user_id, e);
                                             }
+                                        },
+                                        Err(e) => {
+                                            error!("Failed to get Matrix client for user {}: {}", user_id, e);
                                         }
 
-                                        if let Err(e) = client.sync(matrix_sdk::config::SyncSettings::default()).await {
-                                            error!("Matrix sync error for user {}: {}", user_id, e);
-                                        }
-                                    },
-                                    Err(e) => {
-                                        error!("Failed to get Matrix client for user {}: {}", user_id, e);
                                     }
-                                }
-                            });
-                            
-                            sync_tasks.insert(user_id, handle);
+                                });
+                                
+                                sync_tasks.insert(user_id, handle);
+                            }
                         }
-                    }
                 },
                 Err(e) => error!("Failed to get active WhatsApp users: {}", e),
             }

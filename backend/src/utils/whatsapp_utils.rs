@@ -606,6 +606,7 @@ pub async fn handle_whatsapp_message(
     event: OriginalSyncRoomMessageEvent,
     room: Room,
     client: MatrixClient,
+    state: Arc<AppState>,
 ) {
     // Get room name
     let room_name = match room.display_name().await {
@@ -624,6 +625,35 @@ pub async fn handle_whatsapp_message(
     // Only process messages from WhatsApp users
     if !event.sender.localpart().starts_with("whatsapp_") {
         return;
+    }
+
+    // Find the user ID for this Matrix client
+    let client_user_id = client.user_id().unwrap().to_string();
+    let user_id = match state.user_repository.get_user_id_by_matrix_user_id(&client_user_id) {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            tracing::warn!("No user found for Matrix user ID: {}", client_user_id);
+            return;
+        },
+        Err(e) => {
+            tracing::error!("Failed to get user ID for Matrix user {}: {}", client_user_id, e);
+            return;
+        }
+    };
+
+    // Check if user has proactive WhatsApp enabled
+    match state.user_repository.get_proactive_whatsapp(user_id) {
+        Ok(true) => {
+            tracing::debug!("User {} has proactive WhatsApp enabled, processing message", user_id);
+        },
+        Ok(false) => {
+            tracing::debug!("User {} has proactive WhatsApp disabled, skipping message", user_id);
+            return;
+        },
+        Err(e) => {
+            tracing::error!("Failed to check proactive WhatsApp status for user {}: {}", user_id, e);
+            return;
+        }
     }
 
     // Extract message content
@@ -647,12 +677,14 @@ pub async fn handle_whatsapp_message(
         return;
     }
 
+    /*
     // Print message details
     println!("WhatsApp Message Received:");
     println!("Room: {}", room_name);
     println!("Sender: {}", event.sender.localpart());
     println!("Content: {}", content);
     println!("-------------------");
+    */
 }
 
 pub async fn search_whatsapp_rooms(

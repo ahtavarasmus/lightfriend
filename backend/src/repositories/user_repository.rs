@@ -1870,6 +1870,18 @@ impl UserRepository {
         Ok(user_ids)
     }
 
+    pub fn get_user_id_by_matrix_user_id(&self, matrix_user_id: &str) -> Result<Option<i32>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let user_id = users::table
+            .filter(users::matrix_username.eq(matrix_user_id))
+            .select(users::id)
+            .first::<i32>(&mut conn)
+            .optional()?;
+            
+        Ok(user_id)
+    }
+
 
     // Mark an email as processed
     pub fn mark_email_as_processed(&self, user_id: i32, email_uid: &str) -> Result<(), DieselError> {
