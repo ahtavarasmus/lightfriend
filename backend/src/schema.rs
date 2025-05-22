@@ -142,6 +142,7 @@ diesel::table! {
         updated_at -> Integer,
         proactive_calendar_last_activated -> Integer,
         proactive_email_last_activated -> Integer,
+        proactive_whatsapp -> Bool,
     }
 }
 

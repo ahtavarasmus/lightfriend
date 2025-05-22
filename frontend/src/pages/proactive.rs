@@ -10,10 +10,16 @@ use crate::profile::imap_general_checks::ImapGeneralChecks;
 
 use crate::proactive::email::{
     FilterActivityLog,
-    KeywordsSection,
-    PrioritySendersSection,
+    KeywordsSection as EmailKeywordsSection,
+    PrioritySendersSection as EmailPrioritySendersSection,
     WaitingChecksSection,
-    ImportancePrioritySection,
+    ImportancePrioritySection as EmailImportancePrioritySection,
+};
+
+use crate::proactive::whatsapp::{
+    KeywordsSection as WhatsAppKeywordsSection,
+    PrioritySendersSection as WhatsAppPrioritySendersSection,
+    ImportancePrioritySection as WhatsAppImportancePrioritySection,
 };
 
 trait PadStart {
@@ -108,6 +114,7 @@ fn get_service_display_name(service_type: &str) -> String {
     match service_type {
         "imap" => "Email",
         "calendar" => "Calendar",
+        "whatsapp" => "WhatsApp",
         _ => service_type,
     }.to_string()
 }
@@ -145,6 +152,7 @@ pub fn connected_services(props: &Props) -> Html {
     let is_proactive = use_state(|| false);
     let filter_settings = use_state(|| None::<FilterSettings>);
     let is_calendar_proactive = use_state(|| false);
+    let is_whatsapp_proactive = use_state(|| false);
 
     // Function to fetch keywords for a specific service
     let fetch_keywords = {
@@ -248,6 +256,40 @@ pub fn connected_services(props: &Props) -> Html {
                         }
                     } else {
                         error.set(Some("Failed to fetch calendar state".into()));
+                    }
+                });
+            }
+            || ()
+        }, ());
+    }
+
+    // Fetch WHATSAPP proactive state on mount
+    {
+        let is_whatsapp_proactive = is_whatsapp_proactive.clone();
+        let error = error.clone();
+
+        use_effect_with_deps(move |_| {
+            if let Some(token) = window()
+                .and_then(|w| w.local_storage().ok())
+                .flatten()
+                .and_then(|s| s.get_item("token").ok())
+                .flatten()
+            {
+                spawn_local(async move {
+                    if let Ok(resp) = Request::get(&format!(
+                        "{}/api/profile/whatsapp-proactive", config::get_backend_url()
+                    ))
+                    .header("Authorization", &format!("Bearer {}", token))
+                    .send()
+                    .await
+                    {
+                        if let Ok(json) = resp.json::<serde_json::Value>().await {
+                            if let Some(val) = json.get("proactive").and_then(|v| v.as_bool()) {
+                                is_whatsapp_proactive.set(val);
+                            }
+                        }
+                    } else {
+                        error.set(Some("Failed to fetch WhatsApp state".into()));
                     }
                 });
             }
@@ -383,6 +425,7 @@ pub fn connected_services(props: &Props) -> Html {
         let selected_service = selected_service.clone();
         let on_service_click = on_service_click.clone();
         let is_calendar_proactive = is_calendar_proactive.clone();
+        let is_whatsapp_proactive = is_whatsapp_proactive.clone();
         let is_proactive = is_proactive.clone();
 
         move || {
@@ -420,6 +463,12 @@ pub fn connected_services(props: &Props) -> Html {
                                     } else {
                                         html! { <span class="status-dot" title="Inactive"></span> }
                                     }
+                                } else if service.service_type == "whatsapp" {
+                                    if *is_whatsapp_proactive {
+                                        html! { <span class="status-dot active" title="Active"></span> }
+                                    } else {
+                                        html! { <span class="status-dot" title="Inactive"></span> }
+                                    }
                                 } else {
                                     html! { <span class="status-dot" title="Inactive"></span> }
                                 }
@@ -430,6 +479,10 @@ pub fn connected_services(props: &Props) -> Html {
                                 html! {
                                     <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%234285f4' d='M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48H48zM0 176V384c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V176L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z'/%3E%3C/svg%3E" alt="IMAP"/>
                                 }
+                            } else if service.service_type == "whatsapp" {
+                                html! {
+                                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 448 512'%3E%3Cpath fill='%234285f4' d='M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 10.2 77.3 29.6 111L0 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 0-59.3-25.2-115-67.1-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z'/%3E%3C/svg%3E" alt="WhatsApp"/>
+                                }
                             } else {
                                 html! {
                                     <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 448 512'%3E%3Cpath fill='%234285f4' d='M152 24c0-13.3-10.7-24-24-24s-24 10.7-24 24V64H64C28.7 64 0 92.7 0 128v16 48V448c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V192 144 128c0-35.3-28.7-64-64-64H344V24c0-13.3-10.7-24-24-24s-24 10.7-24 24V64H152V24zM48 192H400V448c0 8.8-7.2 16-16 16H64c-8.8 0-16-7.2-16-16V192z'/%3E%3C/svg%3E" alt="Calendar"/>
@@ -437,7 +490,7 @@ pub fn connected_services(props: &Props) -> Html {
                             }
                         }
                         <h3>{get_service_display_name(&service.service_type)}</h3>
-                        <p class="service-identifier">{&service.identifier}</p>
+                        //<p class="service-identifier">{&service.identifier}</p>
                     </div>
                 }
             }).collect::<Html>()
@@ -454,9 +507,74 @@ pub fn connected_services(props: &Props) -> Html {
             {
                 if let Some(selected) = (*selected_service).clone() {
                     if let Some(service) = (*services_state).iter().find(|s| s.service_type == selected) {
-                        if service.service_type == "calendar" {
-                            html! {
-                                <div class="filters-container">
+                    if service.service_type == "whatsapp" {
+                        html! {
+                            <div class="filters-container">
+                                <div class="proactive-toggle-section">
+                                    <div class="notify-toggle">
+                                        <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 448 512'%3E%3Cpath fill='%234285f4' d='M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 10.2 77.3 29.6 111L0 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 0-59.3-25.2-115-67.1-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z'/%3E%3C/svg%3E" alt="WhatsApp"/>
+                                        <span class="proactive-title">{"WHATSAPP NOTIFICATIONS"}</span>
+                                        <span class="toggle-status">
+                                            {if *is_whatsapp_proactive { "Active" } else { "Inactive" }}
+                                        </span>
+                                        <label class="switch"
+                                               onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                                            <input
+                                                type="checkbox"
+                                                checked={*is_whatsapp_proactive}
+                                                onchange={Callback::from({
+                                                    let flag = is_whatsapp_proactive.clone();
+                                                    let error = error.clone();
+                                                    move |e: Event| {
+                                                        let el: HtmlInputElement = e.target_unchecked_into();
+                                                        let val = el.checked();
+                                                        let handle = flag.clone();
+                                                        let error_handle = error.clone();
+                                                        if let Some(tok) = window()
+                                                            .and_then(|w| w.local_storage().ok())
+                                                            .flatten()
+                                                            .and_then(|s| s.get_item("token").ok())
+                                                            .flatten()
+                                                        {
+                                                            spawn_local(async move {
+                                                                match Request::post(&format!(
+                                                                    "{}/api/profile/whatsapp-proactive",
+                                                                    config::get_backend_url()
+                                                                ))
+                                                                .header("Authorization", &format!("Bearer {}", tok))
+                                                                .json(&json!({ "proactive": val }))
+                                                                .expect("Failed to create request")
+                                                                .send()
+                                                                .await {
+                                                                    Ok(response) => {
+                                                                        if response.ok() {
+                                                                            handle.set(val);
+                                                                            error_handle.set(None);
+                                                                        } else {
+                                                                            error_handle.set(Some("Failed to update WhatsApp proactive state".to_string()));
+                                                                        }
+                                                                    }
+                                                                    Err(_) => {
+                                                                        error_handle.set(Some("Network error while updating WhatsApp proactive state".to_string()));
+                                                                    }
+                                                                }
+                                                            });
+                                                        }
+                                                    }
+                                                })}
+                                            />
+                                            <span class="slider round"></span>
+                                        </label>
+                                    </div>
+                                    <p class="notification-description">
+                                        {"Enable notifications for your WhatsApp messages. When enabled, you will receive SMS notifications for new important WhatsApp messages. Lightfriend processes them based on your notification preferences. "}
+                                    </p>
+                                </div>
+                            </div>
+                        }
+                    } else if service.service_type == "calendar" {
+                        html! {
+                            <div class="filters-container">
                                     <div class="proactive-toggle-section">
                                         <div class="notify-toggle">
                                             <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 448 512'%3E%3Cpath fill='%234285f4' d='M152 24c0-13.3-10.7-24-24-24s-24 10.7-24 24V64H64C28.7 64 0 92.7 0 128v16 48V448c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V192 144 128c0-35.3-28.7-64-64-64H344V24c0-13.3-10.7-24-24-24s-24 10.7-24 24V64H152V24zM48 192H400V448c0 8.8-7.2 16-16 16H64c-8.8 0-16-7.2-16-16V192z'/%3E%3C/svg%3E" alt="Calendar"/>
@@ -732,7 +850,72 @@ pub fn connected_services(props: &Props) -> Html {
                                         </p>
                                     </div>
                                 </div>
-                                }
+                            }
+                        } else if service.service_type == "whatsapp" {
+                            html! {
+                                <div class="filters-container">
+                                    <div class="proactive-toggle-section">
+                                        <div class="notify-toggle">
+                                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 448 512'%3E%3Cpath fill='%234285f4' d='M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 10.2 77.3 29.6 111L0 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 0-59.3-25.2-115-67.1-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z'/%3E%3C/svg%3E" alt="WhatsApp"/>
+                                            <span class="proactive-title">{"WHATSAPP NOTIFICATIONS"}</span>
+                                            <span class="toggle-status">
+                                                {if *is_whatsapp_proactive { "Active" } else { "Inactive" }}
+                                            </span>
+                                            <label class="switch"
+                                                   onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={*is_whatsapp_proactive}
+                                                    onchange={Callback::from({
+                                                        let flag = is_whatsapp_proactive.clone();
+                                                        let error = error.clone();
+                                                        move |e: Event| {
+                                                            let el: HtmlInputElement = e.target_unchecked_into();
+                                                            let val = el.checked();
+                                                            let handle = flag.clone();
+                                                            let error_handle = error.clone();
+                                                            if let Some(tok) = window()
+                                                                .and_then(|w| w.local_storage().ok())
+                                                                .flatten()
+                                                                .and_then(|s| s.get_item("token").ok())
+                                                                .flatten()
+                                                            {
+                                                                spawn_local(async move {
+                                                                    match Request::post(&format!(
+                                                                        "{}/api/profile/whatsapp-proactive",
+                                                                        config::get_backend_url()
+                                                                    ))
+                                                                    .header("Authorization", &format!("Bearer {}", tok))
+                                                                    .json(&json!({ "proactive": val }))
+                                                                    .expect("Failed to create request")
+                                                                    .send()
+                                                                    .await {
+                                                                        Ok(response) => {
+                                                                            if response.ok() {
+                                                                                handle.set(val);
+                                                                                error_handle.set(None);
+                                                                            } else {
+                                                                                error_handle.set(Some("Failed to update WhatsApp proactive state".to_string()));
+                                                                            }
+                                                                        }
+                                                                        Err(_) => {
+                                                                            error_handle.set(Some("Network error while updating WhatsApp proactive state".to_string()));
+                                                                        }
+                                                                    }
+                                                                });
+                                                            }
+                                                        }
+                                                    })}
+                                                />
+                                                <span class="slider round"></span>
+                                            </label>
+                                        </div>
+                                        <p class="notification-description">
+                                            {"Enable notifications for your WhatsApp messages. When enabled, you will receive SMS notifications for new WhatsApp messages. Lightfriend checks for new messages every minute and processes them based on your notification preferences. No message content is stored on lightfriend's servers."}
+                                        </p>
+                                    </div>
+                                </div>
+                            }
                         } else {
                             html! {}
                         }

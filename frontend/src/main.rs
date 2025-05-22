@@ -29,6 +29,9 @@ mod pages {
 
 mod proactive {
     pub mod email;
+    pub mod calendar;
+    pub mod whatsapp;
+    pub mod common;
 }
 
 mod connections {

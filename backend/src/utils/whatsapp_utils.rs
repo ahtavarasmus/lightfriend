@@ -388,6 +388,7 @@ pub async fn send_whatsapp_message(
 
 use matrix_sdk::RoomMemberships;
 use strsim;
+use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
 
 #[derive(Debug)]
 struct WhatsAppSearchRoom {
@@ -600,6 +601,59 @@ async fn fetch_messages_from_room(
     Ok((messages, room_name))
 }
 
+
+pub async fn handle_whatsapp_message(
+    event: OriginalSyncRoomMessageEvent,
+    room: Room,
+    client: MatrixClient,
+) {
+    // Get room name
+    let room_name = match room.display_name().await {
+        Ok(name) => name.to_string(),
+        Err(e) => {
+            tracing::error!("Failed to get room name: {}", e);
+            return;
+        }
+    };
+
+    // Only process WhatsApp rooms
+    if !room_name.contains("(WA)") {
+        return;
+    }
+
+    // Only process messages from WhatsApp users
+    if !event.sender.localpart().starts_with("whatsapp_") {
+        return;
+    }
+
+    // Extract message content
+    let content = match event.content.msgtype {
+        MessageType::Text(t) => t.body,
+        MessageType::Notice(n) => n.body,
+        MessageType::Image(_) => "📎 IMAGE".into(),
+        MessageType::Video(_) => "📎 VIDEO".into(),
+        MessageType::File(_) => "📎 FILE".into(),
+        MessageType::Audio(_) => "📎 AUDIO".into(),
+        MessageType::Location(_) => "📍 LOCATION".into(),
+        MessageType::Emote(t) => t.body,
+        _ => return,
+    };
+
+    // Skip error messages
+    if content.contains("Failed to bridge media") ||
+       content.contains("media no longer available") ||
+       content.contains("Decrypting message from WhatsApp failed") ||
+       content.starts_with("* Failed to") {
+        return;
+    }
+
+    // Print message details
+    println!("WhatsApp Message Received:");
+    println!("Room: {}", room_name);
+    println!("Sender: {}", event.sender.localpart());
+    println!("Content: {}", content);
+    println!("-------------------");
+}
 
 pub async fn search_whatsapp_rooms(
     state: &AppState,

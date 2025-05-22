@@ -432,6 +432,14 @@ pub async fn get_connected_services(
         });
     }
 
+    // Check WhatsApp
+    if let Ok(Some(_)) = state.user_repository.get_active_whatsapp_connection(auth_user.user_id) {
+        services.push(ConnectedService {
+            service_type: "whatsapp".to_string(),
+            identifier: "".to_string(),  // Using bridge ID as identifier
+        });
+    }
+
     Ok(Json(services))
 }
 

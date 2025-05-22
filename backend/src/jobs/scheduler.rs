@@ -1165,6 +1165,15 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                 match crate::utils::matrix_auth::get_client(user_id, &state_clone.user_repository, false).await {
                                     Ok(client) => {
                                         info!("Starting Matrix sync for user {}", user_id);
+                                        
+                                        // Add message handler
+                                        use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
+                                        use matrix_sdk::room::Room;
+                                        use matrix_sdk::Client as MatrixClient;
+                                        client.add_event_handler(|ev: OriginalSyncRoomMessageEvent, room: Room, client: MatrixClient| async move {
+                                            crate::utils::whatsapp_utils::handle_whatsapp_message(ev, room, client).await;
+                                        });
+
                                         if let Err(e) = client.sync(matrix_sdk::config::SyncSettings::default()).await {
                                             error!("Matrix sync error for user {}: {}", user_id, e);
                                         }
@@ -1252,7 +1261,5 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     // and if that happens make error visible
 
 }
-
-
 
 

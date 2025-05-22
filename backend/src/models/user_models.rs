@@ -72,6 +72,7 @@ pub struct ProactiveSettings {
     pub updated_at: i32,
     pub proactive_calendar_last_activated: i32,
     pub proactive_email_last_activated: i32,
+    pub proactive_whatsapp: bool,
 }
 
 

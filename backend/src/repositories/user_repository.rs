@@ -956,6 +956,7 @@ impl UserRepository {
                     updated_at: current_time,
                     proactive_calendar_last_activated: current_time,
                     proactive_email_last_activated: current_time,
+                    proactive_whatsapp: false,
                 };
                 diesel::insert_into(proactive_settings::table)
                     .values(&new_settings)
@@ -1053,6 +1054,7 @@ impl UserRepository {
                     updated_at: current_time,
                     proactive_calendar_last_activated: current_time,
                     proactive_email_last_activated: current_time,
+                    proactive_whatsapp: false,
                 };
                 diesel::insert_into(proactive_settings::table)
                     .values(&new_settings)
@@ -1105,6 +1107,7 @@ impl UserRepository {
                     updated_at: current_time,
                     proactive_calendar_last_activated: current_time,
                     proactive_email_last_activated: current_time,
+                    proactive_whatsapp: false,
                 };
                 diesel::insert_into(proactive_settings::table)
                     .values(&new_settings)
@@ -1128,6 +1131,65 @@ impl UserRepository {
             .optional()?;
 
         Ok(settings.map_or((false, 0), |s| (s.proactive_calendar, s.proactive_calendar_last_activated)))
+    }
+
+    pub fn get_proactive_whatsapp(&self, user_id: i32) -> Result<bool, DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
+
+        Ok(settings.map_or(false, |s| s.proactive_whatsapp))
+    }
+
+    pub fn update_proactive_whatsapp(&self, user_id: i32, proactive: bool) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        // Check if settings exist for this user
+        let existing_settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
+
+        match existing_settings {
+            Some(_) => {
+                // Update existing settings
+                diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+                    .set((
+                        proactive_settings::proactive_whatsapp.eq(proactive),
+                        proactive_settings::updated_at.eq(current_time),
+                    ))
+                    .execute(&mut conn)?;
+            },
+            None => {
+                // Create new settings
+                let new_settings = ProactiveSettings {
+                    id: None,
+                    user_id,
+                    imap_proactive: false, // default value
+                    imap_general_checks: None,
+                    proactive_calendar: false, // default value
+                    created_at: current_time,
+                    updated_at: current_time,
+                    proactive_calendar_last_activated: current_time,
+                    proactive_email_last_activated: current_time,
+                    proactive_whatsapp: proactive,
+                };
+                diesel::insert_into(proactive_settings::table)
+                    .values(&new_settings)
+                    .execute(&mut conn)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn get_imap_general_checks(&self, user_id: i32) -> Result<String, DieselError> {
@@ -1775,6 +1837,20 @@ impl UserRepository {
         let bridge = bridges::table
             .filter(bridges::user_id.eq(user_id))
             .filter(bridges::bridge_type.eq("whatsapp"))
+            .first::<Bridge>(&mut conn)
+            .optional()?;
+
+        Ok(bridge)
+    }
+
+    pub fn get_active_whatsapp_connection(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
+        use crate::schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let bridge = bridges::table
+            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::bridge_type.eq("whatsapp"))
+            .filter(bridges::status.eq("connected"))
             .first::<Bridge>(&mut conn)
             .optional()?;
 

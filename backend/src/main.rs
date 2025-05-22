@@ -389,6 +389,8 @@ async fn main() {
 
         .route("/api/profile/calendar-proactive", get(profile_handlers::get_calendar_proactive))
         .route("/api/profile/calendar-proactive", post(profile_handlers::update_calendar_proactive))
+        .route("/api/profile/whatsapp-proactive", get(profile_handlers::get_whatsapp_proactive))
+        .route("/api/profile/whatsapp-proactive", post(profile_handlers::update_whatsapp_proactive))
 
 
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));

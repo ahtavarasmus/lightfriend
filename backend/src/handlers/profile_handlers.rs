@@ -385,6 +385,51 @@ pub async fn update_calendar_proactive(
     }
 }
 
+#[derive(Serialize)]
+pub struct WhatsappProactiveResponse {
+    proactive: bool,
+}
+
+pub async fn get_whatsapp_proactive(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<WhatsappProactiveResponse>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_repository.get_proactive_whatsapp(auth_user.user_id) {
+        Ok(proactive) => Ok(Json(WhatsappProactiveResponse { proactive })),
+        Err(e) => {
+            tracing::error!("Failed to get WhatsApp proactive setting: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to get WhatsApp proactive setting: {}", e)}))
+            ))
+        }
+    }
+}
+
+#[derive(Deserialize)]
+pub struct WhatsappProactiveRequest {
+    proactive: bool,
+}
+
+pub async fn update_whatsapp_proactive(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<WhatsappProactiveRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_repository.update_proactive_whatsapp(auth_user.user_id, request.proactive) {
+        Ok(_) => Ok(Json(json!({
+            "message": "WhatsApp proactive setting updated successfully"
+        }))),
+        Err(e) => {
+            tracing::error!("Failed to update WhatsApp proactive setting: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to update WhatsApp proactive setting: {}", e)}))
+            ))
+        }
+    }
+}
+
 pub async fn get_email_judgments(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
