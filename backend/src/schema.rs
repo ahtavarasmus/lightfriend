@@ -143,6 +143,7 @@ diesel::table! {
         proactive_calendar_last_activated -> Integer,
         proactive_email_last_activated -> Integer,
         proactive_whatsapp -> Bool,
+        whatsapp_general_checks -> Nullable<Text>,
     }
 }
 

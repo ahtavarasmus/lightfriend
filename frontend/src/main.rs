@@ -32,6 +32,7 @@ mod proactive {
     pub mod calendar;
     pub mod whatsapp;
     pub mod common;
+    pub mod whatsapp_general_checks;
 }
 
 mod connections {

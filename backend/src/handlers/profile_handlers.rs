@@ -479,6 +479,49 @@ pub async fn update_imap_general_checks(
     }
 }
 
+#[derive(Deserialize)]
+pub struct WhatsappGeneralChecksRequest {
+    checks: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct WhatsappGeneralChecksResponse {
+    checks: String,
+}
+
+pub async fn get_whatsapp_general_checks(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<WhatsappGeneralChecksResponse>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_repository.get_whatsapp_general_checks(auth_user.user_id) {
+        Ok(checks) => Ok(Json(WhatsappGeneralChecksResponse { checks })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to get WhatsApp general checks: {}", e)}))
+        )),
+    }
+}
+
+pub async fn update_whatsapp_general_checks(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<WhatsappGeneralChecksRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Convert Option<String> to Option<&str>
+    let checks_ref: Option<&str> = request.checks.as_deref();
+
+    // Update the WhatsApp general checks
+    match state.user_repository.update_whatsapp_general_checks(auth_user.user_id, checks_ref) {
+        Ok(_) => Ok(Json(json!({
+            "message": "WhatsApp general checks updated successfully"
+        }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to update WhatsApp general checks: {}", e)}))
+        )),
+    }
+}
+
 pub async fn delete_user(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,

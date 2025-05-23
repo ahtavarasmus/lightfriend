@@ -73,6 +73,7 @@ pub struct ProactiveSettings {
     pub proactive_calendar_last_activated: i32,
     pub proactive_email_last_activated: i32,
     pub proactive_whatsapp: bool,
+    pub whatsapp_general_checks: Option<String>,
 }
 
 

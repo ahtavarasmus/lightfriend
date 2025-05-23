@@ -7,6 +7,7 @@ use serde_json::Number;
 use chrono::Date;
 use wasm_bindgen::JsValue;
 use crate::profile::imap_general_checks::ImapGeneralChecks;
+use crate::proactive::whatsapp_general_checks::WhatsappGeneralChecks;
 
 use crate::proactive::{
     email::{FilterActivityLog, WaitingChecksSection},
@@ -639,6 +640,15 @@ pub fn connected_services(props: &Props) -> Html {
                                                         }
                                                     })}
                                                 />
+
+                                                <WhatsappGeneralChecks 
+                                                    on_update={Callback::from(|_| {})}
+                                                    keywords={settings.keywords.clone()}
+                                                    priority_senders={settings.priority_senders.iter().map(|s| s.sender.clone()).collect::<Vec<String>>()}
+                                                    waiting_checks={settings.waiting_checks.iter().map(|w| w.content.clone()).collect::<Vec<String>>()}
+                                                    threshold={settings.importance_priority.as_ref().map(|ip| ip.threshold).unwrap_or(7)}
+                                                />
+
                                                 </>
                                             }
                                         } else {

@@ -957,6 +957,7 @@ impl UserRepository {
                     proactive_calendar_last_activated: current_time,
                     proactive_email_last_activated: current_time,
                     proactive_whatsapp: false,
+                    whatsapp_general_checks: None,
                 };
                 diesel::insert_into(proactive_settings::table)
                     .values(&new_settings)
@@ -1016,6 +1017,7 @@ impl UserRepository {
         Ok(())
     }
 
+
     // Update user's custom IMAP general checks
     pub fn update_imap_general_checks(&self, user_id: i32, checks: Option<&str>) -> Result<(), DieselError> {
         use crate::schema::proactive_settings;
@@ -1055,6 +1057,7 @@ impl UserRepository {
                     proactive_calendar_last_activated: current_time,
                     proactive_email_last_activated: current_time,
                     proactive_whatsapp: false,
+                    whatsapp_general_checks: None,
                 };
                 diesel::insert_into(proactive_settings::table)
                     .values(&new_settings)
@@ -1108,6 +1111,7 @@ impl UserRepository {
                     proactive_calendar_last_activated: current_time,
                     proactive_email_last_activated: current_time,
                     proactive_whatsapp: false,
+                    whatsapp_general_checks: None,
                 };
                 diesel::insert_into(proactive_settings::table)
                     .values(&new_settings)
@@ -1183,6 +1187,7 @@ impl UserRepository {
                     proactive_calendar_last_activated: current_time,
                     proactive_email_last_activated: current_time,
                     proactive_whatsapp: proactive,
+                    whatsapp_general_checks: None,
                 };
                 diesel::insert_into(proactive_settings::table)
                     .values(&new_settings)
@@ -1191,6 +1196,103 @@ impl UserRepository {
         }
         Ok(())
     }
+
+    pub fn get_whatsapp_general_checks(&self, user_id: i32) -> Result<String, DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
+            
+        Ok(settings.and_then(|s| s.whatsapp_general_checks).unwrap_or_else(|| {
+            // Default general checks prompt for WhatsApp messages
+            String::from("
+                Step 1: Check for Urgency Indicators
+                - Look for words like 'urgent', 'immediate', 'asap', 'deadline', 'important', 'emergency'
+                - Check for time-sensitive phrases like 'by tomorrow', 'end of day', 'as soon as possible', 'right now'
+                - Look for multiple exclamation marks or all-caps words that might indicate urgency
+                - Check for repeated messages or follow-ups indicating urgency
+
+                Step 2: Analyze Sender Importance
+                - Check if it's from family members, close friends, or emergency contacts
+                - Look for messages from work colleagues, managers, or supervisors
+                - Consider if it's from clients or important business partners
+                - Assess if it's from service providers (doctors, lawyers, etc.)
+
+                Step 3: Assess Content Significance
+                - Look for action items or direct requests that need immediate response
+                - Check for mentions of meetings, appointments, or time-sensitive events
+                - Identify emergency situations or health-related concerns
+                - Look for financial matters, payments, or important transactions
+                - Check for travel-related information or changes
+
+                Step 4: Consider Context and Timing
+                - Consider if it's outside normal hours (late night/early morning might indicate urgency)
+                - Check if it's a reply to something you sent recently
+                - Look for group messages where you're specifically mentioned
+                - Consider if it's breaking a long silence in conversation
+
+                Step 5: Evaluate Personal Impact
+                - Assess if immediate action or response is required
+                - Consider if delaying response could have negative consequences
+                - Look for personal emergencies or family matters
+                - Check for work-critical communications
+                - Identify if it contains sensitive or confidential information
+            ")
+        }))
+    }
+
+    // Update user's custom WhatsApp general checks
+    pub fn update_whatsapp_general_checks(&self, user_id: i32, checks: Option<&str>) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        // Check if settings exist for this user
+        let existing_settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
+
+        match existing_settings {
+            Some(_) => {
+                // Update existing settings
+                diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+                    .set((
+                        proactive_settings::whatsapp_general_checks.eq(checks.map(|s| s.to_string())),
+                        proactive_settings::updated_at.eq(current_time),
+                    ))
+                    .execute(&mut conn)?;
+            },
+            None => {
+                // Create new settings
+                let new_settings = ProactiveSettings {
+                    id: None,
+                    user_id,
+                    imap_proactive: false, // default value
+                    imap_general_checks: None,
+                    proactive_calendar: false, // default value
+                    created_at: current_time,
+                    updated_at: current_time,
+                    proactive_calendar_last_activated: current_time,
+                    proactive_email_last_activated: current_time,
+                    proactive_whatsapp: false,
+                    whatsapp_general_checks: checks.map(|s| s.to_string()),
+                };
+                diesel::insert_into(proactive_settings::table)
+                    .values(&new_settings)
+                    .execute(&mut conn)?;
+            }
+        }
+        Ok(())
+    }
+
 
     pub fn get_imap_general_checks(&self, user_id: i32) -> Result<String, DieselError> {
         use crate::schema::proactive_settings;
