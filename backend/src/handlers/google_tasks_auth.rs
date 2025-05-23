@@ -14,7 +14,7 @@ use oauth2::{
     Scope,
     TokenResponse,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 use time::OffsetDateTime;

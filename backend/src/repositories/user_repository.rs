@@ -1972,16 +1972,15 @@ impl UserRepository {
         Ok(user_ids)
     }
 
-    pub fn get_user_id_by_matrix_user_id(&self, matrix_user_id: &str) -> Result<Option<i32>, DieselError> {
+    pub fn get_user_by_matrix_user_id(&self, matrix_user_id: &str) -> Result<Option<User>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        let user_id = users::table
+
+        let user = users::table
             .filter(users::matrix_username.eq(matrix_user_id))
-            .select(users::id)
-            .first::<i32>(&mut conn)
+            .first::<User>(&mut conn)
             .optional()?;
             
-        Ok(user_id)
+        Ok(user)
     }
 
 

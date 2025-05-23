@@ -4,15 +4,14 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
-use chrono::{DateTime, Utc, TimeZone};
+use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use imap;
 use native_tls::TlsConnector;
-use quoted_printable;
 use base64;
-use mail_parser;
+use mail_parser::{self, MimeHeaders};
 
 use crate::{
     AppState,
@@ -56,6 +55,14 @@ pub struct ImapEmailPreview {
 }
 
 #[derive(Debug, Serialize)]
+pub struct EmailAttachment {
+    pub filename: Option<String>,
+    pub content_type: String,
+    pub data: String, // base64 encoded
+    pub size: usize,
+}
+
+#[derive(Debug, Serialize)]
 pub struct ImapEmail {
     pub id: String,
     pub subject: Option<String>,
@@ -66,6 +73,7 @@ pub struct ImapEmail {
     pub snippet: Option<String>,
     pub body: Option<String>,
     pub is_read: bool,
+    pub attachments: Vec<EmailAttachment>,
 }
 
 #[derive(Debug)]
@@ -197,7 +205,8 @@ pub async fn fetch_single_imap_email(
                         "date_formatted": email.date_formatted,
                     "snippet": email.snippet.unwrap_or_else(|| "No preview".to_string()),
                     "body": email.body.unwrap_or_else(|| "No content".to_string()),
-                    "is_read": email.is_read
+                    "is_read": email.is_read,
+                    "attachments": email.attachments
                 }
             })))
         }
@@ -434,10 +443,11 @@ pub async fn fetch_single_email_imap(
         .select("INBOX")
         .map_err(|e| ImapError::FetchError(format!("Failed to select INBOX: {}", e)))?;
 
-    // Fetch specific message
+    // Fetch specific message with body structure for attachments
+    // Using BODY.PEEK[] to avoid marking the email as read
     let messages = match imap_session.uid_fetch(
         email_id,
-        "(UID FLAGS ENVELOPE BODY[] BODY.PEEK[TEXT])",
+        "(UID FLAGS ENVELOPE BODY.PEEK[] BODYSTRUCTURE)",
     ) {
         Ok(messages) => messages,
         Err(e) => {
@@ -511,21 +521,22 @@ pub async fn fetch_single_email_imap(
         .iter()
         .any(|flag| flag.to_string() == "\\Seen");
 
+   
     // Try to get both full body and text body
     let full_body = message.body().map(|b| String::from_utf8_lossy(b).into_owned());
     let text_body = message.text().map(|b| String::from_utf8_lossy(b).into_owned());
-    
+
     use mail_parser::MessageParser;
 
     let body_content = full_body.or(text_body);
 
-    let (body, snippet) = body_content.as_ref().map(|content| {
+    let (body, snippet, attachments) = body_content.as_ref().map(|content| {
         // Create a parser and parse the content into an Option<Message>
         let parser = MessageParser::default();
         let parsed = parser.parse(content.as_bytes());
 
         // Get the best available body content, if parsing succeeded
-        let clean_content = parsed.map(|msg| {
+        let clean_content = parsed.as_ref().map(|msg| {
             let body_text = msg.body_text(0).or_else(|| msg.body_html(0));
             body_text
                 .map(|text| {
@@ -541,11 +552,42 @@ pub async fn fetch_single_email_imap(
         // Generate a snippet from the clean body
         let snippet = clean_content.chars().take(200).collect::<String>();
 
-        (clean_content, snippet)
-    }).unwrap_or_else(|| (String::new(), String::new()));
+        // Extract image attachments (PNG and JPEG only)
+        let attachments = parsed.map(|msg| {
+            msg.attachments()
+                .filter_map(|attachment| {
+                    if let Some(content_type) = attachment.content_type() {
+                        let ctype = content_type.ctype();
+                        if let Some(subtype) = content_type.subtype() {
+                            let content_type_str = format!("{}/{}", ctype, subtype).to_lowercase();
+                            if content_type_str == "image/png" ||
+                               content_type_str == "image/jpeg" ||
+                               content_type_str == "image/jpg" {
+                                let filename = attachment.attachment_name()
+                                    .map(|name| name.to_string());
+                                let attachment_data = attachment.contents();
+                                let base64_data = base64::encode(attachment_data);
 
+                                tracing::info!("Found image attachment: {:?} ({})", filename, content_type_str);
 
-        // Logout
+                                return Some(EmailAttachment {
+                                    filename,
+                                    content_type: content_type_str,
+                                    data: base64_data,
+                                    size: attachment_data.len(),
+                                });
+                            }
+                        }
+                    }
+                    None
+                })
+                .collect::<Vec<_>>()
+        }).unwrap_or_default();
+
+        (clean_content, snippet, attachments)
+    }).unwrap_or_else(|| (String::new(), String::new(), Vec::new()));
+
+    // Logout
     imap_session
         .logout()
         .map_err(|e| ImapError::ConnectionError(format!("Failed to logout: {}", e)))?;
@@ -564,6 +606,6 @@ pub async fn fetch_single_email_imap(
         snippet: Some(snippet),
         body: Some(body),
         is_read,
+        attachments,
     })
 }
-

@@ -6,7 +6,7 @@ use axum::{
 };
 use serde_json::json;
 use serde::{Deserialize, Serialize};
-use resend_rs::{Resend, Result as ResendResult};
+use resend_rs::Resend;
 use resend_rs::types::CreateEmailBaseOptions;
 
 use std::path::Path;

@@ -4,7 +4,7 @@ use axum::{
 use serde::Deserialize;
 use crate::{AppState, utils::whatsapp_utils::{fetch_whatsapp_messages, WhatsAppMessage}};
 use serde::Serialize;
-use chrono::{Utc, NaiveDateTime};
+use chrono::Utc;
 use crate::handlers::auth_middleware::AuthUser;
 
 #[derive(Serialize)]

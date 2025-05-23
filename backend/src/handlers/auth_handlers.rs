@@ -11,7 +11,7 @@ use jsonwebtoken::{encode, Header, EncodingKey};
 use chrono::{Duration, Utc};
 use serde::Deserialize;
 use std::num::NonZeroU32;
-use governor::{Quota, RateLimiter, clock::DefaultClock};
+use governor::{Quota, RateLimiter};
 
 #[derive(Deserialize)]
 pub struct BroadcastMessageRequest {
@@ -25,7 +25,7 @@ use crate::{
 
 pub async fn get_users(
     State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
+    _auth_user: AuthUser,
 ) -> Result<Json<Vec<UserResponse>>, (StatusCode, Json<serde_json::Value>)> {
     println!("Attempting to get all users");
     let users_list = state.user_repository.get_all_users().map_err(|e| {

@@ -6,35 +6,16 @@ use serde_json::json;
 use sha1::Sha1;
 use uuid::Uuid;
 use magic_crypt::MagicCryptTrait;
-use axum::{
-    http::StatusCode,
-    response::Json as AxumJson,
-};
 use matrix_sdk::{
     Client as MatrixClient,
-    config::SyncSettings as MatrixSyncSettings,
-    room::Room,
-    ruma::{
-        api::client::room::create_room::v3::Request as CreateRoomRequest,
-        events::room::message::{RoomMessageEventContent, SyncRoomMessageEvent, MessageType},
-        events::AnySyncTimelineEvent,
-        OwnedRoomId, OwnedUserId, OwnedDeviceId,
-    },
+    ruma::OwnedUserId,
 };
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use reqwest;
-use base64;
-use tokio::time::{sleep, Duration, Instant};
-use crate::{
-    AppState,
-    handlers::auth_middleware::AuthUser,
-    models::user_models::{NewBridge, Bridge},
-};
+use tokio::time::{sleep, Duration};
 use url::Url;
 
-use sha2::{Sha256, Digest};
-use base64::{engine::general_purpose, Engine as _}; // or use hex crate
+use sha2::Digest;
 
 use tokio::sync::Mutex;
 use std::collections::HashMap;

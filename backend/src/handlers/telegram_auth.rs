@@ -1,12 +1,11 @@
 use axum::{
-    extract::{Json, State},
+    extract::State,
     http::StatusCode,
     response::Json as AxumJson,
 };
 use matrix_sdk::{
     Client as MatrixClient,
     config::SyncSettings as MatrixSyncSettings,
-    room::Room,
     ruma::{
         api::client::room::create_room::v3::Request as CreateRoomRequest,
         events::room::message::{RoomMessageEventContent, SyncRoomMessageEvent, MessageType},

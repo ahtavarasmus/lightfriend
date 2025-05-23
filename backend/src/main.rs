@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use diesel::prelude::*;
 use diesel::r2d2::{self, ConnectionManager};
 use dashmap::DashMap;
-use governor::{Quota, RateLimiter, clock::DefaultClock, state::keyed::DefaultKeyedStateStore};
+use governor::{RateLimiter, clock::DefaultClock, state::keyed::DefaultKeyedStateStore};
 use oauth2::{
     basic::BasicClient,
     AuthUrl,
@@ -21,8 +21,7 @@ use oauth2::{
     EndpointSet,
     EndpointNotSet,
 };
-use urlencoding;
-use tower_http::cors::{CorsLayer, Any, AllowOrigin};
+use tower_http::cors::{CorsLayer, AllowOrigin};
 use tower_http::services::ServeDir;
 use tower_http::trace::{TraceLayer, DefaultMakeSpan, DefaultOnResponse};
 use tracing::Level;

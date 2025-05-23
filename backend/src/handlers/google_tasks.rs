@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use crate::handlers::auth_middleware::AuthUser;
 use axum::{
-    extract::{State, Query},
+    extract::State,
     response::Json,
     http::StatusCode,
 };

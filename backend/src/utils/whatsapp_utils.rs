@@ -5,15 +5,13 @@ use matrix_sdk::{
     room::Room,
     ruma::{
         events::room::message::{RoomMessageEventContent, SyncRoomMessageEvent, MessageType},
-        events::{AnyTimelineEvent, AnySyncTimelineEvent},
-        OwnedRoomId,
-        TransactionId,
+        events::AnySyncTimelineEvent,
     },
 };
 
 
 use serde::{Deserialize, Serialize};
-use crate::{AppState, models::user_models::Bridge};
+use crate::AppState;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct WhatsAppRoom {
@@ -23,7 +21,7 @@ pub struct WhatsAppRoom {
     pub last_activity_formatted: String,
 }
 
-use chrono::{DateTime, TimeZone, Utc, Local};
+use chrono::{DateTime, TimeZone};
 use chrono_tz::Tz;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -37,8 +35,6 @@ pub struct WhatsAppMessage {
     pub room_name: String,
 }
 
-use std::time::Duration;
-use tokio::time::sleep;
 
 fn format_timestamp(timestamp: i64, timezone: Option<String>) -> String {
     // Convert timestamp to DateTime<Utc>
@@ -631,17 +627,26 @@ pub async fn handle_whatsapp_message(
 
     // Find the user ID for this Matrix client
     let client_user_id = client.user_id().unwrap().to_string();
-    let user_id = match state.user_repository.get_user_id_by_matrix_user_id(&client_user_id) {
-        Ok(Some(id)) => id,
+
+    // Get user for additional info
+    let user = match state.user_repository.get_user_by_matrix_user_id(&client_user_id) {
+        Ok(Some(user)) => user,
         Ok(None) => {
-            tracing::warn!("No user found for Matrix user ID: {}", client_user_id);
+            tracing::error!("User {} not found", client_user_id);
             return;
         },
         Err(e) => {
-            tracing::error!("Failed to get user ID for Matrix user {}: {}", client_user_id, e);
+            tracing::error!("Failed to get user {}: {}", client_user_id, e);
             return;
         }
     };
+
+    // TODO remove before live
+    if user.id != 1 {
+        return;
+    }
+
+    let user_id = user.id;
 
     // Check if user has proactive WhatsApp enabled
     match state.user_repository.get_proactive_whatsapp(user_id) {
@@ -657,6 +662,27 @@ pub async fn handle_whatsapp_message(
             return;
         }
     }
+
+
+    // Check if user has valid subscription and messages left
+    match state.user_repository.has_valid_subscription_tier_with_messages(user_id, "tier 2") {
+        Ok(true) => (),
+        Ok(false) => {
+            tracing::debug!("User {} does not have valid subscription or messages left for WhatsApp monitoring", user_id);
+            return;
+        },
+        Err(e) => {
+            tracing::error!("Failed to check subscription status for user {}: {}", user_id, e);
+            return;
+        }
+    }
+
+    // Check if we should process this notification based on messages left
+    if user.msgs_left <= 0 {
+        tracing::info!("User has no notification messages left");
+        return;
+    }
+
 
     // Extract message content
     let content = match event.content.msgtype {
@@ -679,31 +705,6 @@ pub async fn handle_whatsapp_message(
         return;
     }
 
-    // Check if user has valid subscription and messages left
-    match state.user_repository.has_valid_subscription_tier_with_messages(user_id, "tier 2") {
-        Ok(true) => (),
-        Ok(false) => {
-            tracing::debug!("User {} does not have valid subscription or messages left for WhatsApp monitoring", user_id);
-            return;
-        },
-        Err(e) => {
-            tracing::error!("Failed to check subscription status for user {}: {}", user_id, e);
-            return;
-        }
-    }
-
-    // Get user for additional info
-    let user = match state.user_repository.find_by_id(user_id) {
-        Ok(Some(user)) => user,
-        Ok(None) => {
-            tracing::error!("User {} not found", user_id);
-            return;
-        },
-        Err(e) => {
-            tracing::error!("Failed to get user {}: {}", user_id, e);
-            return;
-        }
-    };
 
     // Get user's waiting checks, priority senders, and keywords for WhatsApp
     let waiting_checks = match state.user_repository.get_waiting_checks(user_id, "whatsapp") {
@@ -955,22 +956,6 @@ pub async fn handle_whatsapp_message(
                                                 }
                                             }
 
-                                            // Check if we should process this notification based on messages left
-                                            let should_continue = match state.user_repository.decrease_messages_left(user_id) {
-                                                Ok(msgs_left) => {
-                                                    tracing::info!("User {} has {} messages left after decrease", user_id, msgs_left);
-                                                    msgs_left > 0
-                                                },
-                                                Err(e) => {
-                                                    tracing::error!("Failed to decrease messages left for user {}: {}", user_id, e);
-                                                    false
-                                                }
-                                            };
-
-                                            if !should_continue {
-                                                tracing::info!("Skipping WhatsApp notification for user {} due to no messages left", user_id);
-                                                return;
-                                            }
 
                                             // Get the user's preferred number or default
                                             let sender_number = match user.preferred_number.clone() {
@@ -1018,7 +1003,18 @@ pub async fn handle_whatsapp_message(
                                                 &final_notification,
                                                 true,
                                             ).await {
-                                                Ok(_) => tracing::info!("Successfully sent WhatsApp notification to user {}", user_id),
+                                                Ok(_) => {
+                                                    tracing::info!("Successfully sent WhatsApp notification to user {}", user_id);
+                                                    // decrease messages here, we have already checked before that they should have at least one left
+                                                    match state.user_repository.decrease_messages_left(user_id) {
+                                                        Ok(msgs_left) => {
+                                                            tracing::info!("User {} has {} messages left after decrease", user_id, msgs_left);
+                                                        },
+                                                        Err(e) => {
+                                                            tracing::error!("Failed to decrease messages left for user {}: {}", user_id, e);
+                                                        }
+                                                    };
+                                                },
                                                 Err(e) => tracing::error!("Failed to send WhatsApp notification: {}", e),
                                             }
                                         } else {

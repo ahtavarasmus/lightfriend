@@ -240,7 +240,7 @@ create_session,
 
 pub async fn create_checkout_session(
     State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
+    _auth_user: AuthUser,
     Path(user_id): Path<i32>,
     Json(payload): Json<BuyCreditsRequest>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {

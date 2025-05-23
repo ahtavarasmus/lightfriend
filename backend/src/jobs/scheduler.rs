@@ -1,18 +1,10 @@
 use tokio_cron_scheduler::{JobScheduler, Job};
-use axum::{
-    http::StatusCode,
-};
 use std::sync::Arc;
-use tokio::sync::Mutex;
-use tokio::time::{sleep, Duration};
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::{info, error};
 use crate::AppState;
 
 //use crate::handlers::gmail;
 
-use openai_api_rs::v1::common::GPT4_O;
 
 
 

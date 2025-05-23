@@ -2,10 +2,9 @@ use axum::{
     Json,
     extract::State,
     response::Response,
-    http::{StatusCode, Request, HeaderMap, Method},
+    http::{StatusCode, Request, HeaderMap},
     body::Body,
 };
-use std::future::{ready, Ready};
 use tracing::error;
 use axum::middleware;
 use std::sync::Arc;

@@ -13,8 +13,6 @@ use crate::{
     models::user_models::{
         NewWaitingCheck, NewPrioritySender,
         NewKeyword, NewImportancePriority,
-        WaitingCheck, PrioritySender,
-        Keyword, ImportancePriority,
     },
     handlers::auth_middleware::AuthUser,
 };

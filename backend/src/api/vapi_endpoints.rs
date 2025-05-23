@@ -7,13 +7,11 @@ use axum::{
     body::Body
 };
 use axum::middleware;
-use std::future::Future;
 use std::sync::Arc;
 use crate::AppState;
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::error::Error;
-use tracing::{error, info};
+use tracing::error;
 
 pub async fn validate_vapi_secret(
     headers: HeaderMap,

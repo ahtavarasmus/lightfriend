@@ -1,30 +1,27 @@
 use axum::{
-    extract::{Json, State},
+    extract::State,
     http::StatusCode,
     response::Json as AxumJson,
 };
 use matrix_sdk::{
     Client as MatrixClient,
     config::SyncSettings as MatrixSyncSettings,
-    room::Room,
     ruma::{
         api::client::room::create_room::v3::Request as CreateRoomRequest,
         events::room::message::{RoomMessageEventContent, SyncRoomMessageEvent, MessageType},
         events::AnySyncTimelineEvent,
-        OwnedRoomId, OwnedUserId, OwnedDeviceId,
+        OwnedRoomId, OwnedUserId, 
     },
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
 use anyhow::{anyhow, Result};
-use reqwest;
-use base64;
-use tokio::time::{sleep, Duration, Instant};
+use tokio::time::{sleep, Duration};
 use crate::{
     AppState,
     handlers::auth_middleware::AuthUser,
-    models::user_models::{NewBridge, Bridge},
+    models::user_models::{NewBridge},
     utils::matrix_auth,
 };
 
