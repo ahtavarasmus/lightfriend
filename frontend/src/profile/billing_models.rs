@@ -40,6 +40,7 @@ pub struct UserProfile {
     pub discount: bool,
     pub notify: bool,
     pub preferred_number: Option<String>,
+    pub agent_language: String,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]

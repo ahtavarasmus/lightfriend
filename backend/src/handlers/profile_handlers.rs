@@ -25,6 +25,7 @@ pub struct UpdateProfileRequest {
     info: String,
     timezone: String,
     timezone_auto: bool,
+    agent_language: String,
 }
 
 #[derive(Serialize)]
@@ -58,6 +59,7 @@ pub struct ProfileResponse {
     msgs_left: i32,
     credits_left: f32,
     discount: bool,
+    agent_language: String,
 }
 
 use crate::handlers::auth_middleware::AuthUser;
@@ -105,6 +107,7 @@ pub async fn get_profile(
                 msgs_left: user.msgs_left,
                 credits_left: user.credits_left,
                 discount: user.discount,
+                agent_language: user.agent_language,
             }))
         }
         None => Err((
@@ -233,7 +236,16 @@ pub async fn update_profile(
         ));
     }
 
-    match state.user_repository.update_profile(
+    // Validate agent language
+    let allowed_languages = vec!["en", "fi", "de"];
+    if !allowed_languages.contains(&update_req.agent_language.as_str()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid agent language. Must be 'en', 'fi', or 'de'"}))
+        ));
+    }
+
+        match state.user_repository.update_profile(
         auth_user.user_id,
         &update_req.email,
         &update_req.phone_number,
@@ -242,14 +254,15 @@ pub async fn update_profile(
         &update_req.timezone,
         &update_req.timezone_auto,
     ) {
-        Ok(_) => (),
-        Err(DieselError::RollbackTransaction) => {
-            return Err((
-                StatusCode::CONFLICT,
-                Json(json!({"error": "Phone number already exists"}))
-            ));
-        }
-        Err(DieselError::NotFound) => {
+        Ok(_) => {
+            // Update agent language separately // TODO put to same down the line
+            if let Err(e) = state.user_repository.update_agent_language(auth_user.user_id, &update_req.agent_language) {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Failed to update agent language: {}", e)}))
+                ));
+            }
+        },        Err(DieselError::NotFound) => {
             return Err((
                 StatusCode::CONFLICT,
                 Json(json!({"error": "Email already exists"}))

@@ -20,6 +20,7 @@ struct UpdateProfileRequest {
     info: String,
     timezone: String,
     timezone_auto: bool,
+    agent_language: String,
 }
 
 #[derive(Properties, PartialEq, Clone)]
@@ -38,6 +39,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let info = use_state(|| (*user_profile).info.clone().unwrap_or_default());
     let timezone = use_state(|| (*user_profile).timezone.clone().unwrap_or_else(|| String::from("UTC")));
     let timezone_auto = use_state(|| (*user_profile).timezone_auto.unwrap_or(true));
+    let agent_language = use_state(|| (*user_profile).agent_language.clone());
     let error = use_state(|| None::<String>);
     let success = use_state(|| None::<String>);
     let is_editing = use_state(|| false);
@@ -51,13 +53,15 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let info = info.clone();
         let timezone = timezone.clone();
         let user_profile_state = user_profile.clone();
-        
+        let agent_language = agent_language.clone();
+
         use_effect_with_deps(move |props_profile| {
             email.set(props_profile.email.clone());
             phone_number.set(props_profile.phone_number.clone());
             nickname.set(props_profile.nickname.clone().unwrap_or_default());
             info.set(props_profile.info.clone().unwrap_or_default());
             timezone.set(props_profile.timezone.clone().unwrap_or_else(|| String::from("UTC")));
+            agent_language.set(props_profile.agent_language.clone());
             user_profile_state.set(props_profile.clone());
             || ()
         }, props.user_profile.clone());
@@ -74,6 +78,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let navigator = navigator.clone();
         let timezone = timezone.clone();
         let timezone_auto = timezone_auto.clone();
+        let agent_language = agent_language.clone();
         let user_profile = user_profile.clone();
         let props = props.clone();
 
@@ -84,6 +89,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             let info = info.clone();
             let timezone = timezone.clone();
             let timezone_auto = timezone_auto.clone();  // Clone the UseState handle instead of dereferencing
+            let agent_language = agent_language.clone();
             let error = error.clone();
             let success = success.clone();
             let is_editing = is_editing.clone();
@@ -121,6 +127,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                             info: (*info).clone(),
                             timezone: (*timezone).clone(),
                             timezone_auto: *timezone_auto.clone(),
+                            agent_language: (*agent_language).clone(),
                         })
                         .expect("Failed to build request")
                         .send()
@@ -147,6 +154,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     preferred_number: (*user_profile).preferred_number.clone(),
                                     timezone: Some((*timezone).clone()),
                                     timezone_auto: Some(*timezone_auto),
+                                    agent_language: (*agent_language).clone(),
                                     verified: (*user_profile).verified,
                                     time_to_live: (*user_profile).time_to_live,
                                     time_to_delete: (*user_profile).time_to_delete,
@@ -446,6 +454,55 @@ let on_timezone_update = {
                         }
                     }
                 </div>
+            </div>
+
+            <div class="profile-field">
+                <div class="field-label-group">
+                    <span class="field-label">{"Agent Language"}</span>
+                    <div class="tooltip">
+                        <span class="tooltip-icon">{"?"}</span>
+                        <span class="tooltip-text">
+                            {"Choose the language the AI assistant will use when speaking to you. This affects voice calls."}
+                        </span>
+                    </div>
+                </div>
+                {
+                    if *is_editing {
+                        html! {
+                            <select
+                                class="profile-input"
+                                value={(*agent_language).clone()}
+                                onchange={let agent_language = agent_language.clone(); move |e: Event| {
+                                    let select: HtmlInputElement = e.target_unchecked_into();
+                                    agent_language.set(select.value());
+                                }}
+                            >
+                                <option value="en" selected={*agent_language == "en"}>
+                                    {"English"}
+                                </option>
+                                <option value="fi" selected={*agent_language == "fi"}>
+                                    {"Finnish"}
+                                </option>
+                                <option value="de" selected={*agent_language == "de"}>
+                                    {"German"}
+                                </option>
+                            </select>
+                        }
+                    } else {
+                        html! {
+                            <span class="field-value">
+                                {
+                                    match (*user_profile).agent_language.as_str() {
+                                        "en" => "English",
+                                        "fi" => "Finnish", 
+                                        "de" => "German",
+                                        _ => "English"
+                                    }
+                                }
+                            </span>
+                        }
+                    }
+                }
             </div>
             
             <button 

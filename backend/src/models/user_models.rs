@@ -56,6 +56,7 @@ pub struct User {
     pub encrypted_matrix_secret_storage_recovery_key: Option<String>,
     pub last_credits_notification: Option<i32>, // Unix timestamp of last insufficient credits notification
     pub confirm_send_event: bool, // flag that gets set when user wants to send something from voice call and it needs to be confirmed using sms
+    pub agent_language: String, // language the agent will use to answer, default 'en'. 
 }
 
 

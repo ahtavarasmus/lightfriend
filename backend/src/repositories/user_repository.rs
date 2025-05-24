@@ -249,6 +249,15 @@ impl UserRepository {
         Ok(())
     }
 
+    pub fn update_agent_language(&self, user_id: i32, language: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::agent_language.eq(language))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+
     // Create and insert a new user
     pub fn create_user(&self, new_user: NewUser) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");

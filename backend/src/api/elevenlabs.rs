@@ -62,6 +62,7 @@ pub struct ConversationConfig {
 #[derive(Serialize, Deserialize)]
 pub struct AgentConfig {
     first_message: String,
+    language: String,
 }
 
 
@@ -255,6 +256,7 @@ pub async fn fetch_assistant(
     let mut conversation_config_override = ConversationConfig {
         agent: AgentConfig {
             first_message: "Hello {{name}}!".to_string(),
+            language: "en".to_string(),
         },
     };
 
@@ -280,11 +282,29 @@ pub async fn fetch_assistant(
                     println!("Error verifying user: {}", e);
                     // Continue even if verification fails
                 } else {
-                    conversation_config_override = ConversationConfig {
-                        agent: AgentConfig {
-                            first_message: "Welcome! Your number is now verified. You can add some information about yourself in the profile page. Anyways, how can I help?".to_string(),
-                        },
-                    };
+                    if user.agent_language == "de" {
+                        conversation_config_override = ConversationConfig {
+                            agent: AgentConfig {
+                                first_message: "Willkommen! Ihre Nummer ist jetzt verifiziert. Möchten Sie, dass ich erkläre, wie Sie anfangen können?".to_string(),
+                                language: "de".to_string(),
+                            },
+                        };
+                    } else if user.agent_language == "fi" {
+                        conversation_config_override = ConversationConfig {
+                            agent: AgentConfig {
+                                first_message: "Tervetuloa! Sinun numerosi on nyt varmennettu. Uudet tilit saavat euron verran ilmaista käyttöä testaamiseen. Kuinka voin auttaa?".to_string(),
+                                language: "fi".to_string(),
+                            },
+                        };
+                    } else {
+                        conversation_config_override = ConversationConfig {
+                            agent: AgentConfig {
+                                first_message: "Welcome! Your number is now verified. New users get 1 euro worth of free credits for testing. How can I help?".to_string(),
+                                language: "en".to_string(),
+                            },
+                        };
+                    }
+                    
                 }
             }
 
@@ -927,7 +947,6 @@ pub async fn handle_perplexity_tool_call(
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<MessageCallPayload>,
 ) -> Json<serde_json::Value> {
-    println!("Received message: {}", payload.message);
     
 
     let system_prompt = "You are assisting an AI voice calling service. The questions you receive are from voice conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read aloud 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. Use natural language sentence structure 5. When listing multiple points, use simple numbering (1, 2, 3) or natural language transitions (First... Second... Finally...) 6. Focus on the most relevant information that addresses the user's immediate needs 7. If specific numbers, dates, or proper names are important, spell them out clearly 8. Format numerical data in a way that's easy to read aloud (e.g., twenty-five percent instead of 25%) Your responses will be incorporated into a voice conversation, so clarity and natural flow are essential.";
