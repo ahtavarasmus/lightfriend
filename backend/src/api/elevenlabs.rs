@@ -57,6 +57,12 @@ pub struct ConversationInitiationClientData {
 #[derive(Serialize, Deserialize)]
 pub struct ConversationConfig {
     agent: AgentConfig,
+    tts: VoiceId,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct VoiceId{
+    voice_id: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -253,11 +259,16 @@ pub async fn fetch_assistant(
     println!("Caller Number: {}", caller_number);
 
     let mut dynamic_variables = HashMap::new();
+    let us_voice_id = std::env::var("US_VOICE_ID").expect("No US_VOICE_ID set");
+
     let mut conversation_config_override = ConversationConfig {
         agent: AgentConfig {
             first_message: "Hello {{name}}!".to_string(),
             language: "en".to_string(),
         },
+        tts: VoiceId {
+            voice_id: us_voice_id.clone(),
+        }
     };
 
 
@@ -283,18 +294,27 @@ pub async fn fetch_assistant(
                     // Continue even if verification fails
                 } else {
                     if user.agent_language == "de" {
+                        
                         conversation_config_override = ConversationConfig {
                             agent: AgentConfig {
-                                first_message: "Willkommen! Ihre Nummer ist jetzt verifiziert. Möchten Sie, dass ich erkläre, wie Sie anfangen können?".to_string(),
+                                first_message: "Willkommen! Ihre Nummer ist jetzt verifiziert. Neue Benutzer erhalten 1 Euro an kostenlosen Credits zum Testen. Wie kann ich Ihnen helfen?".to_string(),
                                 language: "de".to_string(),
+                            },
+                            tts: VoiceId {
+                                voice_id: std::env::var("DE_VOICE_ID").expect("No DE_VOICE_ID set"),
                             },
                         };
                     } else if user.agent_language == "fi" {
+
+                        
                         conversation_config_override = ConversationConfig {
                             agent: AgentConfig {
                                 first_message: "Tervetuloa! Sinun numerosi on nyt varmennettu. Uudet tilit saavat euron verran ilmaista käyttöä testaamiseen. Kuinka voin auttaa?".to_string(),
                                 language: "fi".to_string(),
                             },
+                            tts: VoiceId {
+                                voice_id: std::env::var("FI_VOICE_ID").expect("No FI_VOICE_ID set"),
+                            }
                         };
                     } else {
                         conversation_config_override = ConversationConfig {
@@ -302,9 +322,18 @@ pub async fn fetch_assistant(
                                 first_message: "Welcome! Your number is now verified. New users get 1 euro worth of free credits for testing. How can I help?".to_string(),
                                 language: "en".to_string(),
                             },
+                            tts: VoiceId {
+                                voice_id: us_voice_id,
+                            }
                         };
                     }
                     
+                }
+            } else {
+                if user.agent_language == "fi" {
+                    conversation_config_override.tts.voice_id = std::env::var("FI_VOICE_ID").expect("No FI_VOICE_ID set");
+                } else if user.agent_language == "de" {
+                    conversation_config_override.tts.voice_id = std::env::var("DE_VOICE_ID").expect("No DE_VOICE_ID set");
                 }
             }
 
