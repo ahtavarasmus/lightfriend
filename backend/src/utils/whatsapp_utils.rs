@@ -72,8 +72,8 @@ pub async fn fetch_whatsapp_messages(
     let user = state.user_repository.find_by_id(user_id)?
         .ok_or_else(|| anyhow!("User not found"))?;
 
-    // Get Matrix client and check bridge status
-    let client = crate::utils::matrix_auth::get_client(user_id, &state.user_repository, false).await?;
+    // Get Matrix client and check bridge status (use cached version for better performance)
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state.user_repository, false, &state.matrix_clients).await?;
 
     let bridge = state.user_repository.get_whatsapp_bridge(user_id)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
@@ -274,9 +274,9 @@ pub async fn send_whatsapp_message(
     // Normalize phone number format
     
     tracing::debug!("Attempting to get Matrix client for user {}", user_id);
-    let client = match crate::utils::matrix_auth::get_client(user_id, &state.user_repository, false).await {
+    let client = match crate::utils::matrix_auth::get_cached_client(user_id, &state.user_repository, false, &state.matrix_clients).await {
         Ok(client) => {
-            tracing::debug!("Successfully obtained Matrix client");
+            tracing::debug!("Successfully obtained cached Matrix client");
             client
         },
         Err(e) => {
@@ -1152,8 +1152,8 @@ pub async fn search_whatsapp_rooms(
         .unwrap_or_else(|_| "@whatsappbot:".to_string());
     tracing::info!("Searching WhatsApp rooms for user {} ", user_id);
 
-    // Get Matrix client using get_client function
-    let client = crate::utils::matrix_auth::get_client(user_id, &state.user_repository, false).await?;
+    // Get Matrix client using cached version for better performance
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state.user_repository, false, &state.matrix_clients).await?;
 
     // Check if we're logged in first
     let bridge = state.user_repository.get_whatsapp_bridge(user_id)?;

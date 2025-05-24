@@ -649,6 +649,55 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository, setup_en
     println!("✅ Matrix client fully initialized for user {}", user_id);
     Ok(client)
 }
+
+/// Get a cached Matrix client or create a new one if not cached/invalid
+pub async fn get_cached_client(
+    user_id: i32,
+    user_repository: &UserRepository,
+    setup_encryption: bool,
+    client_cache: &Arc<tokio::sync::Mutex<HashMap<i32, MatrixClient>>>,
+) -> Result<MatrixClient> {
+    // First check if we have a cached client
+    {
+        let cache = client_cache.lock().await;
+        if let Some(client) = cache.get(&user_id) {
+            // Validate the cached client by checking if it's still logged in
+            if client.logged_in() {
+                // Quick validation - try to get user ID
+                if let Some(_user_id) = client.user_id() {
+                    tracing::debug!("Using cached Matrix client for user {}", user_id);
+                    return Ok(client.clone());
+                }
+            }
+            tracing::debug!("Cached client for user {} is invalid, will create new one", user_id);
+        }
+    }
+
+    // No valid cached client, create a new one
+    tracing::debug!("Creating new Matrix client for user {}", user_id);
+    let client = get_client(user_id, user_repository, setup_encryption).await?;
+    
+    // Cache the new client
+    {
+        let mut cache = client_cache.lock().await;
+        cache.insert(user_id, client.clone());
+        tracing::debug!("Cached new Matrix client for user {}", user_id);
+    }
+
+    Ok(client)
+}
+
+/// Remove a Matrix client from the cache
+pub async fn clear_cached_client(
+    user_id: i32,
+    client_cache: &Arc<tokio::sync::Mutex<HashMap<i32, MatrixClient>>>
+) {
+    let mut cache = client_cache.lock().await;
+    if cache.remove(&user_id).is_some() {
+        tracing::debug!("Removed cached Matrix client for user {}", user_id);
+    }
+}
+
 /*
 
 if !user.matrix_password {

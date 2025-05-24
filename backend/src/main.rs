@@ -130,6 +130,7 @@ pub struct AppState {
     login_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     matrix_sync_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
     matrix_invitation_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
+    matrix_clients: Arc<Mutex<HashMap<i32, matrix_sdk::Client>>>,
 }
 
 pub fn validate_env() {
@@ -223,6 +224,7 @@ async fn main() {
 
     let matrix_sync_tasks = Arc::new(Mutex::new(HashMap::new()));
     let matrix_invitation_tasks = Arc::new(Mutex::new(HashMap::new()));
+    let matrix_clients = Arc::new(Mutex::new(HashMap::new()));
     let state = Arc::new(AppState {
         db_pool: pool,
         user_repository: user_repository.clone(),
@@ -239,6 +241,7 @@ async fn main() {
         },
         matrix_sync_tasks,
         matrix_invitation_tasks,
+        matrix_clients,
     });
 
     let twilio_routes = Router::new()

@@ -85,7 +85,7 @@ async fn connect_whatsapp_with_retry(
                     // Add delay before retry
                     sleep(RETRY_DELAY).await;
                     
-                    // Reinitialize client
+                   // Reinitialize client (bypass cache since we're recovering from an error)
                     match matrix_auth::get_client(user_id, user_repository, true).await {
                         Ok(new_client) => {
                             *client = new_client; // Update the client reference
@@ -243,7 +243,7 @@ pub async fn start_whatsapp_connection(
 
     println!("📝 Getting Matrix client...");
     // Get or create Matrix client using the centralized function
-    let mut client = matrix_auth::get_client(auth_user.user_id, &state.user_repository, true)
+    let mut client = matrix_auth::get_cached_client(auth_user.user_id, &state.user_repository, true, &state.matrix_clients)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);
@@ -604,8 +604,8 @@ pub async fn resync_whatsapp(
         ));
     };
 
-    // Get Matrix client using the centralized function
-    let client = matrix_auth::get_client(auth_user.user_id, &state.user_repository, false)
+    // Get Matrix client using the cached version
+    let client = matrix_auth::get_cached_client(auth_user.user_id, &state.user_repository, false, &state.matrix_clients)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get Matrix client: {}", e);
@@ -696,8 +696,8 @@ pub async fn disconnect_whatsapp(
         })));
     };
 
-    // Get or create Matrix client using the centralized function
-    let client = matrix_auth::get_client(auth_user.user_id, &state.user_repository, false)
+    // Get or create Matrix client using the cached version
+    let client = matrix_auth::get_cached_client(auth_user.user_id, &state.user_repository, false, &state.matrix_clients)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);
@@ -750,6 +750,9 @@ pub async fn disconnect_whatsapp(
                 AxumJson(json!({"error": "Failed to delete bridge record"})),
             )
         })?;
+
+    // Clear the cached Matrix client since the user is disconnecting
+    matrix_auth::clear_cached_client(auth_user.user_id, &state.matrix_clients).await;
 
     println!("✅ WhatsApp disconnection completed for user {}", auth_user.user_id);
     Ok(AxumJson(json!({
