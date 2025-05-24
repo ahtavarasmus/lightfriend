@@ -70,6 +70,8 @@ mod api {
     pub mod langfuse;
 }
 
+mod error;
+
 mod models {
     pub mod user_models;
 }
@@ -361,6 +363,7 @@ async fn main() {
         .route("/api/whatsapp/test-messages", get(whatsapp_handlers::test_fetch_messages))
         .route("/api/whatsapp/send", post(whatsapp_handlers::send_message))
         .route("/api/whatsapp/search-rooms", post(whatsapp_handlers::search_whatsapp_rooms_handler))
+        .route("/api/whatsapp/search-rooms", get(whatsapp_handlers::search_rooms_handler))
 
         // Filter routes
         .route("/api/filters/waiting-check/{service_type}", post(filter_handlers::create_waiting_check))

@@ -416,6 +416,7 @@ fn get_subscription_error(tool_name: &str) -> String {
         }
     )
 }
+
 pub async fn process_sms(
     state: &Arc<AppState>,
     payload: TwilioWebhookPayload,

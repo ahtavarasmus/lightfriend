@@ -474,6 +474,145 @@ pub async fn redact_message(
     Ok(())
 }
 
+// Function to upload media to Twilio Media Content Service
+pub async fn upload_media_to_twilio(
+    chat_service_sid: &str,
+    file_data: &[u8],
+    content_type: &str,
+    filename: &str,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
+    let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
+    let client = Client::new();
+
+    let response = client
+        .post(format!(
+            "https://mcs.us1.twilio.com/v1/Services/{}/Media",
+            chat_service_sid
+        ))
+        .basic_auth(&account_sid, Some(&auth_token))
+        .header("Content-Type", content_type)
+        .header("Content-Length", file_data.len().to_string())
+        .header("Content-Disposition", format!("attachment; filename=\"{}\"", filename))
+        .body(file_data.to_vec())
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        return Err(format!("Failed to upload media to Twilio: {} - {}", response.status(), response.text().await?).into());
+    }
+
+    #[derive(Deserialize)]
+    struct MediaResponse {
+        sid: String,
+    }
+
+    let media_response: MediaResponse = response.json().await?;
+    println!("Successfully uploaded media to Twilio with SID: {}", media_response.sid);
+    
+    Ok(media_response.sid)
+}
+
+// Function to delete media from Twilio Media Content Service
+pub async fn delete_media_from_twilio(
+    chat_service_sid: &str,
+    media_sid: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
+    let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
+    let client = Client::new();
+
+    let response = client
+        .delete(format!(
+            "https://mcs.us1.twilio.com/v1/Services/{}/Media/{}",
+            chat_service_sid, media_sid
+        ))
+        .basic_auth(&account_sid, Some(&auth_token))
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        return Err(format!("Failed to delete media from Twilio: {} - {}", response.status(), response.text().await?).into());
+    }
+
+    println!("Successfully deleted media from Twilio: {}", media_sid);
+    Ok(())
+}
+
+// Function to send conversation message with media attachment
+pub async fn send_conversation_message_with_media(
+    conversation_sid: &str,
+    twilio_number: &String,
+    body: &str,
+    media_sid: &str,
+    redact: bool,
+) -> Result<String, Box<dyn Error>> {
+    // If this is a non-free reply message, we should redact previous free reply messages
+    if redact && !body.contains("(free reply)") {
+        // Fetch recent messages
+        let messages = match crate::api::twilio_sms::fetch_conversation_messages(conversation_sid).await {
+            Ok(msgs) => msgs,
+            Err(e) => {
+                eprintln!("Failed to fetch messages for redaction: {}", e);
+                vec![] // Continue with sending the message even if fetching fails
+            }
+        };
+
+        // Find and redact free reply messages until we hit a non-free reply message
+        for msg in messages {
+            if msg.author == "lightfriend" && msg.body.contains("(free reply)") {
+                let redacted_body = redact_sensitive_info(&msg.body).await;
+                if let Err(e) = redact_message(conversation_sid, &msg.sid, &redacted_body).await {
+                    eprintln!("Failed to redact free reply message {}: {}", msg.sid, e);
+                }
+            } else if msg.author == "lightfriend" {
+                // Stop when we hit a non-free reply message
+                break;
+            }
+        }
+    }
+
+    let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
+    let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
+    let client = Client::new();
+
+    let form_data = vec![
+        ("Body", body),
+        ("Author", "lightfriend"),
+        ("From", twilio_number),
+        ("MediaSid", media_sid),
+        ("X-Twilio-Webhook-Enabled", "true")
+    ];
+
+    let response: MessageResponse = client
+        .post(format!(
+            "https://conversations.twilio.com/v1/Conversations/{}/Messages",
+            conversation_sid
+        ))
+        .basic_auth(&account_sid, Some(&auth_token))
+        .form(&form_data)
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    println!("Successfully sent conversation message with media. Message SID: {}, Media SID: {}", 
+        response.sid, media_sid);
+    tracing::info!("Message with media sent successfully to conversation {} with message SID: {} and media SID: {}", 
+        conversation_sid, response.sid, media_sid);
+
+    // Only redact the current message if it's not a free reply message
+    if redact && !body.contains("(free reply)") {
+        // Redact sensitive information using enhanced LLM-based redaction
+        let redacted_body = redact_sensitive_info(&body).await;
+        
+        // Update the message with the redacted body
+        redact_message(conversation_sid, &response.sid, &redacted_body).await?;
+    }
+
+    Ok(response.sid)
+}
+
 pub async fn send_conversation_message(
     conversation_sid: &str, 
     twilio_number: &String,

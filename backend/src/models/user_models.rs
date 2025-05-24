@@ -258,7 +258,7 @@ pub struct NewUsageLog {
     pub zero_credits_timestamp: Option<i32>,
 }
 
-#[derive(Queryable, Selectable, Insertable)]
+#[derive(Queryable, Selectable, Insertable, Clone)]
 #[diesel(table_name = conversations)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct Conversation {

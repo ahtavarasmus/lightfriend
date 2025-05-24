@@ -36,6 +36,7 @@ pub struct WhatsAppFetchPayload {
 #[derive(Debug, Deserialize)]
 pub struct MessageCallPayload {
     message: String,
+    email_id: Option<String>
 }
 
 #[derive(Debug, Deserialize)]
@@ -612,6 +613,8 @@ pub async fn handle_email_fetch_tool_call(
 
 
 
+use base64::Engine as _;
+
 pub async fn handle_send_sms_tool_call(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
@@ -667,7 +670,6 @@ pub async fn handle_send_sms_tool_call(
         }
     };
 
-
     // Get conversation for the user
     let conversation = match state.user_conversations.get_conversation(&user, user.preferred_number.clone().unwrap()).await {
         Ok(conv) => conv,
@@ -682,7 +684,142 @@ pub async fn handle_send_sms_tool_call(
         }
     };
 
-    // Send the message using Twilio
+    let mut message_sids = Vec::new();
+
+
+    // Handle email attachments if email_id is provided - spawn as background task
+    if let Some(email_id) = payload.email_id.clone() {
+        println!("Spawning background task for email attachments processing for email ID: {}", email_id);
+        
+        let state_clone = Arc::clone(&state);
+        let conversation_clone = conversation.clone();
+        
+        tokio::spawn(async move {
+            println!("Background task: Fetching email attachments for email ID: {}", email_id);
+            
+            match fetch_single_email_imap(&state_clone, user_id, &email_id).await {
+                Ok(email) => {
+                    if !email.attachments.is_empty() {
+                        println!("Background task: Found {} attachments in email", email.attachments.len());
+                        
+                        let mut twilio_media_sids = Vec::new();
+                        let mut attachment_message_sids = Vec::new();
+
+                        for (index, attachment) in email.attachments.iter().enumerate() {
+                            // Decode base64 attachment data
+                            match base64::engine::general_purpose::STANDARD.decode(&attachment.data) {
+                                Ok(decoded_data) => {
+                                    // Upload attachment to Twilio Media Content Service
+                                    match crate::api::twilio_utils::upload_media_to_twilio(
+                                        &conversation_clone.service_sid,
+                                        &decoded_data,
+                                        &attachment.content_type,
+                                        attachment.filename.as_deref().unwrap_or("attachment"),
+                                    ).await {
+                                        Ok(media_sid) => {
+                                            twilio_media_sids.push(media_sid.clone());
+                                            
+                                            // Send message with media attachment
+                                            let attachment_message = format!(
+                                                "📎 Attachment {}/{}: {} ({})",
+                                                index + 1,
+                                                email.attachments.len(),
+                                                attachment.filename.as_deref().unwrap_or("unnamed"),
+                                                attachment.content_type
+                                            );
+                                            
+                                            match crate::api::twilio_utils::send_conversation_message_with_media(
+                                                &conversation_clone.conversation_sid,
+                                                &conversation_clone.twilio_number,
+                                                &attachment_message,
+                                                &media_sid,
+                                                true,
+                                            ).await {
+                                                Ok(sid) => {
+                                                    attachment_message_sids.push(sid.clone());
+                                                    println!("Background task: Sent attachment {} with message SID: {} and media SID: {}", 
+                                                        index + 1, sid, media_sid);
+                                                },
+                                                Err(e) => {
+                                                    let error_msg = e.to_string();
+                                                    error!("Background task: Failed to send attachment message: {}", error_msg);
+                                                }
+                                            }
+                                        },
+                                        Err(e) => {
+                                            let error_msg = e.to_string();
+                                            error!("Background task: Failed to upload attachment {} to Twilio: {}", index + 1, error_msg);
+                                            continue;
+                                        }
+                                    }
+                                },
+                                Err(e) => {
+                                    error!("Background task: Failed to decode base64 attachment data: {}", e);
+                                    continue;
+                                }
+                            }
+                        }
+
+                        
+                        // Send summary message if attachments were processed
+                        if !twilio_media_sids.is_empty() {
+                            let summary_message = format!(
+                                "📧 Forwarded {} attachment(s) from email: {}",
+                                twilio_media_sids.len(),
+                                email.subject.as_deref().unwrap_or("No subject")
+                            );
+                            
+                            match crate::api::twilio_utils::send_conversation_message(
+                                &conversation_clone.conversation_sid,
+                                &conversation_clone.twilio_number,
+                                &summary_message,
+                                true,
+                            ).await {
+                                Ok(sid) => {
+                                    attachment_message_sids.push(sid.clone());
+                                    println!("Background task: Sent summary message with SID: {}", sid);
+                                }
+                                Err(e) => {
+                                    let error_msg = e.to_string();
+                                    error!("Background task: Failed to send summary message: {}", error_msg);
+                                }
+                            }
+                        }
+
+                        // Schedule cleanup of Twilio media after 24 hours
+                        if !twilio_media_sids.is_empty() {
+                            let chat_service_sid = conversation_clone.service_sid.clone();
+                            let media_sids_for_cleanup = twilio_media_sids.clone();
+                            tokio::spawn(async move {
+                                // Wait 24 hours before cleanup
+                                tokio::time::sleep(tokio::time::Duration::from_secs(24 * 60 * 60)).await;
+                                
+                                for media_sid in media_sids_for_cleanup {
+                                    if let Err(e) = crate::api::twilio_utils::delete_media_from_twilio(
+                                        &chat_service_sid, &media_sid
+                                    ).await {
+                                        let error_msg = e.to_string();
+                                        error!("Background task: Failed to cleanup Twilio media {}: {}", media_sid, error_msg);
+                                    } else {
+                                        println!("Background task: Successfully cleaned up Twilio media: {}", media_sid);
+                                    }
+                                }
+                            });
+                        }
+
+                        println!("Background task: Completed processing {} attachments", email.attachments.len());
+                    } else {
+                        println!("Background task: No attachments found in email");
+                    }
+                }
+                Err(e) => {
+                    error!("Background task: Failed to fetch email: {:?}", e);
+                }
+            }
+        });
+    }
+
+    // Send the main message using Twilio
     match crate::api::twilio_utils::send_conversation_message(
         &conversation.conversation_sid,
         &conversation.twilio_number,
@@ -690,15 +827,28 @@ pub async fn handle_send_sms_tool_call(
         true,
     ).await {
         Ok(message_sid) => {
-            println!("Successfully sent SMS with SID: {}", message_sid);
+            message_sids.push(message_sid.clone());
+            println!("Successfully sent main SMS with SID: {}", message_sid);
+            
+            let attachment_info = if payload.email_id.is_some() {
+                "Email attachments are being processed in the background and will be sent shortly."
+            } else {
+                "No email attachments to process."
+            };
+            
             Ok(Json(json!({
                 "status": "success",
                 "message_sid": message_sid,
-                "conversation_sid": conversation.conversation_sid
+                "conversation_sid": conversation.conversation_sid,
+                "attachment_processing": attachment_info,
+                "total_messages_sent": message_sids.len(),
+                "all_message_sids": message_sids
             })))
         }
         Err(e) => {
             error!("Failed to send SMS: {}", e);
+            
+
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
@@ -709,7 +859,6 @@ pub async fn handle_send_sms_tool_call(
         }
     }
 }
-
 
 pub async fn handle_shazam_tool_call(
     State(state): State<Arc<AppState>>,

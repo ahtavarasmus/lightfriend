@@ -187,6 +187,16 @@ pub fn keywords_section(props: &KeywordsProps) -> Html {
     }
 }
 
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct WhatsAppRoom {
+    pub room_id: String,
+    pub display_name: String,
+    pub last_activity: i64,
+    pub last_activity_formatted: String,
+}
+
 #[derive(Properties, PartialEq, Clone)]
 pub struct PrioritySendersProps {
     pub service_type: String,
@@ -198,6 +208,9 @@ pub struct PrioritySendersProps {
 pub fn priority_senders_section(props: &PrioritySendersProps) -> Html {
     let new_sender = use_state(|| String::new());
     let senders_local = use_state(|| props.senders.clone());
+    let search_results = use_state(|| Vec::<WhatsAppRoom>::new());
+    let show_suggestions = use_state(|| false);
+    let is_searching = use_state(|| false);
 
     {
         let senders_local = senders_local.clone();
@@ -241,10 +254,59 @@ pub fn priority_senders_section(props: &PrioritySendersProps) -> Html {
         })
     };
 
+    let search_whatsapp_rooms = {
+        let search_results = search_results.clone();
+        let show_suggestions = show_suggestions.clone();
+        let is_searching = is_searching.clone();
+        Callback::from(move |search_term: String| {
+            if search_term.trim().is_empty() {
+                search_results.set(Vec::new());
+                show_suggestions.set(false);
+                return;
+            }
+
+            if let Some(tok) = window()
+                .and_then(|w| w.local_storage().ok())
+                .flatten()
+                .and_then(|s| s.get_item("token").ok())
+                .flatten()
+            {
+                let search_results = search_results.clone();
+                let show_suggestions = show_suggestions.clone();
+                let is_searching = is_searching.clone();
+                is_searching.set(true);
+                
+                spawn_local(async move {
+                    match Request::get(&format!(
+                        "{}/api/whatsapp/search-rooms?search={}",
+                        crate::config::get_backend_url(),
+                        urlencoding::encode(&search_term)
+                    ))
+                    .header("Authorization", &format!("Bearer {}", tok))
+                    .send()
+                    .await
+                    {
+                        Ok(response) => {
+                            if let Ok(rooms) = response.json::<Vec<WhatsAppRoom>>().await {
+                                search_results.set(rooms);
+                                show_suggestions.set(true);
+                            }
+                        }
+                        Err(e) => {
+                            web_sys::console::log_1(&format!("Search error: {}", e).into());
+                        }
+                    }
+                    is_searching.set(false);
+                });
+            }
+        })
+    };
+
     let add_sender = {
         let stype = props.service_type.clone();
         let new_s = new_sender.clone();
         let reload = refresh.clone();
+        let show_suggestions = show_suggestions.clone();
         Callback::from(move |_| {
             let s = (*new_s).trim().to_string();
             if s.is_empty() { return; }
@@ -257,6 +319,7 @@ pub fn priority_senders_section(props: &PrioritySendersProps) -> Html {
                 let stype = stype.clone();
                 let new_s = new_s.clone();
                 let reload = reload.clone();
+                let show_suggestions = show_suggestions.clone();
                 spawn_local(async move {
                     let _ = Request::post(&format!(
                             "{}/api/filters/priority-sender/{}",
@@ -268,9 +331,26 @@ pub fn priority_senders_section(props: &PrioritySendersProps) -> Html {
                         .send()
                         .await;
                     new_s.set(String::new());
+                    show_suggestions.set(false);
                     reload.emit(());
                 });
             }
+        })
+    };
+
+    let select_suggestion = {
+        let new_sender = new_sender.clone();
+        let show_suggestions = show_suggestions.clone();
+        Callback::from(move |room_name: String| {
+            // Extract clean name from display name (remove " (WA)" suffix)
+            let clean_name = room_name
+                .split(" (WA)")
+                .next()
+                .unwrap_or(&room_name)
+                .trim()
+                .to_string();
+            new_sender.set(clean_name);
+            show_suggestions.set(false);
         })
     };
 
@@ -300,35 +380,130 @@ pub fn priority_senders_section(props: &PrioritySendersProps) -> Html {
         })
     };
 
+    let hide_suggestions = {
+        let show_suggestions = show_suggestions.clone();
+        Callback::from(move |_| {
+            show_suggestions.set(false);
+        })
+    };
+
     html! {
         <div class="filter-section">
             <h3>{"Priority Senders"}</h3>
 
-            <div class="filter-input">
-                <input
-                    type="text"
-                    placeholder="Add priority sender"
-                    value={(*new_sender).clone()}
-                    oninput={Callback::from({
-                        let new_sender = new_sender.clone();
-                        move |e: InputEvent| {
-                            let el: HtmlInputElement = e.target_unchecked_into();
-                            new_sender.set(el.value());
+            <div class="filter-input-container">
+                <div class="filter-input">
+                    {
+                        if props.service_type == "whatsapp" {
+                            html! {
+                                <div class="whatsapp-search-container">
+                                    <input
+                                        type="text"
+                                        placeholder="Search WhatsApp chats or add manually"
+                                        value={(*new_sender).clone()}
+                                        oninput={Callback::from({
+                                            let new_sender = new_sender.clone();
+                                            let search_whatsapp_rooms = search_whatsapp_rooms.clone();
+                                            move |e: InputEvent| {
+                                                let el: HtmlInputElement = e.target_unchecked_into();
+                                                let value = el.value();
+                                                new_sender.set(value.clone());
+                                                search_whatsapp_rooms.emit(value);
+                                            }
+                                        })}
+                                        onkeypress={Callback::from({
+                                            let add_sender = add_sender.clone();
+                                            move |e: KeyboardEvent| if e.key() == "Enter" { add_sender.emit(()) }
+                                        })}
+                                        onblur={Callback::from({
+                                            let hide_suggestions = hide_suggestions.clone();
+                                            move |_| {
+                                                // Delay hiding to allow click on suggestions
+                                                let hide_suggestions = hide_suggestions.clone();
+                                                spawn_local(async move {
+                                                    gloo_timers::future::TimeoutFuture::new(200).await;
+                                                    hide_suggestions.emit(());
+                                                });
+                                            }
+                                        })}
+                                    />
+                                    {
+                                        if *is_searching {
+                                            html! {
+                                                <div class="search-loading">
+                                                    <span>{"🔍 Searching..."}</span>
+                                                </div>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                                    {
+                                        if *show_suggestions && !(*search_results).is_empty() {
+                                            html! {
+                                                <div class="suggestions-dropdown">
+                                                    {
+                                                        (*search_results).iter().map(|room| {
+                                                            let room_name = room.display_name.clone();
+                                                            let clean_name = room_name
+                                                                .split(" (WA)")
+                                                                .next()
+                                                                .unwrap_or(&room_name)
+                                                                .trim()
+                                                                .to_string();
+                                                            html! {
+                                                                <div 
+                                                                    class="suggestion-item"
+                                                                    onmousedown={Callback::from({
+                                                                        let select_suggestion = select_suggestion.clone();
+                                                                        let room_name = room_name.clone();
+                                                                        move |_| select_suggestion.emit(room_name.clone())
+                                                                    })}
+                                                                >
+                                                                    <div class="suggestion-name">{clean_name}</div>
+                                                                    <div class="suggestion-activity">{&room.last_activity_formatted}</div>
+                                                                </div>
+                                                            }
+                                                        }).collect::<Html>()
+                                                    }
+                                                </div>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                                </div>
+                            }
+                        } else {
+                            html! {
+                                <input
+                                    type="text"
+                                    placeholder="Add priority sender"
+                                    value={(*new_sender).clone()}
+                                    oninput={Callback::from({
+                                        let new_sender = new_sender.clone();
+                                        move |e: InputEvent| {
+                                            let el: HtmlInputElement = e.target_unchecked_into();
+                                            new_sender.set(el.value());
+                                        }
+                                    })}
+                                    onkeypress={Callback::from({
+                                        let add_sender = add_sender.clone();
+                                        move |e: KeyboardEvent| if e.key() == "Enter" { add_sender.emit(()) }
+                                    })}
+                                />
+                            }
                         }
-                    })}
-                    onkeypress={Callback::from({
-                        let add_sender = add_sender.clone();
-                        move |e: KeyboardEvent| if e.key() == "Enter" { add_sender.emit(()) }
-                    })}
-                />
-                <button
-                    onclick={Callback::from({
-                        let add_sender = add_sender.clone();
-                        move |_| add_sender.emit(())
-                    })}
-                >
-                    {"Add"}
-                </button>
+                    }
+                    <button
+                        onclick={Callback::from({
+                            let add_sender = add_sender.clone();
+                            move |_| add_sender.emit(())
+                        })}
+                    >
+                        {"Add"}
+                    </button>
+                </div>
             </div>
 
             <ul class="filter-list">

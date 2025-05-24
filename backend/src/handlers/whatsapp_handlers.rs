@@ -208,3 +208,33 @@ pub async fn search_whatsapp_rooms_handler(
     }
 }
 
+
+use axum::{
+    extract::Query,
+    http::StatusCode,
+    Extension,
+};
+use crate::{
+    models::user_models::User,
+    utils::whatsapp_utils::{search_whatsapp_rooms, WhatsAppRoom},
+};
+
+#[derive(Deserialize)]
+pub struct SearchQuery {
+    search: String,
+}
+
+pub async fn search_rooms_handler(
+    State(state): State<std::sync::Arc<AppState>>,
+    auth_user: AuthUser,
+    Query(params): Query<SearchQuery>,
+) -> Result<Json<Vec<WhatsAppRoom>>, StatusCode> {
+    match search_whatsapp_rooms(&state, auth_user.user_id, &params.search).await {
+        Ok(rooms) => Ok(Json(rooms)),
+        Err(e) => {
+            tracing::error!("Failed to search WhatsApp rooms for user {}: {}", auth_user.user_id, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+

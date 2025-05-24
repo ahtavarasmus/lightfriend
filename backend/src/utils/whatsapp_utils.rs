@@ -13,7 +13,7 @@ use matrix_sdk::{
 use serde::{Deserialize, Serialize};
 use crate::AppState;
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WhatsAppRoom {
     pub room_id: String,
     pub display_name: String,
@@ -705,6 +705,24 @@ pub async fn handle_whatsapp_message(
         return;
     }
 
+    // Extract clean chat name from room name
+    let chat_name = room_name
+        .split(" (WA)")
+        .next()
+        .unwrap_or(&room_name)
+        .trim()
+        .to_string();
+
+    // Extract sender name from Matrix user ID
+    let sender_name = event.sender.localpart()
+        .strip_prefix("whatsapp_")
+        .unwrap_or(event.sender.localpart())
+        .to_string();
+
+    // TODO remove before we remove the user_id == 1 check above
+    println!("chat_name: {}", chat_name);
+    println!("sender_name: {}", sender_name);
+    println!("content: {}", content);
 
     // Get user's waiting checks, priority senders, and keywords for WhatsApp
     let waiting_checks = match state.user_repository.get_waiting_checks(user_id, "whatsapp") {
@@ -731,6 +749,73 @@ pub async fn handle_whatsapp_message(
         }
     };
 
+    // FAST CHECKS FIRST - Check waiting checks (exact string matching)
+    for waiting_check in &waiting_checks {
+        if content.to_lowercase().contains(&waiting_check.content.to_lowercase()) {
+            tracing::info!("Fast check: Waiting check matched for user {}: '{}'", user_id, waiting_check.content);
+            
+            // Handle waiting check removal if needed
+            if waiting_check.remove_when_found {
+                tracing::info!("Removing waiting check with content: {}", waiting_check.content);
+                if let Err(e) = state.user_repository.delete_waiting_check(
+                    user_id,
+                    "whatsapp",
+                    &waiting_check.content
+                ) {
+                    tracing::error!("Failed to delete waiting check: {}", e);
+                }
+            }
+
+            // Send notification immediately
+            send_whatsapp_notification(
+                &state,
+                user_id,
+                &chat_name,
+                &content,
+                &format!("Matched waiting check: {}", waiting_check.content)
+            ).await;
+            return;
+        }
+    }
+
+    // FAST CHECKS SECOND - Check priority senders
+    for priority_sender in &priority_senders {
+        if chat_name.to_lowercase().contains(&priority_sender.sender.to_lowercase()) ||
+           sender_name.to_lowercase().contains(&priority_sender.sender.to_lowercase()) {
+            tracing::info!("Fast check: Priority sender matched for user {}: '{}'", user_id, priority_sender.sender);
+            
+            // Send notification immediately
+            send_whatsapp_notification(
+                &state,
+                user_id,
+                &chat_name,
+                &content,
+                &format!("Message from priority sender: {}", priority_sender.sender)
+            ).await;
+            return;
+        }
+    }
+
+    // FAST CHECKS THIRD - Check keywords
+    for keyword in &keywords {
+        if content.to_lowercase().contains(&keyword.keyword.to_lowercase()) {
+            tracing::info!("Fast check: Keyword matched for user {}: '{}'", user_id, keyword.keyword);
+            
+            // Send notification immediately
+            send_whatsapp_notification(
+                &state,
+                user_id,
+                &chat_name,
+                &content,
+                &format!("Matched keyword: {}", keyword.keyword)
+            ).await;
+            return;
+        }
+    }
+
+    // FALLBACK TO LLM - Only if no fast checks matched
+    tracing::debug!("No fast checks matched, falling back to LLM evaluation for user {}", user_id);
+
     let importance_priority = match state.user_repository.get_importance_priority(user_id, "whatsapp") {
         Ok(Some(priority)) => priority.threshold,
         Ok(None) => 7, // Default threshold
@@ -752,20 +837,69 @@ pub async fn handle_whatsapp_message(
         }
     };
 
-    // Extract clean chat name from room name
-    let chat_name = room_name
-        .split(" (WA)")
-        .next()
-        .unwrap_or(&room_name)
-        .trim()
-        .to_string();
+    // Use LLM evaluation as fallback
+    match evaluate_message_with_llm(
+        &content,
+        &chat_name,
+        &sender_name,
+        &waiting_checks,
+        &priority_senders,
+        &keywords,
+        &general_checks_prompt,
+        importance_priority,
+    ).await {
+        Ok((should_notify, reason, score, matched_waiting_check)) => {
+            tracing::info!(
+                "LLM evaluation for user {}: should_notify={}, score={}, reason={}",
+                user_id, should_notify, score, reason
+            );
 
-    // Extract sender name from Matrix user ID
-    let sender_name = event.sender.localpart()
-        .strip_prefix("whatsapp_")
-        .unwrap_or(event.sender.localpart())
-        .to_string();
+            if should_notify {
+                // Handle waiting check removal if LLM matched one
+                if let Some(matched_check_id) = matched_waiting_check {
+                    tracing::info!("LLM matched waiting check ID: {}", matched_check_id);
+                    if let Some(check) = waiting_checks.iter().find(|wc| wc.id == Some(matched_check_id)) {
+                        if check.remove_when_found {
+                            tracing::info!("Removing waiting check with ID {}", matched_check_id);
+                            if let Err(e) = state.user_repository.delete_waiting_check(
+                                user_id,
+                                "whatsapp",
+                                &check.content
+                            ) {
+                                tracing::error!("Failed to delete waiting check: {}", e);
+                            }
+                        }
+                    }
+                }
 
+                // Send notification
+                send_whatsapp_notification(
+                    &state,
+                    user_id,
+                    &chat_name,
+                    &content,
+                    &reason
+                ).await;
+            } else {
+                tracing::debug!("LLM determined message not important enough for notification");
+            }
+        },
+        Err(e) => {
+            tracing::error!("Failed to evaluate message with LLM for user {}: {}", user_id, e);
+        }
+    }
+}
+
+async fn evaluate_message_with_llm(
+    content: &str,
+    chat_name: &str,
+    sender_name: &str,
+    waiting_checks: &[crate::models::user_models::WaitingCheck],
+    priority_senders: &[crate::models::user_models::PrioritySender],
+    keywords: &[crate::models::user_models::Keyword],
+    general_checks_prompt: &str,
+    importance_threshold: i32,
+) -> Result<(bool, String, i32, Option<i32>)> {
     // Prepare the system message for WhatsApp message evaluation
     let waiting_checks_formatted = waiting_checks.iter()
         .map(|wc| format!("{{id: {}, content: '{}'}}", wc.id.unwrap_or(-1), wc.content))
@@ -798,35 +932,19 @@ pub async fn handle_whatsapp_message(
         priority_senders.iter().map(|ps| ps.sender.clone()).collect::<Vec<_>>().join(", "),
         keywords.iter().map(|k| k.keyword.clone()).collect::<Vec<_>>().join(", "),
         general_checks_prompt,
-        importance_priority
+        importance_threshold
     );
 
     // Get OpenRouter API key
-    let api_key = match std::env::var("OPENROUTER_API_KEY") {
-        Ok(key) => {
-            tracing::debug!("Successfully retrieved OpenRouter API key");
-            key
-        },
-        Err(e) => {
-            tracing::error!("Failed to get OPENROUTER_API_KEY: {}", e);
-            return;
-        }
-    };
+    let api_key = std::env::var("OPENROUTER_API_KEY")
+        .map_err(|e| anyhow!("Failed to get OPENROUTER_API_KEY: {}", e))?;
 
     // Create OpenAI client
-    let client_ai = match openai_api_rs::v1::api::OpenAIClient::builder()
+    let client_ai = openai_api_rs::v1::api::OpenAIClient::builder()
         .with_endpoint("https://openrouter.ai/api/v1")
         .with_api_key(api_key)
-        .build() {
-            Ok(client) => {
-                tracing::debug!("Successfully built OpenAI client");
-                client
-            },
-            Err(e) => {
-                tracing::error!("Failed to build OpenAI client: {}", e);
-                return;
-            }
-        };
+        .build()
+        .map_err(|e| anyhow!("Failed to build OpenAI client: {}", e))?;
 
     // Format the WhatsApp message content
     let message_content = format!(
@@ -915,129 +1033,111 @@ pub async fn handle_whatsapp_message(
     .tool_choice(openai_api_rs::v1::chat_completion::ToolChoiceType::Required);
 
     // Get LLM evaluation
-    match client_ai.chat_completion(req.clone()).await {
-        Ok(response) => {
-            tracing::debug!("Received LLM response for WhatsApp message: {:?}", response);
-            if let Some(tool_calls) = response.choices[0].message.tool_calls.as_ref() {
-                for tool_call in tool_calls {
-                    if let Some(name) = &tool_call.function.name {
-                        if name == "evaluate_whatsapp_message" {
-                            if let Some(arguments) = &tool_call.function.arguments {
-                                tracing::debug!("Processing WhatsApp message evaluation arguments");
-                                match serde_json::from_str::<serde_json::Value>(arguments) {
-                                    Ok(evaluation) => {
-                                        tracing::debug!("Parsed WhatsApp message evaluation");
-                                        
-                                        let should_notify = evaluation["should_notify"].as_bool().unwrap_or(false);
-                                        let reason = evaluation["reason"].as_str().unwrap_or("No reason provided");
-                                        let score = evaluation["score"].as_i64().unwrap_or(0) as i32;
+    let response = client_ai.chat_completion(req).await
+        .map_err(|e| anyhow!("Failed to get LLM response: {}", e))?;
 
-                                        tracing::info!(
-                                            "WhatsApp message evaluation for user {}: should_notify={}, score={}, reason={}",
-                                            user_id, should_notify, score, reason
-                                        );
+    if let Some(tool_calls) = response.choices[0].message.tool_calls.as_ref() {
+        for tool_call in tool_calls {
+            if let Some(name) = &tool_call.function.name {
+                if name == "evaluate_whatsapp_message" {
+                    if let Some(arguments) = &tool_call.function.arguments {
+                        let evaluation: serde_json::Value = serde_json::from_str(arguments)
+                            .map_err(|e| anyhow!("Failed to parse LLM response: {}", e))?;
+                        
+                        let should_notify = evaluation["should_notify"].as_bool().unwrap_or(false);
+                        let reason = evaluation["reason"].as_str().unwrap_or("No reason provided").to_string();
+                        let score = evaluation["score"].as_i64().unwrap_or(0) as i32;
+                        let matched_waiting_check = evaluation["matched_waiting_check"].as_i64().map(|id| id as i32);
 
-                                        if should_notify {
-                                            // Check if notification was due to a waiting check
-                                            if let Some(matched_check_id) = evaluation["matched_waiting_check"].as_i64() {
-                                                tracing::info!("Matched waiting check ID: {}", matched_check_id);
-                                                // Find the matching waiting check
-                                                if let Some(check) = waiting_checks.iter().find(|wc| wc.id == Some(matched_check_id as i32)) {
-                                                    if check.remove_when_found {
-                                                        tracing::info!("Removing waiting check with ID {}", matched_check_id);
-                                                        if let Err(e) = state.user_repository.delete_waiting_check(
-                                                            user_id,
-                                                            "whatsapp",
-                                                            &check.content
-                                                        ) {
-                                                            tracing::error!("Failed to delete waiting check: {}", e);
-                                                        }
-                                                    }
-                                                }
-                                            }
-
-
-                                            // Get the user's preferred number or default
-                                            let sender_number = match user.preferred_number.clone() {
-                                                Some(number) => {
-                                                    tracing::info!("Using user's preferred number: {}", number);
-                                                    number
-                                                },
-                                                None => {
-                                                    let number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set");
-                                                    tracing::info!("Using default SHAZAM_PHONE_NUMBER: {}", number);
-                                                    number
-                                                },
-                                            };
-
-                                            // Get the conversation for the user
-                                            let conversation = match state.user_conversations.get_conversation(&user, sender_number).await {
-                                                Ok(conv) => conv,
-                                                Err(e) => {
-                                                    tracing::error!("Failed to ensure conversation exists: {}", e);
-                                                    return;
-                                                }
-                                            };
-
-                                            // Check if this is the final message
-                                            let is_final_message = user.msgs_left <= 1;
-
-                                            // Format notification message
-                                            let notification = format!(
-                                                "Important WhatsApp message from {}:\n\n\"{}\"",
-                                                chat_name,
-                                                content
-                                            );
-
-                                            // Append final message notice if needed
-                                            let final_notification = if is_final_message {
-                                                format!("{}\n\nNote: This is your final proactive message for this month. Your message quota will reset at the start of next month.", notification)
-                                            } else {
-                                                notification
-                                            };
-
-                                            // Send SMS notification
-                                            match crate::api::twilio_utils::send_conversation_message(
-                                                &conversation.conversation_sid,
-                                                &conversation.twilio_number,
-                                                &final_notification,
-                                                true,
-                                            ).await {
-                                                Ok(_) => {
-                                                    tracing::info!("Successfully sent WhatsApp notification to user {}", user_id);
-                                                    // decrease messages here, we have already checked before that they should have at least one left
-                                                    match state.user_repository.decrease_messages_left(user_id) {
-                                                        Ok(msgs_left) => {
-                                                            tracing::info!("User {} has {} messages left after decrease", user_id, msgs_left);
-                                                        },
-                                                        Err(e) => {
-                                                            tracing::error!("Failed to decrease messages left for user {}: {}", user_id, e);
-                                                        }
-                                                    };
-                                                },
-                                                Err(e) => tracing::error!("Failed to send WhatsApp notification: {}", e),
-                                            }
-                                        } else {
-                                            tracing::debug!("WhatsApp message not marked as important, skipping notification");
-                                        }
-                                    }
-                                    Err(e) => {
-                                        tracing::error!("Failed to parse WhatsApp message evaluation arguments: {}", e);
-                                        tracing::error!("Raw arguments that failed to parse: {}", arguments);
-                                    }
-                                }
-                            }
-                        }
+                        return Ok((should_notify, reason, score, matched_waiting_check));
                     }
                 }
-            } else {
-                tracing::error!("No tool calls in LLM response for WhatsApp message");
             }
         }
+    }
+
+    Err(anyhow!("No valid tool call response from LLM"))
+}
+
+async fn send_whatsapp_notification(
+    state: &AppState,
+    user_id: i32,
+    chat_name: &str,
+    content: &str,
+    reason: &str,
+) {
+    // Get user info
+    let user = match state.user_repository.find_by_id(user_id) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            tracing::error!("User {} not found for notification", user_id);
+            return;
+        },
         Err(e) => {
-            tracing::error!("Failed to get LLM response for WhatsApp message: {}", e);
-            tracing::error!("Request details: {:?}", req);
+            tracing::error!("Failed to get user {}: {}", user_id, e);
+            return;
         }
+    };
+
+    // Get the user's preferred number or default
+    let sender_number = match user.preferred_number.clone() {
+        Some(number) => {
+            tracing::info!("Using user's preferred number: {}", number);
+            number
+        },
+        None => {
+            let number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set");
+            tracing::info!("Using default SHAZAM_PHONE_NUMBER: {}", number);
+            number
+        },
+    };
+
+    // Get the conversation for the user
+    let conversation = match state.user_conversations.get_conversation(&user, sender_number).await {
+        Ok(conv) => conv,
+        Err(e) => {
+            tracing::error!("Failed to ensure conversation exists: {}", e);
+            return;
+        }
+    };
+
+    // Check if this is the final message
+    let is_final_message = user.msgs_left <= 1;
+
+    // Format notification message
+    let notification = format!(
+        "Important WhatsApp message from {}:\n\n\"{}\"",
+        chat_name,
+        content
+    );
+
+    // Append final message notice if needed
+    let final_notification = if is_final_message {
+        format!("{}\n\nNote: This is your final proactive message for this month. Your message quota will reset at the start of next month.", notification)
+    } else {
+        notification
+    };
+
+    // Send SMS notification
+    match crate::api::twilio_utils::send_conversation_message(
+        &conversation.conversation_sid,
+        &conversation.twilio_number,
+        &final_notification,
+        true,
+    ).await {
+        Ok(_) => {
+            tracing::info!("Successfully sent WhatsApp notification to user {} (reason: {})", user_id, reason);
+            // Decrease messages here, we have already checked before that they should have at least one left
+            match state.user_repository.decrease_messages_left(user_id) {
+                Ok(msgs_left) => {
+                    tracing::info!("User {} has {} messages left after decrease", user_id, msgs_left);
+                },
+                Err(e) => {
+                    tracing::error!("Failed to decrease messages left for user {}: {}", user_id, e);
+                }
+            };
+        },
+        Err(e) => tracing::error!("Failed to send WhatsApp notification: {}", e),
     }
 }
 

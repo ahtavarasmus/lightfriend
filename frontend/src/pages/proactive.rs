@@ -1239,6 +1239,10 @@ pub fn connected_services(props: &Props) -> Html {
                     flex: 2;
                     width: 100%;
                 }
+                .whatsapp-search-container input[type="text"] {
+                    flex: 2;
+                    width: 100%;
+                }
 
                 .waiting-check-fields input[type="date"] {
                     flex: 1;
@@ -1800,12 +1804,96 @@ pub fn connected_services(props: &Props) -> Html {
                     font-style: italic;
                 }
 
+                .filter-input-container {
+                    position: relative;
+                }
+
                 .filter-input {
                     display: flex;
                     gap: 1rem;
                     margin-bottom: 1rem;
                     flex-wrap: wrap;
                     align-items: center;
+                }
+
+                .whatsapp-search-container {
+                    position: relative;
+                    flex: 1;
+                    min-width: 300px;
+                    width: 100%;
+                }
+
+                .search-loading {
+                    position: absolute;
+                    right: 10px;
+                    top: 50%;
+                    transform: translateY(-50%);
+                    color: #7EB2FF;
+                    font-size: 0.8rem;
+                    pointer-events: none;
+                }
+
+                .suggestions-dropdown {
+                    position: absolute;
+                    top: 100%;
+                    left: 0;
+                    right: 0;
+                    background: rgba(30, 30, 30, 0.95);
+                    border: 1px solid rgba(30, 144, 255, 0.2);
+                    border-radius: 8px;
+                    max-height: 200px;
+                    overflow-y: auto;
+                    z-index: 1000;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+                    backdrop-filter: blur(10px);
+                }
+
+                .suggestion-item {
+                    padding: 0.75rem 1rem;
+                    cursor: pointer;
+                    border-bottom: 1px solid rgba(30, 144, 255, 0.1);
+                    transition: all 0.2s ease;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.2rem;
+                }
+
+                .suggestion-item:hover {
+                    background: rgba(30, 144, 255, 0.1);
+                    transform: translateX(2px);
+                }
+
+                .suggestion-item:last-child {
+                    border-bottom: none;
+                }
+
+                .suggestion-name {
+                    color: #fff;
+                    font-size: 0.9rem;
+                    font-weight: 500;
+                }
+
+                .suggestion-activity {
+                    color: #999;
+                    font-size: 0.8rem;
+                }
+
+                .suggestions-dropdown::-webkit-scrollbar {
+                    width: 6px;
+                }
+
+                .suggestions-dropdown::-webkit-scrollbar-track {
+                    background: rgba(30, 30, 30, 0.5);
+                    border-radius: 3px;
+                }
+
+                .suggestions-dropdown::-webkit-scrollbar-thumb {
+                    background: rgba(30, 144, 255, 0.3);
+                    border-radius: 3px;
+                }
+
+                .suggestions-dropdown::-webkit-scrollbar-thumb:hover {
+                    background: rgba(30, 144, 255, 0.5);
                 }
 
                 .filter-input label {
@@ -1889,8 +1977,29 @@ pub fn connected_services(props: &Props) -> Html {
                     .filter-list li {
                         width: 100%;
                     }
-                }
 
+                    .whatsapp-search-container {
+                        width: 100%;
+                        min-width: unset;
+                        flex: none;
+                    }
+
+                    .suggestions-dropdown {
+                        max-height: 150px;
+                    }
+
+                    .suggestion-item {
+                        padding: 0.6rem 0.8rem;
+                    }
+
+                    .suggestion-name {
+                        font-size: 0.85rem;
+                    }
+
+                    .suggestion-activity {
+                        font-size: 0.75rem;
+                    }
+                }
                 /* Service icons */
                 .calendar-icon::before {
                     content: "📅";
