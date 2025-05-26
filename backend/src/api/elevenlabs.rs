@@ -57,18 +57,11 @@ pub struct ConversationInitiationClientData {
 #[derive(Serialize, Deserialize)]
 pub struct ConversationConfig {
     agent: AgentConfig,
-    tts: VoiceId,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct VoiceId{
-    voice_id: String,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct AgentConfig {
     first_message: String,
-    language: String,
 }
 
 
@@ -259,16 +252,10 @@ pub async fn fetch_assistant(
     println!("Caller Number: {}", caller_number);
 
     let mut dynamic_variables = HashMap::new();
-    let us_voice_id = std::env::var("US_VOICE_ID").expect("No US_VOICE_ID set");
-
     let mut conversation_config_override = ConversationConfig {
         agent: AgentConfig {
             first_message: "Hello {{name}}!".to_string(),
-            language: "en".to_string(),
         },
-        tts: VoiceId {
-            voice_id: us_voice_id.clone(),
-        }
     };
 
 
@@ -293,47 +280,11 @@ pub async fn fetch_assistant(
                     println!("Error verifying user: {}", e);
                     // Continue even if verification fails
                 } else {
-                    if user.agent_language == "de" {
-                        
-                        conversation_config_override = ConversationConfig {
-                            agent: AgentConfig {
-                                first_message: "Willkommen! Ihre Nummer ist jetzt verifiziert. Neue Benutzer erhalten 1 Euro an kostenlosen Credits zum Testen. Wie kann ich Ihnen helfen?".to_string(),
-                                language: "de".to_string(),
-                            },
-                            tts: VoiceId {
-                                voice_id: std::env::var("DE_VOICE_ID").expect("No DE_VOICE_ID set"),
-                            },
-                        };
-                    } else if user.agent_language == "fi" {
-
-                        
-                        conversation_config_override = ConversationConfig {
-                            agent: AgentConfig {
-                                first_message: "Tervetuloa! Sinun numerosi on nyt varmennettu. Uudet tilit saavat euron verran ilmaista käyttöä testaamiseen. Kuinka voin auttaa?".to_string(),
-                                language: "fi".to_string(),
-                            },
-                            tts: VoiceId {
-                                voice_id: std::env::var("FI_VOICE_ID").expect("No FI_VOICE_ID set"),
-                            }
-                        };
-                    } else {
-                        conversation_config_override = ConversationConfig {
-                            agent: AgentConfig {
-                                first_message: "Welcome! Your number is now verified. New users get 1 euro worth of free credits for testing. How can I help?".to_string(),
-                                language: "en".to_string(),
-                            },
-                            tts: VoiceId {
-                                voice_id: us_voice_id,
-                            }
-                        };
-                    }
-                    
-                }
-            } else {
-                if user.agent_language == "fi" {
-                    conversation_config_override.tts.voice_id = std::env::var("FI_VOICE_ID").expect("No FI_VOICE_ID set");
-                } else if user.agent_language == "de" {
-                    conversation_config_override.tts.voice_id = std::env::var("DE_VOICE_ID").expect("No DE_VOICE_ID set");
+                    conversation_config_override = ConversationConfig {
+                        agent: AgentConfig {
+                            first_message: "Welcome! Your number is now verified. You can add some information about yourself in the profile page. Anyways, how can I help?".to_string(),
+                        },
+                    };
                 }
             }
 
@@ -976,6 +927,7 @@ pub async fn handle_perplexity_tool_call(
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<MessageCallPayload>,
 ) -> Json<serde_json::Value> {
+    println!("Received message: {}", payload.message);
     
 
     let system_prompt = "You are assisting an AI voice calling service. The questions you receive are from voice conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read aloud 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. Use natural language sentence structure 5. When listing multiple points, use simple numbering (1, 2, 3) or natural language transitions (First... Second... Finally...) 6. Focus on the most relevant information that addresses the user's immediate needs 7. If specific numbers, dates, or proper names are important, spell them out clearly 8. Format numerical data in a way that's easy to read aloud (e.g., twenty-five percent instead of 25%) Your responses will be incorporated into a voice conversation, so clarity and natural flow are essential.";

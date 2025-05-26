@@ -488,17 +488,12 @@ pub async fn stripe_webhook(
                         user.id,
                         Some("tier 2"),
                     ).ok();
-                    // legacy subscription option
-                    if user.discount {
-                        state.user_repository.update_proactive_messages_left(user.id, 150).ok();
-                    } else {
-                        state.user_repository.update_proactive_messages_left(user.id, 100).ok();
-                        state.user_repository.update_user_credits_left(user.id, 20.0).ok();
-                    }
+                    state.user_repository.update_proactive_messages_left(user.id, 100).ok();
+                    state.user_repository.update_user_credits_left(user.id, 20.0).ok();
                     // Set initial credits_left for the subscription
                     // Enable proactive IMAP messaging for subscribed users
                     //state.user_repository.update_imap_proactive(user.id, true).ok();
-                    println!("Updated subscription tier to 'tier 1', set 100 messages, 20.0 credits_left, and enabled proactive IMAP for user {}", user.id);
+                    println!("Updated subscription tier to 'tier 2', set 100 messages, 20.0 credits_left, and enabled proactive IMAP for user {}", user.id);
 
                     // Mark existing emails as processed to prevent spam
                     match crate::handlers::imap_handlers::fetch_emails_imap(&state, user.id, true, Some(100), true).await {
@@ -535,12 +530,8 @@ pub async fn stripe_webhook(
                 if is_renewal {
                     println!("Subscription renewal detected for customer at period start: {}", current_period_start);
                     if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
-                        if user.discount {
-                            state.user_repository.update_proactive_messages_left(user.id, 150).ok();
-                        } else {
-                            state.user_repository.update_proactive_messages_left(user.id, 100).ok();
-                            state.user_repository.update_user_credits_left(user.id, 20.0).ok();
-                        }
+                        state.user_repository.update_proactive_messages_left(user.id, 100).ok();
+                        state.user_repository.update_user_credits_left(user.id, 20.0).ok();
                         println!("Reset to 150 messages and 20.0 credits_left for user {} on subscription renewal", user.id);
                     } else {
                         println!("No user found for customer ID");
