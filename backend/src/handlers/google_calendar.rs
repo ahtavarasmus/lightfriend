@@ -413,10 +413,9 @@ pub async fn handle_calendar_fetching(
     start: &str,
     end: &str,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Starting calendar tool call for user: {}", user_id);
+    tracing::debug!("Starting calendar tool call for user: {}", user_id);
     
     // Parse start and end times
-    println!("Parsing datetime strings");
     let parse_datetime = |datetime_str: &str| {
         chrono::DateTime::parse_from_rfc3339(datetime_str)
             .map(|dt| dt.with_timezone(&chrono::Utc))
@@ -459,9 +458,9 @@ pub async fn handle_calendar_fetching(
     println!("Checking if user has active Google Calendar connection");
     match state.user_repository.has_active_google_calendar(user_id) {
         Ok(has_connection) => {
-            println!("no errors checking active google calendar connection");
+            tracing::debug!("no errors checking active google calendar connection");
             if !has_connection {
-                println!("User does not have active Google Calendar connection");
+                tracing::debug!("User does not have active Google Calendar connection");
                 return Err((
                     StatusCode::BAD_REQUEST,
                     Json(json!({
@@ -469,10 +468,9 @@ pub async fn handle_calendar_fetching(
                     }))
                 ));
             }
-            println!("User has active Google Calendar connection");
+            tracing::debug!("User has active Google Calendar connection");
         },
         Err(e) => {
-            println!("Error checking calendar connection status: {}", e);
             tracing::error!("Failed to check calendar connection status: {}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -555,7 +553,6 @@ async fn fetch_calendar_list(
     client: &reqwest::Client,
     access_token: &str,
 ) -> Result<Vec<CalendarListEntry>, CalendarError> {
-    println!("Starting to fetch calendar list...");
     let response = client
         .get("https://www.googleapis.com/calendar/v3/users/me/calendarList")
         .header(AUTHORIZATION, format!("Bearer {}", access_token))
@@ -563,12 +560,10 @@ async fn fetch_calendar_list(
         .send()
         .await
         .map_err(|e| CalendarError::ApiError(e.to_string()))?;
-    println!("fetching calendars");
-    println!("Calendar API response status: {}", response.status());
 
     if response.status() == StatusCode::FORBIDDEN {
         // If we get a 403, we don't have permission to list calendars
-        println!("No permission to fetch calendar list, defaulting to primary calendar only");
+        tracing::info!("No permission to fetch calendar list, defaulting to primary calendar only");
         return Ok(vec![CalendarListEntry {
             id: "primary".to_string(),
             summary: "Primary Calendar".to_string(),
@@ -576,7 +571,7 @@ async fn fetch_calendar_list(
             selected: true,
         }]);
     } else if !response.status().is_success() {
-        println!("Failed to fetch calendar list with status: {}", response.status());
+        tracing::error!("Failed to fetch calendar list with status: {}", response.status());
         return Err(CalendarError::ApiError(format!(
             "Failed to fetch calendar list: {}",
             response.status()
@@ -586,7 +581,6 @@ async fn fetch_calendar_list(
     let calendar_list: CalendarListResponse = response.json().await
         .map_err(|e| CalendarError::ParseError(e.to_string()))?;
     
-    println!("Successfully fetched {} calendars", calendar_list.items.len());
 
     Ok(calendar_list.items)
 }
@@ -642,24 +636,22 @@ pub async fn fetch_calendar_events(
     user_id: i32,
     timeframe: TimeframeQuery,
 ) -> Result<Vec<CalendarEvent>, CalendarError> {
-    println!("Starting to fetch calendar events...");
-    tracing::info!("Fetching calendar events for timeframe: {:?} to {:?}", timeframe.start, timeframe.end);
+    tracing::debug!("Fetching calendar events for timeframe: {:?} to {:?}", timeframe.start, timeframe.end);
 
     // Get Google Calendar tokens
-    println!("Getting Google Calendar tokens for user_id: {}", user_id);
+    tracing::debug!("Getting Google Calendar tokens for user_id: {}", user_id);
     let (access_token, refresh_token) = match state.user_repository.get_google_calendar_tokens(user_id) {
         Ok(Some((access, refresh))) => {
-            println!("Successfully retrieved and decrypted tokens");
             tracing::debug!("Access token length: {}, Refresh token length: {}", 
                 access.len(), refresh.len());
             (access, refresh)
         },
         Ok(None) => {
-            println!("No active Google Calendar connection found");
+            tracing::debug!("No active Google Calendar connection found");
             return Err(CalendarError::NoConnection);
         },
         Err(e) => {
-            println!("Error getting tokens: {}", e);
+            tracing::error!("Error getting tokens: {}", e);
             tracing::error!("Failed to get calendar tokens: {}", e);
             return Err(CalendarError::TokenError(format!("Failed to decrypt tokens: {}", e)));
         }
@@ -684,15 +676,12 @@ pub async fn fetch_calendar_events(
         end_time: &str
     ) -> Result<Vec<CalendarEvent>, CalendarError> {
         // First try to fetch calendar list to check permissions
-        println!("Attempting to fetch calendar list...");
         match fetch_calendar_list(client, access_token).await {
             Ok(calendars) => {
-                println!("Successfully fetched calendar list with {} calendars", calendars.len());
                 let mut all_events = Vec::new();
                 
                 for calendar in calendars {
                     if calendar.selected {
-                        println!("Fetching events from calendar: {}", calendar.id);
                         match fetch_events_from_calendar(
                             client,
                             access_token,
@@ -701,11 +690,10 @@ pub async fn fetch_calendar_events(
                             end_time
                         ).await {
                             Ok(mut events) => {
-                                println!("Successfully fetched {} events from calendar {}", events.len(), calendar.summary);
                                 all_events.append(&mut events);
                             },
                             Err(e) => {
-                                println!("Error fetching events from calendar {}: {}", calendar.id, e);
+                                tracing::error!("Error fetching events from calendar {}: {}", calendar.id, e);
                                 continue;
                             }
                         }
@@ -714,7 +702,7 @@ pub async fn fetch_calendar_events(
                 Ok(all_events)
             },
             Err(e) => {
-                println!("Failed to fetch calendar list (possibly due to permissions), falling back to primary calendar: {}", e);
+                tracing::debug!("Failed to fetch calendar list (possibly due to permissions), falling back to primary calendar: {}", e);
                 // Fall back to fetching just the primary calendar
                 fetch_events_from_calendar(
                     client,

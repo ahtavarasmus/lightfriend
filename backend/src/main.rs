@@ -170,10 +170,11 @@ async fn main() {
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| {
             EnvFilter::new("info,lightfriend=debug")
-                .add_directive("matrix_sdk=warn".parse().unwrap())
-                .add_directive("tokio-runtime-worker=warn".parse().unwrap())
+                .add_directive("matrix_sdk=error".parse().unwrap())  // Changed from warn to error
+                .add_directive("tokio-runtime-worker=off".parse().unwrap())
                 .add_directive("ruma=warn".parse().unwrap())
                 .add_directive("eyeball=warn".parse().unwrap())
+                .add_directive("matrix_sdk::encryption=error".parse().unwrap())  // Added specific filter for encryption module
         });
 
     fmt()
@@ -385,6 +386,19 @@ async fn main() {
         .route("/api/filters/importance-priority/{service_type}", delete(filter_handlers::delete_importance_priority))
         .route("/api/filters/importance-priority/{service_type}", get(filter_handlers::get_importance_priority))
         .route("/api/filters/connected-services", get(filter_handlers::get_connected_services))
+
+        // WhatsApp filter toggle routes
+        // Generic filter toggle routes
+        .route("/api/filters/{service_type}/keywords/toggle", post(filter_handlers::toggle_keywords))
+        .route("/api/filters/{service_type}/priority-senders/toggle", post(filter_handlers::toggle_priority_senders))
+        .route("/api/filters/{service_type}/waiting-checks/toggle", post(filter_handlers::toggle_waiting_checks))
+        .route("/api/filters/{service_type}/general-importance/toggle", post(filter_handlers::toggle_general_importance))
+
+        .route("/api/filters/{service_type}/keywords", get(filter_handlers::get_keywords_state))
+
+        // Filter settings getter routes
+        .route("/api/filters/whatsapp/settings", get(filter_handlers::get_whatsapp_filter_settings))
+        .route("/api/filters/imap/settings", get(filter_handlers::get_email_filter_settings))
 
         .route("/api/profile/imap-general-checks", post(profile_handlers::update_imap_general_checks))
         .route("/api/profile/imap-general-checks", get(profile_handlers::get_imap_general_checks))

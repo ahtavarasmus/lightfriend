@@ -284,7 +284,7 @@ pub async fn get_integration_handler(
         .get_integration(&integration_id)
         .await
         .map(|integration| {
-            println!("Successfully retrieved integration details");
+            tracing::debug!("Successfully retrieved integration details");
             Json(integration)
         })
         .map_err(|e| {

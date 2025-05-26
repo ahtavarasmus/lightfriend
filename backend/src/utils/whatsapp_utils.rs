@@ -724,96 +724,129 @@ pub async fn handle_whatsapp_message(
     println!("sender_name: {}", sender_name);
     println!("content: {}", content);
 
-    // Get user's waiting checks, priority senders, and keywords for WhatsApp
-    let waiting_checks = match state.user_repository.get_waiting_checks(user_id, "whatsapp") {
-        Ok(checks) => checks,
-        Err(e) => {
-            tracing::error!("Failed to get waiting checks for user {}: {}", user_id, e);
-            Vec::new()
+    // Get filter activation settings
+    let (keywords_active, priority_senders_active, waiting_checks_active, general_importance_active) = 
+        match state.user_repository.get_whatsapp_filter_settings(user_id) {
+            Ok(settings) => settings,
+            Err(e) => {
+                tracing::error!("Failed to get filter settings for user {}: {}", user_id, e);
+                (true, true, true, true) // Default to all active on error
+            }
+        };
+
+    // Only fetch active filters
+    let waiting_checks = if waiting_checks_active {
+        match state.user_repository.get_waiting_checks(user_id, "whatsapp") {
+            Ok(checks) => checks,
+            Err(e) => {
+                tracing::error!("Failed to get waiting checks for user {}: {}", user_id, e);
+                Vec::new()
+            }
         }
+    } else {
+        Vec::new()
     };
 
-    let priority_senders = match state.user_repository.get_priority_senders(user_id, "whatsapp") {
-        Ok(senders) => senders,
-        Err(e) => {
-            tracing::error!("Failed to get priority senders for user {}: {}", user_id, e);
-            Vec::new()
+    let priority_senders = if priority_senders_active {
+        match state.user_repository.get_priority_senders(user_id, "whatsapp") {
+            Ok(senders) => senders,
+            Err(e) => {
+                tracing::error!("Failed to get priority senders for user {}: {}", user_id, e);
+                Vec::new()
+            }
         }
+    } else {
+        Vec::new()
     };
 
-    let keywords = match state.user_repository.get_keywords(user_id, "whatsapp") {
-        Ok(kw) => kw,
-        Err(e) => {
-            tracing::error!("Failed to get keywords for user {}: {}", user_id, e);
-            Vec::new()
+    let keywords = if keywords_active {
+        match state.user_repository.get_keywords(user_id, "whatsapp") {
+            Ok(kw) => kw,
+            Err(e) => {
+                tracing::error!("Failed to get keywords for user {}: {}", user_id, e);
+                Vec::new()
+            }
         }
+    } else {
+        Vec::new()
     };
 
-    // FAST CHECKS FIRST - Check waiting checks (exact string matching)
-    for waiting_check in &waiting_checks {
-        if content.to_lowercase().contains(&waiting_check.content.to_lowercase()) {
-            tracing::info!("Fast check: Waiting check matched for user {}: '{}'", user_id, waiting_check.content);
-            
-            // Handle waiting check removal if needed
-            if waiting_check.remove_when_found {
-                tracing::info!("Removing waiting check with content: {}", waiting_check.content);
-                if let Err(e) = state.user_repository.delete_waiting_check(
-                    user_id,
-                    "whatsapp",
-                    &waiting_check.content
-                ) {
-                    tracing::error!("Failed to delete waiting check: {}", e);
+    // FAST CHECKS FIRST - Check waiting checks (exact string matching) if active
+    if waiting_checks_active {
+        for waiting_check in &waiting_checks {
+            if content.to_lowercase().contains(&waiting_check.content.to_lowercase()) {
+                tracing::info!("Fast check: Waiting check matched for user {}: '{}'", user_id, waiting_check.content);
+                
+                // Handle waiting check removal if needed
+                if waiting_check.remove_when_found {
+                    tracing::info!("Removing waiting check with content: {}", waiting_check.content);
+                    if let Err(e) = state.user_repository.delete_waiting_check(
+                        user_id,
+                        "whatsapp",
+                        &waiting_check.content
+                    ) {
+                        tracing::error!("Failed to delete waiting check: {}", e);
+                    }
                 }
+
+                // Send notification immediately
+                send_whatsapp_notification(
+                    &state,
+                    user_id,
+                    &chat_name,
+                    &content,
+                    &format!("Matched waiting check: {}", waiting_check.content)
+                ).await;
+                return;
             }
 
-            // Send notification immediately
-            send_whatsapp_notification(
-                &state,
-                user_id,
-                &chat_name,
-                &content,
-                &format!("Matched waiting check: {}", waiting_check.content)
-            ).await;
-            return;
         }
     }
 
-    // FAST CHECKS SECOND - Check priority senders
-    for priority_sender in &priority_senders {
-        if chat_name.to_lowercase().contains(&priority_sender.sender.to_lowercase()) ||
-           sender_name.to_lowercase().contains(&priority_sender.sender.to_lowercase()) {
-            tracing::info!("Fast check: Priority sender matched for user {}: '{}'", user_id, priority_sender.sender);
-            
-            // Send notification immediately
-            send_whatsapp_notification(
-                &state,
-                user_id,
-                &chat_name,
-                &content,
-                &format!("Message from priority sender: {}", priority_sender.sender)
-            ).await;
-            return;
+    // FAST CHECKS SECOND - Check priority senders if active
+    if priority_senders_active {
+        for priority_sender in &priority_senders {
+            if chat_name.to_lowercase().contains(&priority_sender.sender.to_lowercase()) ||
+               sender_name.to_lowercase().contains(&priority_sender.sender.to_lowercase()) {
+                tracing::info!("Fast check: Priority sender matched for user {}: '{}'", user_id, priority_sender.sender);
+                
+                // Send notification immediately
+                send_whatsapp_notification(
+                    &state,
+                    user_id,
+                    &chat_name,
+                    &content,
+                    &format!("Message from priority sender: {}", priority_sender.sender)
+                ).await;
+                return;
+            }
         }
     }
 
-    // FAST CHECKS THIRD - Check keywords
-    for keyword in &keywords {
-        if content.to_lowercase().contains(&keyword.keyword.to_lowercase()) {
-            tracing::info!("Fast check: Keyword matched for user {}: '{}'", user_id, keyword.keyword);
-            
-            // Send notification immediately
-            send_whatsapp_notification(
-                &state,
-                user_id,
-                &chat_name,
-                &content,
-                &format!("Matched keyword: {}", keyword.keyword)
-            ).await;
-            return;
+    // FAST CHECKS THIRD - Check keywords if active
+    if keywords_active {
+        for keyword in &keywords {
+            if content.to_lowercase().contains(&keyword.keyword.to_lowercase()) {
+                tracing::info!("Fast check: Keyword matched for user {}: '{}'", user_id, keyword.keyword);
+                
+                // Send notification immediately
+                send_whatsapp_notification(
+                    &state,
+                    user_id,
+                    &chat_name,
+                    &content,
+                    &format!("Matched keyword: {}", keyword.keyword)
+                ).await;
+                return;
+            }
         }
     }
 
-    // FALLBACK TO LLM - Only if no fast checks matched
+    // FALLBACK TO LLM - Only if no fast checks matched and general importance is active
+    if !general_importance_active {
+        tracing::debug!("General importance check is disabled for user {}, skipping LLM evaluation", user_id);
+        return;
+    }
     tracing::debug!("No fast checks matched, falling back to LLM evaluation for user {}", user_id);
 
     let importance_priority = match state.user_repository.get_importance_priority(user_id, "whatsapp") {

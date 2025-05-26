@@ -60,7 +60,7 @@ pub struct User {
 }
 
 
-#[derive(Queryable, Selectable, Insertable)]
+#[derive(Queryable, Selectable, Insertable, Debug)]
 #[diesel(table_name = proactive_settings)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ProactiveSettings {
@@ -75,6 +75,14 @@ pub struct ProactiveSettings {
     pub proactive_email_last_activated: i32,
     pub proactive_whatsapp: bool,
     pub whatsapp_general_checks: Option<String>,
+    pub whatsapp_keywords_active: bool,
+    pub whatsapp_priority_senders_active: bool,
+    pub whatsapp_waiting_checks_active: bool,
+    pub whatsapp_general_importance_active: bool,
+    pub email_keywords_active: bool,
+    pub email_priority_senders_active: bool,
+    pub email_waiting_checks_active: bool,
+    pub email_general_importance_active: bool,
 }
 
 

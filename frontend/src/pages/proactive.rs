@@ -10,9 +10,229 @@ use crate::profile::imap_general_checks::ImapGeneralChecks;
 use crate::proactive::whatsapp_general_checks::WhatsappGeneralChecks;
 
 use crate::proactive::{
-    email::{FilterActivityLog, WaitingChecksSection},
-    common::{ImportancePrioritySection, PrioritySendersSection, KeywordsSection},
+    email::FilterActivityLog,
+    common::{ImportancePrioritySection, PrioritySendersSection, KeywordsSection, WaitingChecksSection},
 };
+
+#[derive(Properties, PartialEq)]
+pub struct FilterFlowVisualizationProps {
+    pub keywords: Vec<String>,
+    pub priority_senders: Vec<String>,
+    pub waiting_checks: Vec<String>,
+    pub threshold: i32,
+}
+
+#[function_component(FilterFlowVisualization)]
+pub fn filter_flow_visualization(props: &FilterFlowVisualizationProps) -> Html {
+    html! {
+        <div class="filter-flow-container">
+            <h3>{"Filter Flow Visualization"}</h3>
+            <p class="flow-description">
+                {"This shows how your filters work together to determine if you should be notified about a message."}
+            </p>
+            
+            <div class="flow-steps">
+                // Step 1: Keywords
+                <div class="flow-step">
+                    <div class="step-header">
+                        <div class="step-number">{"1"}</div>
+                        <div class="step-title">{"Keywords Check"}</div>
+                        <div class="step-status keywords-status">
+                            {if props.keywords.is_empty() { "SKIP" } else { "CHECK" }}
+                        </div>
+                    </div>
+                    <div class="step-content">
+                        {
+                            if props.keywords.is_empty() {
+                                html! {
+                                    <p class="step-description empty">
+                                        {"No keywords configured - this check is skipped"}
+                                    </p>
+                                }
+                            } else {
+                                html! {
+                                    <>
+                                        <p class="step-description">
+                                            {"If message contains any of these keywords → "}
+                                            <span class="result-notify">{"NOTIFY"}</span>
+                                        </p>
+                                        <div class="filter-items">
+                                            {
+                                                props.keywords.iter().map(|keyword| {
+                                                    html! {
+                                                        <span class="filter-tag keyword-tag">{keyword}</span>
+                                                    }
+                                                }).collect::<Html>()
+                                            }
+                                        </div>
+                                    </>
+                                }
+                            }
+                        }
+                    </div>
+                    <div class="flow-arrow">{"↓"}</div>
+                </div>
+
+                // Step 2: Priority Senders
+                <div class="flow-step">
+                    <div class="step-header">
+                        <div class="step-number">{"2"}</div>
+                        <div class="step-title">{"Priority Senders Check"}</div>
+                        <div class="step-status senders-status">
+                            {if props.priority_senders.is_empty() { "SKIP" } else { "CHECK" }}
+                        </div>
+                    </div>
+                    <div class="step-content">
+                        {
+                            if props.priority_senders.is_empty() {
+                                html! {
+                                    <p class="step-description empty">
+                                        {"No priority senders configured - this check is skipped"}
+                                    </p>
+                                }
+                            } else {
+                                html! {
+                                    <>
+                                        <p class="step-description">
+                                            {"If message is from any of these senders → "}
+                                            <span class="result-notify">{"NOTIFY"}</span>
+                                        </p>
+                                        <div class="filter-items">
+                                            {
+                                                props.priority_senders.iter().map(|sender| {
+                                                    html! {
+                                                        <span class="filter-tag sender-tag">{sender}</span>
+                                                    }
+                                                }).collect::<Html>()
+                                            }
+                                        </div>
+                                    </>
+                                }
+                            }
+                        }
+                    </div>
+                    <div class="flow-arrow">{"↓"}</div>
+                </div>
+
+                // Step 3: Waiting Checks
+                <div class="flow-step">
+                    <div class="step-header">
+                        <div class="step-number">{"3"}</div>
+                        <div class="step-title">{"Waiting For Check"}</div>
+                        <div class="step-status waiting-status">
+                            {if props.waiting_checks.is_empty() { "SKIP" } else { "CHECK" }}
+                        </div>
+                    </div>
+                    <div class="step-content">
+                        {
+                            if props.waiting_checks.is_empty() {
+                                html! {
+                                    <p class="step-description empty">
+                                        {"No waiting checks configured - this check is skipped"}
+                                    </p>
+                                }
+                            } else {
+                                html! {
+                                    <>
+                                        <p class="step-description">
+                                            {"If message contains any of these phrases → "}
+                                            <span class="result-notify">{"NOTIFY"}</span>
+                                        </p>
+                                        <div class="filter-items">
+                                            {
+                                                props.waiting_checks.iter().map(|check| {
+                                                    html! {
+                                                        <span class="filter-tag waiting-tag">{check}</span>
+                                                    }
+                                                }).collect::<Html>()
+                                            }
+                                        </div>
+                                    </>
+                                }
+                            }
+                        }
+                    </div>
+                    <div class="flow-arrow">{"↓"}</div>
+                </div>
+
+                // Step 4: AI Importance Analysis
+                <div class="flow-step">
+                    <div class="step-header">
+                        <div class="step-number">{"4"}</div>
+                        <div class="step-title">{"AI Importance Analysis"}</div>
+                        <div class="step-status ai-status">{"CHECK"}</div>
+                    </div>
+                    <div class="step-content">
+                        <p class="step-description">
+                            {"If none of the above matched, AI analyzes the message and assigns an importance score (1-10). "}
+                            {"If score ≥ "}
+                            <span class="threshold-value">{props.threshold}</span>
+                            {" → "}
+                            <span class="result-notify">{"NOTIFY"}</span>
+                        </p>
+                        <div class="ai-general-info">
+                            <div class="ai-check-examples">
+                                <strong>{"Examples of what AI considers important:"}</strong>
+                                <ul>
+                                    <li>{"Business communications requiring action"}</li>
+                                    <li>{"Urgent requests or deadlines"}</li>
+                                    <li>{"Personal messages from family/friends"}</li>
+                                    <li>{"Account security or financial alerts"}</li>
+                                    <li>{"Meeting invitations or schedule changes"}</li>
+                                </ul>
+                            </div>
+                        </div>
+
+                        <div class="threshold-visualization">
+                            <div class="threshold-scale">
+                                {
+                                    (1..=10).map(|i| {
+                                        let is_threshold = i >= props.threshold;
+                                        html! {
+                                            <div class={classes!(
+                                                "scale-point",
+                                                is_threshold.then(|| "notify-zone")
+                                            )}>
+                                                {i}
+                                            </div>
+                                        }
+                                    }).collect::<Html>()
+                                }
+                            </div>
+                            <div class="threshold-labels">
+                                <span class="label-low">{"Low Priority"}</span>
+                                <span class="label-high">{"High Priority"}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flow-arrow">{"↓"}</div>
+                </div>
+
+                // Final Result
+                <div class="flow-result">
+                    <div class="result-box no-match">
+                        <div class="result-icon">{"❌"}</div>
+                        <div class="result-text">
+                            <strong>{"No Match Found"}</strong>
+                            <p>{"If none of the above conditions are met, no notification is sent"}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flow-legend">
+                <h4>{"How it works:"}</h4>
+                <ul>
+                    <li>{"Filters are checked from top to bottom in order"}</li>
+                    <li>{"If ANY of the first 3 filters match, you get notified immediately"}</li>
+                    <li>{"If none match, AI analyzes the message and assigns an importance score (1-10)"}</li>
+                    <li>{"Only if the AI score meets your threshold, you get notified"}</li>
+                    <li>{"If the score is below your threshold, no notification is sent"}</li>
+                </ul>
+            </div>
+        </div>
+    }
+}
 
 trait PadStart {
     fn pad_start_with_character(&self, width: usize, padding: char) -> String;
@@ -113,7 +333,7 @@ fn get_service_display_name(service_type: &str) -> String {
 use web_sys::js_sys;
 
 
-fn format_date_for_input(timestamp: i32) -> String {
+pub fn format_date_for_input(timestamp: i32) -> String {
     if timestamp == 0 {
         return String::new();
     }
@@ -618,36 +838,66 @@ pub fn connected_services(props: &Props) -> Html {
                                                         }
                                                     })}
                                                 />
-                                                <ImportancePrioritySection
-                                                    service_type={service.service_type.clone()}
-                                                    current_threshold={
-                                                        settings.importance_priority
-                                                                .as_ref()
-                                                                .map(|ip| ip.threshold)
-                                                                .unwrap_or(7)
-                                                    }
-                                                    on_change={Callback::from({
-                                                        let services_state = services_state.clone();
-                                                        let stype          = service.service_type.clone();
-                                                        move |new_thr: i32| {
-                                                            let mut svcs = (*services_state).clone();
-                                                            if let Some(svc) = svcs.iter_mut().find(|s| s.service_type == stype) {
-                                                                if let Some(fs) = &mut svc.filter_settings {
-                                                                    fs.importance_priority = Some(ImportancePriority { threshold: new_thr });
+                                                <div class="filter-section importance-analysis-section">
+                                                    <h3>{"AI Importance Analysis Configuration"}</h3>
+                                                    <div class="importance-analysis-container">
+                                                        <div class="importance-config">
+                                                            <ImportancePrioritySection
+                                                                service_type={service.service_type.clone()}
+                                                                current_threshold={
+                                                                    settings.importance_priority
+                                                                            .as_ref()
+                                                                            .map(|ip| ip.threshold)
+                                                                            .unwrap_or(7)
                                                                 }
-                                                            }
-                                                            services_state.set(svcs);
-                                                        }
-                                                    })}
-                                                />
+                                                                on_change={Callback::from({
+                                                                    let services_state = services_state.clone();
+                                                                    let stype          = service.service_type.clone();
+                                                                    move |new_thr: i32| {
+                                                                        let mut svcs = (*services_state).clone();
+                                                                        if let Some(svc) = svcs.iter_mut().find(|s| s.service_type == stype) {
+                                                                            if let Some(fs) = &mut svc.filter_settings {
+                                                                                fs.importance_priority = Some(ImportancePriority { threshold: new_thr });
+                                                                            }
+                                                                        }
+                                                                        services_state.set(svcs);
+                                                                    }
+                                                                })}
+                                                            />
+                                                        </div>
 
-                                                <WhatsappGeneralChecks 
-                                                    on_update={Callback::from(|_| {})}
-                                                    keywords={settings.keywords.clone()}
-                                                    priority_senders={settings.priority_senders.iter().map(|s| s.sender.clone()).collect::<Vec<String>>()}
-                                                    waiting_checks={settings.waiting_checks.iter().map(|w| w.content.clone()).collect::<Vec<String>>()}
-                                                    threshold={settings.importance_priority.as_ref().map(|ip| ip.threshold).unwrap_or(7)}
-                                                />
+                                                        <div class="importance-general-checks">
+                                                            <WhatsappGeneralChecks 
+                                                                on_update={Callback::from(|_| {})}
+                                                                keywords={settings.keywords.clone()}
+                                                                priority_senders={settings.priority_senders.iter().map(|s| s.sender.clone()).collect::<Vec<String>>()}
+                                                                waiting_checks={settings.waiting_checks.iter().map(|w| w.content.clone()).collect::<Vec<String>>()}
+                                                                threshold={settings.importance_priority.as_ref().map(|ip| ip.threshold).unwrap_or(7)}
+                                                            />
+                                                        </div>
+
+                                                        <div class="importance-flow-visualization">
+                                                            <div class="flow-result">
+                                                                <div class="result-box no-match">
+                                                                    <div class="result-icon">{"❌"}</div>
+                                                                    <div class="result-text">
+                                                                        <strong>{"No Match Found"}</strong>
+                                                                        <p>{"If none of the above conditions are met, no notification is sent"}</p>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+
+                                                            /*
+                                                            <FilterFlowVisualization
+                                                                keywords={settings.keywords.clone()}
+                                                                priority_senders={settings.priority_senders.iter().map(|s| s.sender.clone()).collect::<Vec<String>>()}
+                                                                waiting_checks={settings.waiting_checks.iter().map(|w| w.content.clone()).collect::<Vec<String>>()}
+                                                                threshold={settings.importance_priority.as_ref().map(|ip| ip.threshold).unwrap_or(7)}
+                                                            />
+                                                            */
+                                                    </div>
+                                                </div>
+                                                </div>
 
                                                 </>
                                             }
@@ -796,7 +1046,7 @@ pub fn connected_services(props: &Props) -> Html {
                                     <div class="proactive-toggle-section">
                                         <div class="notify-toggle">
                                             <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%234285f4' d='M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48H48zM0 176V384c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V176L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z'/%3E%3C/svg%3E" alt="IMAP"/>
-                                            <span class="proactive-title">{"IMPORTANT EMAIL NOTIFICATIONS"}</span>
+                                            <span class="proactive-title">{"EMAIL NOTIFICATIONS"}</span>
                                             <span class="toggle-status">
                                                 {if *is_proactive { "Active" } else { "Inactive" }}
                                             </span>
@@ -859,7 +1109,6 @@ pub fn connected_services(props: &Props) -> Html {
 
                                             html! {
                                                 <>
-                                                <FilterActivityLog />
 
                                                 <KeywordsSection
                                                     service_type={service.service_type.clone()}
@@ -913,6 +1162,8 @@ pub fn connected_services(props: &Props) -> Html {
                                                         }
                                                     })}
                                                 />
+                                                <div class="filter-section importance-analysis-section">
+                                                    <h3>{"AI Importance Analysis Configuration"}</h3>
                                                 <ImportancePrioritySection
                                                     service_type={service.service_type.clone()}
                                                     current_threshold={
@@ -939,10 +1190,24 @@ pub fn connected_services(props: &Props) -> Html {
                                                 <ImapGeneralChecks 
                                                     on_update={Callback::from(|_| {})}
                                                     keywords={settings.keywords.clone()}
-                                                    priority_senders={priority_senders}
-                                                    waiting_checks={waiting_checks}
+                                                    priority_senders={priority_senders.clone()}
+                                                    waiting_checks={waiting_checks.clone()}
                                                     threshold={threshold}
                                                 />
+
+                                                    // Final Result
+                                                    <div class="flow-result">
+                                                        <div class="result-box no-match">
+                                                            <div class="result-icon">{"❌"}</div>
+                                                            <div class="result-text">
+                                                                <strong>{"No Match Found"}</strong>
+                                                                <p>{"If none of the above conditions are met, no notification is sent"}</p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <FilterActivityLog />
+                                                </div>
 
                                                 </>
                                             }
@@ -1665,13 +1930,36 @@ pub fn connected_services(props: &Props) -> Html {
                     border: 1px solid rgba(30, 144, 255, 0.1);
                     border-radius: 8px;
                     padding: 1.5rem;
-                    margin-top: 0;
+                    margin-top: 1rem;
+                    transition: all 0.3s ease;
+                }
+                .filter-section h3 {
+                    color: white;
                 }
 
-                .filter-section h3 {
-                    color: #7EB2FF;
-                    font-size: 1.2rem;
-                    margin-bottom: 1rem;
+                .filter-section.inactive {
+                    background: rgba(30, 30, 30, 0.3);
+                    border-color: rgba(255, 255, 255, 0.1);
+                    opacity: 0.7;
+                }
+
+                .filter-section.inactive h3,
+                .filter-section.inactive .toggle-label {
+                    color: rgba(255, 255, 255, 0.5);
+                }
+
+                .filter-section.inactive .filter-list li,
+                .filter-section.inactive .keyword-item {
+                    background: rgba(255, 255, 255, 0.05);
+                    border-color: rgba(255, 255, 255, 0.1);
+                }
+
+                .filter-flow-visualization {
+                    margin: 1.5rem 0;
+                    padding: 1rem;
+                    background: rgba(20, 20, 20, 0.4);
+                    border-radius: 8px;
+                    border: 1px dashed rgba(30, 144, 255, 0.2);
                 }
 
                 /* Judgment list styles */
@@ -1962,6 +2250,10 @@ pub fn connected_services(props: &Props) -> Html {
                     color-scheme: dark;
                 }
 
+                .filter-header {
+                    color: white;
+                }
+
                 @media (max-width: 768px) {
                     .filter-input {
                         flex-direction: column;
@@ -2195,6 +2487,479 @@ pub fn connected_services(props: &Props) -> Html {
 
                     .judgment-item {
                         padding: 0.6rem;
+                    }
+                }
+
+                /* Filter Flow Visualization Styles */
+                .filter-flow-container {
+                    background: rgba(30, 30, 30, 0.5);
+                    border: 1px solid rgba(30, 144, 255, 0.1);
+                    border-radius: 12px;
+                    padding: 1.5rem;
+                    margin: 1.5rem 0;
+                    backdrop-filter: blur(10px);
+                }
+
+                .filter-flow-container h3 {
+                    color: #7EB2FF;
+                    font-size: 1.3rem;
+                    margin-bottom: 0.5rem;
+                    text-align: center;
+                    background: linear-gradient(135deg, #7EB2FF 0%, #4169E1 100%);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                }
+
+                .flow-description {
+                    color: rgba(255, 255, 255, 0.8);
+                    text-align: center;
+                    margin-bottom: 2rem;
+                    font-size: 0.95rem;
+                    line-height: 1.4;
+                }
+
+                .flow-steps {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 1rem;
+                }
+
+                .flow-step {
+                    background: rgba(20, 20, 20, 0.6);
+                    border: 1px solid rgba(30, 144, 255, 0.15);
+                    border-radius: 10px;
+                    padding: 1.2rem;
+                    position: relative;
+                    transition: all 0.3s ease;
+                }
+
+                .flow-step:hover {
+                    transform: translateY(-2px);
+                    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.1);
+                    border-color: rgba(30, 144, 255, 0.25);
+                }
+
+                .step-header {
+                    display: flex;
+                    align-items: center;
+                    gap: 1rem;
+                    margin-bottom: 1rem;
+                }
+
+                .step-number {
+                    width: 32px;
+                    height: 32px;
+                    background: linear-gradient(135deg, #7EB2FF, #4169E1);
+                    color: white;
+                    border-radius: 50%;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-weight: bold;
+                    font-size: 0.9rem;
+                    box-shadow: 0 2px 8px rgba(30, 144, 255, 0.3);
+                }
+
+                .step-title {
+                    color: #fff;
+                    font-size: 1.1rem;
+                    font-weight: 600;
+                    flex: 1;
+                }
+
+                .step-status {
+                    padding: 0.3rem 0.8rem;
+                    border-radius: 12px;
+                    font-size: 0.8rem;
+                    font-weight: 500;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
+                }
+
+                .step-status.keywords-status,
+                .step-status.senders-status,
+                .step-status.waiting-status {
+                    background: rgba(76, 175, 80, 0.1);
+                    color: #4CAF50;
+                    border: 1px solid rgba(76, 175, 80, 0.2);
+                }
+
+                .step-status.ai-status,
+                .step-status.ai-general-status {
+                    background: rgba(255, 193, 7, 0.1);
+                    color: #FFC107;
+                    border: 1px solid rgba(255, 193, 7, 0.2);
+                }
+
+                .step-content {
+                    margin-left: 3rem;
+                }
+
+                .step-description {
+                    color: rgba(255, 255, 255, 0.9);
+                    margin-bottom: 1rem;
+                    line-height: 1.4;
+                    font-size: 0.95rem;
+                }
+
+                .step-description.empty {
+                    color: rgba(255, 255, 255, 0.6);
+                    font-style: italic;
+                }
+
+                .result-notify {
+                    color: #4CAF50;
+                    font-weight: bold;
+                    background: rgba(76, 175, 80, 0.1);
+                    padding: 0.2rem 0.5rem;
+                    border-radius: 4px;
+                    border: 1px solid rgba(76, 175, 80, 0.2);
+                }
+
+                .filter-items {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 0.5rem;
+                    margin-top: 0.8rem;
+                }
+
+                .filter-tag {
+                    padding: 0.4rem 0.8rem;
+                    border-radius: 16px;
+                    font-size: 0.85rem;
+                    font-weight: 500;
+                    border: 1px solid;
+                }
+
+                .keyword-tag {
+                    background: rgba(255, 193, 7, 0.1);
+                    color: #FFC107;
+                    border-color: rgba(255, 193, 7, 0.2);
+                }
+
+                .sender-tag {
+                    background: rgba(156, 39, 176, 0.1);
+                    color: #9C27B0;
+                    border-color: rgba(156, 39, 176, 0.2);
+                }
+
+                .waiting-tag {
+                    background: rgba(255, 87, 34, 0.1);
+                    color: #FF5722;
+                    border-color: rgba(255, 87, 34, 0.2);
+                }
+
+                .threshold-value {
+                    color: #7EB2FF;
+                    font-weight: bold;
+                    background: rgba(30, 144, 255, 0.1);
+                    padding: 0.2rem 0.5rem;
+                    border-radius: 4px;
+                    border: 1px solid rgba(30, 144, 255, 0.2);
+                }
+
+                .threshold-visualization {
+                    margin-top: 1rem;
+                }
+
+                .threshold-scale {
+                    display: flex;
+                    gap: 0.3rem;
+                    margin-bottom: 0.5rem;
+                }
+
+                .scale-point {
+                    width: 32px;
+                    height: 32px;
+                    background: rgba(255, 255, 255, 0.1);
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    border-radius: 6px;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    font-size: 0.8rem;
+                    color: rgba(255, 255, 255, 0.7);
+                    transition: all 0.3s ease;
+                }
+
+                .scale-point.notify-zone {
+                    background: rgba(76, 175, 80, 0.2);
+                    border-color: rgba(76, 175, 80, 0.4);
+                    color: #4CAF50;
+                    font-weight: bold;
+                    transform: scale(1.1);
+                }
+
+                .threshold-labels {
+                    display: flex;
+                    justify-content: space-between;
+                    font-size: 0.8rem;
+                    color: rgba(255, 255, 255, 0.6);
+                }
+
+                .flow-arrow {
+                    text-align: center;
+                    font-size: 1.5rem;
+                    color: #7EB2FF;
+                    margin: 0.5rem 0;
+                    opacity: 0.7;
+                }
+
+                .flow-result {
+                    margin-top: 1rem;
+                }
+
+                .result-box {
+                    background: rgba(20, 20, 20, 0.8);
+                    border: 2px solid;
+                    border-radius: 12px;
+                    padding: 1.5rem;
+                    display: flex;
+                    align-items: center;
+                    gap: 1rem;
+                    transition: all 0.3s ease;
+                }
+
+                .result-box.no-match {
+                    border-color: rgba(255, 71, 87, 0.3);
+                    background: rgba(255, 71, 87, 0.05);
+                }
+
+                .result-icon {
+                    font-size: 2rem;
+                    opacity: 0.8;
+                }
+
+                .result-text strong {
+                    color: #ff4757;
+                    font-size: 1.1rem;
+                    display: block;
+                    margin-bottom: 0.3rem;
+                }
+
+                .result-text p {
+                    color: rgba(255, 255, 255, 0.8);
+                    margin: 0;
+                    font-size: 0.9rem;
+                }
+
+                .flow-legend {
+                    background: rgba(10, 10, 10, 0.6);
+                    border: 1px solid rgba(30, 144, 255, 0.1);
+                    border-radius: 8px;
+                    padding: 1.2rem;
+                    margin-top: 1.5rem;
+                }
+
+                .flow-legend h4 {
+                    color: #7EB2FF;
+                    margin-bottom: 0.8rem;
+                    font-size: 1rem;
+                }
+
+                .flow-legend ul {
+                    list-style: none;
+                    padding: 0;
+                    margin: 0;
+                }
+
+                .flow-legend li {
+                    color: rgba(255, 255, 255, 0.8);
+                    padding: 0.3rem 0;
+                    font-size: 0.9rem;
+                    position: relative;
+                    padding-left: 1.2rem;
+                }
+
+                .flow-legend li::before {
+                    content: "•";
+                    color: #7EB2FF;
+                    position: absolute;
+                    left: 0;
+                    font-weight: bold;
+                }
+
+                .ai-general-info {
+                    background: rgba(255, 193, 7, 0.05);
+                    border: 1px solid rgba(255, 193, 7, 0.1);
+                    border-radius: 8px;
+                    padding: 1rem;
+                    margin-top: 0.8rem;
+                }
+
+                .ai-check-examples {
+                    color: rgba(255, 255, 255, 0.9);
+                }
+
+                .ai-check-examples strong {
+                    color: #FFC107;
+                    display: block;
+                    margin-bottom: 0.5rem;
+                    font-size: 0.9rem;
+                }
+
+                .ai-check-examples ul {
+                    list-style: none;
+                    padding: 0;
+                    margin: 0;
+                }
+
+                .ai-check-examples li {
+                    color: rgba(255, 255, 255, 0.8);
+                    padding: 0.2rem 0;
+                    font-size: 0.85rem;
+                    position: relative;
+                    padding-left: 1rem;
+                }
+
+                .ai-check-examples li::before {
+                    content: "→";
+                    color: #FFC107;
+                    position: absolute;
+                    left: 0;
+                    font-weight: bold;
+                }
+
+                /* Mobile responsiveness for filter flow */
+                @media (max-width: 768px) {
+                    .filter-flow-container {
+                        padding: 1rem;
+                        margin: 1rem 0;
+                    }
+
+                    .filter-flow-container h3 {
+                        font-size: 1.1rem;
+                    }
+
+                    .flow-description {
+                        font-size: 0.9rem;
+                        margin-bottom: 1.5rem;
+                    }
+
+                    .flow-step {
+                        padding: 1rem;
+                    }
+
+                    .step-header {
+                        flex-wrap: wrap;
+                        gap: 0.5rem;
+                    }
+
+                    .step-number {
+                        width: 28px;
+                        height: 28px;
+                        font-size: 0.8rem;
+                    }
+
+                    .step-title {
+                        font-size: 1rem;
+                        flex: 1 1 auto;
+                    }
+
+                    .step-status {
+                        font-size: 0.75rem;
+                        padding: 0.25rem 0.6rem;
+                    }
+
+                    .step-content {
+                        margin-left: 0;
+                        margin-top: 0.8rem;
+                    }
+
+                    .step-description {
+                        font-size: 0.9rem;
+                    }
+
+                    .filter-items {
+                        gap: 0.4rem;
+                    }
+
+                    .filter-tag {
+                        font-size: 0.8rem;
+                        padding: 0.3rem 0.6rem;
+                    }
+
+                    .threshold-scale {
+                        gap: 0.2rem;
+                        flex-wrap: wrap;
+                    }
+
+                    .scale-point {
+                        width: 28px;
+                        height: 28px;
+                        font-size: 0.75rem;
+                    }
+
+                    .threshold-labels {
+                        font-size: 0.75rem;
+                        margin-top: 0.5rem;
+                    }
+
+                    .result-box {
+                        flex-direction: column;
+                        text-align: center;
+                        padding: 1.2rem;
+                    }
+
+                    .result-icon {
+                        font-size: 1.5rem;
+                    }
+
+                    .result-text strong {
+                        font-size: 1rem;
+                    }
+
+                    .result-text p {
+                        font-size: 0.85rem;
+                    }
+
+                    .flow-legend {
+                        padding: 1rem;
+                    }
+
+                    .flow-legend h4 {
+                        font-size: 0.95rem;
+                    }
+
+                    .flow-legend li {
+                        font-size: 0.85rem;
+                    }
+                    .ai-check-examples li {
+                        font-size: 0.85rem;
+                    }
+
+                    .ai-general-info {
+                        padding: 0.8rem;
+                    }
+
+                    .ai-check-examples strong {
+                        font-size: 0.85rem;
+                    }
+
+                    .ai-check-examples li {
+                        font-size: 0.8rem;
+                    }
+                }
+
+
+                @media (max-width: 480px) {
+                    .filter-flow-container {
+                        padding: 0.8rem;
+                    }
+
+                    .threshold-scale {
+                        justify-content: center;
+                    }
+
+                    .scale-point {
+                        width: 24px;
+                        height: 24px;
+                        font-size: 0.7rem;
+                    }
+
+                    .filter-tag {
+                        font-size: 0.75rem;
+                        padding: 0.25rem 0.5rem;
                     }
                 }
                 "#}

@@ -39,6 +39,45 @@ impl UserRepository {
         Self { pool }
     }
 
+    // Helper function to create default proactive settings
+    fn create_default_proactive_settings(&self, user_id: i32) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        let new_settings = ProactiveSettings {
+            id: None,
+            user_id,
+            imap_proactive: false,
+            imap_general_checks: None,
+            proactive_calendar: false,
+            created_at: current_time,
+            updated_at: current_time,
+            proactive_calendar_last_activated: current_time,
+            proactive_email_last_activated: current_time,
+            proactive_whatsapp: false,
+            whatsapp_general_checks: None,
+            whatsapp_keywords_active: true,
+            whatsapp_priority_senders_active: true,
+            whatsapp_waiting_checks_active: true,
+            whatsapp_general_importance_active: true,
+            email_keywords_active: true,
+            email_priority_senders_active: true,
+            email_waiting_checks_active: true,
+            email_general_importance_active: true,
+        };
+
+        diesel::insert_into(proactive_settings::table)
+            .values(&new_settings)
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
     pub fn get_task_notification(&self, user_id: i32, task_id: &str) -> Result<Option<TaskNotification>, diesel::result::Error> {
         use crate::schema::task_notifications;
         
@@ -954,22 +993,10 @@ impl UserRepository {
                     .execute(&mut conn)?;
             },
             None => {
-                // Create new settings
-                let new_settings = ProactiveSettings {
-                    id: None,
-                    user_id,
-                    imap_proactive: proactive,
-                    imap_general_checks: None,
-                    proactive_calendar: false, // default value
-                    created_at: current_time,
-                    updated_at: current_time,
-                    proactive_calendar_last_activated: current_time,
-                    proactive_email_last_activated: current_time,
-                    proactive_whatsapp: false,
-                    whatsapp_general_checks: None,
-                };
-                diesel::insert_into(proactive_settings::table)
-                    .values(&new_settings)
+                self.create_default_proactive_settings(user_id)?;
+                // Update the newly created settings with the proactive value
+                diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+                    .set(proactive_settings::imap_proactive.eq(proactive))
                     .execute(&mut conn)?;
             }
         }
@@ -1054,23 +1081,13 @@ impl UserRepository {
                     .execute(&mut conn)?;
             },
             None => {
-                // Create new settings
-                let new_settings = ProactiveSettings {
-                    id: None,
-                    user_id,
-                    imap_proactive: false, // default value
-                    imap_general_checks: checks.map(|s| s.to_string()),
-                    proactive_calendar: false, // default value
-                    created_at: current_time,
-                    updated_at: current_time,
-                    proactive_calendar_last_activated: current_time,
-                    proactive_email_last_activated: current_time,
-                    proactive_whatsapp: false,
-                    whatsapp_general_checks: None,
-                };
-                diesel::insert_into(proactive_settings::table)
-                    .values(&new_settings)
-                    .execute(&mut conn)?;
+                self.create_default_proactive_settings(user_id)?;
+                // Update the newly created settings with the checks value
+                if let Some(checks_str) = checks {
+                    diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+                        .set(proactive_settings::imap_general_checks.eq(checks_str.to_string()))
+                        .execute(&mut conn)?;
+                }
             }
         }
         Ok(())
@@ -1094,36 +1111,19 @@ impl UserRepository {
         match existing_settings {
             Some(_) => {
                 // Update existing settings
-
-                let existing_settings = proactive_settings::table
-                    .filter(proactive_settings::user_id.eq(user_id))
-                    .first::<ProactiveSettings>(&mut conn)?;
-
                 diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
                     .set((
                         proactive_settings::proactive_calendar.eq(proactive),
                         proactive_settings::updated_at.eq(current_time),
-                        proactive_settings::proactive_calendar_last_activated.eq(if proactive { current_time } else { existing_settings.proactive_calendar_last_activated }),
+                        proactive_settings::proactive_calendar_last_activated.eq(current_time),
                     ))
                     .execute(&mut conn)?;
             },
             None => {
-                // Create new settings
-                let new_settings = ProactiveSettings {
-                    id: None,
-                    user_id,
-                    imap_proactive: false, // default value
-                    imap_general_checks: None,
-                    proactive_calendar: proactive,
-                    created_at: current_time,
-                    updated_at: current_time,
-                    proactive_calendar_last_activated: current_time,
-                    proactive_email_last_activated: current_time,
-                    proactive_whatsapp: false,
-                    whatsapp_general_checks: None,
-                };
-                diesel::insert_into(proactive_settings::table)
-                    .values(&new_settings)
+                self.create_default_proactive_settings(user_id)?;
+                // Update the newly created settings with the proactive value
+                diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+                    .set(proactive_settings::proactive_calendar.eq(proactive))
                     .execute(&mut conn)?;
             }
         }
@@ -1184,22 +1184,10 @@ impl UserRepository {
                     .execute(&mut conn)?;
             },
             None => {
-                // Create new settings
-                let new_settings = ProactiveSettings {
-                    id: None,
-                    user_id,
-                    imap_proactive: false, // default value
-                    imap_general_checks: None,
-                    proactive_calendar: false, // default value
-                    created_at: current_time,
-                    updated_at: current_time,
-                    proactive_calendar_last_activated: current_time,
-                    proactive_email_last_activated: current_time,
-                    proactive_whatsapp: proactive,
-                    whatsapp_general_checks: None,
-                };
-                diesel::insert_into(proactive_settings::table)
-                    .values(&new_settings)
+                self.create_default_proactive_settings(user_id)?;
+                // Update the newly created settings with the proactive value
+                diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+                    .set(proactive_settings::proactive_whatsapp.eq(proactive))
                     .execute(&mut conn)?;
             }
         }
@@ -1280,26 +1268,269 @@ impl UserRepository {
                     .execute(&mut conn)?;
             },
             None => {
-                // Create new settings
-                let new_settings = ProactiveSettings {
-                    id: None,
-                    user_id,
-                    imap_proactive: false, // default value
-                    imap_general_checks: None,
-                    proactive_calendar: false, // default value
-                    created_at: current_time,
-                    updated_at: current_time,
-                    proactive_calendar_last_activated: current_time,
-                    proactive_email_last_activated: current_time,
-                    proactive_whatsapp: false,
-                    whatsapp_general_checks: checks.map(|s| s.to_string()),
-                };
-                diesel::insert_into(proactive_settings::table)
-                    .values(&new_settings)
-                    .execute(&mut conn)?;
+                self.create_default_proactive_settings(user_id)?;
+                // Update the newly created settings with the checks value
+                if let Some(checks_str) = checks {
+                    diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+                        .set(proactive_settings::whatsapp_general_checks.eq(checks_str.to_string()))
+                        .execute(&mut conn)?;
+                }
             }
         }
         Ok(())
+    }
+
+    // WhatsApp filter activation methods
+    pub fn update_whatsapp_keywords_active(&self, user_id: i32, active: bool) -> Result<(), DieselError> {
+        println!("at update_whatsapp_keywords_active!");
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        self.ensure_proactive_settings_exist(user_id)?;
+
+        diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+            .set((
+                proactive_settings::whatsapp_keywords_active.eq(active),
+                proactive_settings::updated_at.eq(current_time),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_whatsapp_priority_senders_active(&self, user_id: i32, active: bool) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        self.ensure_proactive_settings_exist(user_id)?;
+
+        diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+            .set((
+                proactive_settings::whatsapp_priority_senders_active.eq(active),
+                proactive_settings::updated_at.eq(current_time),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_whatsapp_waiting_checks_active(&self, user_id: i32, active: bool) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        self.ensure_proactive_settings_exist(user_id)?;
+
+        diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+            .set((
+                proactive_settings::whatsapp_waiting_checks_active.eq(active),
+                proactive_settings::updated_at.eq(current_time),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_whatsapp_general_importance_active(&self, user_id: i32, active: bool) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        self.ensure_proactive_settings_exist(user_id)?;
+
+        diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+            .set((
+                proactive_settings::whatsapp_general_importance_active.eq(active),
+                proactive_settings::updated_at.eq(current_time),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    // Email filter activation methods
+    pub fn update_email_keywords_active(&self, user_id: i32, active: bool) -> Result<(), DieselError> {
+        println!("at update_email_keywords_active!");
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        self.ensure_proactive_settings_exist(user_id)?;
+
+        diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+            .set((
+                proactive_settings::email_keywords_active.eq(active),
+                proactive_settings::updated_at.eq(current_time),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_email_priority_senders_active(&self, user_id: i32, active: bool) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        self.ensure_proactive_settings_exist(user_id)?;
+
+        diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+            .set((
+                proactive_settings::email_priority_senders_active.eq(active),
+                proactive_settings::updated_at.eq(current_time),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_email_waiting_checks_active(&self, user_id: i32, active: bool) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        self.ensure_proactive_settings_exist(user_id)?;
+
+        diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+            .set((
+                proactive_settings::email_waiting_checks_active.eq(active),
+                proactive_settings::updated_at.eq(current_time),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_email_general_importance_active(&self, user_id: i32, active: bool) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        self.ensure_proactive_settings_exist(user_id)?;
+
+        diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+            .set((
+                proactive_settings::email_general_importance_active.eq(active),
+                proactive_settings::updated_at.eq(current_time),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    // Helper method to ensure proactive settings exist for a user
+    fn ensure_proactive_settings_exist(&self, user_id: i32) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        // Check if settings exist for this user
+        let existing_settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
+
+        if existing_settings.is_none() {
+            // Create new settings with default values
+            let new_settings = ProactiveSettings {
+                id: None,
+                user_id,
+                imap_proactive: false,
+                imap_general_checks: None,
+                proactive_calendar: false,
+                created_at: current_time,
+                updated_at: current_time,
+                proactive_calendar_last_activated: current_time,
+                proactive_email_last_activated: current_time,
+                proactive_whatsapp: false,
+                whatsapp_general_checks: None,
+                whatsapp_keywords_active: true,
+                whatsapp_priority_senders_active: true,
+                whatsapp_waiting_checks_active: true,
+                whatsapp_general_importance_active: true,
+                email_keywords_active: true,
+                email_priority_senders_active: true,
+                email_waiting_checks_active: true,
+                email_general_importance_active: true,
+            };
+            diesel::insert_into(proactive_settings::table)
+                .values(&new_settings)
+                .execute(&mut conn)?;
+        }
+        Ok(())
+    }
+
+    // Getter methods for filter activation status
+    pub fn get_whatsapp_filter_settings(&self, user_id: i32) -> Result<(bool, bool, bool, bool), DieselError> {
+        println!("at get_whatsapp_filter_settings!");
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
+
+        Ok(settings.map_or(
+            (true, true, true, true), // Default all active
+            |s| (
+                s.whatsapp_keywords_active,
+                s.whatsapp_priority_senders_active,
+                s.whatsapp_waiting_checks_active,
+                s.whatsapp_general_importance_active,
+            )
+        ))
+    }
+
+    pub fn get_email_filter_settings(&self, user_id: i32) -> Result<(bool, bool, bool, bool), DieselError> {
+        println!("at get_email_filter_settings!");
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
+
+        Ok(settings.map_or(
+            (true, true, true, true), // Default all active
+            |s| (
+                s.email_keywords_active,
+                s.email_priority_senders_active,
+                s.email_waiting_checks_active,
+                s.email_general_importance_active,
+            )
+        ))
     }
 
 

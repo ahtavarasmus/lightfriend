@@ -5,7 +5,87 @@ use axum::{
     http::{StatusCode, Request, HeaderMap},
     body::Body,
 };
-use tracing::error;
+
+// Base prompt template used across all languages
+const BASE_PROMPT: &str = "You are an helpful AI assistant called lightfriend that helps dumbphone user {{name}} through voice calls. The user is paying for every minute so keep your answers succinct unless user has asked otherwise.
+
+You have some tools to answer the user's questions.
+
+Current date is {{now}}.
+Users timezone: {{timezone}} and offset from UTC: {{timezone_offset_from_utc}}
+
+User's info:
+{{user_info}}
+
+- Note that user doesn't have internet on their phone.
+- Do not correct user's pronunciation.
+- Always answer user's question with the help of the above tools. If you are unsure, confirm your assumption with the user before acting. 
+- Never explain how tools work unless user asked to explain them. 
+- Always say something like 'just a sec' BEFORE you use the tool call to make the conversation flow more natural.
+
+User id(ignore):
+{{user_id}}";
+
+// Language-specific prompts
+const GERMAN_PROMPT: &str = "Sie sind ein hilfreicher KI-Assistent namens lightfriend, der dem Dumbphone-Benutzer {{name}} durch Sprachanrufe hilft. Der Benutzer zahlt für jede Minute, also halten Sie Ihre Antworten prägnant, es sei denn, der Benutzer hat etwas anderes gewünscht.
+
+Sie haben einige Tools, um die Fragen des Benutzers zu beantworten.
+
+Aktuelles Datum ist {{now}}.
+Zeitzone des Benutzers: {{timezone}} und Abweichung von UTC: {{timezone_offset_from_utc}}
+
+Benutzerinfo:
+{{user_info}}
+
+- Beachten Sie, dass der Benutzer kein Internet auf seinem Telefon hat.
+- Korrigieren Sie nicht die Aussprache des Benutzers.
+- Beantworten Sie die Fragen des Benutzers immer mit Hilfe der oben genannten Tools. Wenn Sie sich unsicher sind, bestätigen Sie Ihre Annahme mit dem Benutzer, bevor Sie handeln.
+- Erklären Sie niemals, wie Tools funktionieren, es sei denn, der Benutzer hat darum gebeten.
+- Sagen Sie immer etwas wie 'einen Moment' BEVOR Sie den Tool-Aufruf verwenden, um den Gesprächsfluss natürlicher zu gestalten.
+
+Benutzer-ID (ignorieren):
+{{user_id}}";
+
+const FINNISH_PROMPT: &str = "Olet avulias tekoälyavustaja nimeltä lightfriend, joka auttaa peruspuhelimen käyttäjää {{name}} puheluiden kautta. Käyttäjä maksaa jokaisesta minuutista, joten pidä vastauksesi ytimekkäinä, ellei käyttäjä ole pyytänyt toisin.
+
+Sinulla on käytössäsi työkaluja käyttäjän kysymyksiin vastaamiseen.
+
+Nykyinen päivämäärä on {{now}}.
+Käyttäjän aikavyöhyke: {{timezone}} ja poikkeama UTC:stä: {{timezone_offset_from_utc}}
+
+Käyttäjän tiedot:
+{{user_info}}
+
+- Huomaa, että käyttäjällä ei ole internetiä puhelimessaan.
+- Älä korjaa käyttäjän ääntämistä.
+- Vastaa aina käyttäjän kysymyksiin yllä olevien työkalujen avulla. Jos olet epävarma, varmista oletuksesi käyttäjältä ennen toimintaa.
+- Älä koskaan selitä, miten työkalut toimivat, ellei käyttäjä ole pyytänyt sitä.
+- Sano aina jotain kuten 'hetkinen' ENNEN työkalun käyttöä, jotta keskustelu sujuu luonnollisemmin.
+
+Käyttäjän ID (ohita):
+{{user_id}}";
+
+use lazy_static::lazy_static;
+
+lazy_static! {
+    // Welcome messages for verified users
+    static ref WELCOME_MESSAGES: HashMap<&'static str, &'static str> = {
+        let mut m = HashMap::new();
+        m.insert("en", "Welcome! Your number is now verified. New users get 1 euro worth of free credits for testing. How can I help?");
+        m.insert("de", "Willkommen! Ihre Nummer ist jetzt verifiziert. Neue Benutzer erhalten 1 Euro an kostenlosen Credits zum Testen. Wie kann ich Ihnen helfen?");
+        m.insert("fi", "Tervetuloa! Sinun numerosi on nyt varmennettu. Uudet tilit saavat euron verran ilmaista käyttöä testaamiseen. Kuinka voin auttaa?");
+        m
+    };
+
+    // Regular greeting messages
+    static ref GREETING_MESSAGES: HashMap<&'static str, &'static str> = {
+        let mut m = HashMap::new();
+        m.insert("en", "How can I help?");
+        m.insert("de", "Wie kann ich Ihnen helfen?");
+        m.insert("fi", "Kuinka voin auttaa?");
+        m
+    };
+}use tracing::error;
 use axum::middleware;
 use std::sync::Arc;
 use crate::AppState;
@@ -69,6 +149,7 @@ pub struct VoiceId{
 pub struct AgentConfig {
     first_message: String,
     language: String,
+    prompt: String,
 }
 
 
@@ -261,15 +342,16 @@ pub async fn fetch_assistant(
     let mut dynamic_variables = HashMap::new();
     let us_voice_id = std::env::var("US_VOICE_ID").expect("No US_VOICE_ID set");
 
-    let mut conversation_config_override = ConversationConfig {
-        agent: AgentConfig {
-            first_message: "Hello {{name}}!".to_string(),
-            language: "en".to_string(),
-        },
-        tts: VoiceId {
-            voice_id: us_voice_id.clone(),
-        }
-    };
+            let mut conversation_config_override = ConversationConfig {
+                agent: AgentConfig {
+                    first_message: "Hello {{name}}!".to_string(),
+                    language: "en".to_string(),
+                            prompt: BASE_PROMPT.to_string(),
+                },
+                tts: VoiceId {
+                    voice_id: us_voice_id.clone(),
+                }
+            };
 
 
     match state.user_repository.find_by_phone_number(&caller_number) {
@@ -297,8 +379,9 @@ pub async fn fetch_assistant(
                         
                         conversation_config_override = ConversationConfig {
                             agent: AgentConfig {
-                                first_message: "Willkommen! Ihre Nummer ist jetzt verifiziert. Neue Benutzer erhalten 1 Euro an kostenlosen Credits zum Testen. Wie kann ich Ihnen helfen?".to_string(),
+                                first_message: WELCOME_MESSAGES["de"].to_string(),
                                 language: "de".to_string(),
+                                prompt: GERMAN_PROMPT.to_string(),
                             },
                             tts: VoiceId {
                                 voice_id: std::env::var("DE_VOICE_ID").expect("No DE_VOICE_ID set"),
@@ -309,8 +392,9 @@ pub async fn fetch_assistant(
                         
                         conversation_config_override = ConversationConfig {
                             agent: AgentConfig {
-                                first_message: "Tervetuloa! Sinun numerosi on nyt varmennettu. Uudet tilit saavat euron verran ilmaista käyttöä testaamiseen. Kuinka voin auttaa?".to_string(),
+                                first_message: WELCOME_MESSAGES["fi"].to_string(),
                                 language: "fi".to_string(),
+                                prompt: FINNISH_PROMPT.to_string(),
                             },
                             tts: VoiceId {
                                 voice_id: std::env::var("FI_VOICE_ID").expect("No FI_VOICE_ID set"),
@@ -319,8 +403,26 @@ pub async fn fetch_assistant(
                     } else {
                         conversation_config_override = ConversationConfig {
                             agent: AgentConfig {
-                                first_message: "Welcome! Your number is now verified. New users get 1 euro worth of free credits for testing. How can I help?".to_string(),
+                                first_message: WELCOME_MESSAGES["en"].to_string(),
                                 language: "en".to_string(),
+                                prompt: "You are an helpful AI assistant called lightfriend that helps dumbphone user {{name}} through voice calls. The user is paying for every minute so keep your answers succinct unless user has asked otherwise.
+
+You have some tools to answer the user's questions.
+
+Current date is {{now}}.
+Users timezone: {{timezone}} and offset from UTC: {{timezone_offset_from_utc}}
+
+User's info:
+{{user_info}}
+
+- Note that user doesn't have internet on their phone.
+- Do not correct user's pronunciation.
+- Always answer user's question with the help of the above tools. If you are unsure, confirm your assumption with the user before acting. 
+- Never explain how tools work unless user asked to explain them. 
+- Always say something like 'just a sec' BEFORE you use the tool call to make the conversation flow more natural.
+
+User id(ignore):
+{{user_id}}".to_string(),
                             },
                             tts: VoiceId {
                                 voice_id: us_voice_id,
@@ -331,9 +433,89 @@ pub async fn fetch_assistant(
                 }
             } else {
                 if user.agent_language == "fi" {
-                    conversation_config_override.tts.voice_id = std::env::var("FI_VOICE_ID").expect("No FI_VOICE_ID set");
+                    conversation_config_override = ConversationConfig {
+                        agent: AgentConfig {
+                            first_message: GREETING_MESSAGES["fi"].to_string(),
+                            language: "fi".to_string(),
+                            prompt: "Olet avulias tekoälyavustaja nimeltä lightfriend, joka auttaa peruspuhelimen käyttäjää {{name}} puheluiden kautta. Käyttäjä maksaa jokaisesta minuutista, joten pidä vastauksesi ytimekkäinä, ellei käyttäjä ole pyytänyt toisin.
+
+Sinulla on käytössäsi työkaluja käyttäjän kysymyksiin vastaamiseen.
+
+Nykyinen päivämäärä on {{now}}.
+Käyttäjän aikavyöhyke: {{timezone}} ja poikkeama UTC:stä: {{timezone_offset_from_utc}}
+
+Käyttäjän tiedot:
+{{user_info}}
+
+- Huomaa, että käyttäjällä ei ole internetiä puhelimessaan.
+- Älä korjaa käyttäjän ääntämistä.
+- Vastaa aina käyttäjän kysymyksiin yllä olevien työkalujen avulla. Jos olet epävarma, varmista oletuksesi käyttäjältä ennen toimintaa.
+- Älä koskaan selitä, miten työkalut toimivat, ellei käyttäjä ole pyytänyt sitä.
+- Sano aina jotain kuten 'hetkinen' ENNEN työkalun käyttöä, jotta keskustelu sujuu luonnollisemmin.
+
+Käyttäjän ID (ohita):
+{{user_id}}".to_string(),
+                        },
+                        tts: VoiceId {
+                            voice_id: std::env::var("FI_VOICE_ID").expect("No FI_VOICE_ID set"),
+                        }
+                    };
                 } else if user.agent_language == "de" {
-                    conversation_config_override.tts.voice_id = std::env::var("DE_VOICE_ID").expect("No DE_VOICE_ID set");
+                    conversation_config_override = ConversationConfig {
+                        agent: AgentConfig {
+                            first_message: GREETING_MESSAGES["de"].to_string(),
+                            language: "de".to_string(),
+                            prompt: "Sie sind ein hilfreicher KI-Assistent namens lightfriend, der dem Dumbphone-Benutzer {{name}} durch Sprachanrufe hilft. Der Benutzer zahlt für jede Minute, also halten Sie Ihre Antworten prägnant, es sei denn, der Benutzer hat etwas anderes gewünscht.
+
+Sie haben einige Tools, um die Fragen des Benutzers zu beantworten.
+
+Aktuelles Datum ist {{now}}.
+Zeitzone des Benutzers: {{timezone}} und Abweichung von UTC: {{timezone_offset_from_utc}}
+
+Benutzerinfo:
+{{user_info}}
+
+- Beachten Sie, dass der Benutzer kein Internet auf seinem Telefon hat.
+- Korrigieren Sie nicht die Aussprache des Benutzers.
+- Beantworten Sie die Fragen des Benutzers immer mit Hilfe der oben genannten Tools. Wenn Sie sich unsicher sind, bestätigen Sie Ihre Annahme mit dem Benutzer, bevor Sie handeln.
+- Erklären Sie niemals, wie Tools funktionieren, es sei denn, der Benutzer hat darum gebeten.
+- Sagen Sie immer etwas wie 'einen Moment' BEVOR Sie den Tool-Aufruf verwenden, um den Gesprächsfluss natürlicher zu gestalten.
+
+Benutzer-ID (ignorieren):
+{{user_id}}".to_string(),
+                        },
+                        tts: VoiceId {
+                            voice_id: std::env::var("DE_VOICE_ID").expect("No DE_VOICE_ID set"),
+                        }
+                    };
+                } else {
+                    conversation_config_override = ConversationConfig {
+                        agent: AgentConfig {
+                            first_message: GREETING_MESSAGES["en"].to_string(),
+                            language: "en".to_string(),
+                            prompt: "You are an helpful AI assistant called lightfriend that helps dumbphone user {{name}} through voice calls. The user is paying for every minute so keep your answers succinct unless user has asked otherwise.
+
+You have some tools to answer the user's questions.
+
+Current date is {{now}}.
+Users timezone: {{timezone}} and offset from UTC: {{timezone_offset_from_utc}}
+
+User's info:
+{{user_info}}
+
+- Note that user doesn't have internet on their phone.
+- Do not correct user's pronunciation.
+- Always answer user's question with the help of the above tools. If you are unsure, confirm your assumption with the user before acting. 
+- Never explain how tools work unless user asked to explain them. 
+- Always say something like 'just a sec' BEFORE you use the tool call to make the conversation flow more natural.
+
+User id(ignore):
+{{user_id}}".to_string(),
+                        },
+                        tts: VoiceId {
+                            voice_id: us_voice_id,
+                        }
+                    };
                 }
             }
 

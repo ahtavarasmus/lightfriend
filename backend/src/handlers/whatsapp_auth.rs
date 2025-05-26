@@ -128,16 +128,16 @@ async fn connect_whatsapp(
     let response = client.create_room(request).await?;
     let room_id = response.room_id();
 
-    println!("🏠 Created room with ID: {}", room_id);
+    tracing::debug!("🏠 Created room with ID: {}", room_id);
     let room = client.get_room(&room_id).ok_or(anyhow!("Room not found"))?;
-    println!("🤖 Inviting bot user: {}", bot_user_id);
+    tracing::debug!("🤖 Inviting bot user: {}", bot_user_id);
     room.invite_user_by_id(&bot_user_id).await?;
     client.sync_once(MatrixSyncSettings::default()).await?;
-    println!("🤖 Waiting for bot to join...");
+    tracing::debug!("🤖 Waiting for bot to join...");
     for _ in 0..30 {
         let members = room.members(matrix_sdk::RoomMemberships::JOIN).await?;
         if members.iter().any(|m| m.user_id() == bot_user_id) {
-            println!("✅ Bot has joined the room");
+            tracing::debug!("✅ Bot has joined the room");
             break;
         }
         sleep(Duration::from_secs(1)).await;
@@ -148,33 +148,33 @@ async fn connect_whatsapp(
 
     // Send login command with phone number
     let login_command = format!("!wa login phone {}", phone_number);
-    println!("📤 Sending WhatsApp login command: {}", login_command);
+    tracing::debug!("📤 Sending WhatsApp login command: {}", login_command);
     room.send(RoomMessageEventContent::text_plain(&login_command)).await?;
 
     // Wait for bot response with pairing code
     let mut pairing_code = None;
-    println!("⏳ Starting pairing code monitoring");
+    tracing::debug!("⏳ Starting pairing code monitoring");
     client.sync_once(MatrixSyncSettings::default()).await?;
 
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(5));
 
-    println!("🔄 Starting message polling loop");
+    tracing::debug!("🔄 Starting message polling loop");
     for attempt in 1..=60 {
-        println!("📡 Sync attempt #{}", attempt);
+        tracing::debug!("📡 Sync attempt #{}", attempt);
         client.sync_once(sync_settings.clone()).await?;
         if room.is_synced() {
-            println!("Room is fully synced with the server");
+            tracing::debug!("Room is fully synced with the server");
         } else {
-            println!("Room is NOT fully synced with the server!");
+            tracing::debug!("Room is NOT fully synced with the server!");
         }
         
         sleep(Duration::from_millis(500)).await;
         
         if let Some(room) = client.get_room(&room_id) {
-            println!("🏠 Found room, fetching messages");
+            tracing::debug!("🏠 Found room, fetching messages");
             let options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
             let messages = room.messages(options).await?;
-            println!("📨 Fetched {} messages", messages.chunk.len());
+            tracing::debug!("📨 Fetched {} messages", messages.chunk.len());
             for msg in messages.chunk {
                 let raw_event = msg.raw();
                 if let Ok(event) = raw_event.deserialize() {
@@ -188,7 +188,7 @@ async fn connect_whatsapp(
                             };
 
                             if let MessageType::Notice(text_content) = event_content.msgtype {
-                                println!("📝 Text message found from bot");
+                                tracing::debug!("📝 Text message found from bot");
                                 // Check for pairing code in the message (e.g., "FQWG-FHKC")
                                 if !text_content.body.contains("Input the pairing code") {
                                     // Extract the pairing code (assumes format like "FQWG-FHKC")
@@ -196,7 +196,7 @@ async fn connect_whatsapp(
                                     if let Some(code) = parts.last() {
                                         if code.contains('-') { // Basic validation for code format
                                             pairing_code = Some(code.to_string());
-                                            println!("🔑 Found pairing code");
+                                            tracing::debug!("🔑 Found pairing code");
                                         }
                                     }
                                 }
@@ -221,7 +221,7 @@ pub async fn start_whatsapp_connection(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<WhatsappConnectionResponse>, (StatusCode, AxumJson<serde_json::Value>)> {
-    println!("🚀 Starting WhatsApp connection process for user {}", auth_user.user_id);
+    tracing::debug!("🚀 Starting WhatsApp connection process for user {}", auth_user.user_id);
 
     // Fetch user's phone number
     let phone_number = state
@@ -241,7 +241,7 @@ pub async fn start_whatsapp_connection(
             )
         })?.phone_number;
 
-    println!("📝 Getting Matrix client...");
+    tracing::debug!("📝 Getting Matrix client...");
     // Get or create Matrix client using the centralized function
     let mut client = matrix_auth::get_cached_client(auth_user.user_id, &state.user_repository, true, &state.matrix_clients)
         .await
@@ -252,14 +252,14 @@ pub async fn start_whatsapp_connection(
                 AxumJson(json!({"error": format!("Failed to initialize Matrix client: {}", e)})),
             )
         })?;
-    println!("✅ Matrix client obtained for user: {}", client.user_id().unwrap());
+    tracing::debug!("✅ Matrix client obtained for user: {}", client.user_id().unwrap());
 
     // Get bridge bot from environment
     let bridge_bot = std::env::var("WHATSAPP_BRIDGE_BOT")
         .expect("WHATSAPP_BRIDGE_BOT not set");
 
 
-    println!("🔗 Connecting to WhatsApp bridge...");
+    tracing::debug!("🔗 Connecting to WhatsApp bridge...");
     // Connect to WhatsApp bridge
     let (room_id, pairing_code) = connect_whatsapp_with_retry(
         &mut client,
@@ -279,7 +279,6 @@ pub async fn start_whatsapp_connection(
 
 
     // Debug: Log the pairing code
-    println!("Generated pairing code");
     tracing::info!("Generated pairing code");
 
     // Create bridge record
@@ -338,7 +337,7 @@ pub async fn get_whatsapp_status(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
-    println!("📊 Checking WhatsApp status for user {}", auth_user.user_id);
+    tracing::debug!("📊 Checking WhatsApp status for user {}", auth_user.user_id);
     let bridge = state.user_repository.get_whatsapp_bridge(auth_user.user_id)
         .map_err(|e| {
             tracing::error!("Failed to get WhatsApp bridge status: {}", e);
@@ -364,11 +363,11 @@ pub async fn get_whatsapp_status(
 
 /*
 pub async fn accept_room_invitations(client: MatrixClient, duration: Duration) -> Result<()> {
-    println!("🔄 Starting room invitation acceptance loop");
+    tracing::debug!("🔄 Starting room invitation acceptance loop");
     // Enforce maximum duration of 15 minutes
     let max_duration = Duration::from_secs(900); // 15 minutes
     let actual_duration = if duration > max_duration {
-        println!("⚠️ Requested duration exceeds maximum, capping at 15 minutes");
+        tracing::debug!("⚠️ Requested duration exceeds maximum, capping at 15 minutes");
         max_duration
     } else {
         duration
@@ -376,13 +375,13 @@ pub async fn accept_room_invitations(client: MatrixClient, duration: Duration) -
     let end_time = Instant::now() + actual_duration;
     
     // Ensure we have a recent sync before starting
-    println!("🔄 Performing initial sync to get current room state");
+    tracing::debug!("🔄 Performing initial sync to get current room state");
     client.sync_once(MatrixSyncSettings::default()).await?;
-    println!("😴 Waiting a little for room invitations to come in...");
+    tracing::debug!("😴 Waiting a little for room invitations to come in...");
     sleep(Duration::from_secs(15)).await;
 
     while Instant::now() < end_time {
-        println!("👀 Checking for room invitations...");
+        tracing::debug!("👀 Checking for room invitations...");
 
         let invited_rooms = client.invited_rooms();
         let invitation_count = invited_rooms.len();
@@ -393,10 +392,10 @@ pub async fn accept_room_invitations(client: MatrixClient, duration: Duration) -
             continue;
         }
 
-        println!("📬 Found {} room invitations", invitation_count);
+        tracing::debug!("📬 Found {} room invitations", invitation_count);
         for (index, room) in invited_rooms.into_iter().enumerate() {
             let room_id = room.room_id();
-            println!("🚪 Attempting to join room {}/{}", index + 1, invitation_count);
+            tracing::debug!("🚪 Attempting to join room {}/{}", index + 1, invitation_count);
 
             match client.join_room_by_id(room_id).await {
                 Ok(_) => {
@@ -437,21 +436,21 @@ async fn monitor_whatsapp_connection(
     user_id: i32,
     state: Arc<AppState>,
 ) -> Result<(), anyhow::Error> {
-    println!("👀 Starting WhatsApp connection monitoring for user {} in room {}", user_id, room_id);
+    tracing::debug!("👀 Starting WhatsApp connection monitoring for user {} in room {}", user_id, room_id);
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
 
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(30));
 
     // Increase monitoring duration and frequency
     for attempt in 1..120 { // Try for about 10 minutes (120 * 5 seconds)
-        println!("🔄 Monitoring attempt #{} for user {}", attempt, user_id);
+        tracing::debug!("🔄 Monitoring attempt #{} for user {}", attempt, user_id);
 
         let _= client.sync_once(sync_settings.clone()).await?;
 
         
-        println!("🔍 Checking messages in room");
+        tracing::debug!("🔍 Checking messages in room");
         if let Some(room) = client.get_room(room_id) {
-            println!("📬 Found room, fetching messages...");
+            tracing::debug!("📬 Found room, fetching messages...");
             let options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
             let messages = room.messages(options).await?;
             for msg in messages.chunk {
@@ -474,10 +473,10 @@ async fn monitor_whatsapp_connection(
                             };
         
 
-                            println!("message contains Successfully logged in as: {}",content.contains("Successfully logged in as"));
+                            tracing::debug!("message contains Successfully logged in as: {}",content.contains("Successfully logged in as"));
                             // Check for successful login message first
                             if content.contains("Successfully logged in as") {
-                                println!("🎉 WhatsApp successfully connected for user {} with phone number confirmation", user_id);
+                                tracing::debug!("🎉 WhatsApp successfully connected for user {} with phone number confirmation", user_id);
                                 // Update bridge status to connected
                                 let current_time = std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
@@ -500,24 +499,24 @@ async fn monitor_whatsapp_connection(
 
                                     // First sync all contacts
                                     room.send(RoomMessageEventContent::text_plain("!wa sync contacts --create-portals")).await?;
-                                    println!("Sent !wa sync contacts --create-portals for user {}", user_id);
+                                    tracing::debug!("Sent !wa sync contacts --create-portals for user {}", user_id);
                                     
                                     // Wait a bit for contacts to sync
                                     sleep(Duration::from_secs(2)).await;
                                     
                                     // Then sync all groups
                                     room.send(RoomMessageEventContent::text_plain("!wa sync groups --create-portals")).await?;
-                                    println!("Sent !wa sync groups --create-portals for user {}", user_id);
+                                    tracing::debug!("Sent !wa sync groups --create-portals for user {}", user_id);
                                     
                                     // Wait a bit for groups to sync
                                     sleep(Duration::from_secs(2)).await;
                                     
                                 } else {
-                                    println!("NO WHATSAPP ROOM WAS FOUND AND NOT SYNC COMMANDS WERE SENT");
+                                    tracing::error!("NO WHATSAPP ROOM WAS FOUND AND NOT SYNC COMMANDS WERE SENT");
                                 }
                                     
 
-                                println!("Starting continuous sync and room invitation acceptance");
+                                tracing::debug!("Starting continuous sync and room invitation acceptance");
                                 
                                 // First start the continuous sync so we can receive invitations
                                 let sync_client = client.clone();
@@ -562,7 +561,7 @@ async fn monitor_whatsapp_connection(
                             ];
 
                             if error_patterns.iter().any(|&pattern| content.to_lowercase().contains(pattern)) {
-                                println!("❌ WhatsApp connection failed for user {}", user_id);
+                                tracing::error!("❌ WhatsApp connection failed for user {}", user_id);
                                 state.user_repository.delete_whatsapp_bridge(user_id)?;
                                 return Err(anyhow!("WhatsApp connection failed: {}", content));
                             }
@@ -585,7 +584,7 @@ pub async fn resync_whatsapp(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
-    println!("🔄 Starting WhatsApp resync process for user {}", auth_user.user_id);
+    tracing::debug!("🔄 Starting WhatsApp resync process for user {}", auth_user.user_id);
 
     // Get the bridge information first
     let bridge = state.user_repository.get_whatsapp_bridge(auth_user.user_id)
@@ -623,7 +622,7 @@ pub async fn resync_whatsapp(
         ))?;
 
     if let Some(room) = client.get_room(&room_id) {
-        println!("📱 Sending WhatsApp sync commands");
+        tracing::debug!("📱 Sending WhatsApp sync commands");
         
         // First sync all contacts
         if let Err(e) = room.send(RoomMessageEventContent::text_plain("!wa sync contacts --create-portals")).await {
@@ -633,7 +632,7 @@ pub async fn resync_whatsapp(
                 AxumJson(json!({"error": "Failed to send contacts sync command"})),
             ));
         }
-        println!("✅ Sent contacts sync command");
+        tracing::debug!("✅ Sent contacts sync command");
         
         // Wait a bit for contacts to sync
         sleep(Duration::from_secs(2)).await;
@@ -646,7 +645,7 @@ pub async fn resync_whatsapp(
                 AxumJson(json!({"error": "Failed to send groups sync command"})),
             ));
         }
-        println!("✅ Sent groups sync command");
+        tracing::debug!("✅ Sent groups sync command");
 
         /*
         // Start accepting invitations for new rooms
@@ -662,7 +661,7 @@ pub async fn resync_whatsapp(
         });
         */
 
-        println!("✅ WhatsApp resync process completed for user {}", auth_user.user_id);
+        tracing::debug!("✅ WhatsApp resync process completed for user {}", auth_user.user_id);
         Ok(AxumJson(json!({
             "message": "WhatsApp resync initiated successfully"
         })))
@@ -678,7 +677,7 @@ pub async fn disconnect_whatsapp(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
-    println!("🔌 Starting WhatsApp disconnection process for user {}", auth_user.user_id);
+    tracing::debug!("🔌 Starting WhatsApp disconnection process for user {}", auth_user.user_id);
 
     // Get the bridge information first
     let bridge = state.user_repository.get_whatsapp_bridge(auth_user.user_id)
@@ -715,7 +714,7 @@ pub async fn disconnect_whatsapp(
         ))?;
 
     if let Some(room) = client.get_room(&room_id) {
-        println!("📤 Sending WhatsApp logout command");
+        tracing::debug!("📤 Sending WhatsApp logout command");
         // Send logout command
         if let Err(e) = room.send(RoomMessageEventContent::text_plain("!wa logout")).await {
             tracing::error!("Failed to send logout command: {}", e);
@@ -724,7 +723,7 @@ pub async fn disconnect_whatsapp(
         // Wait a moment for the logout to process
         sleep(Duration::from_secs(5)).await;
 
-        println!("🧹 Cleaning up WhatsApp portals");
+        tracing::debug!("🧹 Cleaning up WhatsApp portals");
         // Send command to delete all portals
         if let Err(e) = room.send(RoomMessageEventContent::text_plain("!wa delete-all-portals")).await {
             tracing::error!("Failed to send delete-portals command: {}", e);
@@ -733,7 +732,7 @@ pub async fn disconnect_whatsapp(
         // Wait a moment for the cleanup to process
         sleep(Duration::from_secs(5)).await;
 
-        println!("🗑️ Sending delete-session command");
+        tracing::debug!("🗑️ Sending delete-session command");
         // Send delete-session command as a final cleanup
         if let Err(e) = room.send(RoomMessageEventContent::text_plain("!wa delete-session")).await {
             tracing::error!("Failed to send delete-session command: {}", e);
@@ -754,7 +753,7 @@ pub async fn disconnect_whatsapp(
     // Clear the cached Matrix client since the user is disconnecting
     matrix_auth::clear_cached_client(auth_user.user_id, &state.matrix_clients).await;
 
-    println!("✅ WhatsApp disconnection completed for user {}", auth_user.user_id);
+    tracing::debug!("✅ WhatsApp disconnection completed for user {}", auth_user.user_id);
     Ok(AxumJson(json!({
         "message": "WhatsApp disconnected successfully"
     })))

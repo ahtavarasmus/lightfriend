@@ -144,6 +144,14 @@ diesel::table! {
         proactive_email_last_activated -> Integer,
         proactive_whatsapp -> Bool,
         whatsapp_general_checks -> Nullable<Text>,
+        whatsapp_keywords_active -> Bool,
+        whatsapp_priority_senders_active -> Bool,
+        whatsapp_waiting_checks_active -> Bool,
+        whatsapp_general_importance_active -> Bool,
+        email_keywords_active -> Bool,
+        email_priority_senders_active -> Bool,
+        email_waiting_checks_active -> Bool,
+        email_general_importance_active -> Bool,
     }
 }
 

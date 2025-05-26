@@ -21,7 +21,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     let message_monitor_job = Job::new_async("0 * * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
-            info!("Running scheduled message check across services...");
             
             // Get all users with valid message monitor subscription
             let users_with_subscription = match state.user_repository.get_all_users() {
@@ -650,7 +649,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         info!("conversation_data : {}",conversation_data);
                                         // Verify call is still active
                                         if conversation_data["status"] == "processing" {
-                                            println!("Recharging the user back up");
+                                            tracing::debug!("Recharging the user back up");
                                             use axum::extract::{State, Path};
                                             let state_clone = Arc::clone(&state);
                                             tokio::spawn(async move {
@@ -658,7 +657,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                     State(state_clone),
                                                     Path(log.user_id),
                                                 ).await;
-                                                println!("Recharged the user successfully back up!");
+                                                tracing::debug!("Recharged the user successfully back up!");
                                             });
                                         }
                                     }
@@ -732,7 +731,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     let task_monitor_job = Job::new_async("0 * * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
-            info!("Running scheduled task check...");
             
             // Get all users with valid Google Tasks connection
             let users = match state.user_repository.get_all_users() {
@@ -955,7 +953,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     let calendar_notification_job = Job::new_async("0 * * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
-            info!("Running calendar notification check...");
             
             // Clean up old notifications (older than 30 minutes)
             let cleanup_threshold = (chrono::Utc::now() - chrono::Duration::minutes(30)).timestamp() as i32;
@@ -977,7 +974,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 match state.user_repository.has_valid_subscription_tier_with_messages(user.id, "tier 2") {
                     Ok(true) => (),
                     Ok(false) => {
-                        info!("User {} does not have valid subscription or messages left", user.id);
+                        tracing::debug!("User {} does not have valid subscription or messages left", user.id);
                         continue;
                     },
                     Err(e) => {
@@ -996,7 +993,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 };
 
                 if !is_enabled {
-                    info!("User {} has not enabled proactive calendar notifications", user.id);
+                    tracing::debug!("User {} has not enabled proactive calendar notifications", user.id);
                     continue;
                 }
 
@@ -1154,7 +1151,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     let matrix_sync_job = Job::new_async("0 * * * * *", move |_, _| {  // Runs at midnight every day
         let state = state_clone.clone();
         Box::pin(async move {
-            println!("Managing Matrix sync tasks...");
+            tracing::debug!("Managing Matrix sync tasks...");
             
             // Get all users with active WhatsApp connection
             match state.user_repository.get_users_with_matrix_bridge_connections() {
@@ -1164,7 +1161,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     // Remove any sync tasks for users who are no longer active
                     sync_tasks.retain(|user_id, task| {
                         if !users.contains(user_id) {
-                            println!("Removing sync task for inactive user {}", user_id);
+                            tracing::debug!("Removing sync task for inactive user {}", user_id);
                             task.abort();
                             false
                         } else {
@@ -1175,7 +1172,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                         // Start sync tasks for new active users
                         for user_id in users {
                             if !sync_tasks.contains_key(&user_id) {
-                                println!("Starting new sync task for user {}", user_id);
+                                tracing::debug!("Starting new sync task for user {}", user_id);
                                 
                                 // Create a new sync task
                                 let state_clone = Arc::clone(&state);
@@ -1225,7 +1222,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     let matrix_invitation_job = Job::new_async("0 * * * * *", move |_, _| {  // runs every fifteen minutes 
         let state = state_clone.clone();
         Box::pin(async move {
-            println!("Managing Matrix invitation tasks...");
+            tracing::debug!("Managing Matrix invitation tasks...");
             
             // Get all users with active WhatsApp connection
             match state.user_repository.get_users_with_matrix_bridge_connections() {
@@ -1235,7 +1232,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     // Remove any invitation tasks for users who are no longer active
                     invitation_tasks.retain(|user_id, task| {
                         if !users.contains(user_id) {
-                            println!("Removing invitation task for inactive user {}", user_id);
+                            tracing::debug!("Removing invitation task for inactive user {}", user_id);
                             task.abort();
                             false
                         } else {
@@ -1246,14 +1243,14 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     // Start invitation tasks for new active users
                     for user_id in users {
                         if !invitation_tasks.contains_key(&user_id) {
-                            println!("Starting new invitation task for user {}", user_id);
+                            tracing::debug!("Starting new invitation task for user {}", user_id);
                             
                             // Create a new invitation task
                             let state_clone = Arc::clone(&state);
                             let handle = tokio::spawn(async move {
                                 match crate::utils::matrix_auth::get_client(user_id, &state_clone.user_repository, true).await {
                                     Ok(client) => {
-                                        println!("Starting Matrix invitation acceptance for user {}", user_id);
+                                        tracing::debug!("Starting Matrix invitation acceptance for user {}", user_id);
                                         // Run the invitation acceptance loop for 15 minutes
                                         if let Err(e) = crate::handlers::whatsapp_auth::accept_room_invitations(client, Duration::from_secs(900)).await {
                                             tracing::error!("Error in accept_room_invitations: {}", e);

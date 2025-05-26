@@ -220,7 +220,7 @@ async fn try_bootstrap_cross_signing(
                         retry_count + 1, max_retries);
                     
                     if let Err(clear_err) = clear_store(username).await {
-                        println!("⚠️ Failed to clear store: {}", clear_err);
+                        tracing::error!("⚠️ Failed to clear store: {}", clear_err);
                     }
                     
                     // Add a small delay before retrying

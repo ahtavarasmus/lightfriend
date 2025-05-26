@@ -376,6 +376,7 @@ dependencies = [
  "imap",
  "jiff",
  "jsonwebtoken",
+ "lazy_static",
  "magic-crypt",
  "mail-parser",
  "matrix-sdk",
