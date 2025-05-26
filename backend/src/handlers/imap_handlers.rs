@@ -35,6 +35,7 @@ fn format_timestamp(timestamp: i64, timezone: Option<String>) -> String {
             }
         }
     } else {
+        tracing::debug!("No timezone provided, using UTC");
         dt_utc.format("%Y-%m-%d %H:%M:%S UTC").to_string()
     };
     
@@ -320,15 +321,28 @@ pub async fn fetch_emails_imap(
             .as_ref()
             .and_then(|s| String::from_utf8(s.to_vec()).ok());
 
-        let date = envelope
+        let raw_date = envelope
             .date
             .as_ref()
-            .and_then(|d| String::from_utf8(d.to_vec()).ok())
-            .and_then(|date_str| {
-                chrono::DateTime::parse_from_rfc2822(&date_str)
-                    .ok()
-                    .map(|dt| dt.with_timezone(&Utc))
-            });
+            .and_then(|d| String::from_utf8(d.to_vec()).ok());
+        
+        tracing::debug!("Raw date from envelope: {:?}", raw_date);
+
+        let date = raw_date.as_ref().and_then(|date_str| {
+            match chrono::DateTime::parse_from_rfc2822(date_str) {
+                Ok(dt) => {
+                    let utc_dt = dt.with_timezone(&Utc);
+                    tracing::debug!("Successfully parsed date '{}' to UTC: {}", date_str, utc_dt);
+                    Some(utc_dt)
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to parse date '{}': {}", date_str, e);
+                    None
+                }
+            }
+        });
+
+        tracing::debug!("Final processed date: {:?}", date);
 
         let is_read = message
             .flags()
@@ -369,9 +383,21 @@ pub async fn fetch_emails_imap(
             (clean_content, snippet)
         }).unwrap_or_else(|| (String::new(), String::new()));
 
-            let date_formatted = date.map(|dt| format_timestamp(dt.timestamp(), state.user_repository.find_by_id(user_id)
+            let user_timezone = state.user_repository.find_by_id(user_id)
                 .ok()
-                .and_then(|u| u.unwrap().timezone)));
+                .and_then(|u| u.unwrap().timezone);
+            
+            tracing::debug!("User timezone from repository: {:?}", user_timezone);
+
+            let date_formatted = date.map(|dt| {
+                let timestamp = dt.timestamp();
+                tracing::debug!("Converting timestamp {} with timezone {:?}", timestamp, user_timezone);
+                let formatted = format_timestamp(timestamp, user_timezone);
+                tracing::debug!("Formatted date result: {}", formatted);
+                formatted
+            });
+
+            tracing::debug!("Final formatted date: {:?}", date_formatted);
 
             email_previews.push(ImapEmailPreview {
                 id: uid.clone(),

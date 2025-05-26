@@ -1547,7 +1547,10 @@ pub async fn process_sms(
                                         let subject = email.get("subject").and_then(|s| s.as_str()).unwrap_or("No subject");
                                         let from = email.get("from").and_then(|f| f.as_str()).unwrap_or("Unknown sender");
 
-                                        let date_formatted = email.get("date_formatted").and_then(|d| d.as_str()).unwrap();
+                                        let date_formatted = email.get("date_formatted")
+                                            .and_then(|d| d.as_str())
+                                            .unwrap_or("Unknown date");
+
                                         let body = email.get("body").and_then(|b| b.as_str()).unwrap_or("");
                                         let snippet = if body.len() > 100 {
                                             format!("{}...", body.chars().take(100).collect::<String>())

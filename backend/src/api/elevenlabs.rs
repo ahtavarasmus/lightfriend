@@ -264,7 +264,36 @@ pub async fn fetch_assistant(
             println!("Found user: {}, {}", user.email, user.phone_number);
             
             // Check if user has sufficient credits
-            if let Err(_) = crate::utils::usage::check_user_credits(&state, &user, "voice").await {
+            if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "voice").await {
+                // Get conversation for the user
+                let conversation = match state.user_conversations.get_conversation(
+                    &user, 
+                    user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
+                ).await {
+                    Ok(conv) => conv,
+                    Err(e) => {
+                        error!("Failed to get conversation: {}", e);
+                        return Err((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "Failed to get conversation",
+                                "message": "Internal server error"
+                            }))
+                        ));
+                    }
+                };
+
+                // Send insufficient credits message
+                let error_message = "Insufficient credits to make a voice call".to_string();
+                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    &conversation.conversation_sid,
+                    &conversation.twilio_number,
+                    &error_message,
+                    false, // Don't redact since there is nothing there 
+                ).await {
+                    error!("Failed to send insufficient credits message: {}", e);
+                }
+
                 return Err((
                     StatusCode::FORBIDDEN,
                     Json(json!({
