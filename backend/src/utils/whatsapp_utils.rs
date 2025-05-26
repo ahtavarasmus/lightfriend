@@ -617,6 +617,7 @@ pub async fn handle_whatsapp_message(
 
     // Only process WhatsApp rooms
     if !room_name.contains("(WA)") {
+        tracing::error!("Skipping non whatsapp message");
         return;
     }
 

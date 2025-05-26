@@ -215,7 +215,6 @@ pub fn Home() -> Html {
                                 if profile.sub_tier.is_none() {
                                     html! {
                                         <div class="subscription-promo">
-                                            <p>{"Buy a subscription!"}</p>
                                             <Link<Route> to={Route::Pricing} classes="promo-link">
                                                 {"View Pricing →"}
                                             </Link<Route>>
@@ -224,7 +223,6 @@ pub fn Home() -> Html {
                                 } else if profile.credits_left <= 1.0 {
                                     html! {
                                         <div class="subscription-promo">
-                                            <p>{"Buy Overage Credits"}</p>
                                             <Link<Route> to={Route::Billing} classes="promo-link">
                                                 {"Billing →"}
                                             </Link<Route>>
@@ -1811,9 +1809,7 @@ pub fn Home() -> Html {
                         color: #7EB2FF;
                         font-weight: 500;
                         padding: 0.5rem 1rem;
-                        background: rgba(30, 144, 255, 0.1);
                         border-radius: 6px;
-                        border: 1px solid rgba(30, 144, 255, 0.3);
                     }
 
                     .ready-status {

@@ -379,10 +379,10 @@ pub fn keywords_section(props: &KeywordsProps) -> Html {
 
             .filter-section.main-filter::after {
                 position: absolute;
-                top: 50%;
-                right: -30px;
+                top: 5%;
+                right: 0;
                 transform: translateY(-50%);
-                font-size: 124px;
+                font-size: 100px;
                 text-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
                 z-index: 2;
             }
@@ -1589,7 +1589,7 @@ pub fn importance_priority_section(props: &ImportanceProps) -> Html {
     html! {
         <div class={classes!("filter-section", "main-filter", (!*is_active).then(|| "inactive"))}>
             <div class="filter-header">
-                <h3>{"4. AI Importance Analysis"}</h3>
+                <h3>{"4. AI Analysis"}</h3>
                 <div class="flow-step-status">
                     <div class={classes!("step-status", "ai-status", (*is_active).then(|| "active"))}>
                         {if !*is_active { "SKIP" } else { "CHECK" }}
@@ -1664,6 +1664,7 @@ pub fn importance_priority_section(props: &ImportanceProps) -> Html {
                     >{"Save"}</button>
                 }
             </div>
+
         </div>
     }
 }

@@ -11,6 +11,7 @@ pub struct Props {
     pub priority_senders: Vec<String>,
     pub waiting_checks: Vec<String>,
     pub threshold: i32,
+    pub is_active: bool,
 }
 
 #[function_component(ImapGeneralChecks)]
@@ -206,10 +207,8 @@ pub fn imap_general_checks(props: &Props) -> Html {
 
 html! {
         <div class="imap-checks-container">
-            <div class="filter-section">
-                <h3>{"General Importance Analysis"}</h3>
-                <p class="description">{"Configure how emails are analyzed for general importance"}</p>
-                
+
+            <div class={classes!("filter-section", (!props.is_active).then(|| "inactive"))}>
                 if *is_editing {
                     <div class="edit-section">
                         <textarea
@@ -240,15 +239,13 @@ html! {
                         </div>
                     </div>
                 } else {
-                    <div class="view-section">
-                        <div class="button-group">
-                            <button 
-                                onclick={on_edit_start}
-                                class="edit-button"
-                            >
-                                {"Customize Analysis Checks"}
-                            </button>
-                        </div>
+                    <div class="button-group">
+                        <button 
+                            onclick={on_edit_start}
+                            class="edit-button"
+                        >
+                            {"Customize AI Instructions"}
+                        </button>
                     </div>
                 }
 
@@ -257,11 +254,8 @@ html! {
                         {(*error_message).clone()}
                     </div>
                 }
-            </div>
 
-            <div class="filter-section prompt-showcase">
-                <h3>{"Current Configuration Preview"}</h3>
-                <p class="description">{"This is how your emails will be analyzed for importance"}</p>
+                <p class="description">{"Preview of AI instructions"}</p>
                 <pre class="prompt-content">
                     {full_prompt}
                 </pre>
@@ -269,6 +263,38 @@ html! {
 
             <style>
                 {r#"
+
+                .filter-section {
+                    background: rgba(30, 30, 30, 0.5);
+                    border: 1px solid rgba(30, 144, 255, 0.1);
+                    border-radius: 8px;
+                    padding: 1.5rem;
+                    margin-top: 1rem;
+                    transition: all 0.3s ease;
+                }
+                .filter-section h3 {
+                    color: white;
+                }
+
+                .filter-section.inactive {
+                    background: rgba(30, 30, 30, 0.3);
+                    border-color: rgba(255, 255, 255, 0.1);
+                    opacity: 0.7;
+                    filter: grayscale(20%);
+                }
+
+                .filter-section.inactive h3,
+                .filter-section.inactive .toggle-label {
+                    color: rgba(255, 255, 255, 0.5);
+                    filter: grayscale(20%);
+                }
+
+                .filter-section.inactive .filter-list li,
+                .filter-section.inactive .keyword-item {
+                    background: rgba(255, 255, 255, 0.05);
+                    border-color: rgba(255, 255, 255, 0.1);
+                    filter: grayscale(20%);
+                }
                 .imap-checks-container {
                     padding: 0;
                     margin: 0;

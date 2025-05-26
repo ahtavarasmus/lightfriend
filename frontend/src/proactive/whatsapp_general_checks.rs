@@ -212,9 +212,6 @@ pub fn whatsapp_general_checks(props: &Props) -> Html {
 html! {
         <div class="whatsapp-checks-container">
             <div class="filter-section">
-                <h3>{"General Importance Analysis"}</h3>
-                <p class="description">{"Configure how WhatsApp messages are analyzed for general importance"}</p>
-                
                 if *is_editing {
                     <div class="edit-section">
                         <textarea
@@ -245,15 +242,13 @@ html! {
                         </div>
                     </div>
                 } else {
-                    <div class="view-section">
-                        <div class="button-group">
-                            <button 
-                                onclick={on_edit_start}
-                                class="edit-button"
-                            >
-                                {"Customize Analysis Checks"}
-                            </button>
-                        </div>
+                    <div class="button-group">
+                        <button 
+                            onclick={on_edit_start}
+                            class="edit-button"
+                        >
+                            {"Customize AI Instructions"}
+                        </button>
                     </div>
                 }
 
@@ -262,11 +257,7 @@ html! {
                         {(*error_message).clone()}
                     </div>
                 }
-            </div>
-
-            <div class="filter-section prompt-showcase">
-                <h3>{"Current Configuration Preview"}</h3>
-                <p class="description">{"This is how your WhatsApp messages will be analyzed for importance"}</p>
+                <p class="description">{"Preview AI instructions"}</p>
                 <pre class="prompt-content">
                     {full_prompt}
                 </pre>

@@ -1226,8 +1226,8 @@ let group_states = use_state(|| {
                             width: 16px;
                             height: 16px;
                             cursor: pointer;
-                        }"}
-                        {".service-status-container {
+                        }
+                        .service-status-container {
                             display: flex;
                             align-items: center;
                             gap: 8px;

@@ -159,7 +159,7 @@ pub fn filter_flow_visualization(props: &FilterFlowVisualizationProps) -> Html {
                 <div class="flow-step">
                     <div class="step-header">
                         <div class="step-number">{"4"}</div>
-                        <div class="step-title">{"AI Importance Analysis"}</div>
+                        <div class="step-title">{"AI Analysis"}</div>
                         <div class="step-status ai-status">{"CHECK"}</div>
                     </div>
                     <div class="step-content">
@@ -839,7 +839,6 @@ pub fn connected_services(props: &Props) -> Html {
                                                     })}
                                                 />
                                                 <div class="filter-section importance-analysis-section">
-                                                    <h3>{"AI Importance Analysis Configuration"}</h3>
                                                     <div class="importance-analysis-container">
                                                         <div class="importance-config">
                                                             <ImportancePrioritySection
@@ -1163,7 +1162,6 @@ pub fn connected_services(props: &Props) -> Html {
                                                     })}
                                                 />
                                                 <div class="filter-section importance-analysis-section">
-                                                    <h3>{"AI Importance Analysis Configuration"}</h3>
                                                 <ImportancePrioritySection
                                                     service_type={service.service_type.clone()}
                                                     current_threshold={
@@ -1193,8 +1191,10 @@ pub fn connected_services(props: &Props) -> Html {
                                                     priority_senders={priority_senders.clone()}
                                                     waiting_checks={waiting_checks.clone()}
                                                     threshold={threshold}
+                                                    is_active={*is_proactive}
                                                 />
 
+                                                </div>
                                                     // Final Result
                                                     <div class="flow-result">
                                                         <div class="result-box no-match">
@@ -1207,7 +1207,6 @@ pub fn connected_services(props: &Props) -> Html {
                                                     </div>
 
                                                     <FilterActivityLog />
-                                                </div>
 
                                                 </>
                                             }
