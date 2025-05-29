@@ -11,7 +11,6 @@ pub struct Props {
     pub priority_senders: Vec<String>,
     pub waiting_checks: Vec<String>,
     pub threshold: i32,
-    pub is_active: bool,
 }
 
 #[function_component(ImapGeneralChecks)]
@@ -208,58 +207,56 @@ pub fn imap_general_checks(props: &Props) -> Html {
 html! {
         <div class="imap-checks-container">
 
-            <div class={classes!("filter-section", (!props.is_active).then(|| "inactive"))}>
-                if *is_editing {
-                    <div class="edit-section">
-                        <textarea
-                            class="checks-textarea"
-                            value={(*checks).clone()}
-                            onchange={on_change}
-                            placeholder="Enter your custom email analysis steps..."
-                        />
-                        <div class="button-group">
-                            <button 
-                                onclick={on_save}
-                                class="save-button"
-                            >
-                                {"Save Changes"}
-                            </button>
-                            <button 
-                                onclick={on_cancel}
-                                class="cancel-button"
-                            >
-                                {"Cancel"}
-                            </button>
-                            <button 
-                                onclick={on_reset}
-                                class="reset-button"
-                            >
-                                {"Reset to Default"}
-                            </button>
-                        </div>
-                    </div>
-                } else {
+            if *is_editing {
+                <div class="edit-section">
+                    <textarea
+                        class="checks-textarea"
+                        value={(*checks).clone()}
+                        onchange={on_change}
+                        placeholder="Enter your custom email analysis steps..."
+                    />
                     <div class="button-group">
                         <button 
-                            onclick={on_edit_start}
-                            class="edit-button"
+                            onclick={on_save}
+                            class="save-button"
                         >
-                            {"Customize AI Instructions"}
+                            {"Save Changes"}
+                        </button>
+                        <button 
+                            onclick={on_cancel}
+                            class="cancel-button"
+                        >
+                            {"Cancel"}
+                        </button>
+                        <button 
+                            onclick={on_reset}
+                            class="reset-button"
+                        >
+                            {"Reset to Default"}
                         </button>
                     </div>
-                }
+                </div>
+            } else {
+                <div class="button-group">
+                    <button 
+                        onclick={on_edit_start}
+                        class="edit-button"
+                    >
+                        {"Customize AI Instructions"}
+                    </button>
+                </div>
+            }
 
-                if !(*error_message).is_empty() {
-                    <div class="error-message">
-                        {(*error_message).clone()}
-                    </div>
-                }
+            if !(*error_message).is_empty() {
+                <div class="error-message">
+                    {(*error_message).clone()}
+                </div>
+            }
 
-                <p class="description">{"Preview of AI instructions"}</p>
-                <pre class="prompt-content">
-                    {full_prompt}
-                </pre>
-            </div>
+            <p class="description">{"Preview of AI instructions"}</p>
+            <pre class="prompt-content">
+                {full_prompt}
+            </pre>
 
             <style>
                 {r#"

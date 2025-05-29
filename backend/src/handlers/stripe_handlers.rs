@@ -30,6 +30,7 @@ pub struct BuyCreditsRequest {
     pub amount_dollars: f32,
 }
 
+// TODO create sub checkout and wehbook handler for tier 1 sub
 
 pub async fn create_subscription_checkout(
     State(state): State<Arc<AppState>>,

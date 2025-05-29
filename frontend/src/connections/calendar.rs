@@ -191,7 +191,7 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
         <div class="service-item">
             <div class="service-header">
                 <div class="service-name">
-                    <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg" alt="Google Calendar"/>
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg" alt="Google Calendar"  width="24" height="24"/>
                     {"Google Calendar"}
                 </div>
                 <button class="info-button" onclick={Callback::from(|_| {
@@ -383,32 +383,44 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                         }
                     </div>
                 } else {
-                    <div class="calendar-connect-options">
-                        <label class="calendar-checkbox">
-                            <input 
-                                type="checkbox"
-                                checked={*all_calendars}
-                                onchange={
-                                    let all_calendars = all_calendars.clone();
-                                    Callback::from(move |e: Event| {
-                                        let input: HtmlInputElement = e.target_unchecked_into();
-                                        all_calendars.set(input.checked());
-                                    })
+                    if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
+                        <div class="calendar-connect-options">
+                            <label class="calendar-checkbox">
+                                <input 
+                                    type="checkbox"
+                                    checked={*all_calendars}
+                                    onchange={
+                                        let all_calendars = all_calendars.clone();
+                                        Callback::from(move |e: Event| {
+                                            let input: HtmlInputElement = e.target_unchecked_into();
+                                            all_calendars.set(input.checked());
+                                        })
+                                    }
+                                />
+                                {"Access all calendars (including shared)"}
+                            </label>
+                            <button 
+                                onclick={onclick_calendar}
+                                class="connect-button"
+                            >
+                                if *connecting {
+                                    {"Connecting..."}
+                                } else {
+                                    {"Connect"}
                                 }
-                            />
-                            {"Access all calendars (including shared)"}
-                        </label>
-                        <button 
-                            onclick={onclick_calendar}
-                            class="connect-button"
-                        >
-                            if *connecting {
-                                {"Connecting..."}
-                            } else {
-                                {"Connect"}
-                            }
-                        </button>
-                    </div>
+                            </button>
+                        </div>
+                    } else {
+                        <div class="upgrade-prompt">
+                            <div class="upgrade-content">
+                                <h3>{"Upgrade to Enable Calendar Integration"}</h3>
+                                <p>{"Calendar integration is available for Espace Plan subscribers. Upgrade your plan to connect your Google Calendar and enjoy seamless event management through SMS and voice calls."}</p>
+                                <a href="/pricing" class="upgrade-button">
+                                    {"View Pricing Plans"}
+                                </a>
+                            </div>
+                        </div>
+                    }
                 }
 
             if let Some(err) = (*error).as_ref() {
@@ -558,6 +570,40 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                         font-size: 0.9rem;
                         padding-top: 1rem;
                         border-top: 1px solid rgba(30, 144, 255, 0.1);
+                    }
+
+                    .upgrade-prompt {
+                        background: rgba(30, 144, 255, 0.1);
+                        padding: 1.5rem;
+                        border-radius: 8px;
+                        text-align: center;
+                        margin-top: 1rem;
+                    }
+
+                    .upgrade-content h3 {
+                        color: #1E90FF;
+                        margin: 0 0 1rem 0;
+                        font-size: 1.2rem;
+                    }
+
+                    .upgrade-content p {
+                        color: #CCC;
+                        margin-bottom: 1.5rem;
+                        line-height: 1.5;
+                    }
+
+                    .upgrade-button {
+                        display: inline-block;
+                        background-color: #1E90FF;
+                        color: white;
+                        padding: 0.8rem 1.5rem;
+                        border-radius: 4px;
+                        text-decoration: none;
+                        transition: background-color 0.3s;
+                    }
+
+                    .upgrade-button:hover {
+                        background-color: #1873CC;
                     }
                 "#}
             </style>

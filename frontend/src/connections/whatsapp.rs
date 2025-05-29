@@ -241,7 +241,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
         <div class="whatsapp-connect">
             <div class="service-header">
                 <div class="service-name">
-                    <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp"/>
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp"  width="24" height="24"/>
                     {"WhatsApp"}
                 </div>
                 if let Some(status) = (*connection_status).clone() {
@@ -549,12 +549,24 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                                 </div>
                             }
                             } else {
-                                <p class="service-description">
-                                    {"Send and receive WhatsApp messages through SMS or voice calls."}
-                                </p>
-                                <button onclick={start_connection} class="connect-button">
-                                    {"Connect WhatsApp"}
-                                </button>
+                                if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
+                                    <p class="service-description">
+                                        {"Send and receive WhatsApp messages through SMS or voice calls."}
+                                    </p>
+                                    <button onclick={start_connection} class="connect-button">
+                                        {"Connect WhatsApp"}
+                                    </button>
+                                } else {
+                                    <div class="upgrade-prompt">
+                                        <div class="upgrade-content">
+                                            <h3>{"Upgrade to Enable WhatsApp Integration"}</h3>
+                                            <p>{"WhatsApp integration is available for Espace Plan subscribers. Upgrade your plan to connect your WhatsApp account and enjoy seamless message forwarding through SMS and voice calls."}</p>
+                                            <a href="/pricing" class="upgrade-button">
+                                                {"View Pricing Plans"}
+                                            </a>
+                                        </div>
+                                    </div>
+                                }
                             }
                     }
                 </div>

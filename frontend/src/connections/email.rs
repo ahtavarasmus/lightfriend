@@ -248,7 +248,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
         <div class="service-item">
             <div class="service-header">
                 <div class="service-name">
-                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%234285f4' d='M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48H48zM0 176V384c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V176L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z'/%3E%3C/svg%3E" alt="IMAP"/>
+                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%234285f4' d='M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48H48zM0 176V384c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V176L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z'/%3E%3C/svg%3E" alt="IMAP"  width="24" height="24"/>
                     {"IMAP Email"}
                 </div>
                 <button class="info-button" onclick={Callback::from(|_| {
@@ -323,6 +323,8 @@ pub fn email_connect(props: &EmailProps) -> Html {
                 <a class="nice-link" href="https://myaccount.google.com/apppasswords" target="_blank">{"here"}</a>
                 {" (requires 2FA)."}
             </p>
+
+            if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
                 if *imap_connected {
                     <div class="imap-controls">
                         <button 
@@ -526,6 +528,33 @@ pub fn email_connect(props: &EmailProps) -> Html {
                     {err}
                 </div>
             }
+        } else {
+            <div class="upgrade-prompt">
+                <div class="upgrade-content">
+                    <h3>{"Upgrade to Enable Email Integration"}</h3>
+                    <p>{"Email integration is available for premium plan subscribers. Upgrade your plan to connect your email account and manage your emails through SMS and voice calls."}</p>
+                    <a href="/pricing" class="upgrade-button">
+                        {"View Pricing Plans"}
+                    </a>
+                </div>
+            </div>
+            {
+                if *imap_connected {
+                    html! {
+                    <div class="imap-controls">
+                        <button 
+                            onclick={onclick_imap_disconnect}
+                            class="disconnect-button"
+                        >
+                            {"Disconnect previous connection"}
+                        </button>
+                    </div>
+                    }
+                } else {
+                    html! {}
+                }
+            }
+        }
         </div>
     }
 }

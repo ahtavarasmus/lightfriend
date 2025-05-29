@@ -271,7 +271,7 @@ let group_states = use_state(|| {
                             <div class="service-item">
                                 <div class="service-header">
                                     <div class="service-name">
-                                        <img src="https://www.perplexity.ai/favicon.ico" alt="Perplexity"/>
+                                        <img src="https://www.perplexity.ai/favicon.ico" alt="Perplexity"  width="24" height="24"/>
                                         {"Perplexity AI"}
                                     </div>
                                 </div>
@@ -297,15 +297,6 @@ let group_states = use_state(|| {
                                 <div class="service-header">
                                     <div class="service-name">
                                         {"🎵 Shazam"}
-                                        {
-                                            if props.sub_tier.is_none() && !props.discount {
-                                                html! {
-                                                    <span class="pro-tag">{"Pro"}</span>
-                                                }
-                                            } else {
-                                                html! {}
-                                            }
-                                        }
                                     </div>
                                     <button class="info-button" onclick={Callback::from(|_| {
                                         if let Some(element) = web_sys::window()
@@ -428,7 +419,7 @@ let group_states = use_state(|| {
                             <div class="service-item coming-soon">
                                 <div class="service-header">
                                     <div class="service-name">
-                                        <img src="https://upload.wikimedia.org/wikipedia/commons/d/df/Microsoft_Office_Outlook_%282018%E2%80%93present%29.svg" alt="Outlook Calendar"/>
+                                        <img src="https://upload.wikimedia.org/wikipedia/commons/d/df/Microsoft_Office_Outlook_%282018%E2%80%93present%29.svg" alt="Outlook Calendar"  width="24" height="24"/>
                                         {"Outlook Calendar"}
                                         <span class="coming-soon-tag">{"Coming Soon"}</span>
                                     </div>
@@ -594,7 +585,7 @@ let group_states = use_state(|| {
                                         <div class="service-item coming-soon">
                                             <div class="service-header">
                                                 <div class="service-name">
-                                                    <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" alt="Telegram"/>
+                                                    <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" alt="Telegram" width="24" height="24"/>
                                                     {"Telegram"}
                                                     <span class="coming-soon-tag">{"Coming Soon"}</span>
                                                 </div>
@@ -650,15 +641,6 @@ let group_states = use_state(|| {
                                 <div class="service-header">
                                     <div class="service-name">
                                         {"⏰ Waiting Checks"}
-                                        {
-                                            if props.sub_tier.is_none() && !props.discount {
-                                                html! {
-                                                    <span class="pro-tag">{"Pro"}</span>
-                                                }
-                                            } else {
-                                                html! {}
-                                            }
-                                        }
                                     </div>
                                     <button class="info-button" onclick={Callback::from(|_| {
                                         if let Some(element) = web_sys::window()
@@ -1085,8 +1067,10 @@ let group_states = use_state(|| {
 }
 
 .service-name img {
-    width: 24px;
-    height: 24px;
+    width: 20px !important;
+    height: 20px !important;
+    object-fit: contain;
+    vertical-align: middle;
 }
 
 .service-status {

@@ -7,7 +7,7 @@ pub fn why() -> Html {
             <div class="why-background"></div>
             <section class="why-hero">
                 <h1>{"Why Choose a Dumbphone?"}</h1>
-                <p>{"Your willpower shouldn't be spent fighting an endless stream of notifications and addictive apps. Tech companies employ thousands of experts specifically to capture and hold your attention. Instead of exhausting yourself resisting these forces, why not simply step away? Choosing a dumbphone isn't about rejecting technology - you'll still have access to powerful tools like AI when you need them. It's about consciously choosing where your attention goes. It's about being the main character in your own life story, not a spectator scrolling through others' highlights."}</p>
+                <p>{"Your time is precious - why waste it fighting an endless battle against notifications and addictive apps? While tech giants deploy armies of experts to hijack your focus, there's a simpler path: stepping away. Choosing a dumbphone isn't about going backwards, you'll still have cutting edge AI at your fingertips. It's about taking back control of your attention and living life as its protagonist rather than watching it pass by through a screen. Make technology work for you, not the other way around."}</p>
             </section>
 
             <section class="why-section alternate">
@@ -52,7 +52,7 @@ pub fn why() -> Html {
                     <div class="why-text">
                         <h2>{"The Lost Art of Boredom"}</h2>
                         <p>
-                            {"Remember when being bored meant letting your mind wander, leading to unexpected bursts of creativity and self-discovery? Today's smartphones have eliminated these precious moments of 'empty time' – replacing them with endless scrolling and constant stimulation."}
+                            {"Remember when being bored meant letting your mind wander, leading to unexpected bursts of creativity and self-discovery? Today's smartphones have eliminated these precious moments of 'empty time' - replacing them with endless scrolling and constant stimulation."}
                         </p>
                         <p>
                             {"But boredom isn't your enemy – it's the canvas for creativity, the spark for innovation, and the space where your best ideas are born. When you're constantly entertained, you lose those moments of reflection that lead to personal growth and creative breakthroughs."}
@@ -75,7 +75,7 @@ pub fn why() -> Html {
                             {"Modern smartphones can make life more predictable and 'safer', but at what cost? When everything is planned, reviewed, and optimized, we lose the charm of spontaneity and the thrill of the unknown. Sometimes, the most memorable experiences come from those moments when we step away from our digital safety nets and let life surprise us."}
                         </p>
                         <p>
-                            {"Your next adventure, friendship, or favorite memory might be waiting just around the corner – but you'll miss it if you're too busy following the perfect route on your screen."}
+                            {"Your next adventure, friendship, or favorite memory might be waiting just around the corner - but you'll miss it if you're too busy following the perfect route on your screen."}
                         </p>
                     </div>
                     <div class="why-image">

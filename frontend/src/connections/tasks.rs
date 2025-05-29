@@ -178,7 +178,7 @@ pub fn tasks_connect(props: &TasksConnectProps) -> Html {
         <div class="service-item">
             <div class="service-header">
             <div class="service-name">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/5/5b/Google_Tasks_2021.svg" alt="Google Tasks"/>
+                <img src="https://upload.wikimedia.org/wikipedia/commons/5/5b/Google_Tasks_2021.svg" alt="Google Tasks"  width="24" height="24"/>
                 {"Google Tasks"}
             </div>
             <button class="info-button" onclick={Callback::from(|_| {
@@ -206,123 +206,253 @@ pub fn tasks_connect(props: &TasksConnectProps) -> Html {
                 {"Create and manage tasks and ideas through SMS or voice calls. This integration creates a dedicated \"lightfriend\" list, keeping your existing task lists untouched. "}
                 {"Perfect for quick note-taking or capturing ideas on the go."}
             </p>
-            <div id="tasks-info" class="info-section" style="display: none">
-                <h4>{"How It Works"}</h4>
+                            <div id="tasks-info" class="info-section" style="display: none">
+                                <h4>{"How It Works"}</h4>
 
-                <div class="info-subsection">
-                    <h5>{"SMS and Voice Call Tools"}</h5>
-                    <ul>
-                        <li>{"Create a Task: Add a new task with optional due date"}</li>
-                        <li>{"List Tasks: View your pending and completed tasks"}</li>
-                    </ul>
-                </div>
+                                <div class="info-subsection">
+                                    <h5>{"SMS and Voice Call Tools"}</h5>
+                                    <ul>
+                                        <li>{"Create a Task: Add a new task with optional due date"}</li>
+                                        <li>{"List Tasks: View your pending and completed tasks"}</li>
+                                    </ul>
+                                </div>
 
-                <div class="info-subsection">
-                    <h5>{"Task Management Features"}</h5>
-                    <ul>
-                        <li>{"Dedicated List: All tasks are stored in a \"lightfriend\" list"}</li>
-                        <li>{"Due Dates: Set deadlines for your tasks (note: times will be set to midnight)"}</li>
-                        <li>{"List Organization: Your existing Google Tasks lists remain untouched"}</li>
-                    </ul>
-                </div>
+                                <div class="info-subsection">
+                                    <h5>{"Task Management Features"}</h5>
+                                    <ul>
+                                        <li>{"Dedicated List: All tasks are stored in a \"lightfriend\" list"}</li>
+                                        <li>{"Due Dates: Set deadlines for your tasks (note: times will be set to midnight)"}</li>
+                                        <li>{"List Organization: Your existing Google Tasks lists remain untouched"}</li>
+                                    </ul>
+                                </div>
 
-                <div class="info-subsection security-notice">
-                    <h5>{"Security & Privacy"}</h5>
-                    <p>{"Your tasks data is protected through:"}</p>
-                    <ul>
-                        <li>{"OAuth 2.0: Secure authentication with storing only the encrypted access token"}</li>
-                        <li>{"Limited Scope: Access restricted to tasks management only"}</li>
-                        <li>{"Revocable Access: You can disconnect anytime through lightfriend or Google Account settings"}</li>
-                    </ul>
-                    <p class="security-recommendation">{"Note: Tasks are transmitted via SMS or voice calls. For sensitive task details, consider using Google Tasks directly."}</p>
-                </div>
-            </div>
-            if *tasks_connected {
-                <div class="tasks-controls">
-                    <button 
-                        onclick={onclick_delete_tasks}
-                        class="disconnect-button"
-                    >
-                        {"Disconnect"}
-                    </button>
+                                <div class="info-subsection security-notice">
+                                    <h5>{"Security & Privacy"}</h5>
+                                    <p>{"Your tasks data is protected through:"}</p>
+                                    <ul>
+                                        <li>{"OAuth 2.0: Secure authentication with storing only the encrypted access token"}</li>
+                                        <li>{"Limited Scope: Access restricted to tasks management only"}</li>
+                                        <li>{"Revocable Access: You can disconnect anytime through lightfriend or Google Account settings"}</li>
+                                    </ul>
+                                    <p class="security-recommendation">{"Note: Tasks are transmitted via SMS or voice calls. For sensitive task details, consider using Google Tasks directly."}</p>
+                                </div>
+                            </div>
+
                     {
-                        if props.user_id == 1 {
+                        if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
                             html! {
                                 <>
+                            
+                            if *tasks_connected {
+                                <div class="tasks-controls">
                                     <button 
-                                        onclick={onclick_test_tasks}
-                                        class="test-button"
+                                        onclick={onclick_delete_tasks}
+                                        class="disconnect-button"
                                     >
-                                        {"Test Tasks"}
+                                        {"Disconnect"}
                                     </button>
-                                    <button
-                                        onclick={
-                                            let error = error.clone();
-                                            Callback::from(move |_: MouseEvent| {
-                                                let error = error.clone();
-                                                if let Some(window) = web_sys::window() {
-                                                    if let Ok(Some(storage)) = window.local_storage() {
-                                                        if let Ok(Some(token)) = storage.get_item("token") {
-                                                            spawn_local(async move {
-                                                                let request = Request::post(&format!("{}/api/tasks/create", config::get_backend_url()))
-                                                                    .header("Authorization", &format!("Bearer {}", token))
-                                                                    .header("Content-Type", "application/json")
-                                                                    .json(&json!({
-                                                                        "title": format!("Test task created at {}", Date::new_0().to_iso_string()),
-                                                                    }))
-                                                                    .unwrap()
-                                                                    .send()
-                                                                    .await;
+                                    {
+                                        if props.user_id == 1 {
+                                            html! {
+                                                <>
+                                                    <button 
+                                                        onclick={onclick_test_tasks}
+                                                        class="test-button"
+                                                    >
+                                                        {"Test Tasks"}
+                                                    </button>
+                                                    <button
+                                                        onclick={
+                                                            let error = error.clone();
+                                                            Callback::from(move |_: MouseEvent| {
+                                                                let error = error.clone();
+                                                                if let Some(window) = web_sys::window() {
+                                                                    if let Ok(Some(storage)) = window.local_storage() {
+                                                                        if let Ok(Some(token)) = storage.get_item("token") {
+                                                                            spawn_local(async move {
+                                                                                let request = Request::post(&format!("{}/api/tasks/create", config::get_backend_url()))
+                                                                                    .header("Authorization", &format!("Bearer {}", token))
+                                                                                    .header("Content-Type", "application/json")
+                                                                                    .json(&json!({
+                                                                                        "title": format!("Test task created at {}", Date::new_0().to_iso_string()),
+                                                                                    }))
+                                                                                    .unwrap()
+                                                                                    .send()
+                                                                                    .await;
 
-                                                                match request {
-                                                                    Ok(response) => {
-                                                                        if response.status() == 200 {
-                                                                            if let Ok(data) = response.json::<serde_json::Value>().await {
-                                                                                web_sys::console::log_1(&format!("Created task: {:?}", data).into());
-                                                                            }
-                                                                        } else {
-                                                                            error.set(Some("Failed to create task".to_string()));
+                                                                                match request {
+                                                                                    Ok(response) => {
+                                                                                        if response.status() == 200 {
+                                                                                            if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                                                                web_sys::console::log_1(&format!("Created task: {:?}", data).into());
+                                                                                            }
+                                                                                        } else {
+                                                                                            error.set(Some("Failed to create task".to_string()));
+                                                                                        }
+                                                                                    }
+                                                                                    Err(e) => {
+                                                                                        error.set(Some(format!("Network error: {}", e)));
+                                                                                    }
+                                                                                }
+                                                                            });
                                                                         }
                                                                     }
-                                                                    Err(e) => {
-                                                                        error.set(Some(format!("Network error: {}", e)));
+                                                                }
+                                                            })
+                                                        }
+                                                        class="test-button"
+                                                    >
+                                                        {"Create Test Task"}
+                                                    </button>
+                                                </>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                                </div>
+                            } else {
+                                <button 
+                                    onclick={onclick_tasks}
+                                    class="connect-button"
+                                >
+                                    if *connecting_tasks {
+                                        {"Connecting..."}
+                                    } else {
+                                        {"Connect"}
+                                    }
+                                </button>
+                            }
+                            if let Some(err) = (*error).as_ref() {
+                                <div class="error-message">
+                                    {err}
+                                </div>
+                            }
+                        </>
+                    }
+                } else {
+                    html! {
+                        <>
+                        <div class="upgrade-prompt">
+                            <div class="upgrade-content">
+                                <h3>{"Upgrade to Enable Tasks Integration"}</h3>
+                                <p>{"Google Tasks integration is available for premium plan subscribers. Upgrade your plan to connect your tasks and manage them through SMS and voice calls."}</p>
+                                <a href="/pricing" class="upgrade-button">
+                                    {"View Pricing Plans"}
+                                </a>
+                            </div>
+                        </div>
+                        if *tasks_connected {
+                                <div class="tasks-controls">
+                                    <button 
+                                        onclick={onclick_delete_tasks}
+                                        class="disconnect-button"
+                                    >
+                                        {"Disconnect"}
+                                    </button>
+                                    {
+                                        if props.user_id == 1 {
+                                            html! {
+                                                <>
+                                                    <button 
+                                                        onclick={onclick_test_tasks}
+                                                        class="test-button"
+                                                    >
+                                                        {"Test Tasks"}
+                                                    </button>
+                                                    <button
+                                                        onclick={
+                                                            let error = error.clone();
+                                                            Callback::from(move |_: MouseEvent| {
+                                                                let error = error.clone();
+                                                                if let Some(window) = web_sys::window() {
+                                                                    if let Ok(Some(storage)) = window.local_storage() {
+                                                                        if let Ok(Some(token)) = storage.get_item("token") {
+                                                                            spawn_local(async move {
+                                                                                let request = Request::post(&format!("{}/api/tasks/create", config::get_backend_url()))
+                                                                                    .header("Authorization", &format!("Bearer {}", token))
+                                                                                    .header("Content-Type", "application/json")
+                                                                                    .json(&json!({
+                                                                                        "title": format!("Test task created at {}", Date::new_0().to_iso_string()),
+                                                                                    }))
+                                                                                    .unwrap()
+                                                                                    .send()
+                                                                                    .await;
+
+                                                                                match request {
+                                                                                    Ok(response) => {
+                                                                                        if response.status() == 200 {
+                                                                                            if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                                                                web_sys::console::log_1(&format!("Created task: {:?}", data).into());
+                                                                                            }
+                                                                                        } else {
+                                                                                            error.set(Some("Failed to create task".to_string()));
+                                                                                        }
+                                                                                    }
+                                                                                    Err(e) => {
+                                                                                        error.set(Some(format!("Network error: {}", e)));
+                                                                                    }
+                                                                                }
+                                                                            });
+                                                                        }
                                                                     }
                                                                 }
-                                                            });
+                                                            })
                                                         }
-                                                    }
-                                                }
-                                            })
+                                                        class="test-button"
+                                                    >
+                                                        {"Create Test Task"}
+                                                    </button>
+                                                </>
+                                            }
+                                        } else {
+                                            html! {}
                                         }
-                                        class="test-button"
-                                    >
-                                        {"Create Test Task"}
-                                    </button>
-                                </>
+                                    }
+                                </div>
                             }
-                        } else {
-                            html! {}
-                        }
+                        </>
                     }
-                </div>
-            } else {
-                <button 
-                    onclick={onclick_tasks}
-                    class="connect-button"
-                >
-                    if *connecting_tasks {
-                        {"Connecting..."}
-                    } else {
-                        {"Connect"}
-                    }
-                </button>
-            }
-            if let Some(err) = (*error).as_ref() {
-                <div class="error-message">
-                    {err}
-                </div>
+                }
+
             }
             <style>
+                {r#"
+                    .upgrade-prompt {
+                        padding: 20px;
+                        text-align: center;
+                        margin-top: 1rem;
+                    }
+
+                    .upgrade-content {
+                        max-width: 500px;
+                        margin: 0 auto;
+                    }
+
+                    .upgrade-content h3 {
+                        color: #1E90FF;
+                        margin-bottom: 1rem;
+                    }
+
+                    .upgrade-content p {
+                        color: #CCC;
+                        margin-bottom: 1.5rem;
+                    }
+
+                    .upgrade-button {
+                        display: inline-block;
+                        padding: 10px 20px;
+                        background-color: #1E90FF;
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 5px;
+                        transition: background-color 0.3s;
+                    }
+
+                    .upgrade-button:hover {
+                        background-color: #1873CC;
+                    }
+                "#}
                 {r#"
                     .info-button {
                         background: none;

@@ -6,6 +6,8 @@ use web_sys::{window, js_sys, HtmlInputElement, KeyboardEvent, InputEvent, Event
 use wasm_bindgen::JsValue;
 use crate::config;
 use crate::pages::proactive::{PrioritySender, ImportancePriority, WaitingCheck};
+use crate::profile::imap_general_checks::ImapGeneralChecks;
+use crate::proactive::whatsapp_general_checks::WhatsappGeneralChecks;
 use serde_json::json;
 
 use crate::pages::proactive::format_date_for_input;
@@ -1438,11 +1440,17 @@ pub fn priority_senders_section(props: &PrioritySendersProps) -> Html {
     }
 }
 
+
 #[derive(Properties, PartialEq, Clone)]
 pub struct ImportanceProps {
     pub service_type: String,
     pub current_threshold: i32,
     pub on_change: Callback<i32>,
+    pub keywords: Vec<String>,
+    pub priority_senders: Vec<String>,
+    pub waiting_checks: Vec<String>,
+    pub threshold: i32,
+    pub is_active: bool,
 }
 
 #[function_component(ImportancePrioritySection)]
@@ -1665,6 +1673,32 @@ pub fn importance_priority_section(props: &ImportanceProps) -> Html {
                 }
             </div>
 
+            {
+                if props.service_type == "whatsapp" {
+                    html! {
+                        <WhatsappGeneralChecks 
+                            on_update={Callback::from(|_| {})}
+                            keywords={props.keywords.clone()}
+                            priority_senders={props.priority_senders.clone()}
+                            waiting_checks={props.waiting_checks.clone()}
+                            threshold={threshold}
+                        />
+                    }
+                } else if props.service_type == "imap" {
+                    html! {
+                        <ImapGeneralChecks 
+                            on_update={Callback::from(|_| {})}
+                            keywords={props.keywords.clone()}
+                            priority_senders={props.priority_senders.clone()}
+                            waiting_checks={props.waiting_checks.clone()}
+                            threshold={threshold}
+                        />
+                    }
+                } else {
+                    html! {}
+                }
+                
+            }
         </div>
     }
 }

@@ -152,11 +152,65 @@ pub fn pricing(props: &PricingProps) -> Html {
         <div class="pricing-container">
             <div class="pricing-header">
                 <h1>{"Your Personal AI Assistant"}</h1>
-                <p>{"Buy back 135 hours every month."}</p>
+                <p>{"Buy back over 100 hours every month*. Dumbphone sold separately."}</p>
             </div>
 
-            <div class="pricing-grid single">
-                <div class="pricing-card subscription">
+            <div class="pricing-grid">
+                <div class="pricing-card subscription basic">
+                    <div class="card-header">
+                        <h3>{"Hard Mode"}</h3>
+                        <div class="price-container">
+                            {
+                                html! {
+                                    <>
+                                        <div class="price">
+                                            <span class="amount">{"€7.50"}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </div>
+                                    </>
+                                }
+                            }
+                        </div>
+                        <div class="includes">
+                            <p>{"Subscription includes:"}</p>
+                            <ul class="quota-list">
+                                <li>{"📞 30-unit quota (1 message = 1 minute)"}</li>
+                                <li class="unavailable">{"🎯 filtered notifications"}</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <ul>
+                        <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="feature-logo" />{"Search Internet with Perplexity"}</li>
+                        <li>{"☀️ Fetch Current Weather"}</li>
+                        <li class="unavailable"><img src="/assets/whatsapplogo.png" alt="WhatsApp" class="feature-logo" />{"Fetch & Send WhatsApp Messages"}</li>
+                        <li class="unavailable">{"📧 Email: Fetch Emails + Receive Notifications"}</li>
+                        <li class="unavailable">{"📅 Calendar: Fetch & Create Events + Receive Notifications"}</li>
+                        <li class="unavailable">{"✅ Tasks: Fetch & Create Tasks"}</li>
+                        <li class="unavailable">{"🎵 Recognize Songs with Shazam"}</li>
+                        <li class="unavailable">{"🔄 24/7 automated monitoring"}</li>
+                        <li class="unavailable">{"🚀 Priority support"}</li>
+                    </ul>
+                    {
+                        if props.is_logged_in && props.sub_tier.is_none() {
+                            html! {
+                                <CheckoutButton user_id={props.user_id} user_email={props.user_email.clone()} />
+                            }
+                        } else if !props.is_logged_in {
+                            html! {
+                                <Link<Route> to={Route::Register} classes="forward-link signup-link">
+                                    <button class="iq-button signup-button"><b>{"Get Started"}</b></button>
+                                </Link<Route>>
+                            }
+                        } else {
+                            html! {
+                                <button class="iq-button disabled" disabled=true><b>{"Already subscribed"}</b></button>
+                            }
+                        }
+                    }
+                </div>
+
+                <div class="pricing-card subscription premium">
+                    <div class="popular-tag">{"All-Inclusive"}</div>
                     <div class="popular-tag">{"All-Inclusive"}</div>
                     <div class="card-header">
                         <h3>{"Escape Plan"}</h3>
@@ -165,13 +219,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 if !props.is_logged_in {
                                     html! {
                                         <>
-                                            <div class="price us-price">
-                                                <span class="region">{"US: "}</span>
-                                                <span class="amount">{"€15.00"}</span>
-                                                <span class="period">{"/month"}</span>
-                                            </div>
                                             <div class="price">
-                                                <span class="region">{"International: "}</span>
                                                 <span class="amount">{"€20.00"}</span>
                                                 <span class="period">{"/month"}</span>
                                             </div>
@@ -194,26 +242,22 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <div class="includes">
                             <p>{"Subscription includes:"}</p>
                             <ul class="quota-list">
-                                <li>{"⏰ 4.5 hours of extra time per day"}</li>
                                 <li>{"📞 100-unit quota (1 message = 1 minute)"}</li>
                                 <li>{"🎯 up to 100 filtered notifications"}</li>
                             </ul>
                         </div>
                     </div>
                     <ul>
+                        <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="feature-logo" />{"Search Internet with Perplexity"}</li>
+                        <li>{"☀️ Fetch Current Weather"}</li>
                         <li><img src="/assets/whatsapplogo.png" alt="WhatsApp" class="feature-logo" />{"Fetch & Send WhatsApp Messages"}</li>
                         <li>{"📧 Email: Fetch Emails + Receive Notifications"}</li>
                         <li>{"📅 Calendar: Fetch & Create Events + Receive Notifications"}</li>
                         <li>{"✅ Tasks: Fetch & Create Tasks"}</li>
-                        <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="feature-logo" />{"Search Internet with Perplexity"}</li>
                         <li>{"🎵 Recognize Songs with Shazam"}</li>
-                        <li>{"☀️ Fetch Current Weather"}</li>
                         <li>{"🔄 24/7 automated monitoring"}</li>
                         <li>{"🚀 Priority support"}</li>
                     </ul>
-                    <div class="includes">
-                        <p>{"Dumbphone sold separately*"}</p>
-                    </div>
                     {
                         if props.is_logged_in && props.sub_tier.is_none() {
                             html! {
@@ -236,7 +280,7 @@ pub fn pricing(props: &PricingProps) -> Html {
 
             <div class="usage-pricing">
                 <h2>{"Overage Rates"}</h2>
-                <p>{"After your monthly quota is used, these rates apply for additional usage"}</p>
+                <p>{"After your monthly quota is used, these rates apply for additional usage. You have to buy these in advance or setup automatic recharge if you want to prepare to never run out."}</p>
                 
                 <div class="usage-grid">
                     <div class="pricing-card main">
@@ -310,6 +354,10 @@ pub fn pricing(props: &PricingProps) -> Html {
                 </div>
             </div>
 
+            <div class="footnotes">
+                <p class="footnote">{"* Gen Z spends an average of 4 to 7 hours a day on their phones, often with up to 60% of that time on social media sessions they later regret, wishing they'd used those hours for something more meaningful. "}<a href="https://explodingtopics.com/blog/smartphone-usage-stats" target="_blank" rel="noopener noreferrer">{"Read the study"}</a></p>
+            </div>
+
             <div class="legal-links">
                 <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
                 {" | "}
@@ -339,6 +387,8 @@ pub fn pricing(props: &PricingProps) -> Html {
                     position: relative;
                     overflow: hidden;
                 }
+
+
 
                 .signup-button::before {
                     content: '';
@@ -390,15 +440,47 @@ pub fn pricing(props: &PricingProps) -> Html {
                     background: rgba(30, 30, 30, 0.7);
                 }
 
-                .pricing-card.free {
-                    background: rgba(30, 30, 30, 0.8);
+                .footnotes {
+                    margin: 4rem auto;
+                    max-width: 800px;
+                    padding: 2rem;
+                    background: rgba(30, 30, 30, 0.7);
+                    border-radius: 16px;
                     border: 1px solid rgba(30, 144, 255, 0.1);
-                    position: relative;
                 }
+
+                .footnote {
+                    color: #999;
+                    font-size: 0.9rem;
+                    line-height: 1.6;
+                    margin-bottom: 1rem;
+                }
+
+                .footnote:last-child {
+                    margin-bottom: 0;
+                }
+
+                .footnote a {
+                    color: #7EB2FF;
+                    text-decoration: none;
+                    transition: color 0.3s ease;
+                }
+
+                .footnote a:hover {
+                    color: #fff;
+                    text-decoration: underline;
+                }
+
+.pricing-card.free {
+    background: rgba(30, 30, 30, 0.8);
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    position: relative;
+    transition: all 0.3s ease-out;
+}
 
                 .pricing-card.free:hover {
                     border-color: rgba(30, 144, 255, 0.3);
-                    box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
+                    box-shadow: 0 10px 30px rgba(30, 144, 255, 0.1);
                 }
 
 .pricing-card.subscription {
@@ -409,7 +491,7 @@ pub fn pricing(props: &PricingProps) -> Html {
     overflow: hidden;
     backdrop-filter: blur(10px);
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-    transition: transform 1.8s cubic-bezier(0.4, 0, 0.2, 1), border-color 1.8s ease, box-shadow 1.8s ease;
+    transition: all 0.3s ease-out;
 }
 
 .pricing-card.subscription::before {
@@ -425,13 +507,16 @@ pub fn pricing(props: &PricingProps) -> Html {
         rgba(30, 144, 255, 0.05) 100%
     );
     z-index: -1;
+    transition: opacity 0.3s ease-out;
 }
 
 .pricing-card.subscription:hover {
-    transform: scale(1.08);
-    border-color: rgba(30, 144, 255, 0.5);
-    box-shadow: 0 8px 32px rgba(30, 144, 255, 0.25);
+    border-color: rgba(30, 144, 255, 0.4);
+    box-shadow: 0 15px 40px rgba(30, 144, 255, 0.15);
+}
 
+.pricing-card.subscription:hover::before {
+    opacity: 0.8;
 }
 
                 .popular-tag {
@@ -551,10 +636,31 @@ pub fn pricing(props: &PricingProps) -> Html {
     z-index: 2;
 }
 
-                .pricing-grid.single {
-                    grid-template-columns: 1fr;
-                    max-width: 600px;
+.pricing-grid {
+                    grid-template-columns: repeat(2, 1fr);
+                    max-width: 1200px;
                     margin: 4rem auto;
+                    gap: 2rem;
+                }
+
+                .pricing-card.basic {
+                    transform: none;
+                }
+
+                .pricing-card.premium {
+                    transform: scale(1.05);
+                }
+
+                @media (max-width: 968px) {
+                    .pricing-grid {
+                        grid-template-columns: 1fr;
+                        max-width: 600px;
+                    }
+                    
+                    .pricing-card.basic,
+                    .pricing-card.premium {
+                        transform: none;
+                    }
                 }
 
                 .quota-list {
@@ -621,14 +727,14 @@ pub fn pricing(props: &PricingProps) -> Html {
     border: 1px solid rgba(30, 144, 255, 0.1);
     border-radius: 16px;
     padding: 2rem;
-    transition: transform 1.2s cubic-bezier(0.4, 0, 0.2, 1), border-color 1.2s ease, box-shadow 1.2s ease;
+    transition: all 0.3s ease-out;
     backdrop-filter: blur(10px);
+    position: relative;
 }
 
                 .pricing-card:hover {
-                    transform: translateY(-5px);
-                    box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
-                    border-color: rgba(30, 144, 255, 0.4);
+                    border-color: rgba(30, 144, 255, 0.3);
+                    box-shadow: 0 10px 30px rgba(30, 144, 255, 0.1);
                 }
 
                 .iq-button.disabled {
@@ -736,6 +842,16 @@ pub fn pricing(props: &PricingProps) -> Html {
                     align-items: center;
                     gap: 0.75rem;
                     font-size: 1.1rem;
+                }
+
+                .pricing-card li.unavailable {
+                    color: rgba(255, 255, 255, 0.4);
+                    text-decoration: line-through;
+                    opacity: 0.7;
+                }
+
+                .pricing-card li.unavailable img {
+                    opacity: 0.4;
                 }
                 .faq-grid {
                     display: flex;

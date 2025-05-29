@@ -126,12 +126,14 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     });
 
     let is_privacy_expanded = use_state(|| false);
+    /*
     let onclick = {
         let is_privacy_expanded = is_privacy_expanded.clone();
         Callback::from(move |_| {
             is_privacy_expanded.set(!*is_privacy_expanded);
         })
     };
+    */
 
 
     html! {
@@ -140,34 +142,49 @@ let scroll_callback = Closure::wrap(Box::new(move || {
         <header class="hero">
                 <div class="hero-background"></div>
                 <div class="hero-content">
-                    <div class="hero-title">{"Break Free Without Vanishing"}</div>
-
+                    <div class="hero-header">
+                        <div class="hero-title">{"Break Free Without Vanishing"}</div>
+                        <p class="hero-subtitle">{"Your digital life just voice call or text away"}</p>
+                    </div>
+                    <Link<Route> to={Route::Register} classes="forward-link">
+                        <button class="hero-cta">{"Start Your Dumbphone Journey"}</button>
+                    </Link<Route>>
                 </div>
         </header>        
 
 
 
             <section class="intro-section">
-            <div class="intro-content">
-                        <div class="sticky-image">
-                            <img src="/assets/whatsappexample.png" alt="WhatsApp example interface" class="example-image whatsapp-image" />
-                            <img src="/assets/emailexample.png" alt="Email example interface" class="example-image email-image" />
-                            <img src="/assets/calendarexample.png" alt="Calendar example interface" class="example-image calendar-image" />
+                <div class="intro-content">
+                    <div class="intro-text">
+                        <h2>{"Everything just a call or text away"}</h2>
+
+                        <p>{"Need your calendar? A WhatsApp reply? Just call or text LightFriend."}</p>
+                        <ul class="feature-list">
+                            <li><img src="/assets/whatsapplogo.png" alt="WhatsApp" class="feature-logo" /> {"WhatsApp"}</li>
+                            <li>{"📧 Emails"}</li>
+                            <li>{"📅 Calendar"}</li>
+                            <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI search"}</li>
+                            <li>{"☀️ Weather, Tasks and even Shazam"}</li>
+                        </ul>
+                        <div class="demo-link-container">
+                            <a href="https://www.youtube.com/shorts/KrVdJbHPB-o" target="_blank" rel="noopener noreferrer" class="demo-link">
+                                {"▶️ See It in Action"}
+                            </a>
                         </div>
                     </div>
+                    <div class="sticky-image">
+                        <img src="/assets/whatsappexample.png" alt="WhatsApp example interface" class="example-image whatsapp-image" />
+                        <img src="/assets/emailexample.png" alt="Email example interface" class="example-image email-image" />
+                        <img src="/assets/calendarexample.png" alt="Calendar example interface" class="example-image calendar-image" />
+                    </div>
+                </div>
             </section>
 
 
         <section class="main-features">
-            <div class="section-header">
-                <h2>{"Freedom, Not Isolation"}</h2>
-                    <div class="section-intro">
-                        <Link<Route> to={Route::Register} classes="forward-link">
-                            <button class="hero-cta">{"Start Your Dumbphone Journey"}</button>
-                        </Link<Route>>
-                    </div>
-            </div>
-            <div class="feature-block on-demand">
+            // Add mobile-only intro content first
+            <div class="feature-block intro-mobile">
                 <div class="feature-content">
                     <h2>{"Everything just a call or text away"}</h2>
                     <p>{"Need your calendar? A WhatsApp reply? Just call or text LightFriend."}</p>
@@ -184,10 +201,8 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                         </a>
                     </div>
                 </div>
-                <div class="feature-image">
-                    <img src="/assets/train.png" alt="Showcase of dumbphone screen showing user getting traing tickets" />
-                </div>
             </div>
+
 
             <div class="feature-block proactive">
                 <div class="feature-content">
@@ -204,6 +219,16 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                 </div>
             </div>
 
+            <div class="section-header">
+                <div class="section-intro">
+                    <Link<Route> to={Route::Register} classes="forward-link">
+                        <button class="hero-cta">{"Get Started"}</button>
+                    </Link<Route>>
+                </div>
+            </div>
+        </section>
+            /*
+            TODO move this to faq section
             <div class="feature-block privacy">
                 <div class="feature-content">
                     <h2>{"Your Data, Your Rules"}</h2>
@@ -247,64 +272,8 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                         }
                     </div>
                 </div>
-                <div class="feature-image-chield">
-                    <img src="/assets/privacy_shield.png" alt="Privacy-focused illustration" />
-                </div>
             </div>
-        </section>
-
-        /* i don't these fit rn
-        <section class="testimonials">
-            <h2>{"Real People, Real Freedom"}</h2>
-            <div class="testimonials-grid">
-                <div class="testimonial-card">
-                    <div class="testimonial-content">
-                        <p>{"“LightFriend got me off my phone addiction. I’m not kidding—I feel alive again. And yeah, days are LONG when you’re not scrolling 4 hours!”"}</p>
-                    </div>
-                    <div class="testimonial-author">
-                        <span class="author-name">{"Sarah K."}</span>
-                        <span class="author-title">{"Student"}</span>
-                    </div>
-                </div>
-                <div class="testimonial-card">
-                    <div class="testimonial-content">
-                        <p>{"“I was tethered to WhatsApp and social media. LightFriend let me ditch my smartphone for good. Such a relief.”"}</p>
-                    </div>
-                    <div class="testimonial-author">
-                        <span class="author-name">{"Michael R."}</span>
-                        <span class="author-title">{"Software Developer"}</span>
-                    </div>
-                </div>
-                <div class="testimonial-card">
-                    <div class="testimonial-content">
-                        <p>{"“ADHD here. Forgot a delivery code in my email, but LightFriend saved me with one text. It’s a game-changer.”"}</p>
-                    </div>
-                    <div class="testimonial-author">
-                        <span class="author-name">{"Long Time Dumbphone User"}</span>
-                        <span class="author-title">{"Artist"}</span>
-                    </div>
-                </div>
-                <div class="testimonial-card">
-                    <div class="testimonial-content">
-                        <p>{"“My old Nokia + LightFriend = perfection. I call to hear my emails while driving. It’s so chill.”"}</p>
-                    </div>
-                    <div class="testimonial-author">
-                        <span class="author-name">{"David W."}</span>
-                        <span class="author-title">{"Designer"}</span>
-                    </div>
-                </div>
-                <div class="testimonial-card">
-                    <div class="testimonial-content">
-                        <p>{"“Tried every minimalist phone. LightFriend’s the only one that nails it—WhatsApp, email, no distractions. Worth every penny.”"}</p>
-                    </div>
-                    <div class="testimonial-author">
-                        <span class="author-name">{"Patrick C."}</span>
-                        <span class="author-title">{"Entrepreneur"}</span>
-                    </div>
-                </div>
-            </div>
-        </section>
-        */
+            */
 
         <section class="how-it-works">
             <h2>{"Escape the Scroll in 3 Steps"}</h2>
@@ -349,268 +318,306 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                                 </div>
                 </div>
             </div>
+            // TODO add cta to landing first page "get started" and add subheader under main header with something like "bring necessary smartphone features to dumbphones"
+            // add first feature showcase section next to the static phone and remove the original. 
+            // remove dead page after phone scroll
+            // keep human pic + proactive section and add video demo link to that
+            // add another cta get started under it
+            // remove the privacy section(add faq and add it there), could remove why page and just add them to faq
+            // add clear steps after signup
         </footer>
             <style>
                 {r#"
-.intro-section {
-    padding: 6rem 2rem;
-    background: transparent;
-    min-height: 100vh;
-    width: 100%;
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    will-change: opacity, transform;
-    height: 100vh;
-    z-index: 1;
-    overflow-y: scroll;
-    transform: translateZ(0); /*force gpu acc*/
-    -webkit-overflow-scrolling: touch;
-    -webkit-backface-visibility: hidden;
-    scrollbar-width: none; /* Firefox */
-    backface-visibility: hidden;
-    pointer-events: none;
-}
+                    .intro-section {
+                        padding: 6rem 2rem;
+                        background: transparent;
+                        min-height: 100vh;
+                        width: 100%;
+                        opacity: 0;
+                        visibility: hidden;
+                        transition: opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        will-change: opacity, transform;
+                        height: 100vh;
+                        z-index: 1;
+                        overflow-y: scroll;
+                        transform: translateZ(0); /*force gpu acc*/
+                        -webkit-overflow-scrolling: touch;
+                        -webkit-backface-visibility: hidden;
+                        scrollbar-width: none; /* Firefox */
+                        backface-visibility: hidden;
+                        pointer-events: none;
+                    }
 
-.intro-section.visible {
-    pointer-events: auto;
-    z-index: 1;
-}
+                    @media (max-width: 768px) {
+                        .intro-section {
+                            display: none; /* Hide on mobile */
+                        }
+                    }
 
-.main-features {
-    position: relative;
-    z-index: 2;
-}
+                    .intro-mobile {
+                        display: none; /* Hidden by default */
+                    }
 
-.footer-cta {
-    position: relative;
-    z-index: 2;
-}
+                    @media (max-width: 768px) {
+                        .intro-mobile {
+                            display: block; /* Show only on mobile */
+                            margin-bottom: 2rem;
+                        }
+                    }
 
-.hero {
-    position: relative;
-    z-index: 2;
-}
+                    @media (min-width: 769px) {
+                        .intro-mobile {
+                            display: none; /* Hide on desktop */
+                        }
+                    }
 
-.hero-content {
-    position: relative;
-    z-index: 2;
-    pointer-events: auto;
-}
+                    .intro-section.visible {
+                        pointer-events: auto;
+                        z-index: 1;
+                    }
 
-.hero-background {
-    z-index: 0;
-}
+                    .main-features {
+                        position: relative;
+                        z-index: 2;
+                    }
 
-.intro-section.visible {
-    pointer-events: auto;
-}
+                    .footer-cta {
+                        position: relative;
+                        z-index: 2;
+                    }
 
-.intro-section::-webkit-scrollbar {
-    display: none; /* Safari and Chrome */
-}
+                    .hero-background {
+                        z-index: 0;
+                    }
 
-@media (max-width: 768px) {
-    .intro-section {
-        padding: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
+                    .intro-section.visible {
+                        pointer-events: auto;
+                    }
 
-    .intro-section.visible {
-        background: rgba(26, 26, 26, 0.4);
-        backdrop-filter: blur(5px);
-    }
-}
+                    .intro-section::-webkit-scrollbar {
+                        display: none; /* Safari and Chrome */
+                    }
 
-.intro-section.sticky {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 2;
-}
+                    @media (max-width: 768px) {
+                        .intro-section {
+                            padding: 0;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                        }
 
-.intro-section.visible {
-    opacity: 1;
-    visibility: visible;
-    transform: translateY(0);
-    pointer-events: auto;
-    z-index: 3;
-    transition: opacity 0.8s ease;
-}
+                        .intro-section.visible {
+                            background: rgba(26, 26, 26, 0.4);
+                            backdrop-filter: blur(5px);
+                        }
 
-.intro-section.visible {
-    opacity: 1;
-    visibility: visible;
-    transform: translateY(0);
-    pointer-events: auto;
-    z-index: 3;
-}
+                        .intro-content {
+                            flex-direction: column;
+                            gap: 0;
+                            padding: 0;
+                        }
+                    }
 
-.intro-section.sticky {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-}
+                    .intro-section.sticky {
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        z-index: 2;
+                    }
 
-/* Add space after sticky section to prevent content jump */
-/* Remove this rule as we're handling spacing with margin-bottom */
-.intro-content {
-    max-width: 1200px;
-    margin: 0 auto;
-    display: flex;
-    align-items: center;
-    gap: 4rem;
-    position: relative;
-    padding: 0 2rem;
-}
+                    .intro-section.visible {
+                        opacity: 1;
+                        visibility: visible;
+                        transform: translateY(0);
+                        pointer-events: auto;
+                        z-index: 3;
+                        transition: opacity 0.8s ease;
+                    }
 
-@media (max-width: 1024px) {
-    .intro-content {
-        flex-direction: column;
-        text-align: center;
-        gap: 2rem;
-        padding-top: 2rem;
-    }
+                    .intro-section.visible {
+                        opacity: 1;
+                        visibility: visible;
+                        transform: translateY(0);
+                        pointer-events: auto;
+                        z-index: 3;
+                    }
 
-    .intro-text {
-        text-align: center;
-        align-items: center;
-        margin-top: 0 !important;
-    }
+                    .intro-section.sticky {
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                    }
 
-    .intro-text .hero-cta {
-        margin: 1.5rem auto;
-    }
+                    /* Add space after sticky section to prevent content jump */
+                    /* Remove this rule as we're handling spacing with margin-bottom */
+                    .intro-content {
+                        max-width: 1200px;
+                        margin: 0 auto;
+                        display: flex;
+                        align-items: center;
+                        gap: 4rem;
+                        position: relative;
+                        padding: 0 2rem;
+                    }
 
-    .hero-image {
-        max-width: 400px;
-        position: relative;
-        top: 0;
-    }
-}
+                    @media (max-width: 1024px) {
+                        .intro-content {
+                            flex-direction: column;
+                            text-align: center;
+                            gap: 2rem;
+                            padding-top: 2rem;
+                        }
 
-.example-image {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-    border-radius: 12px;
-    opacity: 0;
-    transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    pointer-events: none;
-    transform: translateZ(0);
-    -webkit-transform: translateZ(0);
-    backface-visibility: hidden;
-    -webkit-backface-visibility: hidden;
-    max-width: 400px;
-    will-change: opacity;
-    z-index: 5;
-}
+                        .hero-image {
+                            max-width: 400px;
+                            position: relative;
+                            top: 0;
+                        }
+                    }
 
-@media (max-width: 768px) {
-    .intro-content {
-        flex-direction: column;
-        text-align: center;
-        gap: 2rem;
-        padding-top: 0;
-    }
+                    .example-image {
+                        position: absolute;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        object-fit: contain;
+                        border-radius: 12px;
+                        opacity: 0;
+                        transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                        pointer-events: none;
+                        transform: translateZ(0);
+                        -webkit-transform: translateZ(0);
+                        backface-visibility: hidden;
+                        -webkit-backface-visibility: hidden;
+                        max-width: 400px;
+                        will-change: opacity;
+                        z-index: 5;
+                    }
 
-    .sticky-image {
-        position: fixed !important;
-        top: 50% !important;
-        left: 50% !important;
-        transform: translate(-50%, -50%) !important;
-        width: 280px !important;
-        height: 280px !important;
-        transform: translate3d(-50%, -50%, 0) !important; /* Force GPU acceleration */
-        -webkit-transform: translate3d(-50%, -50%, 0) !important;
-        backface-visibility: hidden;
-        -webkit-backface-visibility: hidden;
-        margin: 0 !important;
-        z-index: 10;
-    }
+                    @media (max-width: 768px) {
+                        .intro-content {
+                            flex-direction: column;
+                            text-align: center;
+                            gap: 2rem;
+                            padding-top: 0;
+                            height: 100vh;
+                        }
 
-    .example-image {
-        position: absolute;
-        max-width: 280px;
-        height: auto;
-        left: 50%;
-        top: 50%;
-    }
+                        .sticky-image {
+                            position: fixed !important;
+                            top: 40% !important; /* Moved up slightly to make room for text */
+                            left: 50% !important;
+                            transform: translate(-50%, -50%) !important;
+                            width: 280px !important;
+                            height: 280px !important;
+                            transform: translate3d(-50%, -50%, 0) !important; /* Force GPU acceleration */
+                            -webkit-transform: translate3d(-50%, -50%, 0) !important;
+                            backface-visibility: hidden;
+                            -webkit-backface-visibility: hidden;
+                            margin: 0 !important;
+                            z-index: 10;
+                        }
 
-    .intro-text {
-        margin-top: 100vh !important;
-        padding: 2rem;
-        background: rgba(26, 26, 26, 0.95);
-        border-radius: 16px;
-        border: 1px solid rgba(30, 144, 255, 0.1);
-        backdrop-filter: blur(10px);
-        position: relative;
-        z-index: 20;
-    }
-}
+                        .example-image {
+                            position: absolute;
+                            max-width: 280px;
+                            height: auto;
+                            left: 50%;
+                            top: 50%;
+                        }
+
+                        .intro-text {
+                            margin-top: 100vh !important;
+                            padding: 2rem;
+                            background: rgba(26, 26, 26, 0.95);
+                            border-radius: 16px;
+                            border: 1px solid rgba(30, 144, 255, 0.1);
+                            backdrop-filter: blur(10px);
+
+                            position: relative;
+                            z-index: 20;
+                            text-align: center;
+                            align-items: center;
+                            width: 90%;
+                            margin-left: auto;
+                            margin-right: auto;
+                        }
+
+                        .intro-text h2 {
+                            font-size: 1.8rem;
+                        }
+
+                        .intro-text p {
+                            font-size: 1rem;
+                        }
+
+                        .intro-text .feature-list {
+                            font-size: 0.9rem;
+                        }
+
+                        .intro-text .feature-list li {
+                            margin: 0.5rem 0;
+                        }
+                    }
 
 
-@media (max-width: 768px) {
-    .example-image {
-        position: absolute;
-        max-width: 280px;
-        height: auto;
-    }
-}
+                    @media (max-width: 768px) {
+                        .example-image {
+                            position: absolute;
+                            max-width: 280px;
+                            height: auto;
+                        }
+                    }
 
-.example-image.visible {
-    opacity: 1;
-    z-index: 6;
-}
+                    .example-image.visible {
+                        opacity: 1;
+                        z-index: 6;
+                    }
 
-.example-image.visible {
-    opacity: 1;
-    z-index: 2;
-}
+                    .example-image.visible {
+                        opacity: 1;
+                        z-index: 2;
+                    }
 
-.sticky-image {
-    position: sticky;
-    top: 20vh;
-    width: 400px;
-    height: 600px;
-    flex-shrink: 0;
-    margin-left: auto; /* Push to right side */
-    z-index: 5;
-}
-@media (max-width: 768px) {
-    .sticky-image {
-        position: fixed !important;
-        top: 50% !important;
-        left: 50% !important;
-        transform: translate(-50%, -50%) !important;
-        width: 480px !important;
-        height: 480px !important;
-        margin: 0 !important;
-        z-index: 10;
-    }
-}
+                    .sticky-image {
+                        position: sticky;
+                        top: 20vh;
+                        width: 400px;
+                        height: 600px;
+                        flex-shrink: 0;
+                        margin-left: auto; /* Push to right side */
+                        z-index: 5;
+                    }
+                    @media (max-width: 768px) {
+                        .sticky-image {
+                            position: fixed !important;
+                            top: 50% !important;
+                            left: 50% !important;
+                            transform: translate(-50%, -50%) !important;
+                            width: 480px !important;
+                            height: 480px !important;
+                            margin: 0 !important;
+                            z-index: 10;
+                        }
+                    }
 
-.whatsapp-image, .email-image, .calendar-image {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-}
+                    .whatsapp-image, .email-image, .calendar-image {
+                        position: absolute;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                    }
 
-@media (max-width: 768px) {
+                    @media (max-width: 768px) {
                         .intro-section {
                             padding: 1rem;
                         }
@@ -632,11 +639,6 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                             width: 100%;
                             max-width: 100%;
                             margin: 0 auto;
-                        }
-
-                        .intro-text {
-                            text-align: center;
-                            align-items: center;
                         }
                     }
 
@@ -696,31 +698,31 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                     }
 
 
-.intro-text {
-    flex: 1;
-    text-align: left;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    position: relative;
-    z-index: 2;
-    padding-right: 2rem;
-    margin-top: 50vh; /* Added this line to move the text lower */
-}
+                    .intro-text {
+                        z-index: 2;
+                        padding: 20px 30px;
+                        display: flex;
+                        flex-direction: column;
+                        justify-content: space-around;
+                        padding-right: 2rem;
+                        background: rgba(30, 30, 30, 0.8);
+                        border: 1px solid rgba(30, 144, 255, 0.15);
+                        border-radius: 24px;
+                    }
 
-.intro-text h2 {
-    font-size: 2.5rem;
-    background: linear-gradient(45deg, #fff, #7EB2FF);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    margin-bottom: 1.5rem;
-}
+                    .intro-text h2 {
+                        font-size: 2.5rem;
+                        background: linear-gradient(45deg, #fff, #7EB2FF);
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                        margin-bottom: 1.5rem;
+                    }
 
-.intro-text p {
-    color: #999;
-    font-size: 1.2rem;
-    line-height: 1.6;
-}
+                    .intro-text p {
+                        color: #999;
+                        font-size: 1.2rem;
+                        line-height: 1.6;
+                    }
 
                     @media (max-width: 968px) {
                         .intro-content {
@@ -730,15 +732,6 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                             padding-top: 2rem;
                         }
 
-                        .intro-text {
-                            text-align: center;
-                            align-items: center;
-                        }
-
-                        .intro-text .hero-cta {
-                            margin: 1.5rem auto;
-                        }
-
                         .hero-image {
                             max-width: 400px;
                             position: relative;
@@ -746,23 +739,17 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                         }
                     }
 
-@media (max-width: 768px) {
-    .intro-section {
-        padding: 4rem 1rem;
-    }
+                    @media (max-width: 768px) {
+                        .intro-section {
+                            padding: 4rem 1rem;
+                        }
 
-    .intro-text h2 {
-        font-size: 2rem;
-    }
+                        
 
-    .intro-text p {
-        font-size: 1.1rem;
-    }
-
-    .hero-image {
-        max-width: 300px;
-    }
-}
+                        .hero-image {
+                            max-width: 300px;
+                        }
+                    }
                     .testimonials {
                         padding: 6rem 2rem;
                         text-align: center;
@@ -1194,7 +1181,7 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                     }
 
 .how-it-works {
-    padding: 6rem 2rem;
+    padding: 2rem 2rem;
     text-align: center;
     position: relative;
     z-index: 1;
@@ -1449,21 +1436,14 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     z-index: 0;
 }
 
-                .hero {
-                    text-align: center;
-                    padding: 6rem 2rem;
-                    margin: 0 auto;
-                }
-
 .main-features {
     max-width: 1200px;
     margin: 0 auto;
-    padding: 2rem 2rem;
+    padding: 0 2rem;
     position: relative;
     z-index: 3;
     background: transparent;
     opacity: 1;
-    margin-bottom: 4rem;
     pointer-events: auto;
 }
 
@@ -1471,7 +1451,6 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     display: flex;
     align-items: center;
     gap: 4rem;
-    margin-bottom: 6rem;
     background: rgba(30, 30, 30, 0.8);
     border: 1px solid rgba(30, 144, 255, 0.15);
     border-radius: 24px;
@@ -1566,6 +1545,8 @@ let scroll_callback = Closure::wrap(Box::new(move || {
 
                 .demo-link-container {
                     margin-top: 2rem;
+                    display: flex;
+                    justify-content: center;
                 }
 
                 .demo-link {
@@ -1641,7 +1622,7 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                         }
 
                         .how-it-works {
-                            padding: 3rem 1rem;
+                            padding: 0 3rem;
                         }
 
                         .how-it-works h2 {
@@ -1762,7 +1743,6 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                         align-items: center;
                         justify-content: flex-start;
                         text-align: center;
-                        padding: 8rem 0;
                         position: relative;
                         background: transparent;
                         z-index: 1;
@@ -1776,15 +1756,19 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                     }
 
 .hero-content {
-    position: relative;
     z-index: 3;
     width: 100%;
     height: 100%;
     display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
+    justify-content: space-around;
     padding: 40px;
     pointer-events: auto;
+}
+
+.hero-header {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
 }
 
                     .hero-title {
@@ -1797,9 +1781,6 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                         letter-spacing: 0.02em;
                         text-align: left;
                         margin-bottom: 20px;
-                        position: absolute;
-                        bottom: 40px;
-                        left: 10%;
                         text-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
                         font-style: italic;
                         transform: translateZ(0);
@@ -1831,6 +1812,8 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                     @media (max-width: 768px) {
                         .hero-content {
                             padding: 20px;
+                            flex-direction: column;
+                            justify-content: flex-end;
                         }
 
                         .hero-title {
@@ -2120,7 +2103,6 @@ let scroll_callback = Closure::wrap(Box::new(move || {
 
                     .section-header {
                         text-align: center;
-                        margin-bottom: 4rem;
                     }
 
                     .section-header h2 {
@@ -2280,6 +2262,7 @@ let scroll_callback = Closure::wrap(Box::new(move || {
 
 
                     .hero-subtitle {
+                        position: relative;
                         font-size: 1.2rem;
                         color: rgba(255, 255, 255, 0.9);
                         text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);

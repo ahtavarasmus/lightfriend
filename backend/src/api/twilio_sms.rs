@@ -385,18 +385,15 @@ fn requires_subscription(tool_name: &str, sub_tier: Option<String>, has_discount
     println!("Has discount: {}", has_discount);
     
     // Tier 2 subscribers get access to everything
-    if Some("tier 2".to_string()) == sub_tier {
+    if Some("tier 2".to_string()) == sub_tier || has_discount {
         println!("✅ User has tier 2 subscription - granting full access");
         return false;
-    } else if Some("tier 1".to_string()) == sub_tier || has_discount {
-        let allowed_tools = tool_name.contains("perplexity") ||
-            tool_name.contains("shazam") ||
+    } else if Some("tier 1".to_string()) == sub_tier {
+        let in_allowed_tools = tool_name.contains("perplexity") ||
             tool_name.contains("weather") ||
-            tool_name.contains("assistant") ||
-            tool_name.contains("calendar") ||
-            tool_name.contains("email") ||
-            tool_name.contains("sms");
-        if allowed_tools {
+            tool_name.contains("assistant");
+
+        if in_allowed_tools {
             return false;
         }
     }
@@ -406,14 +403,7 @@ fn requires_subscription(tool_name: &str, sub_tier: Option<String>, has_discount
 
 // Helper function to get subscription error message
 fn get_subscription_error(tool_name: &str) -> String {
-    format!("This feature ({}) requires a subscription. Please visit our website to subscribe.", 
-        match tool_name {
-            "calendar" => "calendar integration",
-            "fetch_whatsapp_messages" | "fetch_whatsapp_room_messages" | 
-            "send_whatsapp_message" | "search_whatsapp_rooms" => "WhatsApp integration",
-            "fetch_tasks" | "create_task" => "tasks integration",
-            _ => "feature"
-        }
+    format!("This feature ({}) requires a subscription. Please visit our website to subscribe.", tool_name
     )
 }
 
@@ -1438,13 +1428,11 @@ pub async fn process_sms(
                 };
 
                 // Check if user has access to this tool
-                /*
                 if requires_subscription(name, user.sub_tier.clone(), user.discount) {
                     println!("Attempted to use subscription-only tool {} without proper subscription", name);
-                    tool_answers.insert(tool_call_id, get_subscription_error(name));
+                    tool_answers.insert(tool_call_id, format!("This feature ({}) requires a subscription. Please visit our website to subscribe.", name));
                     continue;
                 }
-                */
                 let arguments = match &tool_call.function.arguments {
                     Some(args) => args,
                     None => continue,

@@ -14,225 +14,6 @@ use crate::proactive::{
     common::{ImportancePrioritySection, PrioritySendersSection, KeywordsSection, WaitingChecksSection},
 };
 
-#[derive(Properties, PartialEq)]
-pub struct FilterFlowVisualizationProps {
-    pub keywords: Vec<String>,
-    pub priority_senders: Vec<String>,
-    pub waiting_checks: Vec<String>,
-    pub threshold: i32,
-}
-
-#[function_component(FilterFlowVisualization)]
-pub fn filter_flow_visualization(props: &FilterFlowVisualizationProps) -> Html {
-    html! {
-        <div class="filter-flow-container">
-            <h3>{"Filter Flow Visualization"}</h3>
-            <p class="flow-description">
-                {"This shows how your filters work together to determine if you should be notified about a message."}
-            </p>
-            
-            <div class="flow-steps">
-                // Step 1: Keywords
-                <div class="flow-step">
-                    <div class="step-header">
-                        <div class="step-number">{"1"}</div>
-                        <div class="step-title">{"Keywords Check"}</div>
-                        <div class="step-status keywords-status">
-                            {if props.keywords.is_empty() { "SKIP" } else { "CHECK" }}
-                        </div>
-                    </div>
-                    <div class="step-content">
-                        {
-                            if props.keywords.is_empty() {
-                                html! {
-                                    <p class="step-description empty">
-                                        {"No keywords configured - this check is skipped"}
-                                    </p>
-                                }
-                            } else {
-                                html! {
-                                    <>
-                                        <p class="step-description">
-                                            {"If message contains any of these keywords → "}
-                                            <span class="result-notify">{"NOTIFY"}</span>
-                                        </p>
-                                        <div class="filter-items">
-                                            {
-                                                props.keywords.iter().map(|keyword| {
-                                                    html! {
-                                                        <span class="filter-tag keyword-tag">{keyword}</span>
-                                                    }
-                                                }).collect::<Html>()
-                                            }
-                                        </div>
-                                    </>
-                                }
-                            }
-                        }
-                    </div>
-                    <div class="flow-arrow">{"↓"}</div>
-                </div>
-
-                // Step 2: Priority Senders
-                <div class="flow-step">
-                    <div class="step-header">
-                        <div class="step-number">{"2"}</div>
-                        <div class="step-title">{"Priority Senders Check"}</div>
-                        <div class="step-status senders-status">
-                            {if props.priority_senders.is_empty() { "SKIP" } else { "CHECK" }}
-                        </div>
-                    </div>
-                    <div class="step-content">
-                        {
-                            if props.priority_senders.is_empty() {
-                                html! {
-                                    <p class="step-description empty">
-                                        {"No priority senders configured - this check is skipped"}
-                                    </p>
-                                }
-                            } else {
-                                html! {
-                                    <>
-                                        <p class="step-description">
-                                            {"If message is from any of these senders → "}
-                                            <span class="result-notify">{"NOTIFY"}</span>
-                                        </p>
-                                        <div class="filter-items">
-                                            {
-                                                props.priority_senders.iter().map(|sender| {
-                                                    html! {
-                                                        <span class="filter-tag sender-tag">{sender}</span>
-                                                    }
-                                                }).collect::<Html>()
-                                            }
-                                        </div>
-                                    </>
-                                }
-                            }
-                        }
-                    </div>
-                    <div class="flow-arrow">{"↓"}</div>
-                </div>
-
-                // Step 3: Waiting Checks
-                <div class="flow-step">
-                    <div class="step-header">
-                        <div class="step-number">{"3"}</div>
-                        <div class="step-title">{"Waiting For Check"}</div>
-                        <div class="step-status waiting-status">
-                            {if props.waiting_checks.is_empty() { "SKIP" } else { "CHECK" }}
-                        </div>
-                    </div>
-                    <div class="step-content">
-                        {
-                            if props.waiting_checks.is_empty() {
-                                html! {
-                                    <p class="step-description empty">
-                                        {"No waiting checks configured - this check is skipped"}
-                                    </p>
-                                }
-                            } else {
-                                html! {
-                                    <>
-                                        <p class="step-description">
-                                            {"If message contains any of these phrases → "}
-                                            <span class="result-notify">{"NOTIFY"}</span>
-                                        </p>
-                                        <div class="filter-items">
-                                            {
-                                                props.waiting_checks.iter().map(|check| {
-                                                    html! {
-                                                        <span class="filter-tag waiting-tag">{check}</span>
-                                                    }
-                                                }).collect::<Html>()
-                                            }
-                                        </div>
-                                    </>
-                                }
-                            }
-                        }
-                    </div>
-                    <div class="flow-arrow">{"↓"}</div>
-                </div>
-
-                // Step 4: AI Importance Analysis
-                <div class="flow-step">
-                    <div class="step-header">
-                        <div class="step-number">{"4"}</div>
-                        <div class="step-title">{"AI Analysis"}</div>
-                        <div class="step-status ai-status">{"CHECK"}</div>
-                    </div>
-                    <div class="step-content">
-                        <p class="step-description">
-                            {"If none of the above matched, AI analyzes the message and assigns an importance score (1-10). "}
-                            {"If score ≥ "}
-                            <span class="threshold-value">{props.threshold}</span>
-                            {" → "}
-                            <span class="result-notify">{"NOTIFY"}</span>
-                        </p>
-                        <div class="ai-general-info">
-                            <div class="ai-check-examples">
-                                <strong>{"Examples of what AI considers important:"}</strong>
-                                <ul>
-                                    <li>{"Business communications requiring action"}</li>
-                                    <li>{"Urgent requests or deadlines"}</li>
-                                    <li>{"Personal messages from family/friends"}</li>
-                                    <li>{"Account security or financial alerts"}</li>
-                                    <li>{"Meeting invitations or schedule changes"}</li>
-                                </ul>
-                            </div>
-                        </div>
-
-                        <div class="threshold-visualization">
-                            <div class="threshold-scale">
-                                {
-                                    (1..=10).map(|i| {
-                                        let is_threshold = i >= props.threshold;
-                                        html! {
-                                            <div class={classes!(
-                                                "scale-point",
-                                                is_threshold.then(|| "notify-zone")
-                                            )}>
-                                                {i}
-                                            </div>
-                                        }
-                                    }).collect::<Html>()
-                                }
-                            </div>
-                            <div class="threshold-labels">
-                                <span class="label-low">{"Low Priority"}</span>
-                                <span class="label-high">{"High Priority"}</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="flow-arrow">{"↓"}</div>
-                </div>
-
-                // Final Result
-                <div class="flow-result">
-                    <div class="result-box no-match">
-                        <div class="result-icon">{"❌"}</div>
-                        <div class="result-text">
-                            <strong>{"No Match Found"}</strong>
-                            <p>{"If none of the above conditions are met, no notification is sent"}</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="flow-legend">
-                <h4>{"How it works:"}</h4>
-                <ul>
-                    <li>{"Filters are checked from top to bottom in order"}</li>
-                    <li>{"If ANY of the first 3 filters match, you get notified immediately"}</li>
-                    <li>{"If none match, AI analyzes the message and assigns an importance score (1-10)"}</li>
-                    <li>{"Only if the AI score meets your threshold, you get notified"}</li>
-                    <li>{"If the score is below your threshold, no notification is sent"}</li>
-                </ul>
-            </div>
-        </div>
-    }
-}
 
 trait PadStart {
     fn pad_start_with_character(&self, width: usize, padding: char) -> String;
@@ -248,7 +29,6 @@ impl PadStart for String {
         format!("{}{}", padding_string, self)
     }
 }
-use wasm_bindgen::JsCast;
 use crate::config;
 
 use serde_json::json;
@@ -838,67 +618,55 @@ pub fn connected_services(props: &Props) -> Html {
                                                         }
                                                     })}
                                                 />
-                                                <div class="filter-section importance-analysis-section">
-                                                    <div class="importance-analysis-container">
-                                                        <div class="importance-config">
-                                                            <ImportancePrioritySection
-                                                                service_type={service.service_type.clone()}
-                                                                current_threshold={
-                                                                    settings.importance_priority
-                                                                            .as_ref()
-                                                                            .map(|ip| ip.threshold)
-                                                                            .unwrap_or(7)
+                                                <ImportancePrioritySection
+                                                    service_type={service.service_type.clone()}
+                                                    current_threshold={
+                                                        settings.importance_priority
+                                                                .as_ref()
+                                                                .map(|ip| ip.threshold)
+                                                                .unwrap_or(7)
+                                                    }
+                                                    on_change={Callback::from({
+                                                        let services_state = services_state.clone();
+                                                        let stype          = service.service_type.clone();
+                                                        move |new_thr: i32| {
+                                                            let mut svcs = (*services_state).clone();
+                                                            if let Some(svc) = svcs.iter_mut().find(|s| s.service_type == stype) {
+                                                                if let Some(fs) = &mut svc.filter_settings {
+                                                                    fs.importance_priority = Some(ImportancePriority { threshold: new_thr });
                                                                 }
-                                                                on_change={Callback::from({
-                                                                    let services_state = services_state.clone();
-                                                                    let stype          = service.service_type.clone();
-                                                                    move |new_thr: i32| {
-                                                                        let mut svcs = (*services_state).clone();
-                                                                        if let Some(svc) = svcs.iter_mut().find(|s| s.service_type == stype) {
-                                                                            if let Some(fs) = &mut svc.filter_settings {
-                                                                                fs.importance_priority = Some(ImportancePriority { threshold: new_thr });
-                                                                            }
-                                                                        }
-                                                                        services_state.set(svcs);
-                                                                    }
-                                                                })}
-                                                            />
-                                                        </div>
+                                                            }
+                                                            services_state.set(svcs);
+                                                        }
+                                                    })}
+                                                    keywords={settings.keywords.clone()}
 
-                                                        <div class="importance-general-checks">
-                                                            <WhatsappGeneralChecks 
-                                                                on_update={Callback::from(|_| {})}
-                                                                keywords={settings.keywords.clone()}
-                                                                priority_senders={settings.priority_senders.iter().map(|s| s.sender.clone()).collect::<Vec<String>>()}
-                                                                waiting_checks={settings.waiting_checks.iter().map(|w| w.content.clone()).collect::<Vec<String>>()}
-                                                                threshold={settings.importance_priority.as_ref().map(|ip| ip.threshold).unwrap_or(7)}
-                                                            />
-                                                        </div>
+                                                    priority_senders={settings.priority_senders.iter().map(|s| s.sender.clone()).collect::<Vec<String>>()}
+                                                    waiting_checks={settings.waiting_checks.iter().map(|w| w.content.clone()).collect::<Vec<String>>()}
+                                                    threshold={settings.importance_priority.as_ref().map(|ip| ip.threshold).unwrap_or(7)}
+                                                    is_active={*is_proactive}
+                                                />
 
-                                                        <div class="importance-flow-visualization">
-                                                            <div class="flow-result">
-                                                                <div class="result-box no-match">
-                                                                    <div class="result-icon">{"❌"}</div>
-                                                                    <div class="result-text">
-                                                                        <strong>{"No Match Found"}</strong>
-                                                                        <p>{"If none of the above conditions are met, no notification is sent"}</p>
-                                                                    </div>
-                                                                </div>
+                                                <WhatsappGeneralChecks 
+                                                    on_update={Callback::from(|_| {})}
+                                                    keywords={settings.keywords.clone()}
+                                                    priority_senders={settings.priority_senders.iter().map(|s| s.sender.clone()).collect::<Vec<String>>()}
+                                                    waiting_checks={settings.waiting_checks.iter().map(|w| w.content.clone()).collect::<Vec<String>>()}
+                                                    threshold={settings.importance_priority.as_ref().map(|ip| ip.threshold).unwrap_or(7)}
+                                                />
+
+                                                <div class="importance-flow-visualization">
+                                                    <div class="flow-result">
+                                                        <div class="result-box no-match">
+                                                            <div class="result-icon">{"❌"}</div>
+                                                            <div class="result-text">
+                                                                <strong>{"No Match Found"}</strong>
+                                                                <p>{"If none of the above conditions are met, no notification is sent"}</p>
                                                             </div>
-
-                                                            /*
-                                                            <FilterFlowVisualization
-                                                                keywords={settings.keywords.clone()}
-                                                                priority_senders={settings.priority_senders.iter().map(|s| s.sender.clone()).collect::<Vec<String>>()}
-                                                                waiting_checks={settings.waiting_checks.iter().map(|w| w.content.clone()).collect::<Vec<String>>()}
-                                                                threshold={settings.importance_priority.as_ref().map(|ip| ip.threshold).unwrap_or(7)}
-                                                            />
-                                                            */
+                                                        </div>
                                                     </div>
                                                 </div>
-                                                </div>
-
-                                                </>
+                                            </>
                                             }
                                         } else {
                                             html! {}
@@ -906,73 +674,9 @@ pub fn connected_services(props: &Props) -> Html {
                                     }
                                 </div>
                             }
-                        } else {
-                            html! {
-                                <div class="filters-container">
-                                    <div class="proactive-toggle-section">
-                                        <div class="notify-toggle">
-                                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 448 512'%3E%3Cpath fill='%234285f4' d='M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 10.2 77.3 29.6 111L0 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 0-59.3-25.2-115-67.1-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z'/%3E%3C/svg%3E" alt="WhatsApp"/>
-                                            <span class="proactive-title">{"WHATSAPP NOTIFICATIONS(under construction)"}</span>
-                                            /*
-                                            <span class="toggle-status">
-                                                {if *is_whatsapp_proactive { "Active" } else { "Inactive" }}
-                                            </span>
-                                            <label class="switch"
-                                                   onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                                                <input
-                                                    type="checkbox"
-                                                    checked={*is_whatsapp_proactive}
-                                                    onchange={Callback::from({
-                                                        let flag = is_whatsapp_proactive.clone();
-                                                        let error = error.clone();
-                                                        move |e: Event| {
-                                                            let el: HtmlInputElement = e.target_unchecked_into();
-                                                            let val = el.checked();
-                                                            let handle = flag.clone();
-                                                            let error_handle = error.clone();
-                                                            if let Some(tok) = window()
-                                                                .and_then(|w| w.local_storage().ok())
-                                                                .flatten()
-                                                                .and_then(|s| s.get_item("token").ok())
-                                                                .flatten()
-                                                            {
-                                                                spawn_local(async move {
-                                                                    match Request::post(&format!(
-                                                                        "{}/api/profile/whatsapp-proactive",
-                                                                        config::get_backend_url()
-                                                                    ))
-                                                                    .header("Authorization", &format!("Bearer {}", tok))
-                                                                    .json(&json!({ "proactive": val }))
-                                                                    .expect("Failed to create request")
-                                                                    .send()
-                                                                    .await {
-                                                                        Ok(response) => {
-                                                                            if response.ok() {
-                                                                                handle.set(val);
-                                                                                error_handle.set(None);
-                                                                            } else {
-                                                                                error_handle.set(Some("Failed to update WhatsApp proactive state".to_string()));
-                                                                            }
-                                                                        }
-                                                                        Err(_) => {
-                                                                            error_handle.set(Some("Network error while updating WhatsApp proactive state".to_string()));
-                                                                        }
-                                                                    }
-                                                                });
-                                                            }
-                                                        }
-                                                    })}
-                                                />
-                                                <span class="slider round"></span>
-                                            </label>
-                                            */
-                                        </div>
-                                        <p class="notification-description">
-                                            {"(this feature does not work yet it is under construction)Enable notifications for your WhatsApp messages. When enabled, you will receive SMS notifications for new important WhatsApp messages. Lightfriend processes them based on your notification preferences."}
-                                        </p>
-                                    </div>
-                                </div>
-                            }
+                        
+                        } else { // if no filter settings, should not happen and  TODO
+                            html! {}
                         }
                     } else if service.service_type == "calendar" {
                         html! {
@@ -1161,7 +865,6 @@ pub fn connected_services(props: &Props) -> Html {
                                                         }
                                                     })}
                                                 />
-                                                <div class="filter-section importance-analysis-section">
                                                 <ImportancePrioritySection
                                                     service_type={service.service_type.clone()}
                                                     current_threshold={
@@ -1183,10 +886,6 @@ pub fn connected_services(props: &Props) -> Html {
                                                             services_state.set(svcs);
                                                         }
                                                     })}
-                                                />
-
-                                                <ImapGeneralChecks 
-                                                    on_update={Callback::from(|_| {})}
                                                     keywords={settings.keywords.clone()}
                                                     priority_senders={priority_senders.clone()}
                                                     waiting_checks={waiting_checks.clone()}
@@ -1194,7 +893,6 @@ pub fn connected_services(props: &Props) -> Html {
                                                     is_active={*is_proactive}
                                                 />
 
-                                                </div>
                                                     // Final Result
                                                     <div class="flow-result">
                                                         <div class="result-box no-match">
