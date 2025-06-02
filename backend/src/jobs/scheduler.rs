@@ -109,6 +109,18 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                 }
                                 
                                 if !emails.is_empty() {
+                                    // Sort emails by date in descending order (most recent first)
+                                    let mut sorted_emails = emails;
+                                    sorted_emails.sort_by(|a, b| {
+                                        let a_date = a.date.unwrap_or_else(|| chrono::Utc::now());
+                                        let b_date = b.date.unwrap_or_else(|| chrono::Utc::now());
+                                        b_date.cmp(&a_date)
+                                    });
+                                    
+                                    // Take only the most recent email
+                                    let latest_email = sorted_emails.into_iter().next().unwrap();
+                                    let emails = vec![latest_email];
+
                                     // Get user's waiting checks, priority senders, and keywords
                                     let waiting_checks = match state.user_repository.get_waiting_checks(user.id, "imap") {
                                         Ok(checks) => checks,
@@ -555,15 +567,56 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         notification
                                     };
 
-                                    // Send SMS notification
-                                    match twilio_utils::send_conversation_message(
-                                        &conversation.conversation_sid,
-                                        &conversation.twilio_number,
-                                        &final_notification,
-                                        true,
-                                    ).await {
-                                        Ok(_) => info!("Successfully sent email notification to user {}", user.id),
-                                        Err(e) => error!("Failed to send email notification: {}", e),
+                                    // Check user's notification preference
+                                    let notification_type = user.notification_type.as_deref().unwrap_or("sms");
+                                    match notification_type {
+                                        "call" => {
+                                            // For calls, we need a brief intro and detailed message
+                                            let notification_first_message = "Hello, I have an important email to tell you about.".to_string();
+                                            
+                                            // Extract the email ID from the latest email
+                                            let email_id = emails.first().map(|email| email.id.clone()).unwrap_or_default();
+                                            
+                                            // Create dynamic variables with email ID
+                                            let mut dynamic_vars = std::collections::HashMap::new();
+                                            dynamic_vars.insert("email_id".to_string(), email_id.clone());
+                                            
+                                            match crate::api::elevenlabs::make_notification_call(
+                                                &state.clone(),
+                                                user.phone_number.clone(),
+                                                user.preferred_number.unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set")),
+                                                email_id,
+                                                "email".to_string(),
+
+                                                notification_first_message,
+                                                final_notification.clone(),
+                                                user.id.to_string(),
+                                            ).await {
+                                                Ok(mut response) => {
+                                                    // Add dynamic variables to the client data
+                                                    if let Some(client_data) = response.get_mut("client_data") {
+                                                        if let Some(obj) = client_data.as_object_mut() {
+                                                            obj.extend(dynamic_vars.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))));
+                                                        }
+                                                    }
+                                                    info!("Successfully initiated call notification for user {} with email ID", user.id);
+                                                },
+                                                Err((_, json_err)) => error!("Failed to initiate call notification: {:?}", json_err),
+                                            }
+                                        },
+
+
+                                        _ => { // Default to SMS for "sms" or None
+                                            match twilio_utils::send_conversation_message(
+                                                &conversation.conversation_sid,
+                                                &conversation.twilio_number,
+                                                &final_notification,
+                                                true,
+                                            ).await {
+                                                Ok(_) => info!("Successfully sent email notification to user {}", user.id),
+                                                Err(e) => error!("Failed to send email notification: {}", e),
+                                            }
+                                        }
                                     }
                                 }
                             },
@@ -575,7 +628,8 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 }
 
                 // Check if we should continue processing other services
-                match state.user_repository.has_valid_subscription_tier_with_messages(user.id, "tier 2") {
+                let state_clone = Arc::clone(&state);
+                match state_clone.user_repository.has_valid_subscription_tier_with_messages(user.id, "tier 2") {
                     Ok(false) => {
                         continue;
                     },
@@ -1096,7 +1150,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                         notification
                                                     };
 
-                                                    // Clone necessary values for the new thread
+                                                    // Clone all necessary values before spawning the async task
                                                     let conversation_sid = conversation.conversation_sid.clone();
                                                     let twilio_number = conversation.twilio_number.clone();
                                                     let notification_clone = final_notification.clone();
@@ -1104,79 +1158,108 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                     let user_id = user.id;
                                                     let reminder_time_key = reminder_time_key.clone();
                                                     let current_timestamp = current_time.timestamp() as i32;
+                                                    let user_phone = user.phone_number.clone();
+                                                    let user_preferred_number = user.preferred_number.clone();
+                                                    let user_notification_type = user.notification_type.clone();
 
                                                     // Spawn a new thread for sending the notification
                                                     tokio::spawn(async move {
-                                                        match crate::api::twilio_utils::send_conversation_message(
-                                                            &conversation_sid,
-                                                            &twilio_number,
-                                                            &notification_clone,
-                                                            true,
-                                                        ).await {
-                                                            Ok(_) => {
-                                                                info!("Successfully sent calendar reminder to user {}", user_id);
+                                                        // Check user's notification preference
+                                                        let notification_type = user_notification_type.as_deref().unwrap_or("sms");
+                                                        match notification_type {
+                                                            "call" => {
+                                                                // For calls, we need a brief intro and detailed message
+                                                                let notification_first_message = "Hello, I have an upcoming calendar event to tell you about.".to_string();
                                                                 
-                                                                // Record the notification
-                                                                let new_notification = crate::models::user_models::NewCalendarNotification {
-                                                                    user_id,
-                                                                    event_id: reminder_time_key,
-                                                                    notification_time: current_timestamp,
-                                                                };
-                                                                
-                                                                if let Err(e) = state_clone.user_repository.create_calendar_notification(&new_notification) {
-                                                                    error!("Failed to record calendar notification: {}", e);
+                                                                match crate::api::elevenlabs::make_notification_call(
+                                                                    &state_clone,
+                                                                    user_phone,
+                                                                    user_preferred_number.unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set")),
+                                                                    "1".to_string(),
+                                                                    "calendar".to_string(),
+                                                                    notification_first_message,
+                                                                    notification_clone.clone(),
+                                                                    user.id.to_string(),
+
+                                                                ).await {
+                                                                    Ok(_) => {
+                                                                        println!("Successfully initiated calendar event call notification");
+                                                                        // Set the confirm event message flag for the user
+                                                                        if let Err(e) = state_clone.user_repository.set_confirm_send_event(user_id, true) {
+                                                                            error!("Failed to set confirm send event flag: {}", e);
+                                                                            // Continue execution even if setting flag fails
+                                                                        }
+                                                                    },
+                                                                    Err((_, json_err)) => error!("Failed to initiate call notification: {:?}", json_err),
                                                                 }
                                                             },
-                                                            Err(e) => error!("Failed to send calendar reminder: {}", e),
+                                                            _ => { // Default to SMS for "sms" or None
+                                                                match twilio_utils::send_conversation_message(
+                                                                    &conversation_sid,
+                                                                    &twilio_number,
+                                                                    &notification_clone,
+                                                                    false, // Don't redact the body since we need to extract event details from this message
+                                                                ).await {
+                                                                    Ok(message_sid) => {
+                                                                        println!("Successfully sent calendar confirmation SMS with SID: {}", message_sid);
+                                                                        // Set the confirm event message flag for the user
+                                                                        if let Err(e) = state_clone.user_repository.set_confirm_send_event(user_id, true) {
+                                                                            error!("Failed to set confirm send event flag: {}", e);
+                                                                            // Continue execution even if setting flag fails
+                                                                        }
+                                                                    },
+                                                                    Err(e) => error!("Failed to send calendar notification: {}", e),
+                                                                }
+                                                            }
                                                         }
                                                     });
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
                                     }
-                                }
+                                },
+                                Err(e) => error!("Failed to fetch calendar events for user {}: {}", user.id, e),
                             }
                         }
-                    },
-                    Err(e) => error!("Failed to fetch calendar events for user {}: {}", user.id, e),
-                }
-            }
-        })
-    }).expect("Failed to create calendar notification job");
+                    })
+                }).expect("Failed to create calendar notification job");
 
-    sched.add(calendar_notification_job).await.expect("Failed to add calendar notification job to scheduler");
+                sched.add(calendar_notification_job).await.expect("Failed to add calendar notification job to scheduler");
 
-    // Create a job that runs daily to manage Matrix sync tasks
-    let state_clone = Arc::clone(&state);
-    let matrix_sync_job = Job::new_async("0 * * * * *", move |_, _| {  // Runs at midnight every day
-        let state = state_clone.clone();
-        Box::pin(async move {
-            tracing::debug!("Managing Matrix sync tasks...");
-            
-            // Get all users with active WhatsApp connection
-            match state.user_repository.get_users_with_matrix_bridge_connections() {
-                Ok(users) => {
-                    let mut sync_tasks = state.matrix_sync_tasks.lock().await;
-                    
-                    // Remove any sync tasks for users who are no longer active
-                    sync_tasks.retain(|user_id, task| {
-                        if !users.contains(user_id) {
-                            tracing::debug!("Removing sync task for inactive user {}", user_id);
-                            task.abort();
-                            false
-                        } else {
-                            true
-                        }
-                    });
-
-                        // Start sync tasks for new active users
-                        for user_id in users {
-                            if !sync_tasks.contains_key(&user_id) {
-                                tracing::debug!("Starting new sync task for user {}", user_id);
+                // Create a job that runs daily to manage Matrix sync tasks
+                let state_clone = Arc::clone(&state);
+                let matrix_sync_job = Job::new_async("0 * * * * *", move |_, _| {  // Runs at midnight every day
+                    let state = state_clone.clone();
+                    Box::pin(async move {
+                        tracing::debug!("Managing Matrix sync tasks...");
+                        
+                        // Get all users with active WhatsApp connection
+                        match state.user_repository.get_users_with_matrix_bridge_connections() {
+                            Ok(users) => {
+                                let mut sync_tasks = state.matrix_sync_tasks.lock().await;
                                 
-                                // Create a new sync task
-                                let state_clone = Arc::clone(&state);
-                                let handle = tokio::spawn(async move {
+                                // Remove any sync tasks for users who are no longer active
+                                sync_tasks.retain(|user_id, task| {
+                                    if !users.contains(user_id) {
+                                        tracing::debug!("Removing sync task for inactive user {}", user_id);
+                                        task.abort();
+                                        false
+                                    } else {
+                                        true
+                                    }
+                                });
+
+                            // Start sync tasks for new active users
+                            for user_id in users {
+                                if !sync_tasks.contains_key(&user_id) {
+                                    tracing::debug!("Starting new sync task for user {}", user_id);
+                                    
+                                    // Create a new sync task
+                                    let state_clone = Arc::clone(&state);
+                                    let handle = tokio::spawn(async move {
                                     match crate::utils::matrix_auth::get_client(user_id, &state_clone.user_repository, false).await {
                                         Ok(client) => {
                                             info!("Starting Matrix sync for user {}", user_id);

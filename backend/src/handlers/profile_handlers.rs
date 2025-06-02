@@ -26,6 +26,7 @@ pub struct UpdateProfileRequest {
     timezone: String,
     timezone_auto: bool,
     agent_language: String,
+    notification_type: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -245,7 +246,7 @@ pub async fn update_profile(
         ));
     }
 
-        match state.user_repository.update_profile(
+    match state.user_repository.update_profile(
         auth_user.user_id,
         &update_req.email,
         &update_req.phone_number,
@@ -253,6 +254,7 @@ pub async fn update_profile(
         &update_req.info,
         &update_req.timezone,
         &update_req.timezone_auto,
+        update_req.notification_type.as_deref(),
     ) {
         Ok(_) => {
             // Update agent language separately // TODO put to same down the line

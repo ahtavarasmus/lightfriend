@@ -15,6 +15,7 @@ struct UpdatePhoneRequest {
     info: String,
     timezone: String,
     timezone_auto: bool,
+    agent_language: String,
 }
 
 const PHONE_NUMBERS: &[(&str, &str)] = &[
@@ -127,14 +128,16 @@ pub fn Verify() -> Html {
         <div class="verification-container">
             <div class="verification-panel">
                 <h1>{"Verify Your Account"}</h1>
-                <p>{"Call one of the following numbers to verify your account"}</p>
+                <p>{"Click to call one of the following numbers or type them manually to verify your account"}</p>
                 <div class="phone-numbers-list">
                     { PHONE_NUMBERS.iter().map(|(country, number)| {
                         html! {
-                            <div class="phone-number-option">
-                                <span class="country-code">{country.to_uppercase()}</span>
-                                <span class="number-value">{number}</span>
-                            </div>
+                            <a class="phone-number-call-link" href={format!("tel:{}", number)}>
+                                <div class="phone-number-option">
+                                    <span class="country-code">{country.to_uppercase()}</span>
+                                    {"Call "}<span class="number-value">{number}</span>
+                                </div>
+                            </a>
                         }
                     }).collect::<Html>() }
                 </div>
@@ -191,6 +194,7 @@ pub fn Verify() -> Html {
                                                                         info: profile.info.clone().unwrap_or_default(),
                                                                         timezone: profile.timezone.clone().unwrap_or_else(|| String::from("UTC")),
                                                                         timezone_auto: profile.timezone_auto.unwrap_or(true),
+                                                                        agent_language: profile.agent_language.clone(),
                                                                     })
                                                                     .expect("Failed to build request")
                                                                     .send()
@@ -285,6 +289,7 @@ pub fn Verify() -> Html {
     border-radius: 12px;
     padding: 1rem;
     display: flex;
+    color: white;
     justify-content: space-between;
     align-items: center;
     transition: all 0.3s ease;
@@ -294,6 +299,11 @@ pub fn Verify() -> Html {
     transform: translateY(-2px);
     border-color: rgba(30, 144, 255, 0.4);
     box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
+}
+
+.phone-number-call-link {
+    text-decoration: none;
+    color: inherit;
 }
 
 .country-code {

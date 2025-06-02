@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+lettre = { version = "0.10", features = ["smtp-transport", "tokio1", "tokio1-native-tls"] }
 resend-rs = "0.14"
 strsim = "0.11.1"
 governor = "0.6"  # For rate limiting

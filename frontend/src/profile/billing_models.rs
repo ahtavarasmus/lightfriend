@@ -41,6 +41,7 @@ pub struct UserProfile {
     pub notify: bool,
     pub preferred_number: Option<String>,
     pub agent_language: String,
+    pub notification_type: Option<String>,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]

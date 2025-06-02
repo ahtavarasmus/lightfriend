@@ -25,6 +25,7 @@ mod pages {
     pub mod blog;
     pub mod why;
     pub mod proactive;
+    pub mod faq;
 }
 
 mod proactive {
@@ -54,8 +55,7 @@ mod admin {
 
 use pages::{
     home::Home,
-    blog::Blog,
-    why::Why,
+    faq::Faq,
     home::is_logged_in,
     termsprivacy::{TermsAndConditions, PrivacyPolicy},
     money::{Pricing, PricingWrapper},
@@ -74,10 +74,8 @@ use admin::dashboard::AdminDashboard;
 
 #[derive(Clone, Routable, PartialEq)]
 pub enum Route {
-    #[at("/why")]
-    Why,
-    #[at("/the-other-stuff")]
-    Blog,
+    #[at("/faq")]
+    Faq,
     #[at("/")]
     Home,
     #[at("/login")]
@@ -101,13 +99,9 @@ pub enum Route {
 
 fn switch(routes: Route) -> Html {
     match routes {
-        Route::Why => {
-            info!("Rendering Why page");
-            html! { <Why /> }
-        },
-        Route::Blog => {
-            info!("Rendering Blog page");
-            html! { <Blog /> }
+        Route::Faq => {
+            info!("Rendering FAQ page");
+            html! { <Faq /> }
         },
         Route::Home => {
             info!("Rendering Home page");
@@ -243,13 +237,8 @@ let close_menu = {
                             html! {
                                 <>
                                     <div onclick={close_menu.clone()}>
-                                        <Link<Route> to={Route::Why} classes="nav-link">
-                                            {"Why?"}
-                                        </Link<Route>>
-                                    </div>
-                                    <div onclick={close_menu.clone()}>
-                                        <Link<Route> to={Route::Blog} classes="nav-link">
-                                            {"The Other Stuff"}
+                                        <Link<Route> to={Route::Faq} classes="nav-link">
+                                            {"FAQ"}
                                         </Link<Route>>
                                     </div>
                                 </>

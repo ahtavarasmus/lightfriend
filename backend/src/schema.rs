@@ -250,6 +250,7 @@ diesel::table! {
         last_credits_notification -> Nullable<Integer>,
         confirm_send_event -> Bool,
         agent_language -> Text,
+        notification_type -> Nullable<Text>,
     }
 }
 

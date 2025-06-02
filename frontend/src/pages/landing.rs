@@ -13,98 +13,176 @@ use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
+use gloo_timers::callback::Timeout;
 
+#[derive(Clone, PartialEq)]
+struct ChatMessage {
+    text: String,
+    is_user: bool,
+}
 
 #[function_component(Landing)]
 pub fn landing() -> Html {
+    let chat_messages = use_state(|| Vec::<ChatMessage>::new());
+    let is_typing = use_state(|| false);
+    let current_demo_index = use_state(|| 0);
+    let current_phone_word = use_state(|| 0);
+
+    // Simple word rotation timer
+    {
+        let current_phone_word = current_phone_word.clone();
+        use_effect(move || {
+            let timeout = Timeout::new(3000, move || {
+                let next_index = (*current_phone_word + 1) % 4;
+                current_phone_word.set(next_index);
+            });
+            timeout.forget();
+            || {}
+        });
+    }
+    // Define demo conversations as a static array to avoid ownership issues
+    let demo_conversations = [
+        ("Check my WhatsApp messages", "You have 3 new WhatsApp messages:\n\n📱 Mom: \"Don't forget dinner at 7pm\"\n📱 Sarah: \"Great job on the presentation!\"\n📱 Work Group: \"Meeting moved to 3pm tomorrow\""),
+        ("What's the weather like?", "🌤️ Today in your location:\n\nTemperature: 72°F (22°C)\nConditions: Partly cloudy\nChance of rain: 20%\n\nPerfect weather for a walk!"),
+        ("Any important emails?", "📧 You have 2 important emails:\n\n• From: boss@company.com\n  Subject: \"Q4 Budget Review - Action Required\"\n  Received: 2 hours ago\n\n• From: bank@yourbank.com\n  Subject: \"Account Statement Ready\"\n  Received: 1 hour ago"),
+        ("What's on my calendar today?", "📅 Your schedule for today:\n\n• 2:00 PM - Team standup (30 min)\n• 4:00 PM - Client call with ABC Corp (1 hour)\n• 6:30 PM - Dinner with family\n\nNext up: Team standup in 45 minutes"),
+    ];
+
+    let start_demo = {
+        let chat_messages = chat_messages.clone();
+        let is_typing = is_typing.clone();
+        let current_demo_index = current_demo_index.clone();
+        
+        Callback::from(move |question_index: usize| {
+            if question_index >= demo_conversations.len() {
+                return;
+            }
+            
+            let chat_messages = chat_messages.clone();
+            let is_typing = is_typing.clone();
+            let current_demo_index = current_demo_index.clone();
+            let question = demo_conversations[question_index].0.to_string();
+            let answer = demo_conversations[question_index].1.to_string();
+            
+            // Clear previous messages and add user message
+            let user_message = ChatMessage {
+                text: question.clone(),
+                is_user: true,
+            };
+            chat_messages.set(vec![user_message]);
+            current_demo_index.set(question_index);
+            
+            // Show typing indicator
+            is_typing.set(true);
+            
+            // Simulate AI response delay
+            let timeout = Timeout::new(1500, move || {
+                is_typing.set(false);
+                let ai_message = ChatMessage {
+                    text: answer,
+                    is_user: false,
+                };
+                chat_messages.set(vec![
+                    ChatMessage {
+                        text: question,
+                        is_user: true,
+                    },
+                    ai_message,
+                ]);
+            });
+            timeout.forget();
+        })
+    };
+
     use_effect(|| {
         let window = web_sys::window().unwrap();
         let document = window.document().unwrap();
         let window_clone = window.clone();
+
         
-let scroll_callback = Closure::wrap(Box::new(move || {
-                // Handle intro section visibility and image transitions
-                if let Some(intro_section) = document.query_selector(".intro-section").ok().flatten() {
-                    let intro_html = intro_section.clone().dyn_into::<web_sys::HtmlElement>().unwrap();
-                    let scroll_pos = window_clone.scroll_y().unwrap();
-                    let window_height = window_clone.inner_height().unwrap().as_f64().unwrap();
-                    
-                    let sticky_scroll = scroll_pos - (window_height * 0.5);  // Increased to 0.5 to delay appearance
-                    let sticky_duration = window_height * 4.0;  // Keep this the same
-                    
-                    // Calculate intro section opacity based on scroll position
-                    if sticky_scroll > sticky_duration * 0.75 {
-                        let fade_progress = ((sticky_scroll - (sticky_duration * 0.75)) / (sticky_duration * 0.25)).min(1.0);
-                        let intro_opacity = (1.0 - fade_progress).max(0.0);
-                        let _ = intro_html.set_attribute("style", &format!(
-                            "opacity: {}; position: fixed; top: 0; left: 0; width: 100%; z-index: 2;", 
-                            intro_opacity
-                        ));
-                    } else {
-                        let _ = intro_html.set_attribute("style", "opacity: 1; position: fixed; top: 0; left: 0; width: 100%; z-index: 2;");
+        let scroll_callback = Closure::wrap(Box::new(move || {
+            // Handle intro section visibility and image transitions
+            if let Some(intro_section) = document.query_selector(".intro-section").ok().flatten() {
+                let intro_html = intro_section.clone().dyn_into::<web_sys::HtmlElement>().unwrap();
+                let scroll_pos = window_clone.scroll_y().unwrap();
+                let window_height = window_clone.inner_height().unwrap().as_f64().unwrap();
+                
+                let sticky_scroll = scroll_pos - (window_height * 0.8);  // Increased to 0.5 to delay appearance
+                let sticky_duration = window_height * 4.0;  // Keep this the same
+                
+                // Calculate intro section opacity based on scroll position
+                if sticky_scroll > sticky_duration * 0.6 {  // Changed from 0.75 to 0.6 to start fading earlier
+                    let fade_progress = ((sticky_scroll - (sticky_duration * 0.6)) / (sticky_duration * 0.4)).min(1.0);  // Adjusted fade range
+                    let intro_opacity = (1.0 - fade_progress).max(0.0);
+                    let _ = intro_html.set_attribute("style", &format!(
+                        "opacity: {}; position: fixed; top: 0; left: 0; width: 100%; z-index: 2;", 
+                        intro_opacity
+                    ));
+                } else {
+                    let _ = intro_html.set_attribute("style", "opacity: 1; position: fixed; top: 0; left: 0; width: 100%; z-index: 2;");
+                }
+                
+                // Show intro section when scrolled past hero
+                let current_classes = intro_section.class_name();
+                let base_classes = "intro-section";
+                
+                if scroll_pos > window_height * 0.6 {  // Increased to 0.6 to start transition later
+                    if !current_classes.contains("visible") {
+
+                        intro_section.set_class_name(&format!("{} visible", base_classes));
                     }
                     
-                    // Show intro section when scrolled past hero
-                    let current_classes = intro_section.class_name();
-                    let base_classes = "intro-section";
+                    // Calculate relative scroll position within the sticky section
+                    let sticky_scroll = scroll_pos - (window_height * 0.6);  // Increased to match the above change
+                    let sticky_duration = window_height * 1.5; // Reduced to 1.5 for shorter duration
                     
-                    if scroll_pos > window_height * 0.4 {  // Decreased to 0.4 to start transition earlier
-                        if !current_classes.contains("visible") {
+                    // Handle image transitions based on sticky scroll position
+                    if let Some(whatsapp_image) = document.query_selector(".whatsapp-image").ok().flatten() {
+                        if let Some(email_image) = document.query_selector(".email-image").ok().flatten() {
+                            if let Some(calendar_image) = document.query_selector(".calendar-image").ok().flatten() {
+                                // Reset all images first
+                                whatsapp_image.set_class_name("whatsapp-image example-image");
+                                email_image.set_class_name("email-image example-image");
+                                calendar_image.set_class_name("calendar-image example-image");
 
-                            intro_section.set_class_name(&format!("{} visible", base_classes));
-                        }
-                        
-                        // Calculate relative scroll position within the sticky section
-                        let sticky_scroll = scroll_pos - (window_height * 0.4);  // Increased to match the above change
-                        let sticky_duration = window_height * 2.0; // Reduced from 4.0 to 2.0
-                        
-                        // Handle image transitions based on sticky scroll position
-                        if let Some(whatsapp_image) = document.query_selector(".whatsapp-image").ok().flatten() {
-                            if let Some(email_image) = document.query_selector(".email-image").ok().flatten() {
-                                if let Some(calendar_image) = document.query_selector(".calendar-image").ok().flatten() {
-                                    // Reset all images first
-                                    whatsapp_image.set_class_name("whatsapp-image example-image");
-                                    email_image.set_class_name("email-image example-image");
-                                    calendar_image.set_class_name("calendar-image example-image");
-
-                                    if sticky_scroll < sticky_duration * 0.25 {
-                                        // First quarter: show WhatsApp image
-                                        whatsapp_image.set_class_name("whatsapp-image example-image visible");
-                                        let _ = intro_html.set_attribute("style", "opacity: 1");
-                                    } else if sticky_scroll < sticky_duration * 0.5 {
-                                        // Second quarter: show email image
-                                        email_image.set_class_name("email-image example-image visible");
-                                        let _ = intro_html.set_attribute("style", "opacity: 1");
-                                    } else if sticky_scroll < sticky_duration * 0.75 {
-                                        // Third quarter: show calendar image
-                                        calendar_image.set_class_name("calendar-image example-image visible");
-                                        let _ = intro_html.set_attribute("style", "opacity: 1");
-                                    } else {
-                                        // Final quarter: fade out intro section
-                                        calendar_image.set_class_name("calendar-image example-image visible");
-                                        let _ = intro_html.set_attribute("style", "opacity: 0");
-                                    }
+                                if sticky_scroll < sticky_duration * 0.25 {
+                                    // First quarter: show WhatsApp image
+                                    whatsapp_image.set_class_name("whatsapp-image example-image visible");
+                                    let _ = intro_html.set_attribute("style", "opacity: 1");
+                                } else if sticky_scroll < sticky_duration * 0.45 {  // Adjusted from 0.5 to 0.45
+                                    // Second quarter: show email image
+                                    email_image.set_class_name("email-image example-image visible");
+                                    let _ = intro_html.set_attribute("style", "opacity: 1");
+                                } else if sticky_scroll < sticky_duration * 0.75 {
+                                    // Third quarter: show calendar image
+                                    calendar_image.set_class_name("calendar-image example-image visible");
+                                    let _ = intro_html.set_attribute("style", "opacity: 1");
+                                } else {
+                                    // Final quarter: fade out intro section
+                                    calendar_image.set_class_name("calendar-image example-image visible");
+                                    let _ = intro_html.set_attribute("style", "opacity: 0");
                                 }
                             }
                         }
+                    }
 
-                        // Add sticky class when in the sticky range
-                        if sticky_scroll < sticky_duration {
-                            if !current_classes.contains("sticky") {
-                                intro_section.set_class_name(&format!("{} visible sticky", base_classes));
-                            }
-                        } else {
-                            // Remove sticky class after duration
-                            if current_classes.contains("sticky") {
-                                intro_section.set_class_name(&format!("{} visible", base_classes));
-                            }
+                    // Add sticky class when in the sticky range
+                    if sticky_scroll < sticky_duration {
+                        if !current_classes.contains("sticky") {
+                            intro_section.set_class_name(&format!("{} visible sticky", base_classes));
                         }
                     } else {
-                        // Reset to base classes when not visible
-                        intro_section.set_class_name(base_classes);
-                        let _ = intro_html.set_attribute("style", "opacity: 0");
+                        // Remove sticky class after duration
+                        if current_classes.contains("sticky") {
+                            intro_section.set_class_name(&format!("{} visible", base_classes));
+                        }
                     }
+                } else {
+                    // Reset to base classes when not visible
+                    intro_section.set_class_name(base_classes);
+                    let _ = intro_html.set_attribute("style", "opacity: 0");
                 }
+            }
 
         }) as Box<dyn FnMut()>);
 
@@ -143,11 +221,12 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                 <div class="hero-background"></div>
                 <div class="hero-content">
                     <div class="hero-header">
-                        <div class="hero-title">{"Break Free Without Vanishing"}</div>
-                        <p class="hero-subtitle">{"Your digital life just voice call or text away"}</p>
+                        <p class="hero-subtitle">
+                            {"Access all the necessary features without a smartphone so you can escape the doomscrolling"}
+                        </p>
                     </div>
                     <Link<Route> to={Route::Register} classes="forward-link">
-                        <button class="hero-cta">{"Start Your Dumbphone Journey"}</button>
+                        <button class="hero-cta">{"Get Started"}</button>
                     </Link<Route>>
                 </div>
         </header>        
@@ -158,6 +237,7 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                 <div class="intro-content">
                     <div class="intro-text">
                         <h2>{"Everything just a call or text away"}</h2>
+
 
                         <p>{"Need your calendar? A WhatsApp reply? Just call or text LightFriend."}</p>
                         <ul class="feature-list">
@@ -227,56 +307,9 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                 </div>
             </div>
         </section>
-            /*
-            TODO move this to faq section
-            <div class="feature-block privacy">
-                <div class="feature-content">
-                    <h2>{"Your Data, Your Rules"}</h2>
-                    <p>{"We’re not Big Tech. LightFriend’s open-source code and privacy-first design keep your info safe."}</p>
-                    <ul class="feature-list">
-                        <li>{"🔒 No call recordings, ever"}</li>
-                        <li>{"🤖 Sensitive info auto-redacted"}</li>
-                        <li>{"📱 Secure SMS storage with Twilio"}</li>
-                        <li>{"🗑️ Data deleted when you’re done"}</li>
-                        <li>{"💻 Fully open-source—check it yourself"}</li>
-                    </ul>
-                    <div class="privacy-example">
-                        {
-                            html! {
-                                <>
-                                <button class="privacy-toggle" {onclick}>
-                                    <h3>{"How We Protect You"}</h3>
-                                    <span class="toggle-icon">{if *is_privacy_expanded {"▼"} else {"▶"}}</span>
-                                </button>
-                                {
-                                    if *is_privacy_expanded {
-                                    html! {
-                                        <div class="privacy-content">
-                                            <p>{"We keep your data minimal and secure:"}</p>
-                                            <ul class="privacy-details">
-                                                <li><strong>{"Calls:"}</strong> {"No recordings. Just anonymous metrics to improve service."}</li>
-                                                <li><strong>{"Messages:"}</strong> {"Sensitive info redacted, stored securely with Twilio, fetched only when needed."}</li>
-                                            </ul>
-                                            <p class="context-example">{"Example redaction:"}</p>
-                                            <pre class="redaction-example">
-                                                {"Original: \"Check if John Smith sent the $5000 invoice\"\nStored: \"Check if [NAME_REDACTED] sent the [CONTENT_REDACTED]\""}
-                                            </pre>
-                                        </div>
-                                    }
-                                    } else {
-                                        html! {}
-                                    }
-                                }
-                                </>
-                            }
-                        }
-                    </div>
-                </div>
-            </div>
-            */
 
         <section class="how-it-works">
-            <h2>{"Escape the Scroll in 3 Steps"}</h2>
+            <h2>{"Break Free Without Vanishing"}</h2>
             <p>{"LightFriend makes going dumbphone stupidly easy."}</p>
             <div class="steps-grid">
                 <div class="step">
@@ -359,7 +392,7 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                     }
 
                     .intro-mobile {
-                        display: none; /* Hidden by default */
+                        display: none !important; /* Hidden by default */
                     }
 
                     @media (max-width: 768px) {
@@ -371,7 +404,7 @@ let scroll_callback = Closure::wrap(Box::new(move || {
 
                     @media (min-width: 769px) {
                         .intro-mobile {
-                            display: none; /* Hide on desktop */
+                            display: none !important; /* Hide on desktop */
                         }
                     }
 
@@ -408,6 +441,9 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                             display: flex;
                             align-items: center;
                             justify-content: center;
+                            overflow: hidden;
+                            height: 100vh;
+                            position: fixed;
                         }
 
                         .intro-section.visible {
@@ -419,6 +455,8 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                             flex-direction: column;
                             gap: 0;
                             padding: 0;
+                            overflow: hidden;
+                            height: 100vh;
                         }
                     }
 
@@ -473,9 +511,290 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                             text-align: center;
                             gap: 2rem;
                             padding-top: 2rem;
+                    }
+
+                    /* Demo Chat Styles - Force visibility with !important */
+                    .demo-chat-container {
+                        display: flex !important;
+                        flex-direction: column !important;
+                        align-items: center !important;
+                        justify-content: center !important;
+                        margin: 2rem 0 !important;
+
+                        position: relative !important;
+                        z-index: 10 !important;
+                    }
+
+                    .phone-demo {
+                        background: #1a1a1a !important;
+                        border: 3px solid #444 !important;
+                        border-radius: 20px !important;
+                        padding: 0.8rem !important;
+                        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.7), 
+                                    0 0 0 1px rgba(30, 144, 255, 0.2) !important;
+                        position: relative !important;
+                        max-width: 240px !important;
+                        width: 100% !important;
+                        backdrop-filter: blur(10px) !important;
+                        z-index: 11 !important;
+                    }
+
+                    .phone-demo::before {
+                        content: '' !important;
+                        position: absolute !important;
+                        top: 8px !important;
+                        left: 50% !important;
+                        transform: translateX(-50%) !important;
+                        width: 40px !important;
+                        height: 3px !important;
+                        background: #555 !important;
+                        border-radius: 2px !important;
+                    }
+
+                    .phone-screen {
+                        background: #000 !important;
+                        border-radius: 12px !important;
+                        overflow: hidden !important;
+                        height: 320px !important;
+                        display: flex !important;
+                        flex-direction: column !important;
+                        border: 1px solid #333 !important;
+                    }
+
+                    .phone-header {
+                        background: #1a1a1a !important;
+                        padding: 0.5rem !important;
+                        border-bottom: 1px solid #333 !important;
+                        flex-shrink: 0 !important;
+                    }
+
+                    .phone-status {
+                        display: flex !important;
+                        justify-content: space-between !important;
+                        align-items: center !important;
+                        font-size: 0.7rem !important;
+                        color: #fff !important;
+                        margin-bottom: 0.5rem !important;
+                        font-family: -apple-system, BlinkMacSystemFont, sans-serif !important;
+                    }
+
+                    .chat-header {
+                        text-align: center !important;
+                    }
+
+                    .contact-name {
+                        display: block !important;
+                        color: #fff !important;
+                        font-weight: bold !important;
+                        font-size: 0.9rem !important;
+                    }
+
+                    .contact-status {
+                        display: block !important;
+                        color: #7EB2FF !important;
+                        font-size: 0.7rem !important;
+                    }
+
+                    .chat-messages {
+                        flex: 1 !important;
+                        padding: 1rem !important;
+                        overflow-y: auto !important;
+                        display: flex !important;
+                        flex-direction: column !important;
+                        gap: 0.5rem !important;
+                        background: #0a0a0a !important;
+                        min-height: 0 !important;
+                    }
+
+                    .user-message {
+                        display: flex !important;
+                        justify-content: flex-end !important;
+                        margin-bottom: 0.5rem !important;
+                    }
+
+                    .ai-message {
+                        display: flex !important;
+                        justify-content: flex-start !important;
+                        margin-bottom: 0.5rem !important;
+                    }
+
+                    .welcome-message {
+                        display: flex !important;
+                        justify-content: center !important;
+                        align-items: center !important;
+                        height: 100% !important;
+                    }
+
+                    .message-bubble {
+                        max-width: 80% !important;
+                        padding: 0.75rem !important;
+                        border-radius: 15px !important;
+                        font-size: 0.8rem !important;
+                        line-height: 1.4 !important;
+                        word-wrap: break-word !important;
+                        position: relative !important;
+                        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+                    }
+
+                    .message-bubble.user {
+                        background: #1E90FF !important;
+                        color: white !important;
+                        border-bottom-right-radius: 5px !important;
+                        margin-left: auto !important;
+                    }
+
+                    .message-bubble.ai {
+                        background: #2a2a2a !important;
+                        color: #e0e0e0 !important;
+                        border-bottom-left-radius: 5px !important;
+                        border: 1px solid #444 !important;
+                        margin-right: auto !important;
+                    }
+
+                    .message-bubble.typing {
+                        padding: 1rem 0.75rem !important;
+                        background: #2a2a2a !important;
+                        border: 1px solid #444 !important;
+                    }
+
+                    .typing-indicator {
+                        display: flex !important;
+                        gap: 0.25rem !important;
+                        align-items: center !important;
+                        justify-content: center !important;
+                    }
+
+                    .typing-indicator span {
+                        width: 6px !important;
+                        height: 6px !important;
+                        background: #7EB2FF !important;
+                        border-radius: 50% !important;
+                        animation: typing-bounce 1.4s infinite ease-in-out !important;
+                    }
+
+                    .typing-indicator span:nth-child(1) {
+                        animation-delay: -0.32s !important;
+                    }
+
+                    .typing-indicator span:nth-child(2) {
+                        animation-delay: -0.16s !important;
+                    }
+
+                    .typing-indicator span:nth-child(3) {
+                        animation-delay: -0.16s !important;
+                    }
+
+                    @keyframes typing-bounce {
+                        0%, 80%, 100% {
+                            transform: scale(0.8) !important;
+                            opacity: 0.5 !important;
+                        }
+                        40% {
+                            transform: scale(1) !important;
+                            opacity: 1 !important;
+                        }
+                    }
+
+                    .demo-controls {
+                        max-width: 240px !important;
+                        width: 100% !important;
+                        background: rgba(30, 30, 30, 0.9) !important;
+                        border: 2px solid rgba(30, 144, 255, 0.3) !important;
+                        border-radius: 12px !important;
+                        padding: 1rem !important;
+                        backdrop-filter: blur(10px) !important;
+                        z-index: 11 !important;
+                        margin-top: 1rem !important;
+                    }
+
+                    .demo-controls h3 {
+                        color: #7EB2FF !important;
+                        font-size: 1rem !important;
+                        margin-bottom: 0.8rem !important;
+                        text-align: center !important;
+                        margin-top: 0 !important;
+                    }
+
+                    .demo-questions {
+                        display: flex !important;
+                        flex-direction: column !important;
+                        gap: 0.75rem !important;
+                        margin-bottom: 1rem !important;
+                    }
+
+                    .demo-question {
+                        background: rgba(30, 144, 255, 0.15) !important;
+                        border: 2px solid rgba(30, 144, 255, 0.4) !important;
+                        color: #7EB2FF !important;
+                        padding: 0.6rem !important;
+                        border-radius: 6px !important;
+                        cursor: pointer !important;
+                        font-size: 0.8rem !important;
+                        transition: all 0.3s ease !important;
+                        text-align: left !important;
+                        font-family: inherit !important;
+                    }
+
+                    .demo-question:hover {
+                        background: rgba(30, 144, 255, 0.25) !important;
+                        border-color: rgba(30, 144, 255, 0.6) !important;
+                        transform: translateY(-2px) !important;
+                        box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3) !important;
+                    }
+
+                    .clear-chat {
+                        background: rgba(255, 255, 255, 0.15) !important;
+                        border: 2px solid rgba(255, 255, 255, 0.3) !important;
+                        color: #ccc !important;
+                        padding: 0.5rem 1rem !important;
+                        border-radius: 6px !important;
+                        cursor: pointer !important;
+                        font-size: 0.8rem !important;
+                        transition: all 0.3s ease !important;
+                        width: 100% !important;
+                        font-family: inherit !important;
+                    }
+
+                    .clear-chat:hover {
+                        background: rgba(255, 255, 255, 0.25) !important;
+                        color: #fff !important;
+                        transform: translateY(-1px) !important;
+                    }
+
+                    @media (max-width: 768px) {
+                        .demo-chat-container {
+                            flex-direction: column !important;
+                            align-items: center !important;
+
+                            margin: 1.5rem 0 !important;
+                            padding: 0 1rem !important;
                         }
 
-                        .hero-image {
+                        .phone-demo {
+                            max-width: 220px !important;
+                        }
+
+                        .phone-screen {
+                            height: 280px !important;
+                        }
+
+                        .demo-controls {
+                            max-width: 220px !important;
+                            padding: 0.8rem !important;
+                            margin-top: 0.8rem !important;
+                        }
+
+                        .demo-controls h3 {
+                            font-size: 0.9rem !important;
+                        }
+
+                        .demo-question {
+                            font-size: 0.75rem !important;
+                            padding: 0.5rem !important;
+                        }
+                    }
+
+                    .hero-image {
                             max-width: 400px;
                             position: relative;
                             top: 0;
@@ -506,66 +825,47 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                         .intro-content {
                             flex-direction: column;
                             text-align: center;
-                            gap: 2rem;
-                            padding-top: 0;
+                            gap: 0;
+                            padding: 0;
                             height: 100vh;
+                            overflow: hidden;
                         }
 
                         .sticky-image {
                             position: fixed !important;
-                            top: 40% !important; /* Moved up slightly to make room for text */
+                            top: 50% !important;
                             left: 50% !important;
-                            transform: translate(-50%, -50%) !important;
-                            width: 280px !important;
-                            height: 280px !important;
-                            transform: translate3d(-50%, -50%, 0) !important; /* Force GPU acceleration */
+                            transform: translate3d(-50%, -50%, 0) !important;
+                            width: 320px !important;
+                            height: 500px !important;
                             -webkit-transform: translate3d(-50%, -50%, 0) !important;
                             backface-visibility: hidden;
                             -webkit-backface-visibility: hidden;
                             margin: 0 !important;
                             z-index: 10;
+                            overflow: visible;
                         }
 
                         .example-image {
                             position: absolute;
-                            max-width: 280px;
+                            width: 100%;
                             height: auto;
+                            max-height: none;
                             left: 50%;
                             top: 50%;
+                            transform: translate(-50%, -50%);
+                            -webkit-transform: translate(-50%, -50%);
+                            object-fit: contain;
                         }
 
                         .intro-text {
-                            margin-top: 100vh !important;
-                            padding: 2rem;
-                            background: rgba(26, 26, 26, 0.95);
-                            border-radius: 16px;
-                            border: 1px solid rgba(30, 144, 255, 0.1);
-                            backdrop-filter: blur(10px);
-
-                            position: relative;
-                            z-index: 20;
-                            text-align: center;
-                            align-items: center;
-                            width: 90%;
-                            margin-left: auto;
-                            margin-right: auto;
+                            display: none !important;
                         }
 
-                        .intro-text h2 {
-                            font-size: 1.8rem;
+                    }
+                            margin: 0;
                         }
 
-                        .intro-text p {
-                            font-size: 1rem;
-                        }
-
-                        .intro-text .feature-list {
-                            font-size: 0.9rem;
-                        }
-
-                        .intro-text .feature-list li {
-                            margin: 0.5rem 0;
-                        }
                     }
 
 
@@ -592,18 +892,23 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                         top: 20vh;
                         width: 400px;
                         height: 600px;
-                        flex-shrink: 0;
-                        margin-left: auto; /* Push to right side */
-                        z-index: 5;
-                    }
+
                     @media (max-width: 768px) {
                         .sticky-image {
                             position: fixed !important;
                             top: 50% !important;
                             left: 50% !important;
-                            transform: translate(-50%, -50%) !important;
-                            width: 480px !important;
-                            height: 480px !important;
+                            transform: translate3d(-50%, -50%, 0) !important;
+                            -webkit-transform: translate3d(-50%, -50%, 0) !important;
+                            width: 320px !important;
+                            height: 500px !important;
+                            margin: 0 !important;
+                            z-index: 10;
+                            overflow: visible;
+                            backface-visibility: hidden;
+                            -webkit-backface-visibility: hidden;
+                        }
+                    }
                             margin: 0 !important;
                             z-index: 10;
                         }
@@ -1445,6 +1750,7 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     background: transparent;
     opacity: 1;
     pointer-events: auto;
+    margin-top: -30vh; /* Move up by half a viewport height */
 }
 
 .feature-block {
@@ -1755,25 +2061,25 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                         z-index: 2;
                     }
 
-.hero-content {
-    z-index: 3;
-    width: 100%;
-    height: 100%;
-    display: flex;
-    justify-content: space-around;
-    padding: 40px;
-    pointer-events: auto;
-}
+                    .hero-content {
+                        z-index: 3;
+                        width: 100%;
+                        height: 100%;
+                        display: flex;
+                        justify-content: space-around;
+                        padding: 40px;
+                        pointer-events: auto;
+                    }
 
-.hero-header {
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-}
+                    .hero-header {
+                        display: flex;
+                        flex-direction: column;
+                        justify-content: flex-end;
+                    }
 
                     .hero-title {
                         font-size: 3.4rem;
-                        line-height: 1.1;
+                        line-height: 1.3;
                         color: rgba(255, 255, 255, 0.85);
                         font-weight: 200;
                         max-width: 400px;
@@ -1785,6 +2091,16 @@ let scroll_callback = Closure::wrap(Box::new(move || {
                         font-style: italic;
                         transform: translateZ(0);
                         animation: whisperIn 1.5s ease-out forwards;
+                    }
+
+                    .hero-title .changing-word {
+                        display: inline-block;
+                        min-width: 200px;
+                        animation: fadeInOut 3s infinite;
+                        font-weight: 400;
+                        color: #7EB2FF;
+                        font-size: 3.8rem;
+                        margin: 10px 0;
                     }
 
                     @keyframes whisperIn {
@@ -2263,18 +2579,43 @@ let scroll_callback = Closure::wrap(Box::new(move || {
 
                     .hero-subtitle {
                         position: relative;
-                        font-size: 1.2rem;
-                        color: rgba(255, 255, 255, 0.9);
-                        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+                        font-size: 1.3rem;
+                        font-weight: 300;
+                        letter-spacing: 0.02em;
                         max-width: 600px;
                         margin: 0 auto 3rem;
-                        line-height: 1.6;
+                        line-height: 1.8;
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                        text-align: left;
+                        background: linear-gradient(45deg, #fff, #7EB2FF);
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                        text-shadow: none;
+                    }
+
+                    .changing-word {
+                        display: inline-block;
+                        min-width: 120px;
+
+                        font-weight: 500;
+                        color: #7EB2FF;
+                        opacity: 1;
+                        transition: opacity 0.3s ease-in-out;
+                        animation: fadeInOut 3s infinite;
+                    }
+
+                    @media (max-width: 768px) {
+                        .hero-subtitle {
+                            font-size: 1.1rem;
+                            line-height: 1.6;
+                            margin-bottom: 2rem;
+                        }
                     }
 
 .hero-cta {
     background: linear-gradient(
         45deg,
-        #1E90FF,
+        #7EB2FF,
         #4169E1
     );
     color: white;
@@ -2284,13 +2625,16 @@ let scroll_callback = Closure::wrap(Box::new(move || {
     font-size: 1.1rem;
     cursor: pointer;
     transition: transform 1.5s cubic-bezier(0.4, 0, 0.2, 1),
-                box-shadow 1.5s ease;
+                box-shadow 1.5s ease,
+                background 0.3s ease;
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
     position: relative;
     overflow: hidden;
     margin: 2rem 0 3rem 0;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(5px);
 }
 
 @media (min-width: 769px) {
@@ -2326,7 +2670,12 @@ let scroll_callback = Closure::wrap(Box::new(move || {
 
 .hero-cta:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
+    box-shadow: 0 4px 20px rgba(126, 178, 255, 0.4);
+    background: linear-gradient(
+        45deg,
+        #90c2ff,
+        #5479f1
+    );
 }
 
 

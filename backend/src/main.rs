@@ -58,6 +58,7 @@ mod utils {
     pub mod usage;
     pub mod matrix_auth;
     pub mod whatsapp_utils;
+    pub mod elevenlabs_prompts;
 }
 mod api {
     pub mod vapi_endpoints;
@@ -146,7 +147,7 @@ pub fn validate_env() {
         "ENCRYPTION_KEY", "COMPOSIO_API_KEY", "GOOGLE_CALENDAR_CLIENT_ID", 
         "GOOGLE_CALENDAR_CLIENT_SECRET", "MATRIX_HOMESERVER", "MATRIX_SHARED_SECRET",
         "WHATSAPP_BRIDGE_BOT", "GOOGLE_CALENDAR_CLIENT_SECRET", "OPENROUTER_API_KEY",
-        "MATRIX_HOMESERVER_PERSISTENT_STORE_PATH",
+        "MATRIX_HOMESERVER_PERSISTENT_STORE_PATH", "US_VOICE_ID", "FI_VOICE_ID", "DE_VOICE_ID",
     ];
     for var in required_vars.iter() {
         std::env::var(var).expect(&format!("{} must be set", var));
@@ -253,7 +254,7 @@ async fn main() {
         .route("/api/call/assistant", post(elevenlabs::fetch_assistant))
         .route("/api/call/weather", post(elevenlabs::handle_weather_tool_call))
         .route("/api/call/perplexity", post(elevenlabs::handle_perplexity_tool_call))
-        .layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::check_subscription_access))
+        //.layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::check_subscription_access))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 
     let elevenlabs_routes = Router::new()
@@ -264,13 +265,14 @@ async fn main() {
         .route("/api/call/email", get(elevenlabs::handle_email_fetch_tool_call))
         .route("/api/call/email/specific", post(elevenlabs::handle_email_search_tool_call))
         .route("/api/call/email/waiting_check", post(elevenlabs::handle_create_waiting_check_email_tool_call))
+        .route("/api/call/email/respond-confirm", post(elevenlabs::handle_email_response_tool_call))
         .route("/api/call/tasks", get(elevenlabs::handle_tasks_fetching_tool_call))
         .route("/api/call/tasks/create", post(elevenlabs::handle_tasks_creation_tool_call))
         .route("/api/call/whatsapp", get(elevenlabs::handle_whatsapp_fetch_tool_call))
         .route("/api/call/whatsapp/specific-room", get(elevenlabs::handle_whatsapp_fetch_specific_room_tool_call))
         .route("/api/call/whatsapp/search", post(elevenlabs::handle_whatsapp_search_tool_call))
         .route("/api/call/whatsapp/confirm", post(elevenlabs::handle_whatsapp_confirm_send))
-        .layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::check_subscription_access))
+        //.layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::check_subscription_access))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 
     let elevenlabs_webhook_routes = Router::new()

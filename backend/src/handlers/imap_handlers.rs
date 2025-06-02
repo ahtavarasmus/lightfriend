@@ -176,6 +176,194 @@ pub async fn fetch_full_imap_emails(
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct EmailResponseRequest {
+    pub email_id: String,
+    pub response_text: String,
+}
+
+pub async fn respond_to_email(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<EmailResponseRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    tracing::info!("Responding to email {} for user {}", request.email_id, auth_user.user_id);
+
+    // Validate email_id is a valid number
+    if !request.email_id.chars().all(|c| c.is_ascii_digit()) {
+        tracing::error!("Invalid email ID format: {}", request.email_id);
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "Invalid email ID format" }))
+        ));
+    }
+
+    // Get IMAP credentials
+    let (email, password, imap_server, imap_port) = match state
+        .user_repository
+        .get_imap_credentials(auth_user.user_id)
+    {
+        Ok(Some(creds)) => creds,
+        Ok(None) => return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "No IMAP connection found" }))
+        )),
+        Err(e) => return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Failed to get IMAP credentials: {}", e) }))
+        )),
+    };
+
+    // Set up TLS
+    let tls = match TlsConnector::builder().build() {
+        Ok(tls) => tls,
+        Err(e) => return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Failed to create TLS connector: {}", e) }))
+        )),
+    };
+
+    let server = imap_server.as_deref().unwrap_or("imap.gmail.com");
+    let port = imap_port.unwrap_or(993);
+
+    // Connect to IMAP server
+    let client = match imap::connect((server, port as u16), server, &tls) {
+        Ok(client) => client,
+        Err(e) => return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Failed to connect to IMAP server: {}", e) }))
+        )),
+    };
+
+    // Login
+    let mut imap_session = match client.login(&email, &password) {
+        Ok(session) => session,
+        Err((e, _)) => return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "error": format!("Failed to login: {}", e) }))
+        )),
+    };
+
+    // Select INBOX
+    if let Err(e) = imap_session.select("INBOX") {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Failed to select INBOX: {}", e) }))
+        ));
+    }
+
+    // Fetch the original message to get subject and other details
+    let messages = match imap_session.uid_fetch(&request.email_id, "(ENVELOPE)") {
+        Ok(messages) => messages,
+        Err(e) => return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Failed to fetch original message: {}", e) }))
+        )),
+    };
+
+    let original_message = match messages.iter().next() {
+        Some(msg) => msg,
+        None => return Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Original message not found" }))
+        )),
+    };
+
+    let envelope = match original_message.envelope() {
+        Some(env) => env,
+        None => return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to get original message envelope" }))
+        )),
+    };
+
+    // Get the recipient's email address from the original sender
+    let reply_to_address = envelope
+        .from
+        .as_ref()
+        .and_then(|addrs| addrs.first())
+        .and_then(|addr| {
+            let mailbox = addr.mailbox.as_ref()?.to_vec();
+            let host = addr.host.as_ref()?.to_vec();
+            Some(format!(
+                "{}@{}",
+                String::from_utf8_lossy(&mailbox),
+                String::from_utf8_lossy(&host)
+            ))
+        })
+        .ok_or_else(|| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to get recipient address" }))
+        ))?;
+
+    // Get original subject
+    let original_subject = envelope
+        .subject
+        .as_ref()
+        .map(|s| String::from_utf8_lossy(s).into_owned())
+        .unwrap_or_else(|| String::from("No subject"));
+
+    let subject = if !original_subject.to_lowercase().starts_with("re:") {
+        format!("Re: {}", original_subject)
+    } else {
+        original_subject
+    };
+
+    // Create SMTP transport
+    let smtp_server = imap_server
+        .as_deref()
+        .unwrap_or("smtp.gmail.com")
+        .replace("imap", "smtp");
+    
+    let smtp_port = 587; // Standard SMTP port
+
+    let creds = lettre::transport::smtp::authentication::Credentials::new(
+        email.clone(),
+        password.clone(),
+    );
+
+    let mailer = lettre::SmtpTransport::relay(&smtp_server)
+        .unwrap()
+        .port(smtp_port)
+        .credentials(creds)
+        .build();
+
+    use lettre::{Message, Transport};
+
+    // Create email message
+    let email_message = match Message::builder()
+        .from(email.parse().unwrap())
+        .to(reply_to_address.parse().unwrap())
+        .subject(subject)
+        .body(request.response_text.clone())
+    {
+        Ok(message) => message,
+        Err(e) => return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Failed to create email message: {}", e) }))
+        )),
+    };
+
+    // Send the email
+    match mailer.send(&email_message) {
+        Ok(_) => {
+            // Logout from IMAP
+            if let Err(e) = imap_session.logout() {
+                tracing::warn!("Failed to logout from IMAP: {}", e);
+            }
+
+            Ok(Json(json!({
+                "success": true,
+                "message": "Email response sent successfully"
+            })))
+        }
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": format!("Failed to send email: {}", e) }))
+        )),
+    }
+}
+
 pub async fn fetch_single_imap_email(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,

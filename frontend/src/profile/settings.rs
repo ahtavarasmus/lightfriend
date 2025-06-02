@@ -21,6 +21,7 @@ struct UpdateProfileRequest {
     timezone: String,
     timezone_auto: bool,
     agent_language: String,
+    notification_type: Option<String>,
 }
 
 #[derive(Properties, PartialEq, Clone)]
@@ -40,6 +41,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let timezone = use_state(|| (*user_profile).timezone.clone().unwrap_or_else(|| String::from("UTC")));
     let timezone_auto = use_state(|| (*user_profile).timezone_auto.unwrap_or(true));
     let agent_language = use_state(|| (*user_profile).agent_language.clone());
+    let notification_type = use_state(|| (*user_profile).notification_type.clone());
     let error = use_state(|| None::<String>);
     let success = use_state(|| None::<String>);
     let is_editing = use_state(|| false);
@@ -54,6 +56,8 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let timezone = timezone.clone();
         let user_profile_state = user_profile.clone();
         let agent_language = agent_language.clone();
+        let user_profile_state = user_profile.clone();
+        let notification_type = notification_type.clone();
 
         use_effect_with_deps(move |props_profile| {
             email.set(props_profile.email.clone());
@@ -62,6 +66,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             info.set(props_profile.info.clone().unwrap_or_default());
             timezone.set(props_profile.timezone.clone().unwrap_or_else(|| String::from("UTC")));
             agent_language.set(props_profile.agent_language.clone());
+            notification_type.set(props_profile.notification_type.clone());
             user_profile_state.set(props_profile.clone());
             || ()
         }, props.user_profile.clone());
@@ -79,6 +84,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let timezone = timezone.clone();
         let timezone_auto = timezone_auto.clone();
         let agent_language = agent_language.clone();
+        let notification_type = notification_type.clone();
         let user_profile = user_profile.clone();
         let props = props.clone();
 
@@ -95,6 +101,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             let is_editing = is_editing.clone();
             let navigator = navigator.clone();
             let user_profile = user_profile.clone();
+            let notification_type = notification_type.clone();
 
             // Check authentication first
             let is_authenticated = window()
@@ -128,6 +135,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                             timezone: (*timezone).clone(),
                             timezone_auto: *timezone_auto.clone(),
                             agent_language: (*agent_language).clone(),
+                            notification_type: (*notification_type).clone(),
                         })
                         .expect("Failed to build request")
                         .send()
@@ -155,6 +163,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     timezone: Some((*timezone).clone()),
                                     timezone_auto: Some(*timezone_auto),
                                     agent_language: (*agent_language).clone(),
+                                    notification_type: (*notification_type).clone(),
                                     verified: (*user_profile).verified,
                                     time_to_live: (*user_profile).time_to_live,
                                     time_to_delete: (*user_profile).time_to_delete,
@@ -504,6 +513,52 @@ let on_timezone_update = {
                     }
                 }
             </div>
+            <div class="profile-field">
+                <div class="field-label-group">
+                    <span class="field-label">{"Notification Type"}</span>
+                    <div class="tooltip">
+                        <span class="tooltip-icon">{"?"}</span>
+                        <span class="tooltip-text">
+                            {"Choose how you want to receive notifications. You can choose between SMS and calling. Note that you won't receive anything unless you have proactive notifications enabled."}
+                        </span>
+                    </div>
+                </div>
+                {
+                    if *is_editing {
+                        html! {
+                            <select
+                                class="profile-input"
+                                value={(*notification_type).clone().unwrap_or_else(|| "sms".to_string())}
+                                onchange={let notification_type = notification_type.clone(); move |e: Event| {
+                                    let select: HtmlInputElement = e.target_unchecked_into();
+                                    let value = if select.value() == "none" { None } else { Some(select.value()) };
+                                    notification_type.set(value);
+                                }}
+                            >
+                                <option value="sms" selected={(*notification_type).as_deref().unwrap_or("sms") == "sms"}>
+                                    {"Text me"}
+                                </option>
+                                <option value="call" selected={(*notification_type).as_deref() == Some("call")}>
+                                    {"Call me"}
+                                </option>
+                            </select>
+                        }
+                    } else {
+                        html! {
+                            <span class="field-value">
+                                {
+                                    match (*user_profile).notification_type.as_deref() {
+                                        Some("call") => "Voice call",
+                                        _ => "SMS"
+                                    }
+                                }
+                            </span>
+                        }
+                    }
+                }
+            </div>
+            
+
             
             <button 
                 onclick={

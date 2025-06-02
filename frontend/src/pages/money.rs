@@ -156,6 +156,7 @@ pub fn pricing(props: &PricingProps) -> Html {
             </div>
 
             <div class="pricing-grid">
+                /* {Hard Mode tier temporarily commented out
                 <div class="pricing-card subscription basic">
                     <div class="card-header">
                         <h3>{"Hard Mode"}</h3>
@@ -208,6 +209,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                         }
                     }
                 </div>
+                }*/
 
                 <div class="pricing-card subscription premium">
                     <div class="popular-tag">{"All-Inclusive"}</div>
@@ -636,9 +638,9 @@ pub fn pricing(props: &PricingProps) -> Html {
     z-index: 2;
 }
 
-.pricing-grid {
-                    grid-template-columns: repeat(2, 1fr);
-                    max-width: 1200px;
+                .pricing-grid {
+                    grid-template-columns: 1fr;
+                    max-width: 600px;
                     margin: 4rem auto;
                     gap: 2rem;
                 }

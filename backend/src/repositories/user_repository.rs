@@ -346,7 +346,7 @@ impl UserRepository {
         Ok(user)
     }
     // Update user's profile
-    pub fn update_profile(&self, user_id: i32, email: &str, phone_number: &str, nickname: &str, info: &str, timezone: &str, timezone_auto: &bool) -> Result<(), DieselError> {
+    pub fn update_profile(&self, user_id: i32, email: &str, phone_number: &str, nickname: &str, info: &str, timezone: &str, timezone_auto: &bool, notification_type: Option<&str>) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // Check if phone number exists for a different user
@@ -388,6 +388,7 @@ impl UserRepository {
                 users::timezone.eq(timezone),
                 users::timezone_auto.eq(timezone_auto),
                 users::verified.eq(!should_unverify && current_user.verified), // Only keep verified true if phone number hasn't changed
+                users::notification_type.eq(notification_type),
             ))
             .execute(&mut conn)?;
         Ok(())

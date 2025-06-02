@@ -39,6 +39,14 @@ pub struct MessageCallPayload {
     email_id: Option<String>
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct NotificationCallPayload {
+    agent_id: String,
+    agent_phone_number_id: String,
+    to_number: String,
+    conversation_initiation_client_data: ConversationInitiationClientData,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct AssistantPayload {
     agent_id: String,
@@ -47,24 +55,29 @@ pub struct AssistantPayload {
     caller_id: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ConversationInitiationClientData {
     r#type: String,
     conversation_config_override: ConversationConfig,
     dynamic_variables: HashMap<String, Value>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct ConversationConfig {
     agent: AgentConfig,
+    tts: VoiceId,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct AgentConfig {
     first_message: String,
 }
 
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct VoiceId {
+    voice_id: String,
+}
 
 
 pub async fn validate_elevenlabs_secret(
@@ -140,10 +153,18 @@ pub async fn fetch_assistant(
     let caller_number = payload.caller_id;
     println!("Caller Number: {}", caller_number);
 
+
+    let us_voice_id = std::env::var("US_VOICE_ID").expect("US_VOICE_ID not set");
+    let fi_voice_id = std::env::var("FI_VOICE_ID").expect("FI_VOICE_ID not set");
+    let de_voice_id = std::env::var("DE_VOICE_ID").expect("DE_VOICE_ID not set");
+
     let mut dynamic_variables = HashMap::new();
     let mut conversation_config_override = ConversationConfig {
         agent: AgentConfig {
             first_message: "Hello {{name}}!".to_string(),
+        },
+        tts: VoiceId {
+            voice_id: us_voice_id.clone(),
         },
     };
 
@@ -198,12 +219,23 @@ pub async fn fetch_assistant(
                     println!("Error verifying user: {}", e);
                     // Continue even if verification fails
                 } else {
-                    conversation_config_override = ConversationConfig {
-                        agent: AgentConfig {
-                            first_message: "Welcome! Your number is now verified. You can add some information about yourself in the profile page. Anyways, how can I help?".to_string(),
-                        },
-                    };
+                    if user.agent_language == "fi" {
+                        conversation_config_override.agent.first_message = "Tervetuloa! Numerosi on nyt vahvistettu. Miten voin auttaa?".to_string(); 
+                        conversation_config_override.tts.voice_id = fi_voice_id;
+                    } else if user.agent_language == "de" {
+                        conversation_config_override.agent.first_message = "Willkommen! Ihre Nummer ist jetzt verifiziert. Wie kann ich Ihnen helfen?".to_string(); 
+                        conversation_config_override.tts.voice_id = de_voice_id;
+                    } else {
+                        conversation_config_override.agent.first_message = "Welcome! Your number is now verified. Anyways, how can I help?".to_string(); 
+                        conversation_config_override.tts.voice_id = us_voice_id;
+                    }
                 }
+            } else if user.agent_language == "fi" {
+                conversation_config_override.agent.first_message = "Moi {{name}}!".to_string(); 
+                conversation_config_override.tts.voice_id = fi_voice_id;
+            } else if user.agent_language == "de" {
+                conversation_config_override.agent.first_message = "Hallo {{name}}!".to_string(); 
+                conversation_config_override.tts.voice_id = de_voice_id;
             }
 
             let nickname = match user.nickname {
@@ -1822,6 +1854,282 @@ pub async fn handle_whatsapp_fetch_tool_call(
             ))
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EmailResponsePayload {
+    pub email_id: String,
+    pub response_text: String,
+}
+
+pub async fn handle_email_response_tool_call(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    Json(payload): Json<EmailResponsePayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Starting email response confirmation for email ID: {}", payload.email_id);
+
+    // Extract user_id from query parameters
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing or invalid user_id"
+                }))
+            ));
+        }
+    };
+
+    // Get user from database
+    let user = match state.user_repository.find_by_id(user_id) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": "User not found"
+                }))
+            ));
+        }
+        Err(e) => {
+            error!("Error fetching user: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to fetch user"
+                }))
+            ));
+        }
+    };
+
+    // Verify user has sufficient credits for email response
+    if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "email").await {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "error": "Insufficient credits",
+                "message": msg
+            }))
+        ));
+    }
+
+    // Fetch the email details to include in confirmation message
+    match crate::handlers::imap_handlers::fetch_single_email_imap(&state, user_id, &payload.email_id).await {
+        Ok(email) => {
+            let from = email.from.unwrap_or_else(|| "Unknown sender".to_string());
+            let subject = email.subject.unwrap_or_else(|| "No subject".to_string());
+
+            // Create confirmation message
+            let confirmation_message = format!(
+                "Confirm sending email response to '{}' regarding '{}' with content: '{}' id:({})(yes-> send, no -> discard)",
+                from,
+                subject,
+                payload.response_text,
+                payload.email_id
+            );
+
+            // Get conversation for the user
+            let conversation = match state.user_conversations.get_conversation(
+                &user, 
+                user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
+            ).await {
+                Ok(conv) => conv,
+                Err(e) => {
+                    error!("Failed to get conversation: {}", e);
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "Failed to get or create conversation"
+                        }))
+                    ));
+                }
+            };
+
+            // Send the confirmation SMS
+            match crate::api::twilio_utils::send_conversation_message(
+                &conversation.conversation_sid,
+                &conversation.twilio_number,
+                &confirmation_message,
+                false, // Don't redact the body since we need to extract response content from this message
+            ).await {
+                Ok(message_sid) => {
+                    println!("Successfully sent email response confirmation SMS with SID: {}", message_sid);
+                    // Set the confirm event message flag for the user
+                    if let Err(e) = state.user_repository.set_confirm_send_event(user_id, true) {
+                        error!("Failed to set confirm send event flag: {}", e);
+                        // Continue execution even if setting flag fails
+                    }
+                    
+                    Ok(Json(json!({
+                        "status": "success",
+                        "message": "Confirmation message sent",
+                        "email_id": payload.email_id,
+                        "message_sid": message_sid
+                    })))
+                }
+                Err(e) => {
+                    error!("Failed to send confirmation SMS: {}", e);
+                    Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "Failed to send confirmation message",
+                            "details": e.to_string()
+                        }))
+                    ))
+                }
+            }
+        },
+        Err(e) => {
+            error!("Failed to fetch email details: {:?}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to fetch email details",
+                    "details": format!("{:?}", e)
+                }))
+            ))
+        }
+    }
+}
+
+pub async fn make_notification_call(
+    state: &Arc<AppState>,
+    to_phone_number: String,
+    preferred_from_number: String,
+    content_id: String,
+    content_type: String,
+    notification_first_message: String,
+    notification_message: String,
+    user_id: String,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Starting notification call to: {}", to_phone_number);
+
+    // Get the appropriate phone number ID based on preferred number
+    let phone_number_id = if preferred_from_number.contains("+358") {
+        std::env::var("FIN_PHONE_NUMBER_ID").map_err(|e| {
+            error!("Failed to get FIN_PHONE_NUMBER_ID: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to get phone number ID",
+                    "details": e.to_string()
+                }))
+            )
+        })?
+    } else if preferred_from_number.contains("+61") {
+        std::env::var("AUS_PHONE_NUMBER_ID").map_err(|e| {
+            error!("Failed to get AUS_PHONE_NUMBER_ID: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to get phone number ID",
+                    "details": e.to_string()
+                }))
+            )
+        })?
+    } else if preferred_from_number.contains("+44") {
+        std::env::var("GB_PHONE_NUMBER_ID").map_err(|e| {
+            error!("Failed to get GB_PHONE_NUMBER_ID: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to get phone number ID",
+                    "details": e.to_string()
+                }))
+            )
+        })?
+    } else {
+        std::env::var("USA_PHONE_NUMBER_ID").map_err(|e| {
+            error!("Failed to get USA_PHONE_NUMBER_ID: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to get phone number ID",
+                    "details": e.to_string()
+                }))
+            )
+        })?
+    };
+
+    // Get voice ID based on the preferred number
+    let voice_id = if preferred_from_number.contains("+358") {
+        std::env::var("FI_VOICE_ID").expect("FI_VOICE_ID not set")
+    } else if preferred_from_number.contains("+49") {
+        std::env::var("DE_VOICE_ID").expect("DE_VOICE_ID not set")
+    } else {
+        std::env::var("US_VOICE_ID").expect("US_VOICE_ID not set")
+    };
+
+    // Create dynamic variables map with notification message
+    let mut dynamic_variables = HashMap::new();
+    dynamic_variables.insert("notification_message".to_string(), json!(notification_message));
+    dynamic_variables.insert("now".to_string(), json!(format!("{}", chrono::Utc::now())));
+    
+    // Add content-specific dynamic variables
+    if content_type == "email" {
+        dynamic_variables.insert("email_id".to_string(), json!(content_id));
+    }
+    dynamic_variables.insert("content_id".to_string(), json!(content_id));
+    dynamic_variables.insert("content_type".to_string(), json!(content_type));
+    dynamic_variables.insert("user_id".to_string(), json!(user_id));
+
+    // Create the payload for the call
+    let payload = NotificationCallPayload {
+        agent_id: std::env::var("NOTIFICATION_AGENT_ID").expect("NOTIFICATION_AGENT_ID not set"),
+        agent_phone_number_id: phone_number_id.clone(),
+        to_number: to_phone_number.clone(),
+        conversation_initiation_client_data: ConversationInitiationClientData {
+            r#type: "conversation_initiation_client_data".to_string(),
+            conversation_config_override: ConversationConfig {
+                agent: AgentConfig {
+                    first_message: notification_first_message,
+                },
+                tts: VoiceId {
+                    voice_id,
+                },
+            },
+            dynamic_variables,
+        },
+    };
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post("https://api.elevenlabs.io/v1/convai/twilio/outbound-call".to_string())
+        .header("xi-api-key", std::env::var("ELEVENLABS_API_KEY").expect("ELEVENLABS_API_KEY not set"))
+        .json(&payload)
+        .send()
+        .await
+        .map_err(|e| {
+            error!("Failed to make ElevenLabs API call: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to initiate notification call",
+                    "details": e.to_string()
+                }))
+            )
+        })?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        error!("ElevenLabs API returned error: {}", error_text);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": "ElevenLabs API returned error",
+                "details": error_text
+            }))
+        ));
+    }
+
+    Ok(Json(json!({
+        "status": "success",
+        "message": "Notification call initiated successfully",
+        "to_number": to_phone_number,
+        "from_number_id": phone_number_id
+    })))
 }
 
 pub async fn handle_weather_tool_call(

@@ -621,6 +621,129 @@ pub async fn process_sms(
                 }
             }
             
+            // Check for email response confirmation
+            if let Some(captures) = regex::Regex::new(r"Confirm sending email response to '([^']+)' regarding '([^']+)' with content: '([^']+)' id:\((\d+)\).*?(?:\(yes->|$)")
+                .ok()
+                .and_then(|re| re.captures(&last_ai_message.body)) {
+
+                let recipient = captures.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
+                let subject = captures.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
+                let response_text = captures.get(3).map(|m| m.as_str().to_string()).unwrap_or_default();
+                let email_id = captures.get(4).map(|m| m.as_str().to_string()).unwrap_or_default();
+
+                // Redact the confirmation message after extracting the necessary information
+                if let Err(e) = crate::api::twilio_utils::redact_message(
+                    &conversation.conversation_sid,
+                    &last_ai_message.sid,
+                    &format!("Confirm sending email response to '[RECIPIENT_REDACTED]' regarding '[SUBJECT_REDACTED]' with content: '[CONTENT_REDACTED]' id:[ID_REDACTED]")
+                ).await {
+                    eprintln!("Failed to redact email confirmation message: {}", e);
+                }
+
+                match user_response.as_str() {
+                    "yes" => {
+                        // Reset the confirmation flag
+                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                            eprintln!("Failed to reset confirm_send_event flag: {}", e);
+                        }
+
+                        // Create request for email response
+                        let email_request = crate::handlers::imap_handlers::EmailResponseRequest {
+                            email_id: email_id.clone(),
+                            response_text: response_text.clone(),
+                        };
+
+                        let auth_user = crate::handlers::auth_middleware::AuthUser {
+                            user_id: user.id,
+                            is_admin: false,
+                        };
+
+                        // Send the email response
+                        match crate::handlers::imap_handlers::respond_to_email(
+                            State(state.clone()),
+                            auth_user,
+                            Json(email_request),
+                        ).await {
+                            Ok(_) => {
+                                // Send confirmation via Twilio
+                                let confirmation_msg = format!("Email response sent successfully to {} regarding '{}'", recipient, subject);
+                                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                                    &conversation.conversation_sid,
+                                    &conversation.twilio_number,
+                                    &confirmation_msg,
+                                    true,
+                                ).await {
+                                    eprintln!("Failed to send confirmation message: {}", e);
+                                }
+
+                                // Deduct credits for the confirmation response
+                                if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
+                                    eprintln!("Failed to deduct user credits for email confirmation: {}", e);
+                                }
+
+                                return (
+                                    StatusCode::OK,
+                                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                    axum::Json(TwilioResponse {
+                                        message: confirmation_msg,
+                                    })
+                                );
+                            }
+                            Err((status, Json(error))) => {
+                                let error_msg = format!("Failed to send email response: {} (not charged)", error["error"].as_str().unwrap_or("Unknown error"));
+                                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                                    &conversation.conversation_sid,
+                                    &conversation.twilio_number,
+                                    &error_msg,
+                                    true,
+                                ).await {
+                                    eprintln!("Failed to send error message: {}", e);
+                                }
+                                return (
+                                    StatusCode::OK,
+                                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                    axum::Json(TwilioResponse {
+                                        message: error_msg,
+                                    })
+                                );
+                            }
+                        }
+                    }
+                    "no" => {
+                        // Reset the confirmation flag
+                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                            eprintln!("Failed to reset confirm_send_event flag: {}", e);
+                        }
+
+                        // Send cancellation confirmation
+                        let cancel_msg = "Email response cancelled.";
+                        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                            &conversation.conversation_sid,
+                            &conversation.twilio_number,
+                            cancel_msg,
+                            true,
+                        ).await {
+                            eprintln!("Failed to send cancellation confirmation: {}", e);
+                        }
+
+                        return (
+                            StatusCode::OK,
+                            [(axum::http::header::CONTENT_TYPE, "application/json")],
+                            axum::Json(TwilioResponse {
+                                message: cancel_msg.to_string(),
+                            })
+                        );
+                    }
+                    _ => {
+                        // Reset the confirmation flag since we're treating this as a new message
+                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                            eprintln!("Failed to reset confirm_send_event flag: {}", e);
+                        }
+                        // Continue with normal message processing
+                    }
+                }
+            }
+
             // Extract chat name and message content from the confirmation message
             if let Some(captures) = regex::Regex::new(r"Confirm the sending of WhatsApp message to '([^']+)' with content: '([^']+)'.*?(?:\(yes->|$)")
                 .ok()
@@ -1428,11 +1551,13 @@ pub async fn process_sms(
                 };
 
                 // Check if user has access to this tool
+                /*
                 if requires_subscription(name, user.sub_tier.clone(), user.discount) {
                     println!("Attempted to use subscription-only tool {} without proper subscription", name);
                     tool_answers.insert(tool_call_id, format!("This feature ({}) requires a subscription. Please visit our website to subscribe.", name));
                     continue;
                 }
+                */
                 let arguments = match &tool_call.function.arguments {
                     Some(args) => args,
                     None => continue,
