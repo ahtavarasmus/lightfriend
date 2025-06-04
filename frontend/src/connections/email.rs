@@ -472,6 +472,79 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                 >
                                     {"Test Single Message"}
                                 </button>
+                                <button
+                                    onclick={
+                                        let error = error.clone();
+                                        Callback::from(move |_: MouseEvent| {
+                                            let error = error.clone();
+                                            if let Some(window) = web_sys::window() {
+                                                if let Ok(Some(storage)) = window.local_storage() {
+                                                    if let Ok(Some(token)) = storage.get_item("token") {
+                                                        spawn_local(async move {
+                                                            // First fetch previews to get the latest email ID
+                                                            let previews_request = Request::get(&format!("{}/api/imap/previews?limit=1", config::get_backend_url()))
+                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                .send()
+                                                                .await;
+
+                                                            match previews_request {
+                                                                Ok(response) => {
+                                                                    if response.status() == 200 {
+                                                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                                                            if let Some(previews) = data.get("previews").and_then(|p| p.as_array()) {
+                                                                                if let Some(latest_email) = previews.first() {
+                                                                                    if let Some(id) = latest_email.get("id").and_then(|i| i.as_str()) {
+                                                                                        // Now send a test reply
+                                                                                        let reply_payload = json!({
+                                                                                            "email_id": id,
+                                                                                            "response_text": "This is a test reply from LightFriend!"
+                                                                                        });
+
+                                                                                        let reply_request = Request::post(&format!("{}/api/imap/reply", config::get_backend_url()))
+                                                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                                                            .header("Content-Type", "application/json")
+                                                                                            .json(&reply_payload)
+                                                                                            .unwrap()
+                                                                                            .send()
+                                                                                            .await;
+
+                                                                                        match reply_request {
+                                                                                            Ok(reply_response) => {
+                                                                                                if reply_response.status() == 200 {
+                                                                                                    web_sys::console::log_1(&"Successfully sent test reply".into());
+                                                                                                } else {
+                                                                                                    if let Ok(error_data) = reply_response.json::<serde_json::Value>().await {
+                                                                                                        error.set(Some(format!("Failed to send reply: {}", 
+                                                                                                            error_data.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error"))));
+                                                                                                    }
+                                                                                                }
+                                                                                            }
+                                                                                            Err(e) => {
+                                                                                                error.set(Some(format!("Network error while sending reply: {}", e)));
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    } else {
+                                                                        error.set(Some("Failed to fetch latest email".to_string()));
+                                                                    }
+                                                                }
+                                                                Err(e) => {
+                                                                    error.set(Some(format!("Network error: {}", e)));
+                                                                }
+                                                            }
+                                                        });
+                                                    }
+                                                }
+                                            }
+                                        })
+                                    }
+                                    class="test-button"
+                                >
+                                    {"Test Reply to Latest"}
+                                </button>
                             </>
                         }
                     </div>

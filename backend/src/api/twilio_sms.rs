@@ -622,7 +622,7 @@ pub async fn process_sms(
             }
             
             // Check for email response confirmation
-            if let Some(captures) = regex::Regex::new(r"Confirm sending email response to '([^']+)' regarding '([^']+)' with content: '([^']+)' id:\((\d+)\).*?(?:\(yes->|$)")
+            if let Some(captures) = regex::Regex::new(r"Confirm sending email response to '([^']+)' regarding '([^']+)' with content: '([^']+)' id:\((\d+)\)")
                 .ok()
                 .and_then(|re| re.captures(&last_ai_message.body)) {
 

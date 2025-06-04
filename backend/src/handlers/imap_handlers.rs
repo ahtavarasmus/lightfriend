@@ -225,6 +225,7 @@ pub async fn respond_to_email(
             Json(json!({ "error": format!("Failed to get IMAP credentials: {}", e) }))
         )),
     };
+    tracing::info!("setting up tls");
 
     // Set up TLS
     let tls = match TlsConnector::builder().build() {
@@ -255,6 +256,8 @@ pub async fn respond_to_email(
             Json(json!({ "error": format!("Failed to login: {}", e) }))
         )),
     };
+
+    tracing::info!("logged in");
 
     // Select INBOX
     if let Err(e) = imap_session.select("INBOX") {
@@ -289,6 +292,7 @@ pub async fn respond_to_email(
         )),
     };
 
+    tracing::info!("getting the reply address");
     // Get the recipient's email address from the original sender
     let reply_to_address = envelope
         .from
@@ -333,6 +337,7 @@ pub async fn respond_to_email(
         email.clone(),
         password.clone(),
     );
+    tracing::info!("created the smtp transport");
 
     let mailer = lettre::SmtpTransport::relay(&smtp_server)
         .unwrap()
@@ -356,6 +361,7 @@ pub async fn respond_to_email(
         )),
     };
 
+    tracing::info!("sending the mail finally");
     // Send the email
     match mailer.send(&email_message) {
         Ok(_) => {
@@ -363,6 +369,7 @@ pub async fn respond_to_email(
             if let Err(e) = imap_session.logout() {
                 tracing::warn!("Failed to logout from IMAP: {}", e);
             }
+            tracing::info!("sent the mail successfully and logged out");
 
             Ok(Json(json!({
                 "success": true,

@@ -2114,7 +2114,7 @@ pub async fn make_notification_call(
 
     // Create the payload for the call
     let payload = NotificationCallPayload {
-        agent_id: std::env::var("NOTIFICATION_AGENT_ID").expect("NOTIFICATION_AGENT_ID not set"),
+        agent_id: std::env::var("AGENT_ID").expect("AGENT_ID not set"),
         agent_phone_number_id: phone_number_id.clone(),
         to_number: to_phone_number.clone(),
         conversation_initiation_client_data: ConversationInitiationClientData {

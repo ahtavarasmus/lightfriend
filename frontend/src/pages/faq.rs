@@ -127,6 +127,38 @@ pub fn faq() -> Html {
                         <li>{"If you want to watch some youtube videos on your computer, there's "}<a href="https://freetubeapp.io/">{"FreeTube"}</a>{" app that only has subscription feed(it has recommended videos also but they are not personalized)"}</li>
                     </ul>
                 </FaqItem>
+
+                <h2>{"Service Coverage"}</h2>
+
+                <FaqItem question="Where is LightFriend available?">
+                    <h3>{"Local Phone Numbers"}</h3>
+                    <p>{"We currently have local phone numbers available in:"}</p>
+                    <ul>
+                        <li>{"United States"}</li>
+                        <li>{"United Kingdom"}</li>
+                        <li>{"Finland"}</li>
+                        <li>{"Australia"}</li>
+                    </ul>
+                    <p>{"If your country is not listed above and not mentioned in the restricted countries below, please contact "}<a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>{" to inquire about the possibility of adding a new local number for your region."}</p>
+                    
+                    <h3>{"Country Restrictions"}</h3>
+                    <p>{"As a Finnish business, we face certain regulatory restrictions in acquiring local phone numbers. Some countries where we currently cannot provide local numbers include:"}</p>
+                    <ul>
+                        <li>{"Germany"}</li>
+                        <li>{"India"}</li>
+                        <li>{"Many African countries"}</li>
+                        <li>{"And several others due to local telecommunications regulations"}</li>
+                    </ul>
+
+                    <h3>{"International Service Options"}</h3>
+                    <p>{"Even if you're in a country where we don't have local numbers, you can still benefit from LightFriend's notification features! Our outbound services can keep you informed about:"}</p>
+                    <ul>
+                        <li>{"Calendar events"}</li>
+                        <li>{"Important emails"}</li>
+                        <li>{"WhatsApp messages"}</li>
+                    </ul>
+                    <p>{"These notifications can be delivered via calls or texts from our international number, and importantly, receiving these won't incur any additional charges on your end compared to local numbers."}</p>
+                </FaqItem>
             </section>
 
             <style>

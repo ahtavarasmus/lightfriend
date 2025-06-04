@@ -360,6 +360,7 @@ async fn main() {
         .route("/api/imap/previews", get(imap_handlers::fetch_imap_previews))
         .route("/api/imap/message/{email_id}", get(imap_handlers::fetch_single_imap_email))
         .route("/api/imap/full_emails", get(imap_handlers::fetch_full_imap_emails))
+        .route("/api/imap/reply", post(imap_handlers::respond_to_email))
 
         .route("/api/auth/telegram/status", get(telegram_auth::get_telegram_status))
         .route("/api/auth/telegram/connect", get(telegram_auth::start_telegram_connection))
