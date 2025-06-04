@@ -1644,6 +1644,7 @@ pub async fn process_sms(
                             message: "Shazam call initiated".to_string(),
                         })
                     );
+                    // TODO i don't think we need both this call and the single email call. should remove one
                 } else if name == "fetch_imap_emails" {
                     println!("Executing fetch_imap_emails tool call");
                     let queryObj = crate::handlers::imap_handlers::FetchEmailsQuery { limit: None };
@@ -1656,25 +1657,18 @@ pub async fn process_sms(
                             if let Some(emails) = response.get("emails") {
                                 if let Some(emails_array) = emails.as_array() {
                                     let mut response = String::new();
-                                    for (i, email) in emails_array.iter().rev().take(5).rev().enumerate() {
+                                    for (i, email) in emails_array.iter().rev().take(5).enumerate() {
                                         let subject = email.get("subject").and_then(|s| s.as_str()).unwrap_or("No subject");
                                         let from = email.get("from").and_then(|f| f.as_str()).unwrap_or("Unknown sender");
 
                                         let date_formatted = email.get("date_formatted")
                                             .and_then(|d| d.as_str())
                                             .unwrap_or("Unknown date");
-
-                                        let body = email.get("body").and_then(|b| b.as_str()).unwrap_or("");
-                                        let snippet = if body.len() > 100 {
-                                            format!("{}...", body.chars().take(100).collect::<String>())
-                                        } else {
-                                            body.to_string()
-                                        };
                                         
                                         if i == 0 {
-                                            response.push_str(&format!("{}. {} from {} ({}):\n{}", i + 1, subject, from, date_formatted, snippet));
+                                            response.push_str(&format!("{}. {} from {} ({}):\n", i + 1, subject, from, date_formatted));
                                         } else {
-                                            response.push_str(&format!("\n\n{}. {} from {} ({}):\n{}", i + 1, subject, from, date_formatted, snippet));
+                                            response.push_str(&format!("\n\n{}. {} from {} ({}):\n", i + 1, subject, from, date_formatted));
                                         }
                                     }
                                     
@@ -1732,13 +1726,12 @@ pub async fn process_sms(
                             let mut response = format!("Search query: '{}'\n\nLatest emails (newest first):\n\n", query.query);
                             for (i, email) in emails.iter().enumerate() {
                                 let formatted_email = format!(
-                                    "Email {}:\nFrom: {}\nSubject: {}\nDate: {}\n\n{}\n{}\n",
+                                    "Email {}:\nFrom: {}\nSubject: {}\nDate: {}\n\n{}\n",
                                     i + 1,
                                     email.from.as_deref().unwrap_or("Unknown"),
                                     email.subject.as_deref().unwrap_or("No subject"),
                                     email.date_formatted.as_deref().unwrap_or("No date"),
-                                    email.snippet.as_deref().unwrap_or(""),
-                                    email.body.as_deref().unwrap_or("No content")
+                                    email.body.as_deref().unwrap_or("No content"),
                                 );
                                 response.push_str(&formatted_email);
                             }

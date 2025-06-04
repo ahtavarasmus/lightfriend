@@ -157,13 +157,12 @@ pub async fn fetch_full_imap_emails(
                     if testing {
                         println!("from_email: {:#?}", p.from_email.clone());
                         println!("from: {:#?}", p.from.clone());
-                        println!("from: {:#?}", p.from.clone());
                     }
 
                     json!({
                         "id": p.id,
                         "subject": p.subject.unwrap_or_else(|| "No subject".to_string()),
-                        "from": p.from.unwrap_or_else(|| "Unknown sender".to_string()),
+                        "from": p.from_email.unwrap_or_else(|| "Unknown sender".to_string()),
                         "date": p.date.map(|dt| dt.to_rfc3339()),
                         "snippet": p.snippet.unwrap_or_else(|| "No preview".to_string()),
                         "body": p.body.unwrap_or_else(|| "No content".to_string()),
@@ -194,6 +193,7 @@ pub struct EmailResponseRequest {
     pub response_text: String,
 }
 
+// this is not used yet since it didn't work and not my priority rn
 pub async fn respond_to_email(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -312,6 +312,8 @@ pub async fn respond_to_email(
             Json(json!({ "error": "Failed to get recipient address" }))
         ))?;
 
+    tracing::info!("reply addr: {}", reply_to_address);
+
     // Get original subject
     let original_subject = envelope
         .subject
@@ -351,7 +353,7 @@ pub async fn respond_to_email(
     let email_message = match Message::builder()
         .from(email.parse().unwrap())
         .to(reply_to_address.parse().unwrap())
-        .subject(subject)
+        .subject(subject.clone())
         .body(request.response_text.clone())
     {
         Ok(message) => message,
@@ -361,25 +363,52 @@ pub async fn respond_to_email(
         )),
     };
 
-    tracing::info!("sending the mail finally");
-    // Send the email
-    match mailer.send(&email_message) {
+    tracing::info!("Attempting to send email via SMTP...");
+    tracing::info!("SMTP Configuration - Server: {}, Port: {}", smtp_server, smtp_port);
+    
+    // Log email details (excluding sensitive content)
+    tracing::info!("Email details - To: {}, Subject: {}", reply_to_address, subject);
+    
+    // Attempt to send the email with detailed error logging
+    let send_result = mailer.send(&email_message);
+    
+    match send_result {
         Ok(_) => {
-            // Logout from IMAP
-            if let Err(e) = imap_session.logout() {
-                tracing::warn!("Failed to logout from IMAP: {}", e);
+            tracing::info!("Email sent successfully via SMTP");
+            
+            // Attempt IMAP logout
+            match imap_session.logout() {
+                Ok(_) => tracing::info!("Successfully logged out from IMAP"),
+                Err(e) => tracing::warn!("Failed to logout from IMAP: {}", e),
             }
-            tracing::info!("sent the mail successfully and logged out");
+
 
             Ok(Json(json!({
                 "success": true,
                 "message": "Email response sent successfully"
             })))
         }
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "error": format!("Failed to send email: {}", e) }))
-        )),
+        Err(e) => {
+            // Log detailed error information
+            tracing::error!("SMTP send error: {:?}", e);
+            tracing::error!("SMTP error details: {}", e.to_string());
+            
+            // Log SMTP connection details for debugging (excluding credentials)
+            tracing::debug!("SMTP connection details - Server: {}, Port: {}", smtp_server, smtp_port);
+            
+            // Attempt IMAP logout even if SMTP failed
+            if let Err(logout_err) = imap_session.logout() {
+                tracing::warn!("Additionally failed to logout from IMAP: {}", logout_err);
+            }
+
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ 
+                    "error": format!("Failed to send email via SMTP: {}", e),
+                    "details": e.to_string()
+                }))
+            ))
+        }
     }
 }
 

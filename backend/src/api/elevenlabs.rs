@@ -1865,6 +1865,7 @@ pub struct EmailResponsePayload {
     pub response_text: String,
 }
 
+// this is not used at the moment since it didn't work and not a priority rn
 pub async fn handle_email_response_tool_call(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
