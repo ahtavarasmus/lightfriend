@@ -282,6 +282,16 @@ pub async fn handle_incoming_sms(
 ) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
     println!("Received SMS from: {} to: {}", payload.from, payload.to);
 
+    // If this is a media-only webhook (no body but has media), skip processing
+    if payload.body.trim().is_empty() && payload.num_media.as_ref().map_or(false, |n| n != "0") {
+        return (
+            StatusCode::OK,
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            axum::Json(TwilioResponse {
+                message: "Media-only webhook acknowledged".to_string(),
+            })
+        );
+    }
 
     // Check for Shazam shortcut ('S' or 's')
     if payload.body.trim() == "S" || payload.body.trim() == "s" {

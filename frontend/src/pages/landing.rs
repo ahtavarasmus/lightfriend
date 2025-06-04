@@ -245,6 +245,7 @@ pub fn landing() -> Html {
                             <li>{"📧 Emails"}</li>
                             <li>{"📅 Calendar"}</li>
                             <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI search"}</li>
+                            <li>{"📸 Photo Analysis & Translation"}</li>
                             <li>{"☀️ Weather, Tasks and even Shazam"}</li>
                         </ul>
                         <div class="demo-link-container">
@@ -282,7 +283,6 @@ pub fn landing() -> Html {
                     </div>
                 </div>
             </div>
-
 
             <div class="feature-block proactive">
                 <div class="feature-content">
