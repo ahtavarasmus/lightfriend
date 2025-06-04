@@ -138,6 +138,7 @@ pub fn faq() -> Html {
                         <li>{"United Kingdom"}</li>
                         <li>{"Finland"}</li>
                         <li>{"Australia"}</li>
+                        <li>{"Israel"}</li>
                     </ul>
                     <p>{"If your country is not listed above and not mentioned in the restricted countries below, please contact "}<a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>{" to inquire about the possibility of adding a new local number for your region."}</p>
                     

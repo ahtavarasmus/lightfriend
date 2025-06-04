@@ -2050,6 +2050,17 @@ pub async fn make_notification_call(
                 }))
             )
         })?
+    } else if preferred_from_number.contains("+972") {
+        std::env::var("ISR_PHONE_NUMBER_ID").map_err(|e| {
+            error!("Failed to get ISR_PHONE_NUMBER_ID: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to get phone number ID",
+                    "details": e.to_string()
+                }))
+            )
+        })?
     } else {
         std::env::var("USA_PHONE_NUMBER_ID").map_err(|e| {
             error!("Failed to get USA_PHONE_NUMBER_ID: {}", e);
