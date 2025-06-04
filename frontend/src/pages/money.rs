@@ -218,26 +218,11 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <h3>{"Escape Plan"}</h3>
                         <div class="price-container">
                             {
-                                if !props.is_logged_in {
-                                    html! {
-                                        <>
-                                            <div class="price">
-                                                <span class="amount">{"€20.00"}</span>
-                                                <span class="period">{"/month"}</span>
-                                            </div>
-                                        </>
-                                    }
-                                } else {
-                                    let is_us = props.phone_number.as_ref()
-                                        .map(|num| num.starts_with("+1"))
-                                        .unwrap_or(false);
-                                    
-                                    html! {
-                                        <div class="price">
-                                            <span class="amount">{if is_us { "€15.00" } else { "€20.00" }}</span>
-                                            <span class="period">{"/month"}</span>
-                                        </div>
-                                    }
+                                html! {
+                                    <div class="price">
+                                        <span class="amount">{"€20.00"}</span>
+                                        <span class="period">{"/month"}</span>
+                                    </div>
                                 }
                             }
                         </div>
@@ -317,7 +302,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <div class="faq-grid">
                     <div class="faq-item">
                         <h3>{"How does billing work?"}</h3>
-                        <p>{"The Premium Plan is billed monthly at €15 for US customers and €20 for international customers. The plan includes 100 messages or 100 minutes of voice calls. You can use these credits flexibly - for example, 50 messages and 50 minutes of calls. After your monthly quota is used, additional usage is billed at the pay-as-you-go rates. You can optionally enable automatic top-up to ensure uninterrupted service. Plan also includes 100 proactive messages which can be customized to your liking. No hidden fees or long-term commitments."}</p>
+                        <p>{"The Premium Plan is billed monthly at €20. The plan includes 100 messages or 100 minutes of voice calls. You can use these credits flexibly - for example, 50 messages and 50 minutes of calls. After your monthly quota is used, additional usage is billed at the pay-as-you-go rates. You can optionally enable automatic top-up to ensure uninterrupted service. Plan also includes 100 proactive messages which can be customized to your liking. No hidden fees or long-term commitments."}</p>
 
                     </div>
                     

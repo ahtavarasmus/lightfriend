@@ -339,6 +339,11 @@ pub async fn handle_incoming_sms(
         );
     }
 
+
+
+
+
+
     // Check for STOP command
     if payload.body.trim().to_uppercase() == "STOP" {
         if let Ok(Some(user)) = state.user_repository.find_by_phone_number(&payload.from) {
@@ -417,6 +422,21 @@ pub async fn process_sms(
     let user = match state.user_repository.find_by_phone_number(&payload.from) {
         Ok(Some(user)) => {
             tracing::info!("Found user with ID: {} for phone number: {}", user.id, payload.from);
+            
+            // Print image information if present (for admin only)
+            if let (Some(num_media), Some(media_url), Some(content_type)) = (
+                payload.num_media.as_ref(),
+                payload.media_url0.as_ref(),
+                payload.media_content_type0.as_ref()
+            ) {
+                if user.id == 1 {
+                    println!("Media information:");
+                    println!("  Number of media items: {}", num_media);
+                    println!("  Media URL: {}", media_url);
+                    println!("  Content type: {}", content_type);
+                }
+            }
+            
             user
         },
         Ok(None) => {
