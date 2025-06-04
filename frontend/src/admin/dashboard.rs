@@ -36,6 +36,7 @@ struct UserInfo {
     sub_tier: Option<String>,
     msgs_left: i32,
     credits_left: f32,
+    discount: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -844,7 +845,15 @@ pub fn admin_dashboard() -> Html {
                                             <tr>
                                                 <th>{"ID"}</th>
                                                 <th>{"Email"}</th>
-                                            <th>{"Credits"}</th>
+                                                <th>{"Phone"}</th>
+                                                <th>{"Overage Credits"}</th>
+                                                <th>{"Monthly Credits"}</th>
+                                                <th>{"Notifications Left"}</th>
+                                                <th>{"Tier"}</th>
+                                                <th>{"Verified"}</th>
+                                                <th>{"Notify"}</th>
+                                                <th>{"Discount"}</th>
+                                                <th>{"Joined"}</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -856,40 +865,87 @@ pub fn admin_dashboard() -> Html {
                                                     
                                                     html! {
                                                         <>
-                                                            <tr onclick={onclick} key={user.id} class={classes!("user-row", is_selected.then(|| "selected"), user.sub_tier.is_some().then(|| "gold-user"))}>
+                                                            <tr onclick={onclick} key={user.id} class={classes!(
+                                                                "user-row",
+                                                                is_selected.then(|| "selected"),
+                                                                match user.sub_tier.as_deref() {
+                                                                    Some("tier 2") => "gold-user",
+                                                                    Some("tier 1") => "silver-user",
+                                                                    _ => ""
+                                                                }
+                                                            )}>
                                                                 <td>{user.id}</td>
                                                                 <td>
                                                                     <div class="user-email-container">
                                                                         {&user.email}
                                                                         {
-                                                                            if user.sub_tier.is_some() {
-                                                                                html! {
+                                                                            match user.sub_tier.as_deref() {
+                                                                                Some("tier 2") => html! {
                                                                                     <span class="gold-badge">{"★"}</span>
-                                                                                }
-                                                                            } else {
-                                                                                html! {}
+                                                                                },
+                                                                                Some("tier 1") => html! {
+                                                                                    <span class="silver-badge">{"★"}</span>
+                                                                                },
+                                                                                _ => html! {}
                                                                             }
                                                                         }
                                                                     </div>
                                                                 </td>
-                                                                <td>{format!("{:.2}€ + quota left: {:.2}€", user.credits, user.credits_left)}</td>
+                                                                <td>{&user.phone_number}</td>
+                                                                <td>{format!("{:.2}€", user.credits)}</td>
+                                                                <td>{format!("{:.2}€", user.credits_left)}</td>
+                                                                <td>{user.msgs_left}</td>
+                                                                <td>
+                                                                    <span class={classes!(
+                                                                        "tier-badge",
+                                                                        match user.sub_tier.as_deref() {
+                                                                            Some("tier 2") => "gold",
+                                                                            Some("tier 1") => "silver",
+                                                                            _ => "none"
+                                                                        }
+                                                                    )}>
+                                                                        {user.sub_tier.clone().unwrap_or_else(|| "None".to_string())}
+                                                                    </span>
+                                                                </td>
+                                                                <td>
+                                                                    <span class={classes!(
+                                                                        "status-badge",
+                                                                        if user.discount { "enabled" } else { "disabled" }
+                                                                    )}>
+                                                                        {if user.discount { "Yes" } else { "No" }}
+                                                                    </span>
+                                                                </td>
+                                                                <td>
+                                                                    <span class={classes!(
+                                                                        "status-badge",
+                                                                        if user.verified { "verified" } else { "unverified" }
+                                                                    )}>
+                                                                        {if user.verified { "Yes" } else { "No" }}
+                                                                    </span>
+                                                                </td>
+                                                                <td>
+                                                                    <span class={classes!(
+                                                                        "status-badge",
+                                                                        if user.notify { "enabled" } else { "disabled" }
+                                                                    )}>
+                                                                        {if user.notify { "Yes" } else { "No" }}
+                                                                    </span>
+                                                                </td>
+                                                                <td>
+                                                                    {
+                                                                        user.time_to_live.map_or("N/A".to_string(), |ttl| {
+                                                                            Utc.timestamp_opt(ttl as i64, 0)
+                                                                                .single()
+                                                                                .map(|dt| dt.format("%Y-%m-%d").to_string())
+                                                                                .unwrap_or_else(|| "Invalid".to_string())
+                                                                        })
+                                                                    }
+                                                                </td>
                                                             </tr>
                                                             if is_selected {
                                                                 <tr class="details-row">
                                                                     <td colspan="4">
                                                                         <div class="user-details">
-                                                                            <p><strong>{"Phone Number: "}</strong>{&user.phone_number}</p>
-                                                                            <p><strong>{"Joined at: "}</strong>{
-                                                                                user.time_to_live.map_or("N/A".to_string(), |ttl| {
-                                                                                    Utc.timestamp_opt(ttl as i64, 0)
-                                                                                        .single()
-                                                                                        .map(|dt| dt.format("%Y-%m-%d %H:%M:%S UTC").to_string())
-                                                                                        .unwrap_or_else(|| "Invalid timestamp".to_string())
-                                                                                })
-                                                                            }</p>
-                                                                            <p><strong>{"Notify: "}</strong>{if user.notify { "Yes" } else { "No" }}</p>
-                                                                            <p><strong>{"Subscription Tier: "}</strong>{user.sub_tier.clone().unwrap_or_else(|| "None".to_string())}</p>
-                                                                            <p><strong>{"Messages Left: "}</strong>{user.msgs_left}</p>
                                                                             <div class="preferred-number-section">
                                                                                 <p><strong>{"Current Preferred Number: "}</strong>{user.preferred_number.clone().unwrap_or_else(|| "Not set".to_string())}</p>
                                                                             </div>
@@ -1105,11 +1161,12 @@ pub fn admin_dashboard() -> Html {
                                                                                 Callback::from(move |_| {
                                                                                     let users = users.clone();
                                                                                     let error = error.clone();
-                                                                                    let new_tier = if current_tier.as_deref() == Some("tier 2") {
-                                                                                        "tier 0"
-                                                                                    } else {
-                                                                                        "tier 2"
-                                                                                    };
+                                                                                let new_tier = match current_tier.as_deref() {
+                                                                                    None => "tier 2",
+                                                                                    Some("tier 2") => "tier 1",
+                                                                                    Some("tier 1") => "tier 0",
+                                                                                    _ => "tier 0"
+                                                                                };
                                                                                     
                                                                                     wasm_bindgen_futures::spawn_local(async move {
                                                                                         if let Some(token) = window()
@@ -1150,10 +1207,11 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                                                                             }}
                                                                             class="iq-button"
                                                                         >
-                                                                            {if user.sub_tier.as_deref() == Some("tier 2") {
-                                                                                "Remove Tier 2"
-                                                                            } else {
-                                                                                "Set Tier 2"
+                                                                            {match user.sub_tier.as_deref() {
+                                                                                None => "Set Tier 2",
+                                                                                Some("tier 2") => "Set Tier 1",
+                                                                                Some("tier 1") => "Remove Subscription",
+                                                                                _ => "Set Tier 2"
                                                                             }}
                                                                         </button>
                                                                         <button 
@@ -1936,13 +1994,102 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                     }
 
                     .gold-badge {
-                        color: #FFD700;
+
                         font-size: 1.2rem;
+                    }
+
+                    .gold-badge {
+                        color: #FFD700;
+                    }
+
+                    .silver-badge {
+                        color: #C0C0C0;
                     }
 
                     .gold-user {
                         background: linear-gradient(90deg, rgba(255, 215, 0, 0.05), transparent);
                         border-left: 3px solid #FFD700;
+                    }
+
+                    .silver-user {
+                        background: linear-gradient(90deg, rgba(192, 192, 192, 0.05), transparent);
+                        border-left: 3px solid #C0C0C0;
+                    }
+
+                    .tier-badge {
+                        padding: 0.25rem 0.5rem;
+                        border-radius: 4px;
+                        font-size: 0.8rem;
+                        font-weight: 500;
+                    }
+
+                    .tier-badge.gold {
+                        background: rgba(255, 215, 0, 0.1);
+                        color: #FFD700;
+                        border: 1px solid rgba(255, 215, 0, 0.2);
+                    }
+
+                    .tier-badge.silver {
+                        background: rgba(192, 192, 192, 0.1);
+                        color: #C0C0C0;
+                        border: 1px solid rgba(192, 192, 192, 0.2);
+                    }
+
+                    .tier-badge.none {
+                        background: rgba(128, 128, 128, 0.1);
+                        color: #808080;
+                        border: 1px solid rgba(128, 128, 128, 0.2);
+                    }
+
+                    .status-badge {
+                        padding: 0.25rem 0.5rem;
+                        border-radius: 4px;
+                        font-size: 0.8rem;
+                        font-weight: 500;
+                    }
+
+                    .status-badge.verified {
+                        background: rgba(76, 175, 80, 0.1);
+                        color: #4CAF50;
+                        border: 1px solid rgba(76, 175, 80, 0.2);
+                    }
+
+                    .status-badge.unverified {
+                        background: rgba(255, 152, 0, 0.1);
+                        color: #FF9800;
+                        border: 1px solid rgba(255, 152, 0, 0.2);
+                    }
+
+                    .status-badge.enabled {
+                        background: rgba(33, 150, 243, 0.1);
+                        color: #2196F3;
+                        border: 1px solid rgba(33, 150, 243, 0.2);
+                    }
+
+                    .status-badge.disabled {
+                        background: rgba(158, 158, 158, 0.1);
+                        color: #9E9E9E;
+                        border: 1px solid rgba(158, 158, 158, 0.2);
+                    }
+
+                    .users-table th {
+                        padding: 0.75rem;
+                        text-align: left;
+                        border-bottom: 2px solid rgba(30, 144, 255, 0.2);
+                        color: #1E90FF;
+                        font-weight: 600;
+                        white-space: nowrap;
+                    }
+
+                    .users-table td {
+                        padding: 0.75rem;
+                        border-bottom: 1px solid rgba(30, 144, 255, 0.1);
+                        white-space: nowrap;
+                    }
+
+                    .users-table-container {
+                        overflow-x: auto;
+                        margin: 1rem 0;
                     }
 
                 "#}

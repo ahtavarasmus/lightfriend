@@ -325,6 +325,7 @@ async fn main() {
 
         .route("/api/stripe/checkout-session/{user_id}", post(stripe_handlers::create_checkout_session))
         .route("/api/stripe/subscription-checkout/{user_id}", post(stripe_handlers::create_subscription_checkout))
+        .route("/api/stripe/hard-mode-subscription-checkout/{user_id}", post(stripe_handlers::create_hard_mode_subscription_checkout))
         // TODO can use this on the topping up credits if user already has bought some before
         // .route("/api/stripe/automatic-charge/{user_id}", post(stripe_handlers::automatic_charge))
         .route("/api/stripe/customer-portal/{user_id}", get(stripe_handlers::create_customer_portal_session))

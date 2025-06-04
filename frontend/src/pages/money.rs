@@ -18,11 +18,7 @@ struct UserProfile {
     phone_number: Option<String>,
 }
 
-#[derive(Properties, PartialEq, Clone)]
-pub struct CheckoutButtonProps {
-    pub user_id: i32,
-    pub user_email: String,
-}
+
 
 #[derive(Properties, PartialEq)]
 pub struct PricingProps {
@@ -39,16 +35,26 @@ pub struct PricingProps {
 }
 
 
+#[derive(Properties, PartialEq, Clone)]
+pub struct CheckoutButtonProps {
+    pub user_id: i32,
+    pub user_email: String,
+    pub subscription_type: String, // "hard_mode" or "world"
+}
+
 #[function_component(CheckoutButton)]
 pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
     let user_id = props.user_id;
     let user_email = props.user_email.clone();
+    let subscription_type = props.subscription_type.clone();
 
     let onclick = {
         let user_id = user_id.clone();
+        let subscription_type = subscription_type.clone();
         Callback::from(move |e: MouseEvent| {
             e.prevent_default();
             let user_id = user_id.clone();
+            let subscription_type = subscription_type.clone();
             
             // Create subscription checkout session
             wasm_bindgen_futures::spawn_local(async move {
@@ -58,7 +64,13 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
                     .and_then(|storage| storage.get_item("token").ok())
                     .flatten()
                 {
-                    let response = Request::post(&format!("{}/api/stripe/subscription-checkout/{}", config::get_backend_url(), user_id))
+                    let endpoint = if subscription_type == "hard_mode" {
+                        format!("{}/api/stripe/hard-mode-subscription-checkout/{}", config::get_backend_url(), user_id)
+                    } else {
+                        format!("{}/api/stripe/subscription-checkout/{}", config::get_backend_url(), user_id)
+                    };
+
+                    let response = Request::post(&endpoint)
                         .header("Authorization", &format!("Bearer {}", token))
                         .send()
                         .await;
@@ -83,8 +95,14 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
         })
     };
 
+    let button_text = if subscription_type == "hard_mode" {
+        "Subscribe"
+    } else {
+        "Subscribe"
+    };
+
     html! {
-        <button class="iq-button signup-button pro-signup" href="#" {onclick}><b>{"Subscribe Now!"}</b></button>
+        <button class="iq-button signup-button pro-signup" href="#" {onclick}><b>{button_text}</b></button>
     }
 }
 
@@ -156,7 +174,6 @@ pub fn pricing(props: &PricingProps) -> Html {
             </div>
 
             <div class="pricing-grid">
-                /* {Hard Mode tier temporarily commented out
                 <div class="pricing-card subscription basic">
                     <div class="card-header">
                         <h3>{"Hard Mode"}</h3>
@@ -165,7 +182,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 html! {
                                     <>
                                         <div class="price">
-                                            <span class="amount">{"€7.50"}</span>
+                                            <span class="amount">{"€8.00"}</span>
                                             <span class="period">{"/month"}</span>
                                         </div>
                                     </>
@@ -189,12 +206,18 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <li class="unavailable">{"✅ Tasks: Fetch & Create Tasks"}</li>
                         <li class="unavailable">{"🎵 Recognize Songs with Shazam"}</li>
                         <li class="unavailable">{"🔄 24/7 automated monitoring"}</li>
-                        <li class="unavailable">{"🚀 Priority support"}</li>
+                        <li class="available">{"🚀 Priority support"}</li>
                     </ul>
                     {
                         if props.is_logged_in && props.sub_tier.is_none() {
                             html! {
-                                <CheckoutButton user_id={props.user_id} user_email={props.user_email.clone()} />
+                                <>
+                                    <CheckoutButton 
+                                        user_id={props.user_id} 
+                                        user_email={props.user_email.clone()} 
+                                        subscription_type="hard_mode"
+                                    />
+                                </>
                             }
                         } else if !props.is_logged_in {
                             html! {
@@ -209,7 +232,6 @@ pub fn pricing(props: &PricingProps) -> Html {
                         }
                     }
                 </div>
-                }*/
 
                 <div class="pricing-card subscription premium">
                     <div class="popular-tag">{"All-Inclusive"}</div>
@@ -248,7 +270,11 @@ pub fn pricing(props: &PricingProps) -> Html {
                     {
                         if props.is_logged_in && props.sub_tier.is_none() {
                             html! {
-                                <CheckoutButton user_id={props.user_id} user_email={props.user_email.clone()} />
+                                <CheckoutButton 
+                                    user_id={props.user_id} 
+                                    user_email={props.user_email.clone()} 
+                                    subscription_type="world"
+                                />
                             }
                         } else if !props.is_logged_in {
                             html! {
@@ -618,37 +644,86 @@ pub fn pricing(props: &PricingProps) -> Html {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 2rem;
-    margin: 4rem 0;
+    margin: 4rem auto;
     position: relative;
     z-index: 2;
+    max-width: 1200px;
 }
 
-                .pricing-grid {
-                    grid-template-columns: 1fr;
-                    max-width: 600px;
-                    margin: 4rem auto;
-                    gap: 2rem;
-                }
+.pricing-card.basic {
+    transform: scale(0.95);
+}
 
-                .pricing-card.basic {
-                    transform: none;
-                }
+.pricing-card.premium {
+    transform: scale(1.05);
+}
 
-                .pricing-card.premium {
-                    transform: scale(1.05);
-                }
+@media (max-width: 968px) {
+    .pricing-grid {
+        grid-template-columns: repeat(2, 1fr);
+        max-width: 800px;
+        gap: 1rem;
+    }
+    
+    .pricing-card.basic {
+        transform: scale(0.95);
+    }
+    
+    .pricing-card.premium {
+        transform: scale(1);
+    }
+}
 
-                @media (max-width: 968px) {
-                    .pricing-grid {
-                        grid-template-columns: 1fr;
-                        max-width: 600px;
-                    }
-                    
-                    .pricing-card.basic,
-                    .pricing-card.premium {
-                        transform: none;
-                    }
-                }
+@media (max-width: 600px) {
+    .pricing-grid {
+        grid-template-columns: repeat(2, 1fr);
+        max-width: 100%;
+        gap: 0.5rem;
+        padding: 0 0.5rem;
+    }
+
+    .pricing-card {
+        padding: 1rem;
+    }
+
+    .pricing-card.basic {
+        transform: scale(0.95);
+    }
+
+    .pricing-card.premium {
+        transform: scale(0.95);
+    }
+
+    .pricing-card li {
+        font-size: 0.9rem;
+        padding: 0.75rem 0;
+    }
+
+    .card-header h3 {
+        font-size: 1.2rem;
+    }
+
+    .price .amount {
+        font-size: 1.5rem;
+    }
+
+    .price .period {
+        font-size: 0.8rem;
+    }
+
+    .includes p {
+        font-size: 0.9rem;
+    }
+
+    .quota-list {
+        font-size: 0.9rem;
+    }
+
+    .signup-button {
+        padding: 0.75rem 1rem;
+        font-size: 0.9rem;
+    }
+}
 
                 .quota-list {
                     list-style: none;

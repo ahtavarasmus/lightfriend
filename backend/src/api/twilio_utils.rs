@@ -556,6 +556,31 @@ pub async fn get_call_status(conversation_id: &str) -> Result<String, String> {
     Ok(call_status.to_string())
 }
 
+pub async fn delete_twilio_message_media(
+    media_sid: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
+    let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
+    let client = Client::new();
+
+    let response = client
+        .delete(format!(
+            "https://api.twilio.com/2010-04-01/Accounts/{}/Messages/Media/{}",
+            account_sid, media_sid
+        ))
+        .basic_auth(&account_sid, Some(&auth_token))
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        return Err(format!("Failed to delete message media: {} - {}", 
+            response.status(), response.text().await?).into());
+    }
+
+    println!("Successfully deleted message media: {}", media_sid);
+    Ok(())
+}
+
 pub async fn delete_media_from_twilio(
     chat_service_sid: &str,
     media_sid: &str,

@@ -54,6 +54,7 @@ pub struct UserResponse {
     pub sub_tier: Option<String>,
     pub msgs_left: i32,
     pub credits_left: f32,
+    pub discount: bool,
 }
 
 #[derive(Debug, Deserialize)]

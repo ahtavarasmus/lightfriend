@@ -471,9 +471,23 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                 <div class="subscription-tier">
                                                 <h3>{"Current Subscription"}</h3>
                                                 <div class="tooltip">
-                                                    {"Active subscription gives full capability to your lightfriend. Browse all the capabilities at home page."}
+                                                    {
+                                                        if sub_tier == "hard_mode" {
+                                                            "Hard Mode subscription gives your lightfriend access to Perplexity Search and Weather tool with 30 monthly message quota."
+                                                        } else {
+                                                            "Escape Plan subscription gives full capability to your lightfriend with 100 proactive notifications and 100 unit message/voice minute quota monthly."
+                                                        }
+                                                    }
                                                 </div>
-                                                    <span class="tier-label">{"Active"}</span>
+                                                    <span class="tier-label">
+                                                        {
+                                                            if sub_tier == "hard_mode" {
+                                                                "Hard Mode"
+                                                            } else {
+                                                                "Escape Plan"
+                                                            }
+                                                        }
+                                                    </span>
                                                 </div>
                                             </div>
                                         }
@@ -483,7 +497,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                 <div class="discount-status">
                                                 <h3>{"Current Subscription"}</h3>
                                                 <div class="tooltip">
-                                                    {"Early adopters keep access to tools: Email, Calendar, Shazam, Perplexity and Weather regardless of their subscription status. Thank you for taking interest!"}
+                                                    {"Early adopters keep access to tools: Email, Calendar, Shazam, Perplexity and Weather regardless of their subscription status(although credits have to be bought to use them). Thank you for taking interest!"}
                                                 </div>
                                                     <span>{"Early adopter"}</span>
                                                 </div>
@@ -495,9 +509,9 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                 <div class="discount-status">
                                                 <h3>{"Current Subscription"}</h3>
                                                 <div class="tooltip">
-                                                    {"Free Plan gives your lightfriend access to Perplexity Search and Weather tool. Upgrade to Pro Plan and get access to Email, Calendar and more!"}
+                                                    {"Upgrade to Hard Mode for Perplexity Search and Weather tool with 30 monthly messages, or get Escape Plan for full access including Email, Calendar, and 100 monthly messages / voice minutes!"}
                                                 </div>
-                                                    <span>{"Free Plan"}</span>
+                                                    <span>{"Inactive"}</span>
                                                 </div>
                                             </div>
                                         }
@@ -540,8 +554,17 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                     <div class="credits-card monthly-credits">
                                         <div class="credits-header">{"Monthly Quota Left"}</div>
                                         <div class="tooltip">
-
-                                            {"This is how much monthly quota you have left. When these ran out, your purchased overage credits will be used."}
+                                            {
+                                                if let Some(sub_tier) = &user_profile.sub_tier {
+                                                    if sub_tier == "hard_mode" {
+                                                        "Your Hard Mode subscription includes 30 monthly messages. When these run out, your purchased overage credits will be used."
+                                                    } else {
+                                                        "Your Escape Plan subscription includes 100 monthly messages or voice minutes. When these run out, your purchased overage credits will be used."
+                                                    }
+                                                } else {
+                                                    "This is how much monthly quota you have left from your previous subscription. When these run out, your purchased overage credits will be used."
+                                                }
+                                            }
                                         </div>
 
 
@@ -566,7 +589,17 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                     <div class="credits-card proactive-messages">
                                         <div class="credits-header">{"Monthly Proactive Messages"}</div>
                                         <div class="tooltip">
-                                            {"These are your remaining proactive notifications for this month. Lightfriend uses these to notify you about important events, emails, and calendar updates."}
+                                            {
+                                                if let Some(sub_tier) = &user_profile.sub_tier {
+                                                    if sub_tier == "hard_mode" {
+                                                        "Proactive notifications are only available with the Escape Plan subscription. Upgrade to get access to email and calendar notifications!"
+                                                    } else {
+                                                        "Your Escape Plan includes 100 proactive notifications per month. Lightfriend uses these to notify you about important events, emails, and calendar updates."
+                                                    }
+                                                } else {
+                                                    "Proactive notifications are available with the Escape Plan subscription. Subscribe to get notified about important events, emails, and calendar updates!"
+                                                }
+                                            }
                                         </div>
 
                                         <div class="credits-amount">

@@ -942,6 +942,24 @@ pub async fn process_sms(
         payload.body.clone()
     };
 
+    // Delete media if present after processing
+    if let (Some(num_media), Some(media_url), Some(_)) = (
+        payload.num_media.as_ref(),
+        payload.media_url0.as_ref(),
+        payload.media_content_type0.as_ref()
+    ) {
+        if num_media != "0" {
+            // Extract media SID from URL
+            if let Some(media_sid) = media_url.split("/Media/").nth(1) {
+                println!("Attempting to delete media with SID: {}", media_sid);
+                match crate::api::twilio_utils::delete_twilio_message_media(&media_sid).await {
+                    Ok(_) => println!("Successfully deleted media: {}", media_sid),
+                    Err(e) => eprintln!("Failed to delete media {}: {}", media_sid, e),
+                }
+            }
+        }
+    }
+
     // Only include conversation history if message starts with "forget"
     if !payload.body.to_lowercase().starts_with("forget") {
     let mut history: Vec<ChatMessage> = messages.clone().into_iter().map(|msg| {
@@ -1571,13 +1589,11 @@ pub async fn process_sms(
                 };
 
                 // Check if user has access to this tool
-                /*
                 if requires_subscription(name, user.sub_tier.clone(), user.discount) {
                     println!("Attempted to use subscription-only tool {} without proper subscription", name);
                     tool_answers.insert(tool_call_id, format!("This feature ({}) requires a subscription. Please visit our website to subscribe.", name));
                     continue;
                 }
-                */
                 let arguments = match &tool_call.function.arguments {
                     Some(args) => args,
                     None => continue,

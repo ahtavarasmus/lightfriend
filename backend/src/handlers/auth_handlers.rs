@@ -52,6 +52,7 @@ pub async fn get_users(
             sub_tier: user.sub_tier,
             msgs_left: user.msgs_left,
             credits_left: user.credits_left,
+            discount: user.discount,
         })
         .collect();
 

@@ -30,7 +30,134 @@ pub struct BuyCreditsRequest {
     pub amount_dollars: f32,
 }
 
-// TODO create sub checkout and wehbook handler for tier 1 sub
+pub async fn create_hard_mode_subscription_checkout(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(user_id): Path<i32>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    println!("Starting create_hard_mode_subscription_checkout for user_id: {}", user_id);
+
+    // Validate user_id
+    if user_id <= 0 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid user ID"})),
+        ));
+    }
+
+    // Check if user is accessing their own data or is an admin
+    if auth_user.user_id != user_id && !auth_user.is_admin {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Access denied"})),
+        ));
+    }
+
+    // Verify user exists in database
+    let user = state
+        .user_repository
+        .find_by_id(user_id)
+        .map_err(|e| {
+            println!("Database error when finding user: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to verify user"})),
+            )
+        })?
+        .ok_or_else(|| {
+            println!("User not found: {}", user_id);
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            )
+        })?;
+
+    // Initialize Stripe client
+    let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY").map_err(|_| {
+        println!("STRIPE_SECRET_KEY not found in environment");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Stripe configuration error"})),
+        )
+    })?;
+    let client = Client::new(stripe_secret_key);
+    println!("Stripe client initialized");
+
+    // Get or create Stripe customer
+    let customer_id = match state.user_repository.get_stripe_customer_id(user_id) {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            let user = state
+                .user_repository
+                .find_by_id(user_id)
+                .map_err(|e| (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Database error: {}", e)})),
+                ))?
+                .ok_or_else(|| (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"error": "User not found"})),
+                ))?;
+            create_new_customer(&client, user_id, &user.email, &state).await?
+        },
+        Err(e) => return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)})),
+        )),
+    };
+
+    let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
+
+    let price_id = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID")
+                            .expect("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID must be set in environment");
+    
+    let checkout_session = CheckoutSession::create(
+        &client,
+        CreateCheckoutSession {
+            success_url: Some(&format!("{}/billing?subscription=success", domain_url)),
+            cancel_url: Some(&format!("{}/billing?subscription=canceled", domain_url)),
+            mode: Some(stripe::CheckoutSessionMode::Subscription),
+            line_items: Some(vec![
+                stripe::CreateCheckoutSessionLineItems {
+                    price: Some(price_id),
+                    quantity: Some(1),
+                    ..Default::default()
+                }
+            ]),
+            customer: Some(customer_id.parse().unwrap()),
+            allow_promotion_codes: Some(true),
+            billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
+            automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
+                enabled: true,
+                liability: None,
+            }),
+            tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
+                enabled: true,
+            }),
+            customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
+                address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
+                name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto),
+                shipping: None,
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| {
+        println!("Stripe error details: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to create Hard Mode Subscription Checkout Session: {}", e)})),
+        )
+    })?;
+
+    println!("Hard mode subscription checkout session created successfully");
+    
+    Ok(Json(json!({
+        "url": checkout_session.url.unwrap(),
+        "message": "Redirecting to Stripe Checkout for hard mode subscription"
+    })))
+}
 
 pub async fn create_subscription_checkout(
     State(state): State<Arc<AppState>>,
@@ -476,16 +603,46 @@ pub async fn stripe_webhook(
                     stripe::Expandable::Object(customer) => customer.id,
                 };
 
-                
+                // Get the price ID from the subscription
+                let price_id = subscription.items.data.first()
+                    .and_then(|item| item.price.as_ref())
+                    .map(|price| price.id.to_string());
 
                 if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
-                    // Update subscription tier and messages
-                    state.user_repository.set_subscription_tier(
-                        user.id,
-                        Some("tier 2"),
-                    ).ok();
-                    state.user_repository.update_proactive_messages_left(user.id, 100).ok();
-                    state.user_repository.update_user_credits_left(user.id, 20.0).ok();
+                    // Check which subscription type it is based on the price ID
+                    let hard_mode_price_id = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID").unwrap_or_default();
+                    let world_price_id = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID").unwrap_or_default();
+
+                    match price_id.as_deref() {
+                        Some(price) if price == hard_mode_price_id => {
+                            // Hard mode subscription
+                            state.user_repository.set_subscription_tier(
+                                user.id,
+                                Some("tier 1"),
+                            ).ok();
+                            state.user_repository.update_user_credits_left(user.id, 6.0).ok();
+                            println!("Updated subscription tier to 'tier 1', 6.0 credits_left for hard mode subscriber {}", user.id);
+                        },
+                        Some(price) if price == world_price_id => {
+                            // World subscription (tier 2)
+                            state.user_repository.set_subscription_tier(
+                                user.id,
+                                Some("tier 2"),
+                            ).ok();
+                            state.user_repository.update_proactive_messages_left(user.id, 100).ok();
+                            state.user_repository.update_user_credits_left(user.id, 20.0).ok();
+                            println!("Updated subscription tier to 'tier 2', set 100 messages, 20.0 credits_left for world subscriber {}", user.id);
+                        },
+                        _ => {
+                            println!("Unknown subscription price ID, defaulting to tier 2");
+                            state.user_repository.set_subscription_tier(
+                                user.id,
+                                Some("tier 2"),
+                            ).ok();
+                            state.user_repository.update_proactive_messages_left(user.id, 100).ok();
+                            state.user_repository.update_user_credits_left(user.id, 20.0).ok();
+                        }
+                    }
                     // Set initial credits_left for the subscription
                     // Enable proactive IMAP messaging for subscribed users
                     //state.user_repository.update_imap_proactive(user.id, true).ok();
@@ -526,9 +683,32 @@ pub async fn stripe_webhook(
                 if is_renewal {
                     println!("Subscription renewal detected for customer at period start: {}", current_period_start);
                     if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
-                        state.user_repository.update_proactive_messages_left(user.id, 100).ok();
-                        state.user_repository.update_user_credits_left(user.id, 20.0).ok();
-                        println!("Reset to 150 messages and 20.0 credits_left for user {} on subscription renewal", user.id);
+                        // Get the price ID from the subscription
+                        let price_id = subscription.items.data.first()
+                            .and_then(|item| item.price.as_ref())
+                            .map(|price| price.id.to_string());
+
+                        let hard_mode_price_id = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID").unwrap_or_default();
+                        let world_price_id = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID").unwrap_or_default();
+
+                        match price_id.as_deref() {
+                            Some(price) if price == hard_mode_price_id => {
+                                // Hard mode subscription renewal
+                                state.user_repository.update_user_credits_left(user.id, 6.0).ok();
+                                println!("6.0 credits_left for hard mode user {} on subscription renewal", user.id);
+                            },
+                            Some(price) if price == world_price_id => {
+                                // World subscription renewal
+                                state.user_repository.update_proactive_messages_left(user.id, 100).ok();
+                                state.user_repository.update_user_credits_left(user.id, 20.0).ok();
+                                println!("Reset to 100 messages and 20.0 credits_left for world user {} on subscription renewal", user.id);
+                            },
+                            _ => {
+                                println!("Unknown subscription type for renewal, defaulting to tier 2 values");
+                                state.user_repository.update_proactive_messages_left(user.id, 100).ok();
+                                state.user_repository.update_user_credits_left(user.id, 20.0).ok();
+                            }
+                        }
                     } else {
                         println!("No user found for customer ID");
                     }
@@ -553,6 +733,7 @@ pub async fn stripe_webhook(
                     ).ok();
 
                     state.user_repository.update_proactive_messages_left(user.id, 0).ok();
+                    state.user_repository.update_user_credits_left(user.id, 0.0).ok();
                     println!("Removed subscription tier for user {}", user.id);
                 }
             }
