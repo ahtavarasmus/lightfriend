@@ -250,6 +250,10 @@ pub async fn fetch_assistant(
             dynamic_variables.insert("name".to_string(), json!(nickname));
             dynamic_variables.insert("user_info".to_string(), json!(user_info));
             dynamic_variables.insert("user_id".to_string(), json!(user.id));
+            dynamic_variables.insert("email_id".to_string(), json!("-1".to_string()));
+            dynamic_variables.insert("content_type".to_string(), json!("".to_string()));
+            dynamic_variables.insert("notification_message".to_string(), json!("".to_string()));
+
 
             // Get timezone from user info or default to UTC
             let timezone_str = match user.timezone {
