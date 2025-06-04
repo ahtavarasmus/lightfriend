@@ -606,6 +606,8 @@ pub async fn handle_whatsapp_message(
     client: MatrixClient,
     state: Arc<AppState>,
 ) {
+    tracing::info!("Entering WhatsApp message handler");
+    tracing::debug!("Event details: sender={}, event_id={}", event.sender, event.event_id);
     // Get room name
     let room_name = match room.display_name().await {
         Ok(name) => name.to_string(),
@@ -617,9 +619,10 @@ pub async fn handle_whatsapp_message(
 
     // Only process WhatsApp rooms
     if !room_name.contains("(WA)") {
-        tracing::error!("Skipping non whatsapp message");
+        tracing::debug!("Skipping non-WhatsApp room: {}", room_name);
         return;
     }
+    tracing::info!("Processing WhatsApp room: {}", room_name);
 
     // Only process messages from WhatsApp users
     if !event.sender.localpart().starts_with("whatsapp_") {

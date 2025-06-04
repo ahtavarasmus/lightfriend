@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use chrono::TimeZone;
 use crate::handlers::imap_handlers::{fetch_emails_imap, fetch_single_email_imap};
+use crate::models::user_models::User;
 
 
 #[derive(Debug, Deserialize)]
@@ -72,7 +73,6 @@ pub struct ConversationConfig {
 pub struct AgentConfig {
     first_message: String,
 }
-
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct VoiceId {
@@ -250,6 +250,9 @@ pub async fn fetch_assistant(
             dynamic_variables.insert("name".to_string(), json!(nickname));
             dynamic_variables.insert("user_info".to_string(), json!(user_info));
             dynamic_variables.insert("user_id".to_string(), json!(user.id));
+            dynamic_variables.insert("email_id".to_string(), json!("-1".to_string()));
+            dynamic_variables.insert("content_type".to_string(), json!("".to_string()));
+            dynamic_variables.insert("notification_message".to_string(), json!("".to_string()));
 
             // Get timezone from user info or default to UTC
             let timezone_str = match user.timezone {
@@ -1918,13 +1921,18 @@ pub async fn handle_email_response_tool_call(
     // Fetch the email details to include in confirmation message
     match crate::handlers::imap_handlers::fetch_single_email_imap(&state, user_id, &payload.email_id).await {
         Ok(email) => {
-            let from = email.from.unwrap_or_else(|| "Unknown sender".to_string());
+            let from_email = email.from_email.clone().unwrap();
             let subject = email.subject.unwrap_or_else(|| "No subject".to_string());
+
+            // admins can debug their own data
+            if user_id == 1 {
+                println!("from_email e: {}", from_email.clone());
+            }
 
             // Create confirmation message
             let confirmation_message = format!(
                 "Confirm sending email response to '{}' regarding '{}' with content: '{}' id:({})(yes-> send, no -> discard)",
-                from,
+                from_email,
                 subject,
                 payload.response_text,
                 payload.email_id
@@ -2003,6 +2011,7 @@ pub async fn make_notification_call(
     notification_first_message: String,
     notification_message: String,
     user_id: String,
+    user_timezone: Option<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     println!("Starting notification call to: {}", to_phone_number);
 
@@ -2067,13 +2076,41 @@ pub async fn make_notification_call(
     dynamic_variables.insert("notification_message".to_string(), json!(notification_message));
     dynamic_variables.insert("now".to_string(), json!(format!("{}", chrono::Utc::now())));
     
+
+    // set the ids to -1 to prevent agent from making mistake
+    dynamic_variables.insert("email_id".to_string(), json!("-1".to_string()));
     // Add content-specific dynamic variables
     if content_type == "email" {
         dynamic_variables.insert("email_id".to_string(), json!(content_id));
-    }
-    dynamic_variables.insert("content_id".to_string(), json!(content_id));
+    } 
     dynamic_variables.insert("content_type".to_string(), json!(content_type));
     dynamic_variables.insert("user_id".to_string(), json!(user_id));
+    // Get timezone from user info or default to UTC
+    let timezone_str = match user_timezone {
+        Some(ref tz) => tz.as_str(),
+        None => "UTC",
+    };
+
+    // Get timezone offset using jiff
+    let (hours, minutes) = match get_offset_with_jiff(timezone_str) {
+        Ok((h, m)) => (h, m),
+        Err(_) => {
+            println!("Failed to get timezone offset for {}, defaulting to UTC", timezone_str);
+            (0, 0) // UTC default
+        }
+    };
+
+    // Format offset string (e.g., "+02:00" or "-05:30")
+    let offset = format!("{}{:02}:{:02}", 
+        if hours >= 0 { "+" } else { "-" },
+        hours.abs(),
+        minutes.abs()
+    );
+
+    dynamic_variables.insert("timezone".to_string(), json!(timezone_str));
+    dynamic_variables.insert("timezone_offset_from_utc".to_string(), json!(offset));
+
+
 
     // Create the payload for the call
     let payload = NotificationCallPayload {
@@ -2124,11 +2161,113 @@ pub async fn make_notification_call(
         ));
     }
 
+    // Parse the response to get the call SID
+    let response_json = response.json::<serde_json::Value>().await.map_err(|e| {
+        error!("Failed to parse ElevenLabs API response: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": "Failed to parse API response",
+                "details": e.to_string()
+            }))
+        )
+    })?;
+
+    let conversation_id = response_json["conversation_id"].as_str().unwrap_or_default().to_string();
+
+    // Get user information before spawning the thread
+    let user = match state.user_repository.find_by_id(user_id.parse::<i32>().unwrap_or_default()) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            error!("User not found for ID: {}", user_id);
+            return Ok(Json(json!({
+                "status": "success",
+                "message": "Notification call initiated successfully, but user not found for status updates",
+                "to_number": to_phone_number,
+                "from_number_id": phone_number_id,
+            })));
+        }
+        Err(e) => {
+            error!("Error fetching user: {}", e);
+            return Ok(Json(json!({
+                "status": "success",
+                "message": "Notification call initiated successfully, but failed to fetch user for status updates",
+                "to_number": to_phone_number,
+                "from_number_id": phone_number_id,
+            })));
+        }
+    };
+
+
+    // Clone necessary data before spawning the task
+    let state_clone = Arc::clone(state);
+    let conversation_id_clone = conversation_id.clone();
+    let user_preferred_number = user.preferred_number.clone()
+        .unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER")
+            .expect("SHAZAM_PHONE_NUMBER not set"));
+
+    // Get conversation before spawning the task
+    let conversation = match state.user_conversations.get_conversation(&user, user_preferred_number.clone()).await {
+        Ok(conv) => conv,
+        Err(e) => {
+            error!("Failed to get conversation before spawning status check task: {}", e);
+            return Ok(Json(json!({
+                "status": "success",
+                "message": "Notification call initiated successfully, but failed to set up status updates",
+                "to_number": to_phone_number,
+                "from_number_id": phone_number_id,
+            })));
+        }
+    };
+
+    let conversation_sid = conversation.conversation_sid.clone();
+    let twilio_number = conversation.twilio_number.clone();
+
+    // Create a separate function to handle status check that returns a Send-able error
+    async fn check_call_status(
+        conversation_id: String,
+        conversation_sid: String,
+        twilio_number: String,
+    ) -> Result<(), String> {
+        // Wait for call to initialize
+        tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+
+        // Check call status using Twilio API
+        let status = match crate::api::twilio_utils::get_call_status(&conversation_id).await {
+            Ok(s) => s,
+            Err(e) => return Err(format!("Failed to get call status: {}", e)),
+        };
+
+        // Send status message via Twilio
+        match crate::api::twilio_utils::send_conversation_message(
+            &conversation_sid,
+            &twilio_number,
+            &format!("Call status: {}", status),
+            true,
+        ).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(format!("Failed to send call status message: {}", e)),
+        }
+    }
+
+    // Spawn the status check task with Send-able error type
+    let status_check_future = check_call_status(
+        conversation_id.clone(),
+        conversation_sid.clone(),
+        twilio_number.clone(),
+    );
+
+    tokio::spawn(async move {
+        if let Err(e) = status_check_future.await {
+            error!("Status check failed: {}", e);
+        }
+    });
+
     Ok(Json(json!({
         "status": "success",
         "message": "Notification call initiated successfully",
         "to_number": to_phone_number,
-        "from_number_id": phone_number_id
+        "from_number_id": phone_number_id,
     })))
 }
 

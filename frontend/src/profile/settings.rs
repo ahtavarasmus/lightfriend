@@ -1,4 +1,5 @@
 use yew::prelude::*;
+use log::{info, Level};
 use web_sys::{HtmlInputElement, window};
 use yew_router::prelude::*;
 use crate::Route;
@@ -41,7 +42,11 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let timezone = use_state(|| (*user_profile).timezone.clone().unwrap_or_else(|| String::from("UTC")));
     let timezone_auto = use_state(|| (*user_profile).timezone_auto.unwrap_or(true));
     let agent_language = use_state(|| (*user_profile).agent_language.clone());
-    let notification_type = use_state(|| (*user_profile).notification_type.clone());
+    let notification_type = {
+        let initial_value = (*user_profile).notification_type.clone();
+        info!("Initial notification type from props: {:?}", initial_value);
+        use_state(|| initial_value.or(Some("sms".to_string())))
+    };
     let error = use_state(|| None::<String>);
     let success = use_state(|| None::<String>);
     let is_editing = use_state(|| false);
@@ -60,6 +65,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let notification_type = notification_type.clone();
 
         use_effect_with_deps(move |props_profile| {
+            info!("{}", &format!("Props notification type: {:?}", props_profile.notification_type));
             email.set(props_profile.email.clone());
             phone_number.set(props_profile.phone_number.clone());
             nickname.set(props_profile.nickname.clone().unwrap_or_default());
@@ -531,6 +537,7 @@ let on_timezone_update = {
                                 value={(*notification_type).clone().unwrap_or_else(|| "sms".to_string())}
                                 onchange={let notification_type = notification_type.clone(); move |e: Event| {
                                     let select: HtmlInputElement = e.target_unchecked_into();
+                                    info!("{}", &format!("Select changed to: {}", select.value()));
                                     let value = if select.value() == "none" { None } else { Some(select.value()) };
                                     notification_type.set(value);
                                 }}
@@ -549,7 +556,12 @@ let on_timezone_update = {
                                 {
                                     match (*user_profile).notification_type.as_deref() {
                                         Some("call") => "Voice call",
-                                        _ => "SMS"
+                                        Some("sms") => "SMS",
+                                        Some(other) => {
+                                            web_sys::console::log_1(&format!("Unexpected notification type: {:?}", other).into());
+                                            other
+                                        },
+                                        None => "SMS"  // Default to SMS if no preference is set
                                     }
                                 }
                             </span>

@@ -535,6 +535,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                                     <div class="verification-code">
                                         {pairing_code}
                                     </div>
+                                    <p class="instruction">{"Note: This will connect the WhatsApp account associated with your current phone number. If you need to connect a different WhatsApp account, first update your phone number in Settings, connect WhatsApp, then change your number back."}</p>
                                     <p class="instruction">{"1. Open WhatsApp on your phone"}</p>
                                     <p class="instruction">{"2. Go to Settings > Linked Devices"}</p>
                                     <p class="instruction">{"3. Tap 'Link a Device'"}</p>

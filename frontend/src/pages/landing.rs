@@ -351,13 +351,6 @@ pub fn landing() -> Html {
                                 </div>
                 </div>
             </div>
-            // TODO add cta to landing first page "get started" and add subheader under main header with something like "bring necessary smartphone features to dumbphones"
-            // add first feature showcase section next to the static phone and remove the original. 
-            // remove dead page after phone scroll
-            // keep human pic + proactive section and add video demo link to that
-            // add another cta get started under it
-            // remove the privacy section(add faq and add it there), could remove why page and just add them to faq
-            // add clear steps after signup
         </footer>
             <style>
                 {r#"

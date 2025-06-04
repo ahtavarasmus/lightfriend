@@ -348,6 +348,7 @@ impl UserRepository {
     // Update user's profile
     pub fn update_profile(&self, user_id: i32, email: &str, phone_number: &str, nickname: &str, info: &str, timezone: &str, timezone_auto: &bool, notification_type: Option<&str>) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
+        println!("Repository: Updating user {} with notification type: {:?}", user_id, notification_type);
         
         // Check if phone number exists for a different user
         let existing_phone = users::table
@@ -379,7 +380,7 @@ impl UserRepository {
         // If phone number is changing, set verified to false
         let should_unverify = current_user.phone_number != phone_number;
 
-        diesel::update(users::table.find(user_id))
+        let result = diesel::update(users::table.find(user_id))
             .set((
                 users::email.eq(email),
                 users::phone_number.eq(phone_number),
@@ -390,7 +391,14 @@ impl UserRepository {
                 users::verified.eq(!should_unverify && current_user.verified), // Only keep verified true if phone number hasn't changed
                 users::notification_type.eq(notification_type),
             ))
-            .execute(&mut conn)?;
+            .execute(&mut conn);
+            
+        match &result {
+            Ok(_) => println!("Successfully updated user profile with notification type: {:?}", notification_type),
+            Err(e) => println!("Failed to update user profile: {:?}", e),
+        }
+        
+        result?;
         Ok(())
     }
 

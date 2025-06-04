@@ -61,6 +61,7 @@ pub struct ProfileResponse {
     credits_left: f32,
     discount: bool,
     agent_language: String,
+    notification_type: Option<String>,
 }
 
 use crate::handlers::auth_middleware::AuthUser;
@@ -109,6 +110,7 @@ pub async fn get_profile(
                 credits_left: user.credits_left,
                 discount: user.discount,
                 agent_language: user.agent_language,
+                notification_type: user.notification_type,
             }))
         }
         None => Err((
@@ -216,7 +218,7 @@ pub async fn update_profile(
     auth_user: AuthUser,
     Json(update_req): Json<UpdateProfileRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("here");
+    println!("Updating profile with notification type: {:?}", update_req.notification_type);
  
     use regex::Regex;
     let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();

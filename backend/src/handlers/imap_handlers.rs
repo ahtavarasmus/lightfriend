@@ -42,7 +42,7 @@ fn format_timestamp(timestamp: i64, timezone: Option<String>) -> String {
     formatted
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 pub struct ImapEmailPreview {
     pub id: String,
     pub subject: Option<String>,
@@ -138,8 +138,14 @@ pub async fn fetch_full_imap_emails(
     axum::extract::Query(params): axum::extract::Query<FetchEmailsQuery>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Starting IMAP full emails fetch for user {} with limit {:?}", auth_user.user_id, params.limit);
+    let mut limit = params.limit;
+    let mut testing = false;
+    if let None = limit {
+        limit = Some(5);
+        testing = true;
+    }
 
-    match fetch_emails_imap(&state, auth_user.user_id, false, params.limit, false).await {
+    match fetch_emails_imap(&state, auth_user.user_id, false, limit, false).await {
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP full emails", previews.len());
             
@@ -147,6 +153,12 @@ pub async fn fetch_full_imap_emails(
             let formatted_emails: Vec<_> = previews
                 .into_iter()
                 .map(|p| {
+
+                    if testing {
+                        println!("from_email: {:#?}", p.from_email.clone());
+                        println!("from: {:#?}", p.from.clone());
+                        println!("from: {:#?}", p.from.clone());
+                    }
 
                     json!({
                         "id": p.id,
@@ -367,22 +379,35 @@ pub async fn respond_to_email(
 pub async fn fetch_single_imap_email(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
-    email_id: String,
+    axum::extract::Path(email_id): axum::extract::Path<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Fetching single IMAP email {} for user {}", email_id, auth_user.user_id);
 
-    // Validate email_id is a valid number
-    if !email_id.chars().all(|c| c.is_ascii_digit()) {
-        tracing::error!("Invalid email ID format: {}", email_id);
+    // Validate email_id is a valid number and not empty
+    if email_id.trim().is_empty() || !email_id.chars().all(|c| c.is_ascii_digit()) {
+        let error_msg = if email_id.trim().is_empty() {
+            "Email ID cannot be empty"
+        } else {
+            "Invalid email ID format"
+        };
+        tracing::error!("{}: {}", error_msg, email_id);
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "error": "Invalid email ID format" }))
+            Json(json!({ 
+                "error": error_msg,
+                "email_id": email_id
+            }))
         ));
     }
 
     match fetch_single_email_imap(&state, auth_user.user_id, &email_id).await {
         Ok(email) => {
-
+            tracing::debug!("Successfully fetched email {}", email_id);
+            // if admin testing their own account
+            if auth_user.user_id == 1 {
+                println!("email addr: {:#?}", email.from.clone());
+                println!("from_email addr: {:#?}", email.from_email.clone());
+            }
             Ok(Json(json!({
                 "success": true,
                 "email": {
@@ -390,8 +415,8 @@ pub async fn fetch_single_imap_email(
                     "subject": email.subject.unwrap_or_else(|| "No subject".to_string()),
                     "from": email.from.unwrap_or_else(|| "Unknown sender".to_string()),
                     "from_email": email.from_email.unwrap_or_else(|| "unknown@email.com".to_string()),
-                        "date": email.date.map(|dt| dt.to_rfc3339()),
-                        "date_formatted": email.date_formatted,
+                    "date": email.date.map(|dt| dt.to_rfc3339()),
+                    "date_formatted": email.date_formatted,
                     "snippet": email.snippet.unwrap_or_else(|| "No preview".to_string()),
                     "body": email.body.unwrap_or_else(|| "No content".to_string()),
                     "is_read": email.is_read,
@@ -401,14 +426,31 @@ pub async fn fetch_single_imap_email(
         }
         Err(e) => {
             let (status, message) = match e {
-                ImapError::NoConnection => (StatusCode::BAD_REQUEST, "No IMAP connection found".to_string()),
-                ImapError::CredentialsError(msg) => (StatusCode::UNAUTHORIZED, msg),
-                ImapError::ConnectionError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
-                ImapError::FetchError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
-                ImapError::ParseError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg),
+                ImapError::NoConnection => {
+                    tracing::error!("No IMAP connection found for user {}", auth_user.user_id);
+                    (StatusCode::BAD_REQUEST, "No IMAP connection found".to_string())
+                },
+                ImapError::CredentialsError(msg) => {
+                    tracing::error!("IMAP credentials error for user {}: {}", auth_user.user_id, msg);
+                    (StatusCode::UNAUTHORIZED, msg)
+                },
+                ImapError::ConnectionError(msg) => {
+                    tracing::error!("IMAP connection error for user {}: {}", auth_user.user_id, msg);
+                    (StatusCode::INTERNAL_SERVER_ERROR, msg)
+                },
+                ImapError::FetchError(msg) => {
+                    tracing::error!("IMAP fetch error for email {} user {}: {}", email_id, auth_user.user_id, msg);
+                    (StatusCode::INTERNAL_SERVER_ERROR, msg)
+                },
+                ImapError::ParseError(msg) => {
+                    tracing::error!("IMAP parse error for email {} user {}: {}", email_id, auth_user.user_id, msg);
+                    (StatusCode::INTERNAL_SERVER_ERROR, msg)
+                },
             };
-            tracing::error!("IMAP email fetch failed: {}", message);
-            Err((status, Json(json!({ "error": message }))))
+            Err((status, Json(json!({ 
+                "error": message,
+                "email_id": email_id
+            }))))
         }
     }
 }
@@ -698,21 +740,40 @@ pub async fn fetch_single_email_imap(
         .as_ref()
         .and_then(|addrs| addrs.first())
         .map(|addr| {
-            format!(
-                "{} <{}>",
-                addr.name.as_ref().and_then(|n| String::from_utf8(n.to_vec()).ok()).unwrap_or_default(),
-                addr.mailbox.as_ref().and_then(|m| String::from_utf8(m.to_vec()).ok()).unwrap_or_default()
-            )
+            let name = addr.name
+                .as_ref()
+                .and_then(|n| String::from_utf8(n.to_vec()).ok())
+                .unwrap_or_default();
+            let email = format!(
+                "{}@{}",
+                addr.mailbox.as_ref()
+                    .and_then(|m| String::from_utf8(m.to_vec()).ok())
+                    .unwrap_or_default(),
+                addr.host.as_ref()
+                    .and_then(|h| String::from_utf8(h.to_vec()).ok())
+                    .unwrap_or_default()
+            );
+            if name.is_empty() {
+                email.clone()
+            } else {
+                format!("{} <{}>", name, email)
+            }
         });
 
     let from_email = envelope
         .from
         .as_ref()
         .and_then(|addrs| addrs.first())
-        .and_then(|addr| {
-            addr.mailbox
-                .as_ref()
-                .and_then(|m| String::from_utf8(m.to_vec()).ok())
+        .map(|addr| {
+            format!(
+                "{}@{}",
+                addr.mailbox.as_ref()
+                    .and_then(|m| String::from_utf8(m.to_vec()).ok())
+                    .unwrap_or_default(),
+                addr.host.as_ref()
+                    .and_then(|h| String::from_utf8(h.to_vec()).ok())
+                    .unwrap_or_default()
+            )
         });
 
     let subject = envelope

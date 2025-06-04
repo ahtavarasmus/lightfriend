@@ -59,6 +59,7 @@ mod utils {
     pub mod matrix_auth;
     pub mod whatsapp_utils;
     pub mod elevenlabs_prompts;
+    pub mod imap_utils;
 }
 mod api {
     pub mod vapi_endpoints;
@@ -357,7 +358,7 @@ async fn main() {
         .route("/api/auth/imap/status", get(imap_auth::imap_status))
         .route("/api/auth/imap/disconnect", delete(imap_auth::delete_imap_connection))
         .route("/api/imap/previews", get(imap_handlers::fetch_imap_previews))
-        .route("/api/imap/message/{id}", get(imap_handlers::fetch_single_imap_email))
+        .route("/api/imap/message/{email_id}", get(imap_handlers::fetch_single_imap_email))
         .route("/api/imap/full_emails", get(imap_handlers::fetch_full_imap_emails))
 
         .route("/api/auth/telegram/status", get(telegram_auth::get_telegram_status))

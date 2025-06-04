@@ -584,7 +584,7 @@ pub async fn resync_whatsapp(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
-    tracing::debug!("🔄 Starting WhatsApp resync process for user {}", auth_user.user_id);
+    println!("🔄 Starting WhatsApp resync process for user {}", auth_user.user_id);
 
     // Get the bridge information first
     let bridge = state.user_repository.get_whatsapp_bridge(auth_user.user_id)
@@ -622,6 +622,38 @@ pub async fn resync_whatsapp(
         ))?;
 
     if let Some(room) = client.get_room(&room_id) {
+        println!("📱 Setting up Matrix event handler");
+        
+        // Set up event handler for the Matrix client
+        client.add_event_handler(|ev: SyncRoomMessageEvent| async move {
+            match ev {
+                SyncRoomMessageEvent::Original(msg) => {
+                    println!("📨 Received message event: {:?}", msg.content.msgtype);
+                    // Add more specific message handling logic here if needed
+                },
+                SyncRoomMessageEvent::Redacted(_) => {
+                    println!("🗑️ Received redacted message event");
+                }
+            }
+        });
+
+        // Start continuous sync in the background
+        let sync_client = client.clone();
+        tokio::spawn(async move {
+            tracing::info!("🔄 Starting continuous Matrix sync for WhatsApp bridge");
+            let sync_settings = MatrixSyncSettings::default()
+                .timeout(Duration::from_secs(30))
+                .full_state(true);
+            
+            if let Err(e) = sync_client.sync(sync_settings).await {
+                tracing::error!("❌ Matrix sync error: {}", e);
+            }
+            tracing::info!("🛑 Continuous sync ended");
+        });
+
+        // Give the sync a moment to start up
+        sleep(Duration::from_secs(2)).await;
+
         tracing::debug!("📱 Sending WhatsApp sync commands");
         
         // First sync all contacts
