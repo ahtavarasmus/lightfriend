@@ -140,8 +140,6 @@ pub async fn send_shazam_answer_to_user(
     success: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Add check for user's subscription status
-    tracing::info!("Checking subscription status for user {}", user_id);
-    
     tracing::info!("Starting send_shazam_answer_to_user for user_id: {}", user_id);
     tracing::info!("Message to send: {}", message);
 
@@ -2763,7 +2761,7 @@ pub async fn process_sms(
     let mut warnings = Vec::new();
     
     // For regular users, check both credits_left and regular credits
-    if user.sub_tier == Some("tier 2".to_string()) {
+    if user.sub_tier.is_some() {
         let message_cost = std::env::var("MESSAGE_COST")
             .expect("MESSAGE_COST not set")
             .parse::<f32>()

@@ -262,10 +262,11 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         .join("\n\n---\n\n");
 
                                     // Define the system message for notification formatting
-                                    let format_system_message = "You are an AI assistant that creates concise, natural-sounding SMS notifications about important emails. \
-                                        Your message should be clear, informative while keeping the length appropriate for SMS. \
-                                        Include the relevant details from each email. \
-                                        Focus on what makes these emails important and state the information, never reason about the content. Also mention that the message(s) was from email. You are the users assistant which provides this important information.";
+                                    let format_system_message = "You are an AI assistant that creates very concise SMS notifications about important emails. \
+                                        Create notifications that are STRICTLY under 120 characters and use ONLY ASCII characters (no emoji, no Unicode). \
+                                        Focus only on the most critical information. \
+                                        Always start with 'Email:' and be direct and brief. \
+                                        Never use quotes or special characters.";
 
                                     // Define the tool for notification formatting
                                     let mut format_properties = std::collections::HashMap::new();
@@ -283,7 +284,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             r#type: openai_api_rs::v1::chat_completion::ToolType::Function,
                                             function: openai_api_rs::v1::types::Function {
                                                 name: String::from("format_notification"),
-                                                description: Some(String::from("Format the email summaries into a natural notification message")),
+                                                description: Some(String::from("Format a brief ASCII-only notification under 120 chars")),
                                                 parameters: openai_api_rs::v1::types::FunctionParameters {
                                                     schema_type: openai_api_rs::v1::types::JSONSchemaType::Object,
                                                     properties: Some(format_properties),
@@ -292,6 +293,23 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             },
                                         },
                                     ];
+
+                                    // Add a post-processing step to ensure notification length and character constraints
+                                    let process_notification = |notification: String| -> String {
+                                        // Remove any non-ASCII characters
+                                        let ascii_only: String = notification.chars()
+                                            .filter(|c| c.is_ascii())
+                                            .collect();
+                                        // Truncate to 120 chars if needed, ensuring we don't panic on unicode boundaries
+                                        if ascii_only.len() > 120 {
+                                            ascii_only.char_indices()
+                                                .take_while(|(i, _)| *i < 120)
+                                                .map(|(_, c)| c)
+                                                .collect()
+                                        } else {
+                                            ascii_only
+                                        }
+                                    };
 
                                     let format_messages = vec![
                                         openai_api_rs::v1::chat_completion::ChatCompletionMessage {
@@ -329,29 +347,31 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                     if let Some(arguments) = &tool_call.function.arguments {
                                                         match serde_json::from_str::<serde_json::Value>(arguments) {
                                                             Ok(formatted) => {
-                                                                formatted["notification_text"]
-                                                                    .as_str()
-                                                                    .unwrap_or("You have new important emails to check.")
-                                                                    .to_string()
+                                                                process_notification(
+                                                                    formatted["notification_text"]
+                                                                        .as_str()
+                                                                        .unwrap_or("Email: New important message received.")
+                                                                        .to_string()
+                                                                )
                                                             }
                                                             Err(e) => {
                                                                 error!("Failed to parse notification format response: {}", e);
-                                                                format!("You have {} important new emails to check.", important_emails.unwrap().len())
+                                                                format!("Email: {} new important messages.", important_emails.unwrap().len())
                                                             }
                                                         }
                                                     } else {
-                                                        format!("You have {} important new emails to check.", important_emails.unwrap().len())
+                                                        format!("Email: {} new important messages.", important_emails.unwrap().len())
                                                     }
                                                 } else {
-                                                    format!("You have {} important new emails to check.", important_emails.unwrap().len())
+                                                    format!("Email: {} new important messages.", important_emails.unwrap().len())
                                                 }
                                             } else {
-                                                format!("You have {} important new emails to check.", important_emails.unwrap().len())
+                                                format!("Email: {} new important messages.", important_emails.unwrap().len())
                                             }
                                         }
                                         Err(e) => {
                                             error!("Failed to get notification format from LLM: {}", e);
-                                            format!("You have {} important new emails to check.", important_emails.unwrap().len())
+                                            format!("Email: {} new important messages.", important_emails.unwrap().len())
                                         }
                                     };
 
@@ -934,17 +954,36 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                     // Check if this is the final message
                                                     let is_final_message = user.msgs_left <= 1;
 
-                                                    // Format notification message
-                                                    let notification = format!(
-                                                        "Reminder: Your event '{}' starts in {} minutes{}",
+                                                    // Process notification text to be ASCII-only and under 120 chars
+                                                    let process_notification = |text: String| -> String {
+                                                        // Remove any non-ASCII characters
+                                                        let ascii_only: String = text.chars()
+                                                            .filter(|c| c.is_ascii())
+                                                            .collect();
+                                                        // Truncate to 120 chars if needed
+                                                        if ascii_only.len() > 120 {
+                                                            ascii_only.char_indices()
+                                                                .take_while(|(i, _)| *i < 120)
+                                                                .map(|(_, c)| c)
+                                                                .collect()
+                                                        } else {
+                                                            ascii_only
+                                                        }
+                                                    };
+
+                                                    // Create a concise base notification
+                                                    let notification = process_notification(format!(
+                                                        "Calendar: {} in {} mins",
                                                         event_summary,
-                                                        minutes,
-                                                        event_description.map_or("".to_string(), |desc| format!("\nDetails: {}", desc))
-                                                    );
+                                                        minutes
+                                                    ));
 
                                                     // Append final message notice if needed
                                                     let final_notification = if is_final_message {
-                                                        format!("{}\n\nNote: This is your final proactive message for this month. Your message quota will reset at the start of next month.", notification)
+                                                        process_notification(format!(
+                                                            "{}\nNote: This is your final message. Quota resets next month.",
+                                                            notification
+                                                        ))
                                                     } else {
                                                         notification
                                                     };
@@ -969,7 +1008,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                         match notification_type {
                                                             "call" => {
                                                                 // For calls, we need a brief intro and detailed message
-                                                                let notification_first_message = "Hello, I have an upcoming calendar event to tell you about.".to_string();
+                                                let notification_first_message = "Hello, I have a calendar event to tell you about.".to_string();
                                                                 
                                                                 match crate::api::elevenlabs::make_notification_call(
                                                                     &state_clone,
