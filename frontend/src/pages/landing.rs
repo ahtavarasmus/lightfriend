@@ -264,7 +264,7 @@ pub fn landing() -> Html {
 
         <section class="main-features">
             // Add mobile-only intro content first
-            <div class="feature-block intro-mobile">
+            <div class="intro-mobile">
                 <div class="feature-content">
                     <h2>{"Everything just a call or text away"}</h2>
                     <p>{"Need your calendar? A WhatsApp reply? Just call or text LightFriend."}</p>
@@ -385,19 +385,25 @@ pub fn landing() -> Html {
                     }
 
                     .intro-mobile {
-                        display: none !important; /* Hidden by default */
+                        display: none;
                     }
 
                     @media (max-width: 768px) {
                         .intro-mobile {
-                            display: block; /* Show only on mobile */
-                            margin-bottom: 2rem;
+                            display: block !important;
+                            margin: 4rem 1rem 2rem 1rem;
+                            position: relative;
+                            z-index: 5;
+                            background: rgba(30, 30, 30, 0.8);
+                            border: 1px solid rgba(30, 144, 255, 0.15);
+                            border-radius: 24px;
+                            padding: 2rem;
                         }
                     }
 
                     @media (min-width: 769px) {
                         .intro-mobile {
-                            display: none !important; /* Hide on desktop */
+                            display: none;
                         }
                     }
 
