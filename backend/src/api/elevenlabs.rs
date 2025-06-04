@@ -2185,8 +2185,6 @@ pub async fn make_notification_call(
         )
     })?;
 
-    let conversation_id = response_json["conversation_id"].as_str().unwrap_or_default().to_string();
-
     // Get user information before spawning the thread
     let user = match state.user_repository.find_by_id(user_id.parse::<i32>().unwrap_or_default()) {
         Ok(Some(user)) => user,
@@ -2212,8 +2210,6 @@ pub async fn make_notification_call(
 
 
     // Clone necessary data before spawning the task
-    let state_clone = Arc::clone(state);
-    let conversation_id_clone = conversation_id.clone();
     let user_preferred_number = user.preferred_number.clone()
         .unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER")
             .expect("SHAZAM_PHONE_NUMBER not set"));
@@ -2235,45 +2231,32 @@ pub async fn make_notification_call(
     let conversation_sid = conversation.conversation_sid.clone();
     let twilio_number = conversation.twilio_number.clone();
 
-    // Create a separate function to handle status check that returns a Send-able error
-    async fn check_call_status(
-        conversation_id: String,
-        conversation_sid: String,
-        twilio_number: String,
-    ) -> Result<(), String> {
-        // Wait for call to initialize
-        tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-
-        // Check call status using Twilio API
-        let status = match crate::api::twilio_utils::get_call_status(&conversation_id).await {
-            Ok(s) => s,
-            Err(e) => return Err(format!("Failed to get call status: {}", e)),
-        };
-
-        // Send status message via Twilio
-        match crate::api::twilio_utils::send_conversation_message(
-            &conversation_sid,
-            &twilio_number,
-            &format!("Call status: {}", status),
-            true,
-        ).await {
-            Ok(_) => Ok(()),
-            Err(e) => Err(format!("Failed to send call status message: {}", e)),
-        }
-    }
-
-    // Spawn the status check task with Send-able error type
-    let status_check_future = check_call_status(
-        conversation_id.clone(),
-        conversation_sid.clone(),
-        twilio_number.clone(),
+    // Send an immediate SMS notification
+    // Truncate and clean notification message to ensure SMS compatibility
+    let cleaned_message = notification_message
+        .chars()
+        .filter(|c| c.is_ascii())
+        .collect::<String>();
+    let truncated_message = if cleaned_message.len() > 50 {
+        format!("{}...", &cleaned_message[..47])
+    } else {
+        cleaned_message
+    };
+    let notification_sms = format!(
+        "Notification: {}",
+        truncated_message
     );
 
-    tokio::spawn(async move {
-        if let Err(e) = status_check_future.await {
-            error!("Status check failed: {}", e);
-        }
-    });
+    // Send the SMS notification
+    if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+        &conversation_sid,
+        &twilio_number,
+        &notification_sms,
+        true,
+    ).await {
+        error!("Failed to send notification SMS: {}", e);
+        // Continue with the call even if SMS fails
+    }
 
     Ok(Json(json!({
         "status": "success",

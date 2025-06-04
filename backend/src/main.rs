@@ -255,7 +255,6 @@ async fn main() {
         .route("/api/call/assistant", post(elevenlabs::fetch_assistant))
         .route("/api/call/weather", post(elevenlabs::handle_weather_tool_call))
         .route("/api/call/perplexity", post(elevenlabs::handle_perplexity_tool_call))
-        .layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::check_subscription_access))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 
     let elevenlabs_routes = Router::new()
