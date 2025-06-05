@@ -436,8 +436,8 @@ async fn main() {
         .route("/api/twiml", get(shazam_call::twiml_handler).post(shazam_call::twiml_handler))
         .route("/api/stream", get(shazam_call::stream_handler))
         .route("/api/listen/{call_sid}", get(shazam_call::listen_handler))
-        .merge(twilio_routes)
-        .merge(user_twilio_routes)
+        .merge(user_twilio_routes)  // More specific routes first
+        .merge(twilio_routes)       // More general routes last
         .merge(elevenlabs_routes)
         .merge(elevenlabs_free_routes)
         .merge(elevenlabs_webhook_routes)
