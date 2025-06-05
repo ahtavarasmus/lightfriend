@@ -200,6 +200,7 @@ pub async fn fetch_assistant(
                     &conversation.twilio_number,
                     &error_message,
                     false, // Don't redact since there is nothing there 
+                    &user,
                 ).await {
                     error!("Failed to send insufficient credits message: {}", e);
                 }
@@ -646,11 +647,12 @@ pub async fn handle_send_sms_tool_call(
         
         let state_clone = Arc::clone(&state);
         let conversation_clone = conversation.clone();
+        let user_clone = user.clone();
         
         tokio::spawn(async move {
             println!("Background task: Fetching email attachments for email ID: {}", email_id);
             
-            match fetch_single_email_imap(&state_clone, user_id, &email_id).await {
+            match fetch_single_email_imap(&state_clone, user_clone.id, &email_id).await {
                 Ok(email) => {
                     if !email.attachments.is_empty() {
                         println!("Background task: Found {} attachments in email", email.attachments.len());
@@ -668,6 +670,7 @@ pub async fn handle_send_sms_tool_call(
                                         &decoded_data,
                                         &attachment.content_type,
                                         attachment.filename.as_deref().unwrap_or("attachment"),
+                                        &user_clone,
                                     ).await {
                                         Ok(media_sid) => {
                                             twilio_media_sids.push(media_sid.clone());
@@ -687,6 +690,7 @@ pub async fn handle_send_sms_tool_call(
                                                 &attachment_message,
                                                 &media_sid,
                                                 true,
+                                                &user_clone,
                                             ).await {
                                                 Ok(sid) => {
                                                     attachment_message_sids.push(sid.clone());
@@ -727,6 +731,7 @@ pub async fn handle_send_sms_tool_call(
                                 &conversation_clone.twilio_number,
                                 &summary_message,
                                 true,
+                                &user_clone,
                             ).await {
                                 Ok(sid) => {
                                     attachment_message_sids.push(sid.clone());
@@ -749,7 +754,7 @@ pub async fn handle_send_sms_tool_call(
                                 
                                 for media_sid in media_sids_for_cleanup {
                                     if let Err(e) = crate::api::twilio_utils::delete_media_from_twilio(
-                                        &chat_service_sid, &media_sid
+                                        &chat_service_sid, &media_sid, &user_clone,
                                     ).await {
                                         let error_msg = e.to_string();
                                         error!("Background task: Failed to cleanup Twilio media {}: {}", media_sid, error_msg);
@@ -778,6 +783,7 @@ pub async fn handle_send_sms_tool_call(
         &conversation.twilio_number,
         &payload.message,
         true,
+        &user,
     ).await {
         Ok(message_sid) => {
             message_sids.push(message_sid.clone());
@@ -1460,6 +1466,7 @@ pub async fn handle_whatsapp_confirm_send(
                 &conversation.twilio_number,
                 &confirmation_message,
                 false, // we should not redact the body right away since we need to extract the message content from this message
+                &user,
             ).await {
                 Ok(message_sid) => {
                     println!("Successfully sent confirmation SMS with SID: {}", message_sid);
@@ -1579,6 +1586,7 @@ pub async fn handle_calendar_event_confirm(
         &conversation.twilio_number,
         &confirmation_message,
         false, // Don't redact the body since we need to extract event details from this message
+        &user,
     ).await {
         Ok(message_sid) => {
             println!("Successfully sent calendar confirmation SMS with SID: {}", message_sid);
@@ -1962,6 +1970,7 @@ pub async fn handle_email_response_tool_call(
                 &conversation.twilio_number,
                 &confirmation_message,
                 false, // Don't redact the body since we need to extract response content from this message
+                &user,
             ).await {
                 Ok(message_sid) => {
                     println!("Successfully sent email response confirmation SMS with SID: {}", message_sid);
@@ -2253,6 +2262,7 @@ pub async fn make_notification_call(
         &twilio_number,
         &notification_sms,
         true,
+        &user,
     ).await {
         error!("Failed to send notification SMS: {}", e);
         // Continue with the call even if SMS fails

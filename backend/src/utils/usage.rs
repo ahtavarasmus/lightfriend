@@ -74,7 +74,7 @@ pub async fn check_user_credits(
 
         if should_notify {
             // Send notification about depleted credits and monthly quota
-            if let Ok(conversation) = state.user_conversations.get_conversation(user, user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))).await {
+            if let Ok(conversation) = state.user_conversations.get_conversation(&user, user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))).await {
                 let conversation_sid = conversation.conversation_sid.clone();
                 let twilio_number = conversation.twilio_number.clone();
                 
@@ -82,13 +82,16 @@ pub async fn check_user_credits(
                 if let Err(e) = state.user_repository.update_last_credits_notification(user.id, current_time) {
                     eprintln!("Failed to update last_credits_notification: {}", e);
                 }
+
+                let user_clone = user.clone();
                 
                 tokio::spawn(async move {
                     let _ = crate::api::twilio_utils::send_conversation_message(
                         &conversation_sid,
                         &twilio_number,
                         "Your credits and monthly quota have been depleted. Please recharge your credits to continue using the service.",
-                        false
+                        false,
+                        &user_clone,
                     ).await;
                 });
             }

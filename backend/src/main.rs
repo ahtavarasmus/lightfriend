@@ -248,8 +248,12 @@ async fn main() {
     });
 
     let twilio_routes = Router::new()
-        .route("/api/sms/server", post(twilio_sms::handle_incoming_sms))
+        .route("/api/sms/server", post(twilio_sms::handle_regular_sms))
         .route_layer(middleware::from_fn(api::twilio_utils::validate_twilio_signature));
+
+    let user_twilio_routes = Router::new()
+        .route("/api/sms/server/{user_id}", post(twilio_sms::handle_incoming_sms))
+        .route_layer(middleware::from_fn(api::twilio_utils::validate_user_twilio_signature));
 
     let elevenlabs_free_routes = Router::new()
         .route("/api/call/assistant", post(elevenlabs::fetch_assistant))
@@ -433,6 +437,7 @@ async fn main() {
         .route("/api/stream", get(shazam_call::stream_handler))
         .route("/api/listen/{call_sid}", get(shazam_call::listen_handler))
         .merge(twilio_routes)
+        .merge(user_twilio_routes)
         .merge(elevenlabs_routes)
         .merge(elevenlabs_free_routes)
         .merge(elevenlabs_webhook_routes)

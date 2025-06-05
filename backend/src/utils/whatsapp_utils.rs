@@ -1182,6 +1182,7 @@ async fn send_whatsapp_notification(
         &conversation.twilio_number,
         &final_notification,
         true,
+        &user,
     ).await {
         Ok(_) => {
             tracing::info!("Successfully sent WhatsApp notification to user {} (reason: {})", user_id, reason);

@@ -134,32 +134,47 @@ pub struct PreferredNumberRequest {
 pub async fn update_preferred_number(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
-    Json(request): Json<PreferredNumberRequest>,
+    Json(_request): Json<PreferredNumberRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Get user to check their subscription status
+    let user = state.user_repository.find_by_id(auth_user.user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        ))?
+        .ok_or_else(|| (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "User not found"}))
+        ))?;
 
-    let allowed_numbers = vec![
-        std::env::var("USA_PHONE").expect("USA_PHONE must be set in environment"),
-        std::env::var("FIN_PHONE").expect("FIN_PHONE must be set in environment"),
-        std::env::var("AUS_PHONE").expect("AUS_PHONE must be set in environment"),
-        std::env::var("GB_PHONE").expect("GB_PHONE must be set in environment"),
-        std::env::var("ISR_PHONE").expect("ISR_PHONE must be set in environment"),
-    ];
-
-    if !allowed_numbers.contains(&request.preferred_number) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Invalid preferred number"}))
-        ));
-    }
+    let preferred_number = if user.discount_tier.is_some() {
+        // If user has a discount_tier, get their dedicated number from environment
+        let env_var_name = format!("TWILIO_USER_PHONE_NUMBER_{}", auth_user.user_id);
+        std::env::var(&env_var_name).map_err(|_| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("No dedicated phone number found for user {}", auth_user.user_id)}))
+        ))?
+    } else {
+        // If no subscription, use the default allowed numbers
+        let allowed_numbers = vec![
+            std::env::var("USA_PHONE").expect("USA_PHONE must be set in environment"),
+            std::env::var("FIN_PHONE").expect("FIN_PHONE must be set in environment"),
+            std::env::var("AUS_PHONE").expect("AUS_PHONE must be set in environment"),
+            std::env::var("GB_PHONE").expect("GB_PHONE must be set in environment"),
+            std::env::var("ISR_PHONE").expect("ISR_PHONE must be set in environment"),
+        ];
+        // Use the first available number as default
+        allowed_numbers[0].clone()
+    };
 
     // Update preferred number
-    state.user_repository.update_preferred_number(auth_user.user_id, &request.preferred_number)
+    state.user_repository.update_preferred_number(auth_user.user_id, &preferred_number)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)}))
     ))?;
 
-    println!("Updated preferred number to: {}", request.preferred_number);
+    println!("Updated preferred number to: {}", preferred_number);
     Ok(Json(json!({
         "message": "Preferred number updated successfully"
     })))

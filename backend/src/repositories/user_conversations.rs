@@ -99,7 +99,7 @@ impl UserConversations {
                 // used to just reset the conversation if problems
                 if false {
                     // Delete the Twilio conversation first
-                    crate::api::twilio_utils::delete_twilio_conversation(&conversation.conversation_sid).await?;
+                    crate::api::twilio_utils::delete_twilio_conversation(&conversation.conversation_sid, &user).await?;
                     // Then delete the conversation from our database
                     self.delete_conversation(&conversation.conversation_sid).await?;
                     // Create a new conversation
@@ -109,7 +109,7 @@ impl UserConversations {
                 
                 
                 // Fetch and log participants
-                match crate::api::twilio_utils::fetch_conversation_participants(&conversation.conversation_sid).await {
+                match crate::api::twilio_utils::fetch_conversation_participants(&user, &conversation.conversation_sid).await {
                     Ok(participants) => {
                         println!("Conversation participants:");
                         for participant in participants {

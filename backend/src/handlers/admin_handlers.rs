@@ -281,6 +281,7 @@ async fn process_broadcast_messages(
                     &sender_number,
                     &message_with_stop,
                     false,
+                    &user,
                 )
                 .await
                 .map_err(|e| BroadcastError::MessageSendError(e.to_string()))

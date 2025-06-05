@@ -190,7 +190,7 @@ pub async fn send_shazam_answer_to_user(
         .await?;
 
     // Verify the conversation is still active by fetching participants
-    let participants = crate::api::twilio_utils::fetch_conversation_participants(&conversation.conversation_sid).await?;
+    let participants = crate::api::twilio_utils::fetch_conversation_participants(&user, &conversation.conversation_sid).await?;
     
     if participants.is_empty() {
         tracing::error!("No active participants found in conversation {}", conversation.conversation_sid);
@@ -216,6 +216,7 @@ pub async fn send_shazam_answer_to_user(
         &conversation.twilio_number,
         message,
         true,
+        &user,
     )
     .await {
         Ok(message_sid) => {
@@ -276,6 +277,54 @@ pub async fn send_shazam_answer_to_user(
 
 
 
+// New wrapper handler for the regular SMS endpoint
+pub async fn handle_regular_sms(
+    State(state): State<Arc<AppState>>,
+    Form(payload): Form<TwilioWebhookPayload>,
+) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
+    // First check if this user has a discount_tier == sms - they shouldn't be using this endpoint, but their own dedicated
+    match state.user_repository.find_by_phone_number(&payload.from) {
+        Ok(Some(user)) => {
+            if let Some(tier) = user.discount_tier {
+                if tier == "msg".to_string() {
+                    tracing::warn!("User {} with discount_tier equal to msg attempted to use regular SMS endpoint", user.id);
+                    return (
+                        StatusCode::FORBIDDEN,
+                        [(axum::http::header::CONTENT_TYPE, "application/json")],
+                        axum::Json(TwilioResponse {
+                            message: "Please use your dedicated SMS endpoint. Contact support if you need help.".to_string(),
+                        })
+                    );
+                }
+            }
+        },
+        Ok(None) => {
+            tracing::error!("No user found for phone number: {}", payload.from);
+            return (
+                StatusCode::NOT_FOUND,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                axum::Json(TwilioResponse {
+                    message: "User not found".to_string(),
+                })
+            );
+        },
+        Err(e) => {
+            tracing::error!("Database error while finding user: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                axum::Json(TwilioResponse {
+                    message: "Internal server error".to_string(),
+                })
+            );
+        }
+    }
+
+    // If we get here, the user is allowed to use this endpoint
+    handle_incoming_sms(State(state), Form(payload)).await
+}
+
+// Original handler becomes internal and is used by both routes
 pub async fn handle_incoming_sms(
     State(state): State<Arc<AppState>>,
     Form(payload): Form<TwilioWebhookPayload>,
@@ -518,7 +567,8 @@ pub async fn process_sms(
                 if let Err(e) = crate::api::twilio_utils::redact_message(
                     &conversation.conversation_sid,
                     &last_ai_message.sid,
-                    "Calendar event confirmation message redacted"
+                    "Calendar event confirmation message redacted",
+                    &user,
                 ).await {
                     eprintln!("Failed to redact calendar confirmation message: {}", e);
                 }
@@ -541,6 +591,7 @@ pub async fn process_sms(
                                         &conversation.twilio_number,
                                         "Failed to create calendar event due to invalid start time.",
                                         true,
+                                        &user,
                                     ).await {
                                         eprintln!("Failed to send error message: {}", e);
                                     }
@@ -577,6 +628,7 @@ pub async fn process_sms(
                                     &conversation.twilio_number,
                                     confirmation_msg,
                                     true,
+                                    &user,
                                 ).await {
                                     eprintln!("Failed to send confirmation message: {}", e);
                                 }
@@ -601,6 +653,7 @@ pub async fn process_sms(
                                     &conversation.twilio_number,
                                     &error_msg,
                                     true,
+                                    &user,
                                 ).await {
                                     eprintln!("Failed to send error message: {}", e);
                                 }
@@ -627,6 +680,7 @@ pub async fn process_sms(
                             &conversation.twilio_number,
                             cancel_msg,
                             true,
+                            &user,
                         ).await {
                             eprintln!("Failed to send cancellation confirmation: {}", e);
                         }
@@ -663,7 +717,8 @@ pub async fn process_sms(
                 if let Err(e) = crate::api::twilio_utils::redact_message(
                     &conversation.conversation_sid,
                     &last_ai_message.sid,
-                    &format!("Confirm sending email response to '[RECIPIENT_REDACTED]' regarding '[SUBJECT_REDACTED]' with content: '[CONTENT_REDACTED]' id:[ID_REDACTED]")
+                    &format!("Confirm sending email response to '[RECIPIENT_REDACTED]' regarding '[SUBJECT_REDACTED]' with content: '[CONTENT_REDACTED]' id:[ID_REDACTED]"),
+                    &user,
                 ).await {
                     eprintln!("Failed to redact email confirmation message: {}", e);
                 }
@@ -700,6 +755,7 @@ pub async fn process_sms(
                                     &conversation.twilio_number,
                                     &confirmation_msg,
                                     true,
+                                    &user,
                                 ).await {
                                     eprintln!("Failed to send confirmation message: {}", e);
                                 }
@@ -724,6 +780,7 @@ pub async fn process_sms(
                                     &conversation.twilio_number,
                                     &error_msg,
                                     true,
+                                    &user,
                                 ).await {
                                     eprintln!("Failed to send error message: {}", e);
                                 }
@@ -750,6 +807,7 @@ pub async fn process_sms(
                             &conversation.twilio_number,
                             cancel_msg,
                             true,
+                            &user,
                         ).await {
                             eprintln!("Failed to send cancellation confirmation: {}", e);
                         }
@@ -786,7 +844,8 @@ pub async fn process_sms(
                 if let Err(e) = crate::api::twilio_utils::redact_message(
                     &conversation.conversation_sid,
                     &last_ai_message.sid,
-                    &format!("Confirm the sending of WhatsApp message to '[CHAT_NAME_REDACTED]' with content: '[MESSAGE_CONTENT_REDACTED]'")
+                    &format!("Confirm the sending of WhatsApp message to '[CHAT_NAME_REDACTED]' with content: '[MESSAGE_CONTENT_REDACTED]'"),
+                    &user,
                 ).await {
                     eprintln!("Failed to redact confirmation message: {}", e);
                 }
@@ -814,6 +873,7 @@ pub async fn process_sms(
                                     &conversation.twilio_number,
                                     &confirmation_msg,
                                     true,
+                                    &user,
                                 ).await {
                                     eprintln!("Failed to send confirmation message: {}", e);
                                 }
@@ -840,6 +900,7 @@ pub async fn process_sms(
                                     &conversation.twilio_number,
                                     &error_msg,
                                     true,
+                                    &user,
                                 ).await {
                                     eprintln!("Failed to send error message: {}", send_err);
                                 }
@@ -867,6 +928,7 @@ pub async fn process_sms(
                             &conversation.twilio_number,
                             cancel_msg,
                             true,
+                            &user,
                         ).await {
                             eprintln!("Failed to send cancellation confirmation: {}", e);
                         }
@@ -899,7 +961,7 @@ pub async fn process_sms(
     };
 
 
-    let user_info = match user.info {
+    let user_info = match user.clone().info {
         Some(info) => info,
         None => "".to_string()
     };
@@ -960,7 +1022,7 @@ pub async fn process_sms(
             // Extract media SID from URL
             if let Some(media_sid) = media_url.split("/Media/").nth(1) {
                 println!("Attempting to delete media with SID: {}", media_sid);
-                match crate::api::twilio_utils::delete_twilio_message_media(&media_sid).await {
+                match crate::api::twilio_utils::delete_twilio_message_media(&media_sid, &user).await {
                     Ok(_) => println!("Successfully deleted media: {}", media_sid),
                     Err(e) => eprintln!("Failed to delete media {}: {}", media_sid, e),
                 }
@@ -1833,6 +1895,7 @@ pub async fn process_sms(
                             &conversation.twilio_number,
                             "Failed to prepare calendar event creation. (not charged, contact rasmus@ahtava.com)",
                             true,
+                            &user,
                         ).await {
                             eprintln!("Failed to send error message: {}", e);
                         }
@@ -1864,6 +1927,7 @@ pub async fn process_sms(
                         &conversation.twilio_number,
                         &confirmation_msg,
                         false, // Don't redact since we need to extract info from this message later
+                        &user,
                     ).await {
                         Ok(_) => {
                             // Deduct credits for the confirmation message
@@ -2007,6 +2071,7 @@ pub async fn process_sms(
                                 &conversation.twilio_number,
                                 "Failed to parse message sending request. (not charged, contact rasmus@ahtava.com)",
                                 true,
+                                &user,
                             ).await {
                                 eprintln!("Failed to send error message: {}", e);
                             }
@@ -2034,6 +2099,7 @@ pub async fn process_sms(
                                     &conversation.twilio_number,
                                     &error_msg,
                                     true,
+                                    &user,
                                 ).await {
                                     eprintln!("Failed to send error message: {}", e);
                                 }
@@ -2058,6 +2124,7 @@ pub async fn process_sms(
                                     &conversation.twilio_number,
                                     "Failed to prepare WhatsApp message sending. (not charged, contact rasmus@ahtava.com)",
                                     true,
+                                    &user,
                                 ).await {
                                     eprintln!("Failed to send error message: {}", e);
                                 }
@@ -2082,6 +2149,7 @@ pub async fn process_sms(
                                 &conversation.twilio_number,
                                 &confirmation_msg,
                                 false, // Don't redact since we need to extract info from this message later
+                                &user,
                             ).await {
                                 Ok(_) => {
                                     // Deduct credits for the confirmation message
@@ -2116,6 +2184,7 @@ pub async fn process_sms(
                                 &conversation.twilio_number,
                                 error_msg,
                                 true,
+                                &user,
                             ).await {
                                 eprintln!("Failed to send error message: {}", e);
                             }
@@ -2341,7 +2410,7 @@ pub async fn process_sms(
                 } else if name == "delete_sms_conversation_history" {
                     println!("Executing delete_sms_conversation_history tool call");
 
-                    match crate::api::twilio_utils::delete_bot_conversations(&user.phone_number).await {
+                    match crate::api::twilio_utils::delete_bot_conversations(&user.phone_number, &user).await {
                         Ok(_) => {
                             tool_answers.insert(tool_call_id, "Successfully deleted all bot conversations.".to_string());
                         }
@@ -2874,7 +2943,7 @@ pub async fn process_sms(
     }
 
     // Send the actual message if not in test mode
-    match crate::api::twilio_utils::send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number, &final_response_with_notice, redact_the_body).await {
+    match crate::api::twilio_utils::send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number, &final_response_with_notice, redact_the_body, &user).await {
         Ok(message_sid) => {
             // Always log the SMS usage metadata and eval(no content!)
             println!("status of the message: {}", status);

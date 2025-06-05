@@ -431,6 +431,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                 &conversation.twilio_number,
                                                 &final_notification,
                                                 true,
+                                                &user,
                                             ).await {
                                                 Ok(_) => info!("Successfully sent email notification to user {}", user.id),
                                                 Err(e) => error!("Failed to send email notification: {}", e),
@@ -993,13 +994,14 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                     let twilio_number = conversation.twilio_number.clone();
                                                     let notification_clone = final_notification.clone();
                                                     let state_clone = Arc::clone(&state);
-                                                    let user_id = user.id;
+                                                    let user_clone = user.clone();
+                                                    let user_id = user_clone.id;
                                                     let reminder_time_key = reminder_time_key.clone();
                                                     let current_timestamp = current_time.timestamp() as i32;
-                                                    let user_phone = user.phone_number.clone();
-                                                    let user_preferred_number = user.preferred_number.clone();
-                                                    let user_notification_type = user.notification_type.clone();
-                                                    let user_timezone = user.timezone.clone();
+                                                    let user_phone = user_clone.phone_number.clone();
+                                                    let user_preferred_number = user_clone.preferred_number.clone();
+                                                    let user_notification_type = user_clone.notification_type.clone();
+                                                    let user_timezone = user_clone.timezone.clone();
 
                                                     // Spawn a new thread for sending the notification
                                                     tokio::spawn(async move {
@@ -1038,6 +1040,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                                     &twilio_number,
                                                                     &notification_clone,
                                                                     false, // Don't redact the body since we need to extract event details from this message
+                                                                    &user_clone,
                                                                 ).await {
                                                                     Ok(message_sid) => {
                                                                         println!("Successfully sent calendar confirmation SMS with SID: {}", message_sid);

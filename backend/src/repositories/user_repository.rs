@@ -1591,21 +1591,54 @@ impl UserRepository {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let user = users::table
             .find(user_id)
-            .select((users::sub_tier, users::msgs_left))
-            .first::<(Option<String>, i32)>(&mut conn)?;
+            .select((users::sub_tier, users::msgs_left, users::discount_tier))
+            .first::<(Option<String>, i32, Option<String>)>(&mut conn)?;
+        
+        // If user has msg discount tier, they always have messages available
+        if user.2.as_deref() == Some("msg") {
+            // ensure msg tier users have messages
+            self.ensure_msg_tier_messages(user_id)?;
+        
+            return Ok(user.0.map_or(false, |t| t == tier));
+        }
         
         // Check both subscription tier and remaining messages
         Ok(user.0.map_or(false, |t| t == tier) && user.1 > 0)
     }
 
+    // Helper method to ensure msg discount tier users always have messages
+    fn ensure_msg_tier_messages(&self, user_id: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let (current_msgs, discount_tier) = users::table
+            .find(user_id)
+            .select((users::msgs_left, users::discount_tier))
+            .first::<(i32, Option<String>)>(&mut conn)?;
+            
+        if discount_tier.as_deref() == Some("msg") && current_msgs < 100 {
+            diesel::update(users::table.find(user_id))
+                .set(users::msgs_left.eq(100))
+                .execute(&mut conn)?;
+        }
+        
+        Ok(())
+    }
+
     pub fn decrease_messages_left(&self, user_id: i32) -> Result<i32, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
-        // Get current messages left
-        let current_msgs = users::table
+                // Get current messages left and discount tier
+        let (current_msgs, discount_tier) = users::table
             .find(user_id)
-            .select(users::msgs_left)
-            .first::<i32>(&mut conn)?;
+            .select((users::msgs_left, users::discount_tier))
+            .first::<(i32, Option<String>)>(&mut conn)?;
+            
+        // If user has "msg" discount tier, return current messages without decreasing
+        if discount_tier.as_deref() == Some("msg") {
+            // ensure msg tier users have messages
+            self.ensure_msg_tier_messages(user_id)?;
+            return Ok(current_msgs);
+        }
             
         // Only decrease if greater than 0
         if current_msgs > 0 {
