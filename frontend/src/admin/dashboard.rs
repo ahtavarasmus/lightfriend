@@ -37,6 +37,7 @@ struct UserInfo {
     msgs_left: i32,
     credits_left: f32,
     discount: bool,
+    discount_tier: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -889,6 +890,20 @@ pub fn admin_dashboard() -> Html {
                                                                                 _ => html! {}
                                                                             }
                                                                         }
+                                                                        {
+                                                                            match user.discount_tier.as_deref() {
+                                                                                Some("msg") => html! {
+                                                                                    <span class="discount-badge msg">{"msg✦"}</span>
+                                                                                },
+                                                                                Some("voice") => html! {
+                                                                                    <span class="discount-badge voice">{"voice✧"}</span>
+                                                                                },
+                                                                                Some("full") => html! {
+                                                                                    <span class="discount-badge full">{"full✶"}</span>
+                                                                                },
+                                                                                _ => html! {}
+                                                                            }
+                                                                        }
                                                                     </div>
                                                                 </td>
                                                                 <td>{&user.phone_number}</td>
@@ -910,9 +925,24 @@ pub fn admin_dashboard() -> Html {
                                                                 <td>
                                                                     <span class={classes!(
                                                                         "status-badge",
-                                                                        if user.discount { "enabled" } else { "disabled" }
+
+
+                                                                        if user.discount { "enabled" } else { "disabled" },
+                                                                        match user.discount_tier.as_deref() {
+                                                                            Some("msg") => "discount-msg",
+                                                                            Some("voice") => "discount-voice",
+                                                                            Some("full") => "discount-full",
+                                                                            _ => "disabled"
+                                                                        }
                                                                     )}>
-                                                                        {if user.discount { "Yes" } else { "No" }}
+                                                                                                                                                                                                {if user.discount { "Yes" } else { "No" }}
+
+                                                                        {match user.discount_tier.as_deref() {
+                                                                            Some("msg") => "MSG",
+                                                                            Some("voice") => "Voice",
+                                                                            Some("full") => "Full",
+                                                                            _ => "None"
+                                                                        }}
                                                                     </span>
                                                                 </td>
                                                                 <td>
@@ -1151,6 +1181,68 @@ pub fn admin_dashboard() -> Html {
                                                                             class="iq-button"
                                                                         >
                                                                             {"Set Default Number"}
+                                                                        </button>
+                                                                        <button 
+                                                                            onclick={{
+                                                                                let users = users.clone();
+                                                                                let error = error.clone();
+                                                                                let user_id = user.id;
+                                                                                let current_discount_tier = user.discount_tier.clone();
+                                                                                Callback::from(move |_| {
+                                                                                    let users = users.clone();
+                                                                                    let error = error.clone();
+                                                                                    let new_tier = match current_discount_tier.as_deref() {
+                                                                                        None => "msg",
+                                                                                        Some("msg") => "voice",
+                                                                                        Some("voice") => "full",
+                                                                                        Some("full") | _ => "none",
+                                                                                    };
+                                                                                    
+                                                                                    wasm_bindgen_futures::spawn_local(async move {
+                                                                                        if let Some(token) = window()
+                                                                                            .and_then(|w| w.local_storage().ok())
+                                                                                            .flatten()
+                                                                                            .and_then(|storage| storage.get_item("token").ok())
+                                                                                            .flatten()
+                                                                                        {
+                                                                                            match Request::post(&format!("{}/api/admin/discount-tier/{}/{}", config::get_backend_url(), user_id, new_tier))
+                                                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                                                .send()
+                                                                                                .await
+                                                                                            {
+                                                                                                Ok(response) => {
+                                                                                                    if response.ok() {
+                                                                                                        // Refresh the users list
+                                                                                                        if let Ok(response) = Request::get(&format!("{}/api/admin/users", config::get_backend_url()))
+                                                                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                                                                            .send()
+                                                                                                            .await
+                                                                                                        {
+                                                                                                            if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
+                                                                                                                users.set(updated_users);
+                                                                                                            }
+                                                                                                        }
+                                                                                                    } else {
+                                                                                                        error.set(Some("Failed to update discount tier".to_string()));
+                                                                                                    }
+                                                                                                }
+                                                                                                Err(_) => {
+                                                                                                    error.set(Some("Failed to send request".to_string()));
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    });
+                                                                                })
+                                                                            }}
+                                                                            class="iq-button discount-tier"
+                                                                        >
+                                                                            {match user.discount_tier.as_deref() {
+                                                                                None => "Set MSG Discount",
+                                                                                Some("msg") => "Set Voice Discount",
+                                                                                Some("voice") => "Set Full Discount",
+                                                                                Some("full") => "Remove Discount",
+                                                                                _ => "Set MSG Discount",
+                                                                            }}
                                                                         </button>
                                                                         <button 
                                                                             onclick={{
@@ -2006,6 +2098,23 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                         color: #C0C0C0;
                     }
 
+                    .discount-badge {
+                        font-size: 1.2rem;
+                        margin-left: 0.2rem;
+                    }
+
+                    .discount-badge.msg {
+                        color: #4CAF50;
+                    }
+
+                    .discount-badge.voice {
+                        color: #FFC107;
+                    }
+
+                    .discount-badge.full {
+                        color: #E91E63;
+                    }
+
                     .gold-user {
                         background: linear-gradient(90deg, rgba(255, 215, 0, 0.05), transparent);
                         border-left: 3px solid #FFD700;
@@ -2070,6 +2179,33 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                         background: rgba(158, 158, 158, 0.1);
                         color: #9E9E9E;
                         border: 1px solid rgba(158, 158, 158, 0.2);
+                    }
+
+                    .status-badge.discount-msg {
+                        background: rgba(76, 175, 80, 0.1);
+                        color: #4CAF50;
+                        border: 1px solid rgba(76, 175, 80, 0.2);
+                    }
+
+                    .status-badge.discount-voice {
+                        background: rgba(255, 193, 7, 0.1);
+                        color: #FFC107;
+                        border: 1px solid rgba(255, 193, 7, 0.2);
+                    }
+
+                    .status-badge.discount-full {
+                        background: rgba(233, 30, 99, 0.1);
+                        color: #E91E63;
+                        border: 1px solid rgba(233, 30, 99, 0.2);
+                    }
+
+                    .iq-button.discount-tier {
+                        background: linear-gradient(45deg, #4CAF50, #81C784);
+                    }
+
+                    .iq-button.discount-tier:hover {
+                        background: linear-gradient(45deg, #81C784, #4CAF50);
+                        box-shadow: 0 4px 15px rgba(76, 175, 80, 0.4);
                     }
 
                     .users-table th {

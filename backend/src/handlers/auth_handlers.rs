@@ -53,6 +53,7 @@ pub async fn get_users(
             msgs_left: user.msgs_left,
             credits_left: user.credits_left,
             discount: user.discount,
+            discount_tier: user.discount_tier,
         })
         .collect();
 
@@ -290,7 +291,6 @@ pub async fn register(
         phone_number: reg_r.phone_number,
         time_to_live: five_minutes_from_now,
         notify: true,
-        debug_logging_permission: false,
         verified: false,
         credits: 1.00,
         charge_when_under: false,

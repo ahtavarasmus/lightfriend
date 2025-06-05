@@ -181,8 +181,29 @@ pub fn pricing(props: &PricingProps) -> Html {
                             {
                                 html! {
                                     <>
-                                        <div class="price">
+                                        <div class="price us-price">
+                                            <span class="region">{"US"}</span>
                                             <span class="amount">{"€8.00"}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </div>
+                                        <div class="price">
+                                            <span class="region">{"FI"}</span>
+                                            <span class="amount">{"€15.00"}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </div>
+                                        <div class="price">
+                                            <span class="region">{"UK"}</span>
+                                            <span class="amount">{"€15.00"}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </div>
+                                        <div class="price">
+                                            <span class="region">{"AU"}</span>
+                                            <span class="amount">{"€15.00"}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </div>
+                                        <div class="price">
+                                            <span class="region">{"IL"}</span>
+                                            <span class="amount">{"€35.00"}</span>
                                             <span class="period">{"/month"}</span>
                                         </div>
                                     </>
@@ -192,7 +213,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <div class="includes">
                             <p>{"Subscription includes:"}</p>
                             <ul class="quota-list">
-                                <li>{"📞 30-unit quota (1 message = 1 minute)"}</li>
+                                <li>{"📞 40-unit quota (1 message = 1 minute)"}</li>
                                 <li class="unavailable">{"🎯 filtered notifications"}</li>
                             </ul>
                         </div>
@@ -241,18 +262,41 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <div class="price-container">
                             {
                                 html! {
-                                    <div class="price">
-                                        <span class="amount">{"€20.00"}</span>
-                                        <span class="period">{"/month"}</span>
-                                    </div>
+                                    <>
+                                        <div class="price us-price">
+                                            <span class="region">{"US"}</span>
+                                            <span class="amount">{"€15.00"}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </div>
+                                        <div class="price">
+                                            <span class="region">{"FI"}</span>
+                                            <span class="amount">{"€30.00"}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </div>
+                                        <div class="price">
+                                            <span class="region">{"UK"}</span>
+                                            <span class="amount">{"€30.00"}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </div>
+                                        <div class="price">
+                                            <span class="region">{"AU"}</span>
+                                            <span class="amount">{"€30.00"}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </div>
+                                        <div class="price">
+                                            <span class="region">{"IL"}</span>
+                                            <span class="amount">{"€65.00"}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </div>
+                                    </>
                                 }
                             }
                         </div>
                         <div class="includes">
                             <p>{"Subscription includes:"}</p>
                             <ul class="quota-list">
-                                <li>{"📞 100-unit quota (1 message = 1 minute)"}</li>
-                                <li>{"🎯 up to 100 filtered notifications"}</li>
+                                <li>{"📞 40-unit quota (1 message = 1 minute)"}</li>
+                                <li>{"🎯 up to 60 filtered notifications per month"}</li>
                             </ul>
                         </div>
                     </div>
@@ -299,9 +343,32 @@ pub fn pricing(props: &PricingProps) -> Html {
                     <div class="pricing-card main">
                     <div class="card-header">
                         <h3>{"Additional Voice Calls"}</h3>
-                        <div class="price">
-                            <span class="amount">{"€0.20"}</span>
-                            <span class="period">{"/minute"}</span>
+                        <div class="price-container">
+                            <div class="price us-price">
+                                <span class="region">{"US"}</span>
+                                <span class="amount">{"€0.20"}</span>
+                                <span class="period">{"/minute"}</span>
+                            </div>
+                            <div class="price">
+                                <span class="region">{"FI"}</span>
+                                <span class="amount">{"€0.25"}</span>
+                                <span class="period">{"/minute"}</span>
+                            </div>
+                            <div class="price">
+                                <span class="region">{"UK"}</span>
+                                <span class="amount">{"€0.25"}</span>
+                                <span class="period">{"/minute"}</span>
+                            </div>
+                            <div class="price">
+                                <span class="region">{"AU"}</span>
+                                <span class="amount">{"€0.25"}</span>
+                                <span class="period">{"/minute"}</span>
+                            </div>
+                            <div class="price">
+                                <span class="region">{"IL"}</span>
+                                <span class="amount">{"€0.20"}</span>
+                                <span class="period">{"/minute"}</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -311,8 +378,29 @@ pub fn pricing(props: &PricingProps) -> Html {
                     <div class="card-header">
                         <h3>{"Additional Messages"}</h3>
                         <div class="price-container">
+                            <div class="price us-price">
+                                <span class="region">{"US"}</span>
+                                <span class="amount">{"€0.10"}</span>
+                                <span class="period">{"/message"}</span>
+                            </div>
                             <div class="price">
-                                <span class="amount">{"€0.20"}</span>
+                                <span class="region">{"FI"}</span>
+                                <span class="amount">{"€0.30"}</span>
+                                <span class="period">{"/message"}</span>
+                            </div>
+                            <div class="price">
+                                <span class="region">{"UK"}</span>
+                                <span class="amount">{"€0.30"}</span>
+                                <span class="period">{"/message"}</span>
+                            </div>
+                            <div class="price">
+                                <span class="region">{"AU"}</span>
+                                <span class="amount">{"€0.40"}</span>
+                                <span class="period">{"/message"}</span>
+                            </div>
+                            <div class="price">
+                                <span class="region">{"IL"}</span>
+                                <span class="amount">{"€0.90"}</span>
                                 <span class="period">{"/message"}</span>
                             </div>
                         </div>
@@ -328,7 +416,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <div class="faq-grid">
                     <div class="faq-item">
                         <h3>{"How does billing work?"}</h3>
-                        <p>{"The Premium Plan is billed monthly at €20. The plan includes 100 messages or 100 minutes of voice calls. You can use these credits flexibly - for example, 50 messages and 50 minutes of calls. After your monthly quota is used, additional usage is billed at the pay-as-you-go rates. You can optionally enable automatic top-up to ensure uninterrupted service. Plan also includes 100 proactive messages which can be customized to your liking. No hidden fees or long-term commitments."}</p>
+                <p>{"Pricing varies by country. Both plans include 40 units (messages or voice minutes) that you can use flexibly. The Escape Plan also includes up to 60 filtered notifications per month. After your monthly quota is used, additional usage is billed at the pay-as-you-go rates which vary by country, with US having the lowest rates, followed by UK/Finland, Australia, and Israel having region-specific rates. You can optionally enable automatic top-up to ensure uninterrupted service. No hidden fees or long-term commitments."}</p>
 
                     </div>
                     

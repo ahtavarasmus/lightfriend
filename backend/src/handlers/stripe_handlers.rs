@@ -108,8 +108,21 @@ pub async fn create_hard_mode_subscription_checkout(
 
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
 
-    let price_id = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID")
-                            .expect("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID must be set in environment");
+    // Select price ID based on user's phone number
+    let price_id = if user.phone_number.starts_with("+1") {
+        std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_US")
+    } else if user.phone_number.starts_with("+358") {
+        std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_FI")
+    } else if user.phone_number.starts_with("+44") {
+        std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_UK")
+    } else if user.phone_number.starts_with("+61") {
+        std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_AU")
+    } else if user.phone_number.starts_with("+972") {
+        std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_IL")
+    } else {
+        // Default to Finland/UK price for other countries
+        std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_FI")
+    }.expect("Stripe price ID not found for region");
     
     let checkout_session = CheckoutSession::create(
         &client,
@@ -237,8 +250,21 @@ pub async fn create_subscription_checkout(
 
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
 
-    let price_id= std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID")
-                            .expect("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID must be set in environment");
+    // Select price ID based on user's phone number
+    let price_id = if user.phone_number.starts_with("+1") {
+        std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_US")
+    } else if user.phone_number.starts_with("+358") {
+        std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_FI")
+    } else if user.phone_number.starts_with("+44") {
+        std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_UK")
+    } else if user.phone_number.starts_with("+61") {
+        std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_AU")
+    } else if user.phone_number.starts_with("+972") {
+        std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_IL")
+    } else {
+        // Default to Finland/UK price for other countries
+        std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_FI")
+    }.expect("Stripe price ID not found for region");
     
     let checkout_session = CheckoutSession::create(
         &client,
@@ -613,25 +639,65 @@ pub async fn stripe_webhook(
                     let hard_mode_price_id = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID").unwrap_or_default();
                     let world_price_id = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID").unwrap_or_default();
 
+                    // Get all possible price IDs for different regions
+                    let hard_mode_price_id_us = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_US").unwrap_or_default();
+                    let hard_mode_price_id_fi = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_FI").unwrap_or_default();
+                    let hard_mode_price_id_uk = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_UK").unwrap_or_default();
+                    let hard_mode_price_id_au = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_AU").unwrap_or_default();
+                    let hard_mode_price_id_il = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_IL").unwrap_or_default();
+
+                    let world_price_id_us = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_US").unwrap_or_default();
+                    let world_price_id_fi = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_FI").unwrap_or_default();
+                    let world_price_id_uk = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_UK").unwrap_or_default();
+                    let world_price_id_au = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_AU").unwrap_or_default();
+                    let world_price_id_il = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_IL").unwrap_or_default();
+
                     match price_id.as_deref() {
-                        Some(price) if price == hard_mode_price_id => {
-                            // Hard mode subscription
-                            state.user_repository.set_subscription_tier(
-                                user.id,
-                                Some("tier 1"),
-                            ).ok();
-                            state.user_repository.update_user_credits_left(user.id, 6.0).ok();
-                            println!("Updated subscription tier to 'tier 1', 6.0 credits_left for hard mode subscriber {}", user.id);
+                        // Hard Mode Subscription variants
+                        Some(price) if price == hard_mode_price_id_us => {
+                            state.user_repository.set_subscription_tier(user.id, Some("tier 1")).ok();
+                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                            println!("Updated subscription tier to 'tier 1', 40.0 credits_left for US hard mode subscriber {}", user.id);
                         },
-                        Some(price) if price == world_price_id => {
-                            // World subscription (tier 2)
-                            state.user_repository.set_subscription_tier(
-                                user.id,
-                                Some("tier 2"),
-                            ).ok();
-                            state.user_repository.update_proactive_messages_left(user.id, 100).ok();
-                            state.user_repository.update_user_credits_left(user.id, 20.0).ok();
-                            println!("Updated subscription tier to 'tier 2', set 100 messages, 20.0 credits_left for world subscriber {}", user.id);
+                        Some(price) if price == hard_mode_price_id_fi || price == hard_mode_price_id_uk => {
+                            state.user_repository.set_subscription_tier(user.id, Some("tier 1")).ok();
+                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                            println!("Updated subscription tier to 'tier 1', 40.0 credits_left for FI/UK hard mode subscriber {}", user.id);
+                        },
+                        Some(price) if price == hard_mode_price_id_au => {
+                            state.user_repository.set_subscription_tier(user.id, Some("tier 1")).ok();
+                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                            println!("Updated subscription tier to 'tier 1', 40.0 credits_left for AU hard mode subscriber {}", user.id);
+                        },
+                        Some(price) if price == hard_mode_price_id_il => {
+                            state.user_repository.set_subscription_tier(user.id, Some("tier 1")).ok();
+                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                            println!("Updated subscription tier to 'tier 1', 40.0 credits_left for IL hard mode subscriber {}", user.id);
+                        },
+                        // World Subscription variants
+                        Some(price) if price == world_price_id_us => {
+                            state.user_repository.set_subscription_tier(user.id, Some("tier 2")).ok();
+                            state.user_repository.update_proactive_messages_left(user.id, 60).ok();
+                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                            println!("Updated subscription tier to 'tier 2', set 60 messages, 40.0 credits_left for US world subscriber {}", user.id);
+                        },
+                        Some(price) if price == world_price_id_fi || price == world_price_id_uk => {
+                            state.user_repository.set_subscription_tier(user.id, Some("tier 2")).ok();
+                            state.user_repository.update_proactive_messages_left(user.id, 60).ok();
+                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                            println!("Updated subscription tier to 'tier 2', set 60 messages, 40.0 credits_left for FI/UK world subscriber {}", user.id);
+                        },
+                        Some(price) if price == world_price_id_au => {
+                            state.user_repository.set_subscription_tier(user.id, Some("tier 2")).ok();
+                            state.user_repository.update_proactive_messages_left(user.id, 60).ok();
+                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                            println!("Updated subscription tier to 'tier 2', set 60 messages, 40.0 credits_left for AU world subscriber {}", user.id);
+                        },
+                        Some(price) if price == world_price_id_il => {
+                            state.user_repository.set_subscription_tier(user.id, Some("tier 2")).ok();
+                            state.user_repository.update_proactive_messages_left(user.id, 60).ok();
+                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                            println!("Updated subscription tier to 'tier 2', set 60 messages, 40.0 credits_left for IL world subscriber {}", user.id);
                         },
                         _ => {
                             println!("Unknown subscription price ID, defaulting to tier 2");
@@ -639,14 +705,14 @@ pub async fn stripe_webhook(
                                 user.id,
                                 Some("tier 2"),
                             ).ok();
-                            state.user_repository.update_proactive_messages_left(user.id, 100).ok();
-                            state.user_repository.update_user_credits_left(user.id, 20.0).ok();
+                            state.user_repository.update_proactive_messages_left(user.id, 60).ok();
+                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
                         }
                     }
                     // Set initial credits_left for the subscription
                     // Enable proactive IMAP messaging for subscribed users
                     //state.user_repository.update_imap_proactive(user.id, true).ok();
-                    println!("Updated subscription tier to 'tier 2', set 100 messages, 20.0 credits_left, and enabled proactive IMAP for user {}", user.id);
+                    println!("Updated subscription tier to 'tier 2', set 60 messages, 20.0 credits_left, and enabled proactive IMAP for user {}", user.id);
 
                     // Mark existing emails as processed to prevent spam
                     match crate::handlers::imap_handlers::fetch_emails_imap(&state, user.id, true, Some(100), true).await {
@@ -691,22 +757,62 @@ pub async fn stripe_webhook(
                         let hard_mode_price_id = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID").unwrap_or_default();
                         let world_price_id = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID").unwrap_or_default();
 
+                        // Get all possible price IDs for different regions
+                        let hard_mode_price_id_us = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_US").unwrap_or_default();
+                        let hard_mode_price_id_fi = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_FI").unwrap_or_default();
+                        let hard_mode_price_id_uk = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_UK").unwrap_or_default();
+                        let hard_mode_price_id_au = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_AU").unwrap_or_default();
+                        let hard_mode_price_id_il = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_IL").unwrap_or_default();
+
+                        let world_price_id_us = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_US").unwrap_or_default();
+                        let world_price_id_fi = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_FI").unwrap_or_default();
+                        let world_price_id_uk = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_UK").unwrap_or_default();
+                        let world_price_id_au = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_AU").unwrap_or_default();
+                        let world_price_id_il = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_IL").unwrap_or_default();
+
                         match price_id.as_deref() {
-                            Some(price) if price == hard_mode_price_id => {
-                                // Hard mode subscription renewal
-                                state.user_repository.update_user_credits_left(user.id, 6.0).ok();
-                                println!("6.0 credits_left for hard mode user {} on subscription renewal", user.id);
+                            // Hard Mode Subscription renewal variants
+                            Some(price) if price == hard_mode_price_id_us => {
+                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                                println!("40.0 credits_left for US hard mode user {} on subscription renewal", user.id);
                             },
-                            Some(price) if price == world_price_id => {
-                                // World subscription renewal
-                                state.user_repository.update_proactive_messages_left(user.id, 100).ok();
-                                state.user_repository.update_user_credits_left(user.id, 20.0).ok();
-                                println!("Reset to 100 messages and 20.0 credits_left for world user {} on subscription renewal", user.id);
+                            Some(price) if price == hard_mode_price_id_fi || price == hard_mode_price_id_uk => {
+                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                                println!("40.0 credits_left for FI/UK hard mode user {} on subscription renewal", user.id);
+                            },
+                            Some(price) if price == hard_mode_price_id_au => {
+                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                                println!("40.0 credits_left for AU hard mode user {} on subscription renewal", user.id);
+                            },
+                            Some(price) if price == hard_mode_price_id_il => {
+                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                                println!("40.0 credits_left for IL hard mode user {} on subscription renewal", user.id);
+                            },
+                            // World Subscription renewal variants
+                            Some(price) if price == world_price_id_us => {
+                                state.user_repository.update_proactive_messages_left(user.id, 60).ok();
+                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                                println!("Reset to 60 messages and 40.0 credits_left for US world user {} on subscription renewal", user.id);
+                            },
+                            Some(price) if price == world_price_id_fi || price == world_price_id_uk => {
+                                state.user_repository.update_proactive_messages_left(user.id, 60).ok();
+                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                                println!("Reset to 60 messages and 40.0 credits_left for FI/UK world user {} on subscription renewal", user.id);
+                            },
+                            Some(price) if price == world_price_id_au => {
+                                state.user_repository.update_proactive_messages_left(user.id, 60).ok();
+                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                                println!("Reset to 60 messages and 40.0 credits_left for AU world user {} on subscription renewal", user.id);
+                            },
+                            Some(price) if price == world_price_id_il => {
+                                state.user_repository.update_proactive_messages_left(user.id, 60).ok();
+                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                                println!("Reset to 60 messages and 40.0 credits_left for IL world user {} on subscription renewal", user.id);
                             },
                             _ => {
                                 println!("Unknown subscription type for renewal, defaulting to tier 2 values");
-                                state.user_repository.update_proactive_messages_left(user.id, 100).ok();
-                                state.user_repository.update_user_credits_left(user.id, 20.0).ok();
+                                state.user_repository.update_proactive_messages_left(user.id, 60).ok();
+                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
                             }
                         }
                     } else {

@@ -128,13 +128,36 @@ pub async fn fetch_whatsapp_messages(
 
             // Get last message timestamp
             let mut options = matrix_sdk::room::MessagesOptions::backward();
-            options.limit = matrix_sdk::ruma::UInt::new(1).unwrap();
+            options.limit = matrix_sdk::ruma::UInt::new(10).unwrap(); // Look at more messages to find WhatsApp ones
             
             let last_activity = match room.messages(options).await {
                 Ok(response) => {
-                    response.chunk.first()
-                        .and_then(|event| event.raw().deserialize().ok())
-                        .map(|event: AnySyncTimelineEvent| i64::from(event.origin_server_ts().0) / 1000)
+                    // Find the most recent WhatsApp message timestamp
+                    response.chunk.iter()
+                        .filter_map(|event| {
+                            if let Ok(any_event) = event.raw().deserialize() {
+                                if let AnySyncTimelineEvent::MessageLike(
+                                    matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
+                                ) = any_event {
+                                    match msg {
+                                        SyncRoomMessageEvent::Original(e) => {
+                                            // Only count messages from WhatsApp users
+                                            if e.sender.localpart().starts_with("whatsapp_") {
+                                                Some(i64::from(e.origin_server_ts.0) / 1000)
+                                            } else {
+                                                None
+                                            }
+                                        }
+                                        _ => None
+                                    }
+                                } else {
+                                    None
+                                }
+                            } else {
+                                None
+                            }
+                        })
+                        .next() // Get the first (most recent) WhatsApp message timestamp
                         .unwrap_or(0)
                 },
                 Err(_) => 0,
@@ -168,72 +191,72 @@ pub async fn fetch_whatsapp_messages(
         let user_timezone = user.timezone.clone();
         
         futures.push(async move {
-            let mut options = matrix_sdk::room::MessagesOptions::backward();
-            options.limit = matrix_sdk::ruma::UInt::new(1).unwrap(); // Only get latest message
+    let mut options = matrix_sdk::room::MessagesOptions::backward();
+    options.limit = matrix_sdk::ruma::UInt::new(20).unwrap(); // Increase limit to find WhatsApp messages
             
-            match room.messages(options).await {
-                Ok(response) => {
-                    if let Some(event) = response.chunk.first() {
-                        if let Ok(any_sync_event) = event.raw().deserialize() {
-                            if let AnySyncTimelineEvent::MessageLike(
-                                matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
-                            ) = any_sync_event {
-                                let (sender, timestamp, content) = match msg {
-                                    SyncRoomMessageEvent::Original(e) => {
-                                        let timestamp = i64::from(e.origin_server_ts.0) / 1000;
-                                        (e.sender, timestamp, e.content)
-                                    }
-                                    SyncRoomMessageEvent::Redacted(_) => return None,
-                                };
-
-                                // Skip messages outside time range
-                                if timestamp < start_time {
-                                    return None;
-                                }
-
-
-                                let (msgtype, body) = match content.msgtype {
-                                    MessageType::Text(t) => ("text", t.body),
-                                    MessageType::Notice(n) => ("notice", n.body),
-                                    MessageType::Image(_) => ("image", "📎 IMAGE".into()),
-                                    MessageType::Video(_) => ("video", "📎 VIDEO".into()),
-                                    MessageType::File(_) => ("file", "📎 FILE".into()),
-                                    MessageType::Audio(_) => ("audio", "📎 AUDIO".into()),
-                                    MessageType::Location(_) => ("location", "📍 LOCATION".into()),
-                                    MessageType::Emote(t) => ("emote", t.body),
-                                    _ => return None,
-                                };
-
-                                // Skip error messages
-                                if body.contains("Failed to bridge media") ||
-                                   body.contains("media no longer available") ||
-                                   body.contains("Decrypting message from WhatsApp failed") ||
-                                   body.starts_with("* Failed to") {
-                                    return None;
-                                }
-
-                                // Only include WhatsApp messages
-                                if sender.localpart().starts_with("whatsapp_") && room_name.contains("(WA)") {
-                                    return Some(WhatsAppMessage {
-                                        sender: sender.to_string(),
-                                        sender_display_name: sender.localpart().to_string(),
-                                        content: body,
-                                        timestamp,
-                                        formatted_timestamp: format_timestamp(timestamp, user_timezone),
-                                        message_type: msgtype.to_string(),
-                                        room_name: room_name.clone(),
-                                    });
-                                }
+    match room.messages(options).await {
+        Ok(response) => {
+            // Process all messages in the chunk to find WhatsApp messages
+            for event in response.chunk {
+                if let Ok(any_sync_event) = event.raw().deserialize() {
+                    if let AnySyncTimelineEvent::MessageLike(
+                        matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
+                    ) = any_sync_event {
+                        let (sender, timestamp, content) = match msg {
+                            SyncRoomMessageEvent::Original(e) => {
+                                let timestamp = i64::from(e.origin_server_ts.0) / 1000;
+                                (e.sender, timestamp, e.content)
                             }
+                            SyncRoomMessageEvent::Redacted(_) => continue,
+                        };
+
+                        // Skip messages outside time range
+                        if timestamp < start_time {
+                            continue;
                         }
 
+                        let (msgtype, body) = match content.msgtype {
+                            MessageType::Text(t) => ("text", t.body),
+                            MessageType::Notice(n) => ("notice", n.body),
+                            MessageType::Image(_) => ("image", "📎 IMAGE".into()),
+                            MessageType::Video(_) => ("video", "📎 VIDEO".into()),
+                            MessageType::File(_) => ("file", "📎 FILE".into()),
+                            MessageType::Audio(_) => ("audio", "📎 AUDIO".into()),
+                            MessageType::Location(_) => ("location", "📍 LOCATION".into()),
+                            MessageType::Emote(t) => ("emote", t.body),
+                            _ => continue,
+                        };
+
+                        // Skip error messages
+                        if body.contains("Failed to bridge media") ||
+                           body.contains("media no longer available") ||
+                           body.contains("Decrypting message from WhatsApp failed") ||
+                           body.starts_with("* Failed to") {
+                            continue;
+                        }
+
+                        // Only include WhatsApp messages
+                        if sender.localpart().starts_with("whatsapp_") && room_name.contains("(WA)") {
+                            return Some(WhatsAppMessage {
+                                sender: sender.to_string(),
+                                sender_display_name: sender.localpart().to_string(),
+                                content: body,
+                                timestamp,
+                                formatted_timestamp: format_timestamp(timestamp, user_timezone),
+                                message_type: msgtype.to_string(),
+                                room_name: room_name.clone(),
+                            });
+                        }
                     }
                 }
-                Err(e) => {
-                    tracing::error!("Failed to fetch message: {}", e);
-                }
+
             }
-            None
+        }
+        Err(e) => {
+            tracing::error!("Failed to fetch messages: {}", e);
+        }
+    }
+    None
         });
     }
 
@@ -243,9 +266,7 @@ pub async fn fetch_whatsapp_messages(
 
     // Sort by timestamp (most recent first)
     messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    
     tracing::info!("Retrieved {} latest messages from most active rooms", messages.len());
-    
 
     Ok(messages)
 }

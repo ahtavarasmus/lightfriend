@@ -230,7 +230,6 @@ diesel::table! {
         notify -> Bool,
         info -> Nullable<Text>,
         preferred_number -> Nullable<Text>,
-        debug_logging_permission -> Bool,
         charge_when_under -> Bool,
         charge_back_to -> Nullable<Float>,
         stripe_customer_id -> Nullable<Text>,
@@ -251,6 +250,7 @@ diesel::table! {
         confirm_send_event -> Bool,
         agent_language -> Text,
         notification_type -> Nullable<Text>,
+        discount_tier -> Nullable<Text>,
     }
 }
 

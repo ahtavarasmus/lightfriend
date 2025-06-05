@@ -11,7 +11,6 @@ pub struct NewUser {
     pub phone_number: String,
     pub time_to_live: i32,
     pub notify: bool,
-    pub debug_logging_permission: bool,
     pub verified: bool,
     pub credits: f32,
     pub charge_when_under: bool,
@@ -55,6 +54,7 @@ pub struct UserResponse {
     pub msgs_left: i32,
     pub credits_left: f32,
     pub discount: bool,
+    pub discount_tier: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

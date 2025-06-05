@@ -2446,6 +2446,16 @@ impl UserRepository {
         Ok(())
     }
 
+    pub fn update_discount_tier(&self, user_id: i32, discount_tier: Option<&str>) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        diesel::update(users::table.find(user_id))
+            .set(users::discount_tier.eq(discount_tier))
+            .execute(&mut conn)?;
+            
+        Ok(())
+    }
+
     pub fn create_google_calendar_connection(
         &self,
         user_id: i32,

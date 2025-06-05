@@ -307,6 +307,7 @@ async fn main() {
         .route("/api/admin/test-sms", post(admin_handlers::test_sms))
         .route("/api/admin/test-sms-with-image", post(admin_handlers::test_sms_with_image))
         .route("/api/admin/monthly-credits/{user_id}/{amount}", post(admin_handlers::update_monthly_credits))
+        .route("/api/admin/discount-tier/{user_id}/{tier}", post(admin_handlers::update_discount_tier))
         .route_layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::require_admin));
 
     // Protected routes that need user authentication

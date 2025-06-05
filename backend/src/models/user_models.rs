@@ -37,7 +37,6 @@ pub struct User {
     pub notify: bool, // notify when new features
     pub info: Option<String>, // extra info about the user for the ai
     pub preferred_number: Option<String>, // number the user prefers lightfriend texting/calling them from
-    pub debug_logging_permission: bool,
     pub charge_when_under: bool,
     pub charge_back_to: Option<f32>,
     pub stripe_customer_id: Option<String>,
@@ -58,6 +57,7 @@ pub struct User {
     pub confirm_send_event: bool, // flag that gets set when user wants to send something from voice call and it needs to be confirmed using sms
     pub agent_language: String, // language the agent will use to answer, default 'en'. 
     pub notification_type: Option<String>,
+    pub discount_tier: Option<String>, // could be None, "msg", "voice" or "full"
 }
 
 
