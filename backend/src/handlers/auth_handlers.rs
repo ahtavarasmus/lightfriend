@@ -256,10 +256,16 @@ pub async fn request_password_reset(
         .unwrap()
         .as_secs() + 300; // 5 minutes
 
+    // Remove any existing OTP for this email first
+    state.password_reset_otps.remove(&reset_req.email);
+
+    // Insert the new OTP
     state.password_reset_otps.insert(
         reset_req.email.clone(),
         (otp.clone(), expiration)
     );
+
+    println!("Stored OTP {} for email {} with expiration {}", otp, reset_req.email, expiration);
 
     // Get or create a conversation for sending the OTP
     let conversation = match state.user_conversations.get_conversation(&user, user.preferred_number.clone().unwrap_or_else(|| {
@@ -298,6 +304,8 @@ pub async fn verify_password_reset(
     State(state): State<Arc<AppState>>,
     Json(verify_req): Json<VerifyPasswordResetRequest>,
 ) -> Result<Json<PasswordResetResponse>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Verifying OTP {} for email {}", verify_req.otp, verify_req.email);
+    
     // Check if OTP exists and is valid
     let otp_data = state.password_reset_otps.get(&verify_req.email);
     
@@ -308,7 +316,10 @@ pub async fn verify_password_reset(
             .unwrap()
             .as_secs();
 
+        println!("Found stored OTP {} with expiration {}, current time is {}", stored_otp, expiration, current_time);
+
         if current_time > *expiration {
+            println!("OTP expired: current_time {} > expiration {}", current_time, expiration);
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "OTP has expired"}))
@@ -316,6 +327,7 @@ pub async fn verify_password_reset(
         }
 
         if verify_req.otp != *stored_otp {
+            println!("OTP mismatch: provided {} != stored {}", verify_req.otp, stored_otp);
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(json!({"error": "Invalid OTP"}))
