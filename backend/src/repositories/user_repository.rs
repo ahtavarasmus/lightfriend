@@ -78,6 +78,17 @@ impl UserRepository {
         Ok(())
     }
 
+    pub fn update_password(&self, email: &str, password_hash: &str) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        diesel::update(users::table)
+            .filter(users::email.eq(email))
+            .set(users::password_hash.eq(password_hash))
+            .execute(&mut conn)?;
+            
+        Ok(())
+    }
+
     pub fn get_task_notification(&self, user_id: i32, task_id: &str) -> Result<Option<TaskNotification>, diesel::result::Error> {
         use crate::schema::task_notifications;
         

@@ -74,6 +74,8 @@ use admin::dashboard::AdminDashboard;
 
 #[derive(Clone, Routable, PartialEq)]
 pub enum Route {
+    #[at("/password-reset")]
+    PasswordReset,
     #[at("/faq")]
     Faq,
     #[at("/")]
@@ -99,6 +101,10 @@ pub enum Route {
 
 fn switch(routes: Route) -> Html {
     match routes {
+        Route::PasswordReset => {
+            info!("Rendering Password Reset page");
+            html! { <auth::signup::password_reset::PasswordReset /> }
+        },
         Route::Faq => {
             info!("Rendering FAQ page");
             html! { <Faq /> }

@@ -6,6 +6,9 @@ use axum::{
     response::Response,
     http::StatusCode,
 };
+use rand::Rng;
+use std::time::{SystemTime, UNIX_EPOCH};
+use crate::api::twilio_sms;
 use serde_json::json;
 use jsonwebtoken::{encode, Header, EncodingKey};
 use chrono::{Duration, Utc};
@@ -22,6 +25,29 @@ use crate::{
     handlers::auth_dtos::{LoginRequest, RegisterRequest, UserResponse, NewUser},
     AppState
 };
+
+#[derive(Deserialize)]
+pub struct ErrorResponse {
+    error: String,
+}
+
+#[derive(Deserialize)]
+pub struct PasswordResetRequest {
+    email: String,
+}
+
+#[derive(Deserialize)]
+pub struct VerifyPasswordResetRequest {
+    email: String,
+    otp: String,
+    new_password: String,
+}
+
+use serde::Serialize;
+#[derive(Serialize)]
+pub struct PasswordResetResponse {
+    message: String,
+}
 
 pub async fn get_users(
     State(state): State<Arc<AppState>>,
@@ -195,6 +221,135 @@ pub async fn login(
     }
 }
 
+
+pub async fn request_password_reset(
+    State(state): State<Arc<AppState>>,
+    Json(reset_req): Json<PasswordResetRequest>,
+) -> Result<Json<PasswordResetResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Find user by email
+    let user = match state.user_repository.find_by_email(&reset_req.email) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"}))
+            ));
+        }
+        Err(_) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Database error"}))
+            ));
+        }
+    };
+
+    // Generate 6-digit OTP
+    let otp: String = rand::thread_rng()
+        .sample_iter(&rand::distributions::Uniform::new(0, 10))
+        .take(6)
+        .map(|d| d.to_string())
+        .collect();
+
+    // Store OTP with expiration (5 minutes from now)
+    let expiration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() + 300; // 5 minutes
+
+    state.password_reset_otps.insert(
+        reset_req.email.clone(),
+        (otp.clone(), expiration)
+    );
+
+    // Get or create a conversation for sending the OTP
+    let conversation = match state.user_conversations.get_conversation(&user, user.preferred_number.clone().unwrap_or_else(|| {
+        std::env::var("FIN_PHONE").expect("FIN_PHONE must be set")
+    })).await {
+        Ok(conv) => conv,
+        Err(_) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to create conversation for OTP"}))
+            ));
+        }
+    };
+
+    // Send OTP via conversation message
+    let message = format!("Your Lightfriend password reset code is: {}. Valid for 5 minutes.", otp);
+    if let Err(_) = crate::api::twilio_utils::send_conversation_message(
+        &conversation.conversation_sid,
+        &conversation.twilio_number,
+        &message,
+        false, // Don't redact OTP messages
+        &user
+    ).await {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to send OTP"}))
+        ));
+    }
+
+    Ok(Json(PasswordResetResponse {
+        message: "Password reset code sent to your phone".to_string()
+    }))
+}
+
+pub async fn verify_password_reset(
+    State(state): State<Arc<AppState>>,
+    Json(verify_req): Json<VerifyPasswordResetRequest>,
+) -> Result<Json<PasswordResetResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Check if OTP exists and is valid
+    let otp_data = state.password_reset_otps.get(&verify_req.email);
+    
+    if let Some(ref_data) = otp_data {
+        let (stored_otp, expiration) = &*ref_data;
+        let current_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        if current_time > *expiration {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "OTP has expired"}))
+            ));
+        }
+
+        if verify_req.otp != *stored_otp {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Invalid OTP"}))
+            ));
+        }
+
+        // Hash new password
+        let password_hash = bcrypt::hash(&verify_req.new_password, bcrypt::DEFAULT_COST)
+            .map_err(|_| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Password hashing failed"}))
+            ))?;
+
+        // Update password in database
+        if let Err(_) = state.user_repository.update_password(&verify_req.email, &password_hash) {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to update password"}))
+            ));
+        }
+
+        // Remove used OTP
+        state.password_reset_otps.remove(&verify_req.email);
+
+        Ok(Json(PasswordResetResponse {
+            message: "Password has been reset successfully".to_string()
+        }))
+    } else {
+        Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "No valid OTP found for this email"}))
+        ))
+    }
+}
 
 pub async fn register(
     State(state): State<Arc<AppState>>,

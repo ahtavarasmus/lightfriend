@@ -143,6 +143,11 @@ pub mod login {
                         {"Register here"}
                     </Link<Route>>
                 </div>
+                <div class="auth-redirect">
+                    <Link<Route> to={Route::PasswordReset}>
+                        {"Forgot password?"}
+                    </Link<Route>>
+                </div>
             </div>
         </div>
         }
@@ -150,6 +155,212 @@ pub mod login {
 }
 
 
+
+pub mod password_reset {
+    use yew::prelude::*;
+    use web_sys::HtmlInputElement;
+    use gloo_net::http::Request;
+    use serde::{Deserialize, Serialize};
+    use yew_router::prelude::*;
+    use crate::Route;
+    use crate::config;
+
+    #[derive(Serialize)]
+    struct PasswordResetRequest {
+        email: String,
+    }
+
+    #[derive(Serialize)]
+    struct VerifyPasswordResetRequest {
+        email: String,
+        otp: String,
+        new_password: String,
+    }
+
+    #[derive(Deserialize)]
+    struct PasswordResetResponse {
+        message: String,
+    }
+
+    #[function_component]
+    pub fn PasswordReset() -> Html {
+        let email = use_state(String::new);
+        let otp = use_state(String::new);
+        let new_password = use_state(String::new);
+        let error = use_state(|| None::<String>);
+        let success = use_state(|| None::<String>);
+        let otp_sent = use_state(|| false);
+
+        let request_reset = {
+            let email = email.clone();
+            let error_setter = error.clone();
+            let success_setter = success.clone();
+            let otp_sent = otp_sent.clone();
+            
+            Callback::from(move |e: SubmitEvent| {
+                e.prevent_default();
+                let email = (*email).clone();
+                let error_setter = error_setter.clone();
+                let success_setter = success_setter.clone();
+                let otp_sent = otp_sent.clone();
+
+                wasm_bindgen_futures::spawn_local(async move {
+                    match Request::post(&format!("{}/api/password-reset/request", config::get_backend_url()))
+                        .json(&PasswordResetRequest { email })
+                        .unwrap()
+                        .send()
+                        .await 
+                    {
+                        Ok(response) => {
+                            if response.ok() {
+                                match response.json::<PasswordResetResponse>().await {
+                                    Ok(resp) => {
+                                        error_setter.set(None);
+                                        success_setter.set(Some(resp.message));
+                                        otp_sent.set(true);
+                                    }
+                                    Err(_) => {
+                                        error_setter.set(Some("Failed to parse server response".to_string()));
+                                    }
+                                }
+                            } else {
+                                error_setter.set(Some("Failed to send reset code".to_string()));
+                            }
+                        }
+                        Err(e) => {
+                            error_setter.set(Some(format!("Request failed: {}", e)));
+                        }
+                    }
+                });
+            })
+        };
+
+        let verify_reset = {
+            let email = email.clone();
+            let otp = otp.clone();
+            let new_password = new_password.clone();
+            let error_setter = error.clone();
+            let success_setter = success.clone();
+            
+            Callback::from(move |e: SubmitEvent| {
+                e.prevent_default();
+                let email = (*email).clone();
+                let otp = (*otp).clone();
+                let new_password = (*new_password).clone();
+                let error_setter = error_setter.clone();
+                let success_setter = success_setter.clone();
+
+                wasm_bindgen_futures::spawn_local(async move {
+                    match Request::post(&format!("{}/api/password-reset/verify", config::get_backend_url()))
+                        .json(&VerifyPasswordResetRequest { 
+                            email,
+                            otp,
+                            new_password,
+                        })
+                        .unwrap()
+                        .send()
+                        .await 
+                    {
+                        Ok(response) => {
+                            if response.ok() {
+                                match response.json::<PasswordResetResponse>().await {
+                                    Ok(resp) => {
+                                        error_setter.set(None);
+                                        success_setter.set(Some(resp.message.clone()));
+                                        
+                                        // Redirect to login after successful reset
+                                        let window = web_sys::window().unwrap();
+                                        wasm_bindgen_futures::spawn_local(async move {
+                                            gloo_timers::future::TimeoutFuture::new(2_000).await;
+                                            let _ = window.location().set_href("/login");
+                                        });
+                                    }
+                                    Err(_) => {
+                                        error_setter.set(Some("Failed to parse server response".to_string()));
+                                    }
+                                }
+                            } else {
+                                error_setter.set(Some("Failed to verify reset code".to_string()));
+                            }
+                        }
+                        Err(e) => {
+                            error_setter.set(Some(format!("Request failed: {}", e)));
+                        }
+                    }
+                });
+            })
+        };
+
+        html! {
+            <div class="min-h-screen gradient-bg">
+                <div class="login-container">
+                    <h1>{"Password Reset"}</h1>
+                    {
+                        if let Some(error_message) = (*error).as_ref() {
+                            html! {
+                                <div class="error-message" style="color: red; margin-bottom: 10px;">
+                                    {error_message}
+                                </div>
+                            }
+                        } else if let Some(success_message) = (*success).as_ref() {
+                            html! {
+                                <div class="success-message" style="color: green; margin-bottom: 10px;">
+                                    {success_message}
+                                </div>
+                            }
+                        } else {
+                            html! {}
+                        }
+                    }
+                    {
+                        if !*otp_sent {
+                            html! {
+                                <form onsubmit={request_reset}>
+                                    <input
+                                        type="email"
+                                        placeholder="Email"
+                                        onchange={let email = email.clone(); move |e: Event| {
+                                            let input: HtmlInputElement = e.target_unchecked_into();
+                                            email.set(input.value());
+                                        }}
+                                    />
+                                    <button type="submit">{"Send Reset Code"}</button>
+                                </form>
+                            }
+                        } else {
+                            html! {
+                                <form onsubmit={verify_reset}>
+                                    <input
+                                        type="text"
+                                        placeholder="Reset Code"
+                                        onchange={let otp = otp.clone(); move |e: Event| {
+                                            let input: HtmlInputElement = e.target_unchecked_into();
+                                            otp.set(input.value());
+                                        }}
+                                    />
+                                    <input
+                                        type="password"
+                                        placeholder="New Password"
+                                        onchange={let new_password = new_password.clone(); move |e: Event| {
+                                            let input: HtmlInputElement = e.target_unchecked_into();
+                                            new_password.set(input.value());
+                                        }}
+                                    />
+                                    <button type="submit">{"Reset Password"}</button>
+                                </form>
+                            }
+                        }
+                    }
+                    <div class="auth-redirect">
+                        <Link<Route> to={Route::Login}>
+                            {"Back to Login"}
+                        </Link<Route>>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+}
 
 pub mod register {
     use yew::prelude::*;

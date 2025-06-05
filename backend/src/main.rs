@@ -11,6 +11,7 @@ use diesel::prelude::*;
 use diesel::r2d2::{self, ConnectionManager};
 use dashmap::DashMap;
 use governor::{RateLimiter, clock::DefaultClock, state::keyed::DefaultKeyedStateStore};
+use std::time::SystemTime;
 use oauth2::{
     basic::BasicClient,
     AuthUrl,
@@ -133,6 +134,7 @@ pub struct AppState {
     matrix_sync_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
     matrix_invitation_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
     matrix_clients: Arc<Mutex<HashMap<i32, matrix_sdk::Client>>>,
+    password_reset_otps: DashMap<String, (String, u64)>, // (email, (otp, expiration))
 }
 
 pub fn validate_env() {
@@ -230,6 +232,7 @@ async fn main() {
     let matrix_clients = Arc::new(Mutex::new(HashMap::new()));
     let state = Arc::new(AppState {
         db_pool: pool,
+        password_reset_otps: DashMap::new(),
         user_repository: user_repository.clone(),
         user_conversations: user_conversations.clone(),
         sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -294,7 +297,9 @@ async fn main() {
     let public_routes = Router::new()
         .route("/api/health", get(health_check))
         .route("/api/login", post(auth_handlers::login))
-        .route("/api/register", post(auth_handlers::register));
+        .route("/api/register", post(auth_handlers::register))
+        .route("/api/password-reset/request", post(auth_handlers::request_password_reset))
+        .route("/api/password-reset/verify", post(auth_handlers::verify_password_reset));
 
     // Admin routes that need admin authentication
     let admin_routes = Router::new()
