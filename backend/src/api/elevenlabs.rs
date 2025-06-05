@@ -2025,54 +2025,77 @@ pub async fn make_notification_call(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     println!("Starting notification call to: {}", to_phone_number);
 
-    // Get the appropriate phone number ID based on preferred number
-    let phone_number_id = if preferred_from_number.contains("+358") {
-        std::env::var("FIN_PHONE_NUMBER_ID").map_err(|e| {
-            error!("Failed to get FIN_PHONE_NUMBER_ID: {}", e);
-            (
+// Get user information to check for discount tier
+    let user = match state.user_repository.find_by_id(user_id.parse::<i32>().unwrap_or_default()) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            error!("User not found for ID: {}", user_id);
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": "User not found",
+                    "details": "Could not find user with provided ID"
+                }))
+            ));
+        }
+        Err(e) => {
+            error!("Error fetching user: {}", e);
+            return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
-                    "error": "Failed to get phone number ID",
+                    "error": "Database error",
                     "details": e.to_string()
                 }))
-            )
-        })?
-    } else if preferred_from_number.contains("+61") {
-        std::env::var("AUS_PHONE_NUMBER_ID").map_err(|e| {
-            error!("Failed to get AUS_PHONE_NUMBER_ID: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": "Failed to get phone number ID",
-                    "details": e.to_string()
-                }))
-            )
-        })?
-    } else if preferred_from_number.contains("+44") {
-        std::env::var("GB_PHONE_NUMBER_ID").map_err(|e| {
-            error!("Failed to get GB_PHONE_NUMBER_ID: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": "Failed to get phone number ID",
-                    "details": e.to_string()
-                }))
-            )
-        })?
-    } else if preferred_from_number.contains("+972") {
-        std::env::var("ISR_PHONE_NUMBER_ID").map_err(|e| {
-            error!("Failed to get ISR_PHONE_NUMBER_ID: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": "Failed to get phone number ID",
-                    "details": e.to_string()
-                }))
-            )
-        })?
+            ));
+        }
+    };
+
+    // Check if user has a custom phone number ID
+    let phone_number_id = if user.discount_tier.is_some() {
+        let custom_env_key = format!("TWILIO_USER_PHONE_NUMBER_ID_{}", user.id);
+        match std::env::var(&custom_env_key) {
+            Ok(id) => {
+                println!("Using custom phone number ID for user {}: {}", user.id, id);
+                id
+            },
+            Err(_) => {
+                // Fall back to regular phone number selection if custom ID not found
+                if preferred_from_number.contains("+358") {
+                    std::env::var("FIN_PHONE_NUMBER_ID")
+                } else if preferred_from_number.contains("+61") {
+                    std::env::var("AUS_PHONE_NUMBER_ID")
+                } else if preferred_from_number.contains("+44") {
+                    std::env::var("GB_PHONE_NUMBER_ID")
+                } else if preferred_from_number.contains("+972") {
+                    std::env::var("ISR_PHONE_NUMBER_ID")
+                } else {
+                    std::env::var("USA_PHONE_NUMBER_ID")
+                }.map_err(|e| {
+                    error!("Failed to get phone number ID: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "Failed to get phone number ID",
+                            "details": e.to_string()
+                        }))
+                    )
+                })?
+            }
+        }
     } else {
-        std::env::var("USA_PHONE_NUMBER_ID").map_err(|e| {
-            error!("Failed to get USA_PHONE_NUMBER_ID: {}", e);
+        // Regular phone number selection for non-discount users
+        if preferred_from_number.contains("+358") {
+            std::env::var("FIN_PHONE_NUMBER_ID")
+        } else if preferred_from_number.contains("+61") {
+            std::env::var("AUS_PHONE_NUMBER_ID")
+        } else if preferred_from_number.contains("+44") {
+            std::env::var("GB_PHONE_NUMBER_ID")
+        } else if preferred_from_number.contains("+972") {
+            std::env::var("ISR_PHONE_NUMBER_ID")
+        } else {
+            std::env::var("USA_PHONE_NUMBER_ID")
+        }.map_err(|e| {
+            error!("Failed to get phone number ID: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
@@ -2082,6 +2105,7 @@ pub async fn make_notification_call(
             )
         })?
     };
+
 
     // Get voice ID based on the preferred number
     let voice_id = if preferred_from_number.contains("+358") {
