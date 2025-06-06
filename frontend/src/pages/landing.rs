@@ -163,7 +163,7 @@ pub fn landing() -> Html {
                 <div class="hero-content">
                     <div class="hero-header">
                         <p class="hero-subtitle">
-                            {"Access all the necessary features without a smartphone so you can escape the doomscrolling"}
+                            {"Access all the necessary features without a smartphone and escape the doomscrolling"}
                         </p>
                     </div>
                     <div class="hero-cta-group">
