@@ -62,6 +62,7 @@ mod utils {
     pub mod elevenlabs_prompts;
     pub mod imap_utils;
 }
+
 mod api {
     pub mod vapi_endpoints;
     pub mod vapi_dtos;
@@ -131,6 +132,8 @@ pub struct AppState {
     gmail_oauth_client: GoogleOAuthClient,
     session_store: MemoryStore,
     login_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    password_reset_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    password_reset_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     matrix_sync_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
     matrix_invitation_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
     matrix_clients: Arc<Mutex<HashMap<i32, matrix_sdk::Client>>>,
@@ -145,12 +148,11 @@ pub fn validate_env() {
         "ENVIRONMENT", "FRONTEND_URL", "STRIPE_CREDITS_PRODUCT_ID",
         "STRIPE_SUBSCRIPTION_WORLD_PRICE_ID",
         "STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET",
-        "MESSAGE_COST", "MESSAGE_COST_US", "VOICE_SECOND_COST", "CHARGE_BACK_THRESHOLD", 
         "SHAZAM_PHONE_NUMBER", "SHAZAM_API_KEY", "SERVER_URL", 
         "ENCRYPTION_KEY", "COMPOSIO_API_KEY", "GOOGLE_CALENDAR_CLIENT_ID", 
         "GOOGLE_CALENDAR_CLIENT_SECRET", "MATRIX_HOMESERVER", "MATRIX_SHARED_SECRET",
         "WHATSAPP_BRIDGE_BOT", "GOOGLE_CALENDAR_CLIENT_SECRET", "OPENROUTER_API_KEY",
-        "MATRIX_HOMESERVER_PERSISTENT_STORE_PATH", "US_VOICE_ID", "FI_VOICE_ID", "DE_VOICE_ID",
+        "MATRIX_HOMESERVER_PERSISTENT_STORE_PATH",
     ];
     for var in required_vars.iter() {
         std::env::var(var).expect(&format!("{} must be set", var));
@@ -161,7 +163,6 @@ pub fn validate_env() {
 #[tokio::main]
 async fn main() {
     dotenv().ok();
-    validate_env();
 
     let _guard = sentry::init(("https://07fbdaf63c1270c8509844b775045dd3@o4507415184539648.ingest.de.sentry.io/4508802101411920", sentry::ClientOptions {
         release: sentry::release_name!(),
@@ -241,10 +242,9 @@ async fn main() {
         google_tasks_oauth_client,
         gmail_oauth_client,
         session_store: session_store.clone(),
-        login_limiter: {
-            let mut map = DashMap::new();
-            map
-        },
+        login_limiter: DashMap::new(),
+        password_reset_limiter: DashMap::new(),
+        password_reset_verify_limiter: DashMap::new(),
         matrix_sync_tasks,
         matrix_invitation_tasks,
         matrix_clients,
@@ -492,6 +492,8 @@ async fn main() {
         Ok("staging") => 3100, // actually prod, but just saying staging
         _ => 3000,
     };
+
+    validate_env();
     tracing::info!("Starting server on port {}", port);
     let listener = TcpListener::bind(format!("127.0.0.1:{}", port)).await.unwrap();
     axum::serve(listener, app.into_make_service()).await.unwrap();

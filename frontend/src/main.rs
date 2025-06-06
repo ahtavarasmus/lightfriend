@@ -64,6 +64,7 @@ use pages::{
 use auth::{
     signup::register::Register,
     signup::login::Login,
+    signup::password_reset::PasswordReset,
     verify::Verify,
 };
 
@@ -103,7 +104,7 @@ fn switch(routes: Route) -> Html {
     match routes {
         Route::PasswordReset => {
             info!("Rendering Password Reset page");
-            html! { <auth::signup::password_reset::PasswordReset /> }
+            html! { <PasswordReset /> }
         },
         Route::Faq => {
             info!("Rendering FAQ page");

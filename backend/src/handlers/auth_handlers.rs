@@ -226,6 +226,24 @@ pub async fn request_password_reset(
     State(state): State<Arc<AppState>>,
     Json(reset_req): Json<PasswordResetRequest>,
 ) -> Result<Json<PasswordResetResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Define rate limit: 3 attempts per hour per email
+    let quota = Quota::per_hour(NonZeroU32::new(3).unwrap());
+    let limiter_key = reset_req.email.clone();
+
+    // Get or create a rate limiter for this email
+    let entry = state.password_reset_limiter
+        .entry(limiter_key.clone())
+        .or_insert_with(|| RateLimiter::keyed(quota));
+    let limiter = entry.value();
+
+    // Check if rate limit is exceeded
+    if limiter.check_key(&limiter_key).is_err() {
+        println!("Rate limit exceeded for password reset request: [redacted email]");
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({"error": "Too many password reset attempts. Please try again later."}))
+        ));
+    }
     // Find user by email
     let user = match state.user_repository.find_by_email(&reset_req.email) {
         Ok(Some(user)) => user,
@@ -304,64 +322,93 @@ pub async fn verify_password_reset(
     State(state): State<Arc<AppState>>,
     Json(verify_req): Json<VerifyPasswordResetRequest>,
 ) -> Result<Json<PasswordResetResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Define rate limit: 3 attempts per 60 minutes per email
+    let quota = Quota::with_period(std::time::Duration::from_secs(60 * 60))
+        .unwrap()
+        .allow_burst(NonZeroU32::new(3).unwrap());
+    let limiter_key = verify_req.email.clone();
+
+    // Get or create a rate limiter for this email
+    let entry = state.password_reset_verify_limiter
+        .entry(limiter_key.clone())
+        .or_insert_with(|| RateLimiter::keyed(quota));
+    let limiter = entry.value();
+
+    // Check if rate limit is exceeded
+    if limiter.check_key(&limiter_key).is_err() {
+        println!("Rate limit exceeded for password reset verification: [redacted email]");
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({"error": "Too many verification attempts. Please try again later."}))
+        ));
+    }
     println!("Verifying OTP {} for email {}", verify_req.otp, verify_req.email);
     
-    // Check if OTP exists and is valid
-    let otp_data = state.password_reset_otps.get(&verify_req.email);
-    
-    if let Some(ref_data) = otp_data {
-        let (stored_otp, expiration) = &*ref_data;
-        let current_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        println!("Found stored OTP {} with expiration {}, current time is {}", stored_otp, expiration, current_time);
-
-        if current_time > *expiration {
-            println!("OTP expired: current_time {} > expiration {}", current_time, expiration);
+    // Remove the OTP data immediately to prevent any hanging references
+    let otp_data = match state.password_reset_otps.remove(&verify_req.email) {
+        Some((_, data)) => data,  // The first element is the key (email), second is the value tuple
+        None => {
             return Err((
                 StatusCode::BAD_REQUEST,
-                Json(json!({"error": "OTP has expired"}))
+                Json(json!({"error": "No valid OTP found for this email"}))
             ));
         }
+    };
 
-        if verify_req.otp != *stored_otp {
-            println!("OTP mismatch: provided {} != stored {}", verify_req.otp, stored_otp);
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({"error": "Invalid OTP"}))
-            ));
-        }
+    let (stored_otp, expiration_time) = otp_data;
 
-        // Hash new password
-        let password_hash = bcrypt::hash(&verify_req.new_password, bcrypt::DEFAULT_COST)
-            .map_err(|_| (
+    let current_time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    if current_time > expiration_time {
+        println!("OTP expired: current_time {} > expiration {}", current_time, expiration_time);
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "OTP has expired"}))
+        ));
+    }
+
+    if verify_req.otp != stored_otp {
+        println!("OTP mismatch: provided {} != stored {}", verify_req.otp, stored_otp);
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid OTP"}))
+        ));
+    }
+
+    // Hash new password
+    let password_hash = bcrypt::hash(&verify_req.new_password, bcrypt::DEFAULT_COST)
+        .map_err(|e| {
+            println!("Password hashing failed: {}", e);
+            (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "Password hashing failed"}))
-            ))?;
+            )
+        })?;
 
-        // Update password in database
-        if let Err(_) = state.user_repository.update_password(&verify_req.email, &password_hash) {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to update password"}))
-            ));
-        }
-        println!("New password updated successfully");
-
-        // Remove used OTP
-        state.password_reset_otps.remove(&verify_req.email);
-
-        Ok(Json(PasswordResetResponse {
-            message: "Password has been reset successfully".to_string()
-        }))
-    } else {
-        Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "No valid OTP found for this email"}))
-        ))
+    // Update password in database
+    if let Err(e) = state.user_repository.update_password(&verify_req.email, &password_hash) {
+        println!("Failed to update password: {}", e);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to update password"}))
+        ));
     }
+    println!("New password updated successfully");
+
+    // Also remove any rate limiting for this email
+    state.login_limiter.remove(&verify_req.email);
+    
+    println!("Password reset completed successfully, sending response");
+    
+    // Create success response with explicit status code
+    let response = PasswordResetResponse {
+        message: "Password has been reset successfully. You can now log in with your new password.".to_string()
+    };
+    
+    Ok(Json(response))
 }
 
 pub async fn register(

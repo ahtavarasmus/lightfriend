@@ -1,11 +1,14 @@
 pub mod login {
-    use yew::prelude::*;
-    use web_sys::HtmlInputElement;
-    use gloo_net::http::Request;
-    use serde::{Deserialize, Serialize};
-    use yew_router::prelude::*;
-    use crate::Route;
-    use crate::config;
+use yew::prelude::*;
+use web_sys::HtmlInputElement;
+use gloo_net::http::Request;
+use serde::{Deserialize, Serialize};
+use yew_router::prelude::*;
+use crate::Route;
+use crate::config;
+use gloo_timers::callback::Timeout;
+use wasm_bindgen_futures::spawn_local;
+use yew_hooks::prelude::*;
     use gloo_console::log;
     #[derive(Serialize)]
     pub struct LoginRequest {
@@ -159,6 +162,7 @@ pub mod login {
 pub mod password_reset {
     use yew::prelude::*;
     use web_sys::HtmlInputElement;
+    use crate::auth::signup::register::ErrorResponse;
     use gloo_net::http::Request;
     use serde::{Deserialize, Serialize};
     use yew_router::prelude::*;
@@ -181,9 +185,9 @@ pub mod password_reset {
     struct PasswordResetResponse {
         message: String,
     }
-
     #[function_component]
     pub fn PasswordReset() -> Html {
+        let navigator = use_navigator().unwrap();
         let email = use_state(String::new);
         let otp = use_state(String::new);
         let new_password = use_state(String::new);
@@ -195,14 +199,14 @@ pub mod password_reset {
             let email = email.clone();
             let error_setter = error.clone();
             let success_setter = success.clone();
-            let otp_sent = otp_sent.clone();
+            let otp_sent_setter = otp_sent.clone();
             
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
                 let email = (*email).clone();
                 let error_setter = error_setter.clone();
                 let success_setter = success_setter.clone();
-                let otp_sent = otp_sent.clone();
+                let otp_sent_setter = otp_sent_setter.clone();
 
                 wasm_bindgen_futures::spawn_local(async move {
                     match Request::post(&format!("{}/api/password-reset/request", config::get_backend_url()))
@@ -217,14 +221,21 @@ pub mod password_reset {
                                     Ok(resp) => {
                                         error_setter.set(None);
                                         success_setter.set(Some(resp.message));
-                                        otp_sent.set(true);
+                                        otp_sent_setter.set(true);
                                     }
                                     Err(_) => {
                                         error_setter.set(Some("Failed to parse server response".to_string()));
                                     }
                                 }
                             } else {
-                                error_setter.set(Some("Failed to send reset code".to_string()));
+                                match response.json::<ErrorResponse>().await {
+                                    Ok(error_response) => {
+                                        error_setter.set(Some(error_response.error));
+                                    }
+                                    Err(_) => {
+                                        error_setter.set(Some("Failed to request password reset".to_string()));
+                                    }
+                                }
                             }
                         }
                         Err(e) => {
@@ -241,6 +252,7 @@ pub mod password_reset {
             let new_password = new_password.clone();
             let error_setter = error.clone();
             let success_setter = success.clone();
+            let navigator = navigator.clone();
             
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
@@ -249,6 +261,7 @@ pub mod password_reset {
                 let new_password = (*new_password).clone();
                 let error_setter = error_setter.clone();
                 let success_setter = success_setter.clone();
+                let navigator = navigator.clone();
 
                 wasm_bindgen_futures::spawn_local(async move {
                     match Request::post(&format!("{}/api/password-reset/verify", config::get_backend_url()))
@@ -265,18 +278,21 @@ pub mod password_reset {
                             if response.ok() {
                                 match response.json::<PasswordResetResponse>().await {
                                     Ok(resp) => {
+                                        println!("Password reset successful, preparing to redirect");
                                         error_setter.set(None);
                                         success_setter.set(Some(resp.message.clone()));
-                                        
-                                        // Redirect to login after successful reset
-                                        let window = web_sys::window().unwrap();
-                                        wasm_bindgen_futures::spawn_local(async move {
-                                            gloo_timers::future::TimeoutFuture::new(2_000).await;
-                                            let _ = window.location().set_href("/login");
-                                        });
+
+                                        // Use setTimeout to delay navigation
+                                        let navigator = navigator.clone();
+                                        let success_message = resp.message.clone();
+                                        gloo_timers::callback::Timeout::new(2_000, move || {
+                                            println!("Redirecting to login page after password reset");
+                                            navigator.push(&Route::Login);
+                                        }).forget();
                                     }
-                                    Err(_) => {
-                                        error_setter.set(Some("Failed to parse server response".to_string()));
+                                    Err(e) => {
+                                        println!("Error parsing password reset response: {:?}", e);
+                                        error_setter.set(Some("Failed to parse server response. Please try again.".to_string()));
                                     }
                                 }
                             } else {
@@ -290,6 +306,7 @@ pub mod password_reset {
                 });
             })
         };
+
 
         html! {
             <div class="min-h-screen gradient-bg">
@@ -386,7 +403,7 @@ pub mod register {
 
     #[derive(Deserialize)]
     pub struct ErrorResponse {
-        error: String,
+        pub error: String,
     }
 
     fn is_valid_email(email: &str) -> bool {
