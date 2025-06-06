@@ -348,6 +348,7 @@ pub async fn verify_password_reset(
                 Json(json!({"error": "Failed to update password"}))
             ));
         }
+        println!("New password updated successfully");
 
         // Remove used OTP
         state.password_reset_otps.remove(&verify_req.email);
