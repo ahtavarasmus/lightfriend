@@ -328,15 +328,27 @@ pub fn pricing(props: &PricingProps) -> Html {
                     </div>
                 </div>
             </div>
-
-            <div class="byo-twilio">
-                <h3>{"Bring Your Own Twilio Number"}</h3>
-                <p>{"Get 50% off any plan by using your own Twilio number. You’ll pay for messages directly to Twilio."}</p>
-                <a href="mailto:rasmus@ahtava.com?subject=Bring Your Own Twilio Number">
-                    <button class="iq-button signup-button">{"Contact Us to Set Up"}</button>
-                </a>
+            <div class="phone-number-options">
+                <div class="phone-number-section">
+                    <h2>{"Phone Number Options"}</h2>
+                    <div class="options-grid">
+                        <div class="option-card">
+                            <h3>{"Request New Number"}</h3>
+                            <p>{"Need a phone number? We can provide numbers in select countries like US, Finland, UK, Australia, and Israel. Due to regulatory restrictions, we cannot provide numbers in many countries including Germany, India, most African countries, and parts of Asia. If your country isn't listed in the pricing above, contact us to check availability."}</p>
+                            <a href="mailto:rasmus@ahtava.com?subject=Request New Phone Number">
+                                <button class="iq-button signup-button">{"Check Number Availability"}</button>
+                            </a>
+                        </div>
+                        <div class="option-card">
+                            <h3>{"Bring Your Own Number"}</h3>
+                            <p>{"Use your own Twilio number to get 50% off any plan and enable service in ANY country. Perfect for regions where we can't directly provide numbers (like Germany, India, African countries). This option lets you use our service worldwide while managing your own number through Twilio."}</p>
+                            <a href="mailto:rasmus@ahtava.com?subject=Bring Your Own Twilio Number">
+                                <button class="iq-button signup-button">{"Contact Us to Set Up"}</button>
+                            </a>
+                        </div>
+                    </div>
+                </div>
             </div>
-
             <div class="pricing-faq">
                 <h2>{"Common Questions"}</h2>
                 <div class="faq-grid">
@@ -616,27 +628,61 @@ pub fn pricing(props: &PricingProps) -> Html {
         padding: 2rem;
     }
 
-    .byo-twilio {
-        max-width: 800px;
+    .phone-number-options {
+        max-width: 1200px;
         margin: 4rem auto;
+    }
+
+    .phone-number-section {
         text-align: center;
+        padding: 2.5rem;
+    }
+
+    .phone-number-section h2 {
+        color: #7EB2FF;
+        font-size: 2.5rem;
+        margin-bottom: 2rem;
+    }
+
+    .options-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 2rem;
+        margin-top: 2rem;
+    }
+
+    .option-card {
         background: rgba(30, 30, 30, 0.8);
         border: 1px solid rgba(30, 144, 255, 0.15);
         border-radius: 24px;
         padding: 2.5rem;
         backdrop-filter: blur(10px);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
     }
 
-    .byo-twilio h3 {
+    .option-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
+        border-color: rgba(30, 144, 255, 0.3);
+    }
+
+    .option-card h3 {
         color: #7EB2FF;
-        font-size: 2rem;
+        font-size: 1.8rem;
         margin-bottom: 1rem;
     }
 
-    .byo-twilio p {
+    .option-card p {
         color: #e0e0e0;
         margin-bottom: 2rem;
         font-size: 1.1rem;
+        line-height: 1.6;
+    }
+
+    @media (max-width: 968px) {
+        .options-grid {
+            grid-template-columns: 1fr;
+        }
     }
 
     .pricing-faq {

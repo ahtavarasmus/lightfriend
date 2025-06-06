@@ -1,10 +1,19 @@
 use yew::prelude::*;
 use web_sys::MouseEvent;
 use yew::{Children, Properties};
+use gloo_timers::callback::Timeout;
+use wasm_bindgen::prelude::*;
+
+#[derive(Clone, PartialEq)]
+struct ChatMessage {
+    text: String,
+    is_user: bool,
+}
 
 #[derive(Properties, PartialEq)]
 struct FaqItemProps {
     question: String,
+    id: String,
     children: Children,
 }
 
@@ -12,6 +21,47 @@ struct FaqItemProps {
 fn faq_item(props: &FaqItemProps) -> Html {
     let is_open = use_state(|| false);
     
+    // Check URL hash on mount and when hash changes
+    {
+        let is_open = is_open.clone();
+        let id = props.id.clone();
+        
+        use_effect_with_deps(move |_| {
+            let check_hash = move || {
+                if let Some(window) = web_sys::window() {
+                    if let Ok(location) = window.location().hash() {
+                        if location == format!("#{}", id) {
+                            is_open.set(true);
+                            // Add a small delay to ensure the content is expanded before scrolling
+                            let window_clone = window.clone();
+                            let id_clone = id.clone();
+                            let timeout = Timeout::new(100, move || {
+                                if let Some(element) = window_clone.document().and_then(|doc| doc.get_element_by_id(&id_clone)) {
+                                    element.scroll_into_view_with_bool(true);
+                                }
+                            });
+                            timeout.forget();
+                        }
+                    }
+                }
+            };
+
+            // Check hash immediately
+            check_hash();
+
+            // Set up hash change listener
+            let window = web_sys::window().unwrap();
+            let callback = Closure::wrap(Box::new(move || {
+                check_hash();
+            }) as Box<dyn FnMut()>);
+            
+            window.add_event_listener_with_callback("hashchange", callback.as_ref().unchecked_ref()).unwrap();
+            callback.forget();
+
+            || ()
+        }, ());
+    }
+
     let toggle = {
         let is_open = is_open.clone();
         Callback::from(move |e: MouseEvent| {
@@ -19,13 +69,51 @@ fn faq_item(props: &FaqItemProps) -> Html {
             is_open.set(!*is_open);
         })
     };
+    /*
+
+    let copy_link = {
+        let id = props.id.clone();
+        Callback::from(move |e: MouseEvent| {
+            e.stop_propagation();
+                if let Some(window) = web_sys::window() {
+                    if let Ok(location) = window.location().href() {
+                        let base_url = location.split('#').next().unwrap_or(&location);
+                        let full_url = format!("{}#{}", base_url, id);
+                        
+                        // Copy to clipboard using the correct web-sys API
+                        if let Some(clipboard) = window.navigator().clipboard() {
+                            let _ = clipboard.write_text(&full_url);
+                            
+                            // Optional: Show a temporary tooltip or notification
+                            if let Some(element) = window.document().and_then(|doc| doc.get_element_by_id(&id)) {
+                                let _ = element.set_attribute("title", "Link copied!");
+                                // Reset title after 2 seconds
+                                let element_weak = web_sys::Element::from(element);
+                                let timeout = gloo_timers::callback::Timeout::new(2_000, move || {
+                                    let _ = element_weak.set_attribute("title", "Copy link to this question");
+                                });
+                                timeout.forget();
+                            }
+                        }
+                    }
+                }
+        })
+    };
+    */
 
     html! {
-        <div class={classes!("faq-item", if *is_open { "open" } else { "" })}>
-            <button class="faq-question" onclick={toggle}>
-                <span class="question-text">{&props.question}</span>
-                <span class="toggle-icon">{if *is_open { "−" } else { "+" }}</span>
-            </button>
+        <div id={props.id.clone()} class={classes!("faq-item", if *is_open { "open" } else { "" })}>
+            <div class="faq-question-container">
+                <button class="faq-question" onclick={toggle}>
+                    <span class="question-text">{&props.question}</span>
+                    <span class="toggle-icon">{if *is_open { "−" } else { "+" }}</span>
+                </button>
+                /*
+                <button class="copy-link-button" onclick={copy_link} title="Copy link to this question">
+                    <span class="link-icon">{"🔗"}</span>
+                </button>
+                */
+            </div>
             <div class="faq-answer">
                 { for props.children.iter() }
             </div>
@@ -35,6 +123,64 @@ fn faq_item(props: &FaqItemProps) -> Html {
 
 #[function_component(Faq)]
 pub fn faq() -> Html {
+    let chat_messages = use_state(|| Vec::<ChatMessage>::new());
+    let is_typing = use_state(|| false);
+    let current_demo_index = use_state(|| 0);
+
+    // Define demo conversations
+    let demo_conversations = [
+        ("Check my WhatsApp messages", "You have 3 new WhatsApp messages:\n\n📱 Mom: \"Don't forget dinner at 7pm\"\n📱 Sarah: \"Great job on the presentation!\"\n📱 Work Group: \"Meeting moved to 3pm tomorrow\""),
+        ("What's the weather like?", "🌤️ Today in your location:\n\nTemperature: 72°F (22°C)\nConditions: Partly cloudy\nChance of rain: 20%\n\nPerfect weather for a walk!"),
+        ("Any important emails?", "📧 You have 2 important emails:\n\n• From: boss@company.com\n  Subject: \"Q4 Budget Review - Action Required\"\n  Received: 2 hours ago\n\n• From: bank@yourbank.com\n  Subject: \"Account Statement Ready\"\n  Received: 1 hour ago"),
+        ("What's on my calendar today?", "📅 Your schedule for today:\n\n• 2:00 PM - Team standup (30 min)\n• 4:00 PM - Client call with ABC Corp (1 hour)\n• 6:30 PM - Dinner with family\n\nNext up: Team standup in 45 minutes"),
+        ("When is the next Light Phone 3 estimated delivery date?", "📱 Light Phone 3 has estimated delivery date in August 2025 if you order today"),
+    ];
+
+    let start_demo = {
+        let chat_messages = chat_messages.clone();
+        let is_typing = is_typing.clone();
+        let current_demo_index = current_demo_index.clone();
+        
+        Callback::from(move |question_index: usize| {
+            if question_index >= demo_conversations.len() {
+                return;
+            }
+            
+            let chat_messages = chat_messages.clone();
+            let is_typing = is_typing.clone();
+            let current_demo_index = current_demo_index.clone();
+            let question = demo_conversations[question_index].0.to_string();
+            let answer = demo_conversations[question_index].1.to_string();
+            
+            // Clear previous messages and add user message
+            let user_message = ChatMessage {
+                text: question.clone(),
+                is_user: true,
+            };
+            chat_messages.set(vec![user_message]);
+            current_demo_index.set(question_index);
+            
+            // Show typing indicator
+            is_typing.set(true);
+            
+            // Simulate AI response delay
+            let timeout = Timeout::new(1500, move || {
+                is_typing.set(false);
+                let ai_message = ChatMessage {
+                    text: answer,
+                    is_user: false,
+                };
+                chat_messages.set(vec![
+                    ChatMessage {
+                        text: question,
+                        is_user: true,
+                    },
+                    ai_message,
+                ]);
+            });
+            timeout.forget();
+        })
+    };
     html! {
         <div class="faq-page">
             <div class="faq-background"></div>
@@ -44,9 +190,90 @@ pub fn faq() -> Html {
             </section>
 
             <section class="faq-section">
+
+
+                <FaqItem 
+                    question="Can I try the service before signing up?"
+                    id="try-service"
+                >
+                    <p>{"Yes! Try our demo chat below to see how LightFriend responds to common requests:"}</p>
+                    
+                    <div class="demo-chat-container">
+                        <div class="phone-demo">
+                            <div class="phone-screen">
+                                <div class="phone-header">
+                                    <div class="phone-status">
+                                        <span>{"9:41"}</span>
+                                        <span>{"100%"}</span>
+                                    </div>
+                                    <div class="chat-header">
+                                        <span class="contact-name">{"lightfriend"}</span>
+                                    </div>
+                                </div>
+                                <div class="chat-messages">
+                                    {if chat_messages.is_empty() {
+                                        html! {
+                                            <div class="welcome-message">
+                                                <p>{"Try a demo message below 👇"}</p>
+                                            </div>
+                                        }
+                                    } else {
+                                        html! {
+                                            <>
+                                                {for chat_messages.iter().map(|msg| {
+                                                    let class = if msg.is_user { "user" } else { "ai" };
+                                                    html! {
+                                                        <div class={if msg.is_user { "user-message" } else { "ai-message" }}>
+                                                            <div class={format!("message-bubble {}", class)}>
+                                                                {&msg.text}
+                                                            </div>
+                                                        </div>
+                                                    }
+                                                })}
+                                                {if *is_typing {
+                                                    html! {
+                                                        <div class="ai-message">
+                                                            <div class="message-bubble typing">
+                                                                <div class="typing-indicator">
+                                                                    <span></span>
+                                                                    <span></span>
+                                                                    <span></span>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    }
+                                                } else {
+                                                    html! {}
+                                                }}
+                                            </>
+                                        }
+                                    }}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="demo-controls">
+                            <h3>{"Try these examples:"}</h3>
+                            <div class="demo-questions">
+                                {for (0..demo_conversations.len()).map(|i| {
+                                    let start_demo = start_demo.clone();
+                                    let onclick = Callback::from(move |_| start_demo.emit(i));
+                                    html! {
+                                        <button class="demo-question" onclick={onclick}>
+                                            {demo_conversations[i].0}
+                                        </button>
+                                    }
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                </FaqItem>
+
                 <h2>{"Why Go Light?"}</h2>
                 
-                <FaqItem question="Why choose a dumbphone?">
+                <FaqItem 
+                    question="Why choose a dumbphone?"
+                    id="why-dumbphone"
+                >
                     <p>
                         {"Your time is precious - why waste it fighting an endless battle against notifications and addictive apps? While tech giants deploy armies of experts to hijack your focus, there's a simpler path: stepping away. Choosing a dumbphone isn't about going backwards, you'll still have cutting edge AI at your fingertips. It's about taking back control of your attention and living life as its protagonist rather than watching it pass by through a screen."}
                     </p>
@@ -56,7 +283,10 @@ pub fn faq() -> Html {
                     </p>
                 </FaqItem>
 
-                <FaqItem question="What about the impact on relationships?">
+                <FaqItem 
+                    question="What about the impact on relationships?"
+                    id="relationships-impact"
+                >
                     <img src="/assets/kid_draws_mom.jpg" alt="Child drawing mother on phone" class="faq-image" />
                     <p>
                         {"A child's drawing tells a thousand words. When asked to draw their parents, more and more children depict them with phones in hand – a powerful reflection of how our digital habits affect those around us."}
@@ -66,7 +296,10 @@ pub fn faq() -> Html {
                     </p>
                 </FaqItem>
 
-                <FaqItem question="What's the value of boredom?">
+                <FaqItem 
+                    question="What's the value of boredom?"
+                    id="value-of-boredom"
+                >
                     <img src="/assets/boredom.png" alt="Illustration of creative boredom" class="faq-image" />
                     <p>
                         {"Remember when being bored meant letting your mind wander, leading to unexpected bursts of creativity and self-discovery? Today's smartphones have eliminated these precious moments of 'empty time' - replacing them with endless scrolling and constant stimulation."}
@@ -78,7 +311,10 @@ pub fn faq() -> Html {
 
                 <h2>{"Practical Solutions"}</h2>
 
-                <FaqItem question="How do I handle 2FA authentication?">
+                <FaqItem 
+                    question="How do I handle 2FA authentication?"
+                    id="handle-2fa"
+                >
                     <h3>{"'Step Two' mac app"}</h3>
                     <p>{"It is very fast and simple. It's free for certain number of accounts and then small one time payment for unlimited."}</p>
                     <img src="/assets/StepTwo.png" alt="Step Two app" class="faq-image" />
@@ -92,7 +328,10 @@ pub fn faq() -> Html {
                     <img src="/assets/nordea_code_calc.png" alt="Nordea code calculator" class="faq-image" />
                 </FaqItem>
 
-                <FaqItem question="How do I handle commuting and navigation?">
+                <FaqItem 
+                    question="How do I handle commuting and navigation?"
+                    id="commuting-navigation"
+                >
                     <h3>{"Airport"}</h3>
                     <p>{"Get printed boarding passes and use computer to check flight times. With some airlines you can also get gate changes texted to you."}</p>
                     
@@ -108,7 +347,10 @@ pub fn faq() -> Html {
 
                 <h2>{"Privacy & Security"}</h2>
 
-                <FaqItem question="How does LightFriend protect my data?">
+                <FaqItem 
+                    question="How does LightFriend protect my data?"
+                    id="data-protection"
+                >
                     <p>{"We keep your data minimal and secure:"}</p>
                     <ul>
                         <li><strong>{"Calls:"}</strong>{" No recordings. Just anonymous metrics to improve service."}</li>
@@ -120,7 +362,10 @@ pub fn faq() -> Html {
                     </pre>
                 </FaqItem>
 
-                <FaqItem question="What tools can help me stay focused?">
+                <FaqItem 
+                    question="What tools can help me stay focused?"
+                    id="focus-tools"
+                >
                     <ul>
                         <li><a href="https://getcoldturkey.com/">{"Cold Turkey App Blocker"}</a>{" is great for website and computer app blocking. It is very strong so be careful though not to lock yourself out of your computer:D"}</li>
                         <li>{"Amazon kindle has small simple text based browser, which can be used for reading website blogs."}</li>
@@ -128,38 +373,7 @@ pub fn faq() -> Html {
                     </ul>
                 </FaqItem>
 
-                <h2>{"Service Coverage"}</h2>
 
-                <FaqItem question="Where is LightFriend available?">
-                    <h3>{"Local Phone Numbers"}</h3>
-                    <p>{"We currently have local phone numbers available in:"}</p>
-                    <ul>
-                        <li>{"United States"}</li>
-                        <li>{"United Kingdom"}</li>
-                        <li>{"Finland"}</li>
-                        <li>{"Australia"}</li>
-                        <li>{"Israel"}</li>
-                    </ul>
-                    <p>{"If your country is not listed above and not mentioned in the restricted countries below, please contact "}<a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com"}</a>{" to inquire about the possibility of adding a new local number for your region."}</p>
-                    
-                    <h3>{"Country Restrictions"}</h3>
-                    <p>{"As a Finnish business, we face certain regulatory restrictions in acquiring local phone numbers. Some countries where we currently cannot provide local numbers include:"}</p>
-                    <ul>
-                        <li>{"Germany"}</li>
-                        <li>{"India"}</li>
-                        <li>{"Many African countries"}</li>
-                        <li>{"And several others due to local telecommunications regulations"}</li>
-                    </ul>
-
-                    <h3>{"International Service Options"}</h3>
-                    <p>{"Even if you're in a country where we don't have local numbers, you can still benefit from LightFriend's notification features! Our outbound services can keep you informed about:"}</p>
-                    <ul>
-                        <li>{"Calendar events"}</li>
-                        <li>{"Important emails"}</li>
-                        <li>{"WhatsApp messages"}</li>
-                    </ul>
-                    <p>{"These notifications can be delivered via calls or texts from our international number, and importantly, receiving these won't incur any additional charges on your end compared to local numbers."}</p>
-                </FaqItem>
             </section>
 
             <style>
@@ -273,6 +487,34 @@ pub fn faq() -> Html {
                     color: #7EB2FF;
                 }
 
+                .faq-question-container {
+                    display: flex;
+                    align-items: center;
+                    width: 100%;
+                }
+
+                .copy-link-button {
+                    background: none;
+                    border: none;
+                    color: #666;
+                    padding: 8px;
+                    cursor: pointer;
+                    opacity: 0;
+                    transition: opacity 0.3s ease;
+                }
+
+                .faq-question-container:hover .copy-link-button {
+                    opacity: 1;
+                }
+
+                .copy-link-button:hover {
+                    color: #7EB2FF;
+                }
+
+                .link-icon {
+                    font-size: 1rem;
+                }
+
                 .toggle-icon {
                     font-size: 1.5rem;
                     color: #7EB2FF;
@@ -359,6 +601,226 @@ pub fn faq() -> Html {
                     color: #999;
                     white-space: pre-wrap;
                     overflow-x: auto;
+                }
+
+                /* Demo Chat Styling */
+                .demo-chat-container {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 2rem;
+                    margin: 2rem 0;
+                    padding: 1rem;
+                }
+
+                .phone-demo {
+                    width: 280px;
+                    height: 480px;
+                    background: #2a2a2a;
+                    border-radius: 20px;
+                    position: relative;
+                    padding: 40px 20px;
+                    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+                    border: 2px solid #444;
+                    overflow: hidden;
+                }
+
+                .phone-demo::before {
+                    content: '';
+                    position: absolute;
+                    top: 15px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    width: 50px;
+                    height: 5px;
+                    background: #444;
+                    border-radius: 3px;
+                }
+
+                .phone-screen {
+                    background: #001a1a;
+                    height: 280px;
+                    width: 240px;
+                    border-radius: 5px;
+                    overflow: hidden;
+                    display: flex;
+                    flex-direction: column;
+                    border: 3px solid #444;
+                    box-shadow: inset 0 0 10px rgba(0, 255, 255, 0.1);
+                }
+
+                .phone-header {
+                    background: rgba(0, 0, 0, 0.9);
+                    padding: 10px;
+                    border-bottom: 1px solid #333;
+                }
+
+                .phone-status {
+                    display: flex;
+                    justify-content: space-between;
+                    color: #fff;
+                    font-size: 0.8rem;
+                    margin-bottom: 10px;
+                }
+
+                .chat-header {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    padding: 5px 0;
+                }
+
+                .contact-name {
+                    color: #fff;
+                    font-weight: bold;
+                    font-size: 1.1rem;
+                }
+
+                .contact-status {
+                    color: #666;
+                    font-size: 0.8rem;
+                }
+
+                .chat-messages {
+                    flex: 1;
+                    overflow-y: auto;
+                    padding: 15px;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 10px;
+                    background: #000;
+                }
+
+                .chat-messages::-webkit-scrollbar {
+                    width: 6px;
+                }
+
+                .chat-messages::-webkit-scrollbar-track {
+                    background: transparent;
+                }
+
+                .chat-messages::-webkit-scrollbar-thumb {
+                    background: #333;
+                    border-radius: 3px;
+                }
+
+                .welcome-message {
+                    text-align: center;
+                    color: #666;
+                    padding: 20px;
+                }
+
+                .message-bubble {
+                    max-width: 80%;
+                    padding: 10px 15px;
+                    border-radius: 15px;
+                    font-size: 0.9rem;
+                    line-height: 1.4;
+                    white-space: pre-wrap;
+                }
+
+                .user-message {
+                    align-self: flex-end;
+                }
+
+                .ai-message {
+                    align-self: flex-start;
+                }
+
+                .user .message-bubble {
+                    background: #1E90FF;
+                    color: white;
+                    border-bottom-right-radius: 5px;
+                }
+
+                .ai .message-bubble {
+                    background: #333;
+                    color: white;
+                    border-bottom-left-radius: 5px;
+                }
+
+                .typing .message-bubble {
+                    background: #333;
+                    padding: 15px;
+                }
+
+                .typing-indicator {
+                    display: flex;
+                    gap: 4px;
+                }
+
+                .typing-indicator span {
+                    width: 8px;
+                    height: 8px;
+                    background: #666;
+                    border-radius: 50%;
+                    animation: typing 1s infinite;
+                }
+
+                .typing-indicator span:nth-child(2) {
+                    animation-delay: 0.2s;
+                }
+
+                .typing-indicator span:nth-child(3) {
+                    animation-delay: 0.4s;
+                }
+
+                @keyframes typing {
+                    0%, 100% { transform: translateY(0); }
+                    50% { transform: translateY(-5px); }
+                }
+
+                .demo-controls {
+                    width: 100%;
+                    max-width: 400px;
+                }
+
+                .demo-controls h3 {
+                    text-align: center;
+                    margin-bottom: 1rem;
+                    color: #fff;
+                }
+
+                .demo-questions {
+                    display: grid;
+                    gap: 10px;
+                }
+
+                .demo-question {
+                    background: rgba(30, 144, 255, 0.1);
+                    border: 1px solid rgba(30, 144, 255, 0.3);
+                    color: #fff;
+                    padding: 12px;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                    text-align: left;
+                }
+
+                .demo-question:hover {
+                    background: rgba(30, 144, 255, 0.2);
+                    border-color: rgba(30, 144, 255, 0.5);
+                }
+
+                @media (max-width: 768px) {
+                    .demo-chat-container {
+                        padding: 0;
+                    }
+
+                    .phone-demo {
+                        width: 100%;
+                        max-width: 280px;
+                        height: 480px;
+                    }
+
+                    .phone-screen {
+                        width: calc(100% - 40px);
+                        height: 280px;
+                    }
+
+                    .demo-controls {
+                        padding: 0 1rem;
+                    }
                 }
 
                 @media (max-width: 768px) {

@@ -15,17 +15,10 @@ use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 use gloo_timers::callback::Timeout;
 
-#[derive(Clone, PartialEq)]
-struct ChatMessage {
-    text: String,
-    is_user: bool,
-}
 
 #[function_component(Landing)]
 pub fn landing() -> Html {
-    let chat_messages = use_state(|| Vec::<ChatMessage>::new());
-    let is_typing = use_state(|| false);
-    let current_demo_index = use_state(|| 0);
+
     let current_phone_word = use_state(|| 0);
 
     // Simple word rotation timer
@@ -40,59 +33,7 @@ pub fn landing() -> Html {
             || {}
         });
     }
-    // Define demo conversations as a static array to avoid ownership issues
-    let demo_conversations = [
-        ("Check my WhatsApp messages", "You have 3 new WhatsApp messages:\n\n📱 Mom: \"Don't forget dinner at 7pm\"\n📱 Sarah: \"Great job on the presentation!\"\n📱 Work Group: \"Meeting moved to 3pm tomorrow\""),
-        ("What's the weather like?", "🌤️ Today in your location:\n\nTemperature: 72°F (22°C)\nConditions: Partly cloudy\nChance of rain: 20%\n\nPerfect weather for a walk!"),
-        ("Any important emails?", "📧 You have 2 important emails:\n\n• From: boss@company.com\n  Subject: \"Q4 Budget Review - Action Required\"\n  Received: 2 hours ago\n\n• From: bank@yourbank.com\n  Subject: \"Account Statement Ready\"\n  Received: 1 hour ago"),
-        ("What's on my calendar today?", "📅 Your schedule for today:\n\n• 2:00 PM - Team standup (30 min)\n• 4:00 PM - Client call with ABC Corp (1 hour)\n• 6:30 PM - Dinner with family\n\nNext up: Team standup in 45 minutes"),
-    ];
 
-    let start_demo = {
-        let chat_messages = chat_messages.clone();
-        let is_typing = is_typing.clone();
-        let current_demo_index = current_demo_index.clone();
-        
-        Callback::from(move |question_index: usize| {
-            if question_index >= demo_conversations.len() {
-                return;
-            }
-            
-            let chat_messages = chat_messages.clone();
-            let is_typing = is_typing.clone();
-            let current_demo_index = current_demo_index.clone();
-            let question = demo_conversations[question_index].0.to_string();
-            let answer = demo_conversations[question_index].1.to_string();
-            
-            // Clear previous messages and add user message
-            let user_message = ChatMessage {
-                text: question.clone(),
-                is_user: true,
-            };
-            chat_messages.set(vec![user_message]);
-            current_demo_index.set(question_index);
-            
-            // Show typing indicator
-            is_typing.set(true);
-            
-            // Simulate AI response delay
-            let timeout = Timeout::new(1500, move || {
-                is_typing.set(false);
-                let ai_message = ChatMessage {
-                    text: answer,
-                    is_user: false,
-                };
-                chat_messages.set(vec![
-                    ChatMessage {
-                        text: question,
-                        is_user: true,
-                    },
-                    ai_message,
-                ]);
-            });
-            timeout.forget();
-        })
-    };
 
     use_effect(|| {
         let window = web_sys::window().unwrap();
@@ -225,9 +166,14 @@ pub fn landing() -> Html {
                             {"Access all the necessary features without a smartphone so you can escape the doomscrolling"}
                         </p>
                     </div>
-                    <Link<Route> to={Route::Register} classes="forward-link">
-                        <button class="hero-cta">{"Get Started"}</button>
-                    </Link<Route>>
+                    <div class="hero-cta-group">
+                        <Link<Route> to={Route::Register} classes="forward-link">
+                            <button class="hero-cta">{"Get Started"}</button>
+                        </Link<Route>>
+                        <a href="/faq#try-service" class="faq-link">
+                            {"Try demo first"}
+                        </a>
+                    </div>
                 </div>
         </header>        
 
@@ -2675,6 +2621,51 @@ pub fn landing() -> Html {
         #90c2ff,
         #5479f1
     );
+}
+
+.hero-cta-group {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 1rem;
+}
+
+.faq-link {
+    color: #7EB2FF;
+    text-decoration: none;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+    position: relative;
+    padding: 0.5rem 1rem;
+}
+
+.faq-link::after {
+    content: '';
+    position: absolute;
+    width: 100%;
+    height: 1px;
+    bottom: -2px;
+    left: 0;
+    background: linear-gradient(90deg, #1E90FF, #4169E1);
+    transform: scaleX(0);
+    transform-origin: bottom right;
+    transition: transform 0.3s ease;
+}
+
+.faq-link:hover {
+    color: #90c2ff;
+    text-shadow: 0 0 8px rgba(30, 144, 255, 0.3);
+}
+
+.faq-link:hover::after {
+    transform: scaleX(1);
+    transform-origin: bottom left;
+}
+
+@media (max-width: 768px) {
+    .hero-cta-group {
+        gap: 0.75rem;
+    }
 }
 
 

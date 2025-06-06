@@ -472,11 +472,11 @@ pub mod register {
                                                 error_setter.set(None);
                                                 success_setter.set(Some(resp.message));
                                                 
-                                                // Redirect to home page after a short delay
+                                                // Redirect to pricing page after a short delay
                                                 let window_clone = window.clone();
                                                 wasm_bindgen_futures::spawn_local(async move {
                                                     gloo_timers::future::TimeoutFuture::new(1_000).await;
-                                                    let _ = window_clone.location().set_href("/");
+                                                    let _ = window_clone.location().set_href("/pricing");
                                                 });
                                             }
                                         }
