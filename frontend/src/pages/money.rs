@@ -180,9 +180,17 @@ pub fn pricing(props: &PricingProps) -> Html {
                                         subscription_type="hard_mode"
                                     />
                                 }
+                            } else if props.sub_tier.as_ref().map_or(false, |tier| tier != "tier 1") {
+                                html! {
+                                    <CheckoutButton 
+                                        user_id={props.user_id} 
+                                        user_email={props.user_email.clone()} 
+                                        subscription_type="hard_mode"
+                                    />
+                                }
                             } else {
                                 html! {
-                                    <button class="iq-button disabled" disabled=true><b>{"Already subscribed"}</b></button>
+                                    <button class="iq-button current-plan" disabled=true><b>{"Current Plan"}</b></button>
                                 }
                             }
                         } else {
@@ -222,9 +230,17 @@ pub fn pricing(props: &PricingProps) -> Html {
                                         subscription_type="world"
                                     />
                                 }
+                            } else if props.sub_tier.as_ref().map_or(false, |tier| tier != "tier 2") {
+                                html! {
+                                    <CheckoutButton 
+                                        user_id={props.user_id} 
+                                        user_email={props.user_email.clone()} 
+                                        subscription_type="world"
+                                    />
+                                }
                             } else {
                                 html! {
-                                    <button class="iq-button disabled" disabled=true><b>{"Already subscribed"}</b></button>
+                                    <button class="iq-button current-plan" disabled=true><b>{"Current Plan"}</b></button>
                                 }
                             }
                         } else {
@@ -793,6 +809,18 @@ pub fn pricing(props: &PricingProps) -> Html {
     .iq-button.disabled:hover {
         transform: none;
         box-shadow: none;
+    }
+
+    .iq-button.current-plan {
+        background: rgba(30, 144, 255, 0.3);
+        border: 1px solid rgba(30, 144, 255, 0.5);
+        cursor: default;
+    }
+
+    .iq-button.current-plan:hover {
+        transform: none;
+        box-shadow: none;
+        background: rgba(30, 144, 255, 0.3);
     }
 
     @media (max-width: 968px) {
