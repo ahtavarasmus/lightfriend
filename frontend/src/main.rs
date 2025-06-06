@@ -58,7 +58,7 @@ use pages::{
     faq::Faq,
     home::is_logged_in,
     termsprivacy::{TermsAndConditions, PrivacyPolicy},
-    money::{Pricing, PricingWrapper},
+    money::{Pricing},
 };
 
 use auth::{
@@ -99,6 +99,9 @@ pub enum Route {
     Pricing,
 }
 
+
+use crate::profile::billing_models::UserProfile;
+use gloo_net::http::Request;
 
 fn switch(routes: Route) -> Html {
     match routes {
@@ -144,25 +147,68 @@ fn switch(routes: Route) -> Html {
         },
         Route::Pricing => {
             info!("Rendering Pricing page");
-            let logged_in = is_logged_in();
-            if logged_in {
-                html! { 
-                    <PricingWrapper />
-                }
-            } else {
-                html! { 
-                    <Pricing 
-                        user_id={0}
-                        user_email={"".to_string()}
-                        sub_tier={None::<String>}
-                        is_logged_in={false}
-                    /> 
-                }
-            }
+            html! { <PricingWrapper /> }
         },
     }
 }
 
+
+#[function_component(PricingWrapper)]
+pub fn pricing_wrapper() -> Html {
+    let profile_data = use_state(|| None::<UserProfile>);
+    
+    {
+        let profile_data = profile_data.clone();
+        
+        use_effect_with_deps(move |_| {
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Some(token) = window()
+                    .and_then(|w| w.local_storage().ok())
+                    .flatten()
+                    .and_then(|storage| storage.get_item("token").ok())
+                    .flatten()
+                {
+                    match Request::get(&format!("{}/api/profile", config::get_backend_url()))
+                        .header("Authorization", &format!("Bearer {}", token))
+                        .send()
+                        .await
+                    {
+                        Ok(response) => {
+                            if let Ok(profile) = response.json::<UserProfile>().await {
+                                profile_data.set(Some(profile));
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                }
+            });
+            
+            || ()
+        }, ());
+    }
+
+    if let Some(profile) = (*profile_data).as_ref() {
+        html! {
+            <Pricing
+                user_id={profile.id}
+                user_email={profile.email.clone()}
+                sub_tier={profile.sub_tier.clone()}
+                is_logged_in={true}
+                phone_number={profile.phone_number.clone()}
+            />
+        }
+    } else {
+        html! {
+            <Pricing
+                user_id={0}
+                user_email={"".to_string()}
+                sub_tier={None::<String>}
+                is_logged_in={false}
+                phone_number={None::<String>}
+            />
+        }
+    }
+}
 
 #[derive(Properties, PartialEq)]
 pub struct NavProps {
@@ -296,7 +342,6 @@ let close_menu = {
         </nav>
     }
 }
-
 
 #[function_component]
 fn App() -> Html {
