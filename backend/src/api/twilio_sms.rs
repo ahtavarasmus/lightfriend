@@ -2349,24 +2349,25 @@ pub async fn process_sms(
                     // Only proceed if we have an image URL from the message
                     if let Some(url) = image_url.as_ref() {
                         match crate::utils::qr_utils::scan_qr_code(url).await {
-                        Ok(data) => {
-                            if data.is_empty() {
-                                tool_answers.insert(tool_call_id, "No QR code found in the image.".to_string());
-                            } else {
-                                tool_answers.insert(tool_call_id, format!("QR code content: {}", data));
+                            Ok(data) => {
+                                if data.is_empty() {
+                                    tool_answers.insert(tool_call_id, "No QR code found in the image.".to_string());
+                                } else {
+                                    tool_answers.insert(tool_call_id, format!("QR code content: {}", data));
+                                }
+                            },
+                            Err(e) => {
+                                eprintln!("Failed to scan QR code: {}", e);
+                                tool_answers.insert(tool_call_id, 
+                                    "Failed to scan QR code from the image. Please make sure the QR code is clearly visible.".to_string()
+                                );
                             }
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to scan QR code: {}", e);
-                            tool_answers.insert(tool_call_id, 
-                                "Failed to scan QR code from the image. Please make sure the QR code is clearly visible.".to_string()
-                            );
                         }
                     } else {
                         tool_answers.insert(tool_call_id, 
                             "No image was provided in the message. Please send an image containing a QR code.".to_string()
                         );
-                    }
+              }
                 } else if name == "delete_sms_conversation_history" {
                     println!("Executing delete_sms_conversation_history tool call");
 
