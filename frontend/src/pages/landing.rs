@@ -191,12 +191,15 @@ pub fn landing() -> Html {
                             <li>{"📧 Emails"}</li>
                             <li>{"📅 Calendar"}</li>
                             <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI search"}</li>
-                            <li>{"📸 Photo Analysis & Translation"}</li>
-                            <li>{"☀️ Weather, Tasks and even Shazam"}</li>
+                            <li>{"📸 Photo Analysis & Translation(in US & AUS only)"}</li>
+                            <li>{"☀️ Weather, Tasks"}</li>
                         </ul>
                         <div class="demo-link-container">
                             <a href="https://www.youtube.com/shorts/KrVdJbHPB-o" target="_blank" rel="noopener noreferrer" class="demo-link">
                                 {"▶️ See It in Action"}
+                            </a>
+                            <a href="/faq#try-service" class="faq-link">
+                                {"Try demo chat"}
                             </a>
                         </div>
                     </div>

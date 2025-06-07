@@ -292,6 +292,7 @@ let group_states = use_state(|| {
                                 </p>
                             </div>
 
+                            /*
                             // Shazam
                             <div class="service-item">
                                 <div class="service-header">
@@ -331,6 +332,7 @@ let group_states = use_state(|| {
                                     </div>
                                 </div>
                             </div>
+                            */
 
                             // QR Code Scanner (Coming Soon)
                             <div class="service-item coming-soon">
