@@ -406,7 +406,7 @@ pub fn pricing(props: &PricingProps) -> Html {
         left: 0;
         width: 100%;
         height: 100vh;
-        background-image: url('/assets/human_looking_at_field.png');
+        background-image: url('/assets/human_looking_at_field.webp');
         background-size: cover;
         background-position: center;
         background-repeat: no-repeat;

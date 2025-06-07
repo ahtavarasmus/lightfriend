@@ -204,9 +204,9 @@ pub fn landing() -> Html {
                         </div>
                     </div>
                     <div class="sticky-image">
-                        <img src="/assets/whatsappexample.png" alt="WhatsApp example interface" class="example-image whatsapp-image" />
-                        <img src="/assets/emailexample.png" alt="Email example interface" class="example-image email-image" />
-                        <img src="/assets/calendarexample.png" alt="Calendar example interface" class="example-image calendar-image" />
+                        <img src="/assets/whatsappexample.png" alt="WhatsApp example interface" loading="lazy" class="example-image whatsapp-image" />
+                        <img src="/assets/calendarexample1.webp" alt="Calendar example interface" loading="lazy" class="example-image email-image" />
+                        <img src="/assets/phone_translation_example.png" alt="Photo example interface" loading="lazy" class="example-image calendar-image" />
                     </div>
                 </div>
             </section>
@@ -219,10 +219,10 @@ pub fn landing() -> Html {
                     <h2>{"Everything just a call or text away"}</h2>
                     <p>{"Need your calendar? A WhatsApp reply? Just call or text LightFriend."}</p>
                     <ul class="feature-list">
-                        <li><img src="/assets/whatsapplogo.png" alt="WhatsApp" class="feature-logo" /> {"WhatsApp"}</li>
+                        <li><img src="/assets/whatsapplogo.png" loading="lazy" alt="WhatsApp" class="feature-logo" /> {"WhatsApp"}</li>
                         <li>{"📧 Emails"}</li>
                         <li>{"📅 Calendar"}</li>
-                        <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI search"}</li>
+                        <li><img src="/assets/perplexitylogo.png" loading="lazy" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI search"}</li>
                         <li>{"☀️ Weather, Tasks and even Shazam"}</li>
                     </ul>
                     <div class="demo-link-container">
@@ -244,7 +244,7 @@ pub fn landing() -> Html {
                     </ul>
                 </div>
                 <div class="feature-image">
-                    <img src="/assets/notifications.png" alt="Person receiving a meaningful notification" />
+                    <img src="/assets/notifications.png" loading="lazy"  alt="Person receiving a meaningful notification" />
                 </div>
             </div>
 
@@ -2100,7 +2100,7 @@ pub fn landing() -> Html {
     left: 0;
     width: 100%;
     height: 100vh;
-    background-image: url('/assets/boy_holding_dumbphone_in_crowded_place.png');
+    background-image: url('/assets/boy_holding_dumbphone_in_crowded_place.webp');
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;

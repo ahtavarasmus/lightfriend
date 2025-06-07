@@ -134,6 +134,7 @@ pub fn faq() -> Html {
         ("Any important emails?", "📧 You have 2 important emails:\n\n• From: boss@company.com\n  Subject: \"Q4 Budget Review - Action Required\"\n  Received: 2 hours ago\n\n• From: bank@yourbank.com\n  Subject: \"Account Statement Ready\"\n  Received: 1 hour ago"),
         ("What's on my calendar today?", "📅 Your schedule for today:\n\n• 2:00 PM - Team standup (30 min)\n• 4:00 PM - Client call with ABC Corp (1 hour)\n• 6:30 PM - Dinner with family\n\nNext up: Team standup in 45 minutes"),
         ("When is the next Light Phone 3 estimated delivery date?", "📱 Light Phone 3 has estimated delivery date in August 2025 if you order today"),
+        ("📸 [Image sent] Can you translate this menu?", "I see a Japanese restaurant menu in the image. Here's the translation:\n\n🍜 Ramen Section:\n1. Tonkotsu Ramen - $12\n   Rich pork bone broth\n2. Miso Ramen - $11\n   Traditional fermented soybean paste soup\n3. Shoyu Ramen - $11\n   Classic soy sauce based broth\n\n🍱 Side Dishes:\n• Gyoza (6 pcs) - $6\n• Edamame - $4\n• Karaage (Japanese fried chicken) - $7\n\nWould you like me to explain any of these dishes in more detail?"),
     ];
 
     let start_demo = {
@@ -277,7 +278,7 @@ pub fn faq() -> Html {
                     <p>
                         {"Your time is precious - why waste it fighting an endless battle against notifications and addictive apps? While tech giants deploy armies of experts to hijack your focus, there's a simpler path: stepping away. Choosing a dumbphone isn't about going backwards, you'll still have cutting edge AI at your fingertips. It's about taking back control of your attention and living life as its protagonist rather than watching it pass by through a screen."}
                     </p>
-                    <img src="/assets/squidwardlookingwindow.png" alt="Squidward looking through window metaphor" class="faq-image" />
+                    <img src="/assets/squidwardlookingwindow.png" loading="lazy" alt="Squidward looking through window metaphor" class="faq-image" />
                     <p>
                         {"Like Squidward on his window, many of us find ourselves looking out at life from behind our screens. We see others living, connecting, and experiencing the world firsthand, while we remain observers, separated by a digital barrier."}
                     </p>
@@ -287,7 +288,7 @@ pub fn faq() -> Html {
                     question="What about the impact on relationships?"
                     id="relationships-impact"
                 >
-                    <img src="/assets/kid_draws_mom.jpg" alt="Child drawing mother on phone" class="faq-image" />
+                    <img src="/assets/kid_draws_mom.jpg" loading="lazy"  alt="Child drawing mother on phone" class="faq-image" />
                     <p>
                         {"A child's drawing tells a thousand words. When asked to draw their parents, more and more children depict them with phones in hand – a powerful reflection of how our digital habits affect those around us."}
                     </p>
@@ -300,7 +301,7 @@ pub fn faq() -> Html {
                     question="What's the value of boredom?"
                     id="value-of-boredom"
                 >
-                    <img src="/assets/boredom.png" alt="Illustration of creative boredom" class="faq-image" />
+                    <img src="/assets/boredom.png" loading="lazy" alt="Illustration of creative boredom" class="faq-image" />
                     <p>
                         {"Remember when being bored meant letting your mind wander, leading to unexpected bursts of creativity and self-discovery? Today's smartphones have eliminated these precious moments of 'empty time' - replacing them with endless scrolling and constant stimulation."}
                     </p>
@@ -317,15 +318,15 @@ pub fn faq() -> Html {
                 >
                     <h3>{"'Step Two' mac app"}</h3>
                     <p>{"It is very fast and simple. It's free for certain number of accounts and then small one time payment for unlimited."}</p>
-                    <img src="/assets/StepTwo.png" alt="Step Two app" class="faq-image" />
+                    <img src="/assets/StepTwo.png" loading="lazy" alt="Step Two app" class="faq-image" />
                     
                     <h3>{"Yubikey"}</h3>
                     <p>{"Can be used inplace of authenticator apps."}</p>
-                    <img src="/assets/Yubikey.png" alt="Yubikey" class="faq-image" />
+                    <img src="/assets/Yubikey.png" alt="Yubikey" loading="lazy" class="faq-image" />
                     
                     <h3>{"Physical Code Calculator Device"}</h3>
                     <p>{"Most banks have it and it's used for bank login."}</p>
-                    <img src="/assets/nordea_code_calc.png" alt="Nordea code calculator" class="faq-image" />
+                    <img src="/assets/nordea_code_calc.png" loading="lazy" alt="Nordea code calculator" class="faq-image" />
                 </FaqItem>
 
                 <FaqItem 
@@ -392,7 +393,7 @@ pub fn faq() -> Html {
                     left: 0;
                     width: 100%;
                     height: 100vh;
-                    background-image: url('/assets/bicycle_field.png');
+                    background-image: url('/assets/bicycle_field.webp');
                     background-size: cover;
                     background-position: center;
                     background-repeat: no-repeat;
@@ -689,6 +690,12 @@ pub fn faq() -> Html {
                     flex-direction: column;
                     gap: 10px;
                     background: #000;
+                }
+
+                .message-bubble img {
+                    max-width: 100%;
+                    border-radius: 8px;
+                    margin: 5px 0;
                 }
 
                 .chat-messages::-webkit-scrollbar {
