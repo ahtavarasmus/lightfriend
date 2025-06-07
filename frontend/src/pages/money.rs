@@ -297,11 +297,6 @@ pub fn pricing(props: &PricingProps) -> Html {
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
-                            <td>{"Recognize Songs with Shazam"}</td>
-                            <td>{"❌"}</td>
-                            <td>{"✅"}</td>
-                        </tr>
-                        <tr>
                             <td>{"24/7 Automated Monitoring"}</td>
                             <td>{"❌"}</td>
                             <td>{"✅"}</td>

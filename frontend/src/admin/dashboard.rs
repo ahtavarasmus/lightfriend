@@ -268,11 +268,11 @@ pub fn admin_dashboard() -> Html {
                                                     message.set(String::new());
                                                     error.set(Some("SMS broadcast sent successfully".to_string()));
                                                 } else {
-                                                    error.set(Some("Failed to send SMS broadcast".to_string()));
+                                                    error.set(Some("Failed to send SMS broadcast(hahaa you were brave enough to try!)".to_string()));
                                                 }
                                             }
                                             Err(_) => {
-                                                error.set(Some("Failed to send SMS broadcast request".to_string()));
+                                                error.set(Some("Failed to send SMS broadcast request(hahaa you were brave enough to try!)".to_string()));
                                             }
                                         }
                                     }
@@ -352,11 +352,11 @@ pub fn admin_dashboard() -> Html {
                                                     email_message.set(String::new());
                                                     error.set(Some("Email broadcast sent successfully".to_string()));
                                                 } else {
-                                                    error.set(Some("Failed to send email broadcast".to_string()));
+                                                    error.set(Some("Failed to send email broadcast(lol you thought you were him?)".to_string()));
                                                 }
                                             }
                                             Err(_) => {
-                                                error.set(Some("Failed to send email broadcast request".to_string()));
+                                                error.set(Some("Failed to send email broadcast request(lol you thought you were him?)".to_string()));
                                             }
                                         }
                                     }

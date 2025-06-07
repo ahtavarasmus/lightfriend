@@ -33,12 +33,12 @@ pub struct User {
     pub nickname: Option<String>, // what user wants the ai to call them
     pub time_to_live: Option<i32>, // if user has not verified their account in some time it will be deleted
     pub verified: bool, 
-    pub credits: f32, // user extra credits, will not expire, can be bought if user doesn't want to subscribe or subscription tier has ran out of messages
+    pub credits: f32, // user purchased credits, will not expire, can be bought if has subscribtion or is a early user(discount = true)
     pub notify: bool, // notify when new features
     pub info: Option<String>, // extra info about the user for the ai
     pub preferred_number: Option<String>, // number the user prefers lightfriend texting/calling them from
-    pub charge_when_under: bool,
-    pub charge_back_to: Option<f32>,
+    pub charge_when_under: bool, // flag for if user wants to automatically buy more overage credits
+    pub charge_back_to: Option<f32>, // the credit amount to charge 
     pub stripe_customer_id: Option<String>,
     pub stripe_payment_method_id: Option<String>,
     pub stripe_checkout_session_id: Option<String>,
@@ -50,13 +50,13 @@ pub struct User {
     pub msgs_left: i32, // proactive messages for the monthly sub, resets every month to bought amount
     pub matrix_device_id: Option<String>,
     pub credits_left: f32, // free credits that reset every month while in the monthly sub. will always be consumed before one time credits
-    pub discount: bool, // if user can get discounted credits(for early adopters)
+    pub discount: bool, // if user can get buy overage credits without subscription(for early adopters)
     pub encrypted_matrix_password: Option<String>,
     pub encrypted_matrix_secret_storage_recovery_key: Option<String>,
-    pub last_credits_notification: Option<i32>, // Unix timestamp of last insufficient credits notification
-    pub confirm_send_event: bool, // flag that gets set when user wants to send something from voice call and it needs to be confirmed using sms
+    pub last_credits_notification: Option<i32>, // Unix timestamp of last insufficient credits notification to prevent spam
+    pub confirm_send_event: bool, // flag that gets set when user wants to send something and it needs to be confirmed before sending 
     pub agent_language: String, // language the agent will use to answer, default 'en'. 
-    pub notification_type: Option<String>,
+    pub notification_type: Option<String>, // "call" or "sms"(sms is default when none) // "call" also sends notification as sms
     pub discount_tier: Option<String>, // could be None, "msg", "voice" or "full"
 }
 

@@ -344,62 +344,15 @@ pub async fn handle_incoming_sms(
 
     // Check for Shazam shortcut ('S' or 's')
     if payload.body.trim() == "S" || payload.body.trim() == "s" {
-        println!("Shazam shortcut detected");
-    let user = match state.user_repository.find_by_phone_number(&payload.from) {
-        Ok(Some(user)) => {
-            user
-        },
-            Ok(None) => return (
-                StatusCode::NOT_FOUND,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                axum::Json(TwilioResponse {
-                    message: "User not found".to_string(),
-                })
-            ),
-            Err(e) => {
-                eprintln!("Database error: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    axum::Json(TwilioResponse {
-                        message: "Database error".to_string(),
-                    })
-                );
-            }
-        };
-        // Check if user has sufficient credits
-        if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "message").await {
-            return (
-                StatusCode::BAD_REQUEST,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                axum::Json(TwilioResponse {
-                    message: format!("Insufficient credits to use Shazam. {}", msg),
-                })
-            );
-        }
-
-        let user_id = user.id;
-        let state_clone = state.clone();
-        tokio::spawn(async move {
-            crate::api::shazam_call::start_call_for_user(
-                axum::extract::Path(user_id.to_string()),
-                axum::extract::State(state_clone),
-            ).await;
-        });
 
         return (
             StatusCode::OK,
             [(axum::http::header::CONTENT_TYPE, "application/json")],
             axum::Json(TwilioResponse {
-                message: "Shazam call initiated".to_string(),
+                message: "The Shazam feature has been discontinued due to insufficient usage. Thank you for your understanding.".to_string(),
             })
         );
     }
-
-
-
-
-
 
     // Check for STOP command
     if payload.body.trim().to_uppercase() == "STOP" {
@@ -1138,15 +1091,7 @@ pub async fn process_sms(
     );
 
 
-    let mut shazam_properties = HashMap::new();
-    shazam_properties.insert(
-        "param".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("can be anything, won't get used anyways".to_string()),
-            ..Default::default()
-        }),
-    );
+
 
     let mut calendar_properties = HashMap::new();
     calendar_properties.insert(
@@ -1461,18 +1406,7 @@ pub async fn process_sms(
                 },
             },
         },
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("use_shazam"),
-                description: Some(String::from("Shazam tool identifies the song and the artist from audio clip. This tool gives the user a call which when answered can listen to the song audio and sends the song name to user as sms. This returns a shazam listener for the user. If user asks to use shazam, identify a song or ask about it, it means you have to call this tool.")),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(shazam_properties),
-                    required: None,
-                },
-            },
-        },
+
         chat_completion::Tool {
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
@@ -1713,44 +1647,7 @@ pub async fn process_sms(
                         }
                     };
                 } else if name == "use_shazam" {
-                    println!("Executing use_shazam tool call");
-                    // Check if credits are under threshold and handle automatic charging
-                    // this is because if user only uses shazam they won't be recharged since the 
-                    // shazam message sending function does not do this yet(TODO)
-                    match state.user_repository.is_credits_under_threshold(user.id) {
-                        Ok(is_under) => {
-                            if is_under && user.charge_when_under {
-                                println!("User {} credits is under threshold after Shazam message, attempting automatic charge", user.id);
-                                use axum::extract::{State, Path};
-                                let state_clone = Arc::clone(&state);
-                                tokio::spawn(async move {
-                                    let _ = crate::handlers::stripe_handlers::automatic_charge(
-                                        State(state_clone),
-                                        Path(user.id),
-                                    ).await;
-                                });
-                                println!("Initiated automatic recharge for user after Shazam message");
-                            }
-                        },
-                        Err(e) => eprintln!("Failed to check if user credits is under threshold after Shazam message: {}", e),
-                    }
-                    let user_id = user.id;
-                    let state_clone = state.clone();
-                    tokio::spawn(async move {
-                        crate::api::shazam_call::start_call_for_user(
-                            axum::extract::Path(user_id.to_string()),
-                            axum::extract::State(state_clone),
-                        ).await;
-                    });
-                    // Return early without sending any SMS response
-                    return (
-                        StatusCode::OK,
-                        [(axum::http::header::CONTENT_TYPE, "application/json")],
-                        axum::Json(TwilioResponse {
-                            message: "Shazam call initiated".to_string(),
-                        })
-                    );
-                    // TODO i don't think we need both this call and the single email call. should remove one
+                    tool_answers.insert(tool_call_id, "The Shazam feature has been discontinued due to insufficient usage. Thank you for your understanding.".to_string());
                 } else if name == "fetch_imap_emails" {
                     println!("Executing fetch_imap_emails tool call");
                     let queryObj = crate::handlers::imap_handlers::FetchEmailsQuery { limit: None };
