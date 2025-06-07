@@ -85,40 +85,40 @@ pub async fn validate_elevenlabs_secret(
     request: Request<Body>,
     next: middleware::Next,
 ) -> Result<Response, StatusCode> {
-    println!("\n=== Starting Elevenlabs Secret Validation ===");
+    tracing::debug!("\n=== Starting Elevenlabs Secret Validation ===");
     
     let secret_key = match std::env::var("ELEVENLABS_SERVER_URL_SECRET") {
         Ok(key) => {
-            println!("✅ Successfully retrieved ELEVENLABS_SERVER_URL_SECRET");
+            tracing::debug!("✅ Successfully retrieved ELEVENLABS_SERVER_URL_SECRET");
             key
         },
         Err(e) => {
-            println!("❌ Failed to get ELEVENLABS_SERVER_URL_SECRET: {}", e);
+            tracing::error!("❌ Failed to get ELEVENLABS_SERVER_URL_SECRET: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
 
     match headers.get("x-elevenlabs-secret") {
         Some(header_value) => {
-            println!("🔍 Found x-elevenlabs-secret header");
+            tracing::debug!("🔍 Found x-elevenlabs-secret header");
             match header_value.to_str() {
                 Ok(value) => {
                     if value == secret_key {
-                        println!("✅ Secret validation successful");
+                        tracing::debug!("✅ Secret validation successful");
                         Ok(next.run(request).await)
                     } else {
-                        println!("❌ Invalid secret provided");
+                        tracing::error!("❌ Invalid secret provided");
                         Err(StatusCode::UNAUTHORIZED)
                     }
                 },
                 Err(e) => {
-                    println!("❌ Error converting header to string: {}", e);
+                    tracing::error!("❌ Error converting header to string: {}", e);
                     Err(StatusCode::UNAUTHORIZED)
                 }
             }
         },
         None => {
-            println!("❌ No x-elevenlabs-secret header found");
+            tracing::error!("❌ No x-elevenlabs-secret header found");
             Err(StatusCode::UNAUTHORIZED)
         }
     }
@@ -143,15 +143,11 @@ pub async fn fetch_assistant(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<AssistantPayload>,
 ) -> Result<Json<ConversationInitiationClientData>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Received assistant request:");
+    tracing::debug!("Received assistant request:");
     let agent_id = payload.agent_id;
-    println!("Agent ID: {}", agent_id);
     let call_sid = payload.call_sid;
-    println!("Call SID: {}", call_sid);
     let called_number = payload.called_number;
-    println!("Called Number: {}", called_number);
     let caller_number = payload.caller_id;
-    println!("Caller Number: {}", caller_number);
 
 
     let us_voice_id = std::env::var("US_VOICE_ID").expect("US_VOICE_ID not set");
@@ -171,7 +167,7 @@ pub async fn fetch_assistant(
 
     match state.user_repository.find_by_phone_number(&caller_number) {
         Ok(Some(user)) => {
-            println!("Found user: {}, {}", user.email, user.phone_number);
+            tracing::debug!("Found user by their phone number");
             
             // Check if user has sufficient credits
             if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "voice").await {
@@ -217,7 +213,7 @@ pub async fn fetch_assistant(
             // If user is not verified, verify them
             if !user.verified {
                 if let Err(e) = state.user_repository.verify_user(user.id) {
-                    println!("Error verifying user: {}", e);
+                    tracing::error!("Error verifying user: {}", e);
                     // Continue even if verification fails
                 } else {
                     if user.agent_language == "fi" {
@@ -265,7 +261,7 @@ pub async fn fetch_assistant(
             let (hours, minutes) = match get_offset_with_jiff(timezone_str) {
                 Ok((h, m)) => (h, m),
                 Err(_) => {
-                    println!("Failed to get timezone offset for {}, defaulting to UTC", timezone_str);
+                    tracing::error!("Failed to get timezone offset for {}, defaulting to UTC", timezone_str);
                     (0, 0) // UTC default
                 }
             };
@@ -292,12 +288,10 @@ pub async fn fetch_assistant(
 
             let user_current_credits_to_threshold = user.credits - charge_back_threshold;
             let seconds_to_threshold = (user_current_credits_to_threshold / voice_second_cost) as i32;
-            println!("SEconds_to_threshold: {}", seconds_to_threshold);
             // following just so it doesn't go negative although i don't think it matters
             let recharge_threshold_timestamp: i32 = (chrono::Utc::now().timestamp() as i32) + seconds_to_threshold;
 
             let seconds_to_zero_credits= (user.credits / voice_second_cost) as i32;
-            println!("Seconds to zero credits: {}", seconds_to_zero_credits);
             let zero_credits_timestamp: i32 = (chrono::Utc::now().timestamp() as i32) + seconds_to_zero_credits as i32;
 
             // log usage and start call
@@ -313,18 +307,18 @@ pub async fn fetch_assistant(
                 Some(recharge_threshold_timestamp),
                 Some(zero_credits_timestamp),
             ) {
-                eprintln!("Failed to log call usage: {}", e);
+                tracing::error!("Failed to log call usage: {}", e);
                 // Continue execution even if logging fails
             }
 
         },
         Ok(None) => {
-            println!("No user found for number: {}", caller_number);
+            tracing::debug!("No user found for number: {}", caller_number);
             dynamic_variables.insert("name".to_string(), json!(""));
             dynamic_variables.insert("user_info".to_string(), json!("new user"));
         },
         Err(e) => {
-            println!("Error looking up user: {}", e);
+            tracing::error!("Error looking up user: {}", e);
             dynamic_variables.insert("name".to_string(), json!("Guest"));
             dynamic_variables.insert("user_info".to_string(), json!({
                 "error": "Database error"
@@ -356,7 +350,7 @@ pub async fn handle_create_waiting_check_email_tool_call(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<WaitingCheckPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Received waiting check creation request for user: {}", payload.user_id);
+    tracing::debug!("Received waiting check creation request");
 
     // Handle due_date: parse provided string or use default (2 weeks from now)
     let due_date_utc = match payload.due_date {
@@ -365,7 +359,7 @@ pub async fn handle_create_waiting_check_email_tool_call(
             match chrono::DateTime::parse_from_rfc3339(&date_str) {
                 Ok(_) => date_str, // If valid RFC3339, use as-is
                 Err(_) => {
-                    println!("Invalid due_date format provided, using default");
+                    tracing::error!("Invalid due_date format provided, using default");
                     let two_weeks = chrono::Duration::weeks(2);
                     (chrono::Utc::now() + two_weeks)
                         .format("%Y-%m-%dT00:00:00Z")
@@ -405,7 +399,7 @@ pub async fn handle_create_waiting_check_email_tool_call(
 
             match state.user_repository.create_waiting_check(&new_check) {
                 Ok(_) => {
-                    println!("Successfully created waiting check for user: {} with due date: {}", 
+                    tracing::debug!("Successfully created waiting check for user: {} with due date: {}", 
                         payload.user_id, due_date_utc);
                     Ok(Json(json!({
                         "response": "I'll keep an eye out for that in your emails and notify you when I find it.",
@@ -427,7 +421,7 @@ pub async fn handle_create_waiting_check_email_tool_call(
             }
         },
         Ok(None) => {
-            println!("User not found: {}", payload.user_id);
+            tracing::error!("User not found: {}", payload.user_id);
             Err((
                 StatusCode::NOT_FOUND,
                 Json(json!({
@@ -464,7 +458,7 @@ pub async fn handle_email_fetch_tool_call(
             ));
         }
     };
-    println!("Received email fetch request for user: {}", user_id);
+    tracing::debug!("Received email fetch request for user: {}", user_id);
     
     match crate::handlers::imap_handlers::fetch_emails_imap(&state, user_id, true, Some(10), false).await {
         Ok(emails) => {
@@ -574,7 +568,7 @@ pub async fn handle_send_sms_tool_call(
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<MessageCallPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Received SMS send request with message: {}", payload.message);
+    tracing::debug!("Received SMS send request");
     
     // Get user_id from query params
     let user_id_str = match params.get("user_id") {
@@ -643,19 +637,19 @@ pub async fn handle_send_sms_tool_call(
 
     // Handle email attachments if email_id is provided - spawn as background task
     if let Some(email_id) = payload.email_id.clone() {
-        println!("Spawning background task for email attachments processing for email ID: {}", email_id);
+        tracing::debug!("Spawning background task for email attachments processing for email ID: {}", email_id);
         
         let state_clone = Arc::clone(&state);
         let conversation_clone = conversation.clone();
         let user_clone = user.clone();
         
         tokio::spawn(async move {
-            println!("Background task: Fetching email attachments for email ID: {}", email_id);
+            tracing::debug!("Background task: Fetching email attachments for email ID: {}", email_id);
             
             match fetch_single_email_imap(&state_clone, user_clone.id, &email_id).await {
                 Ok(email) => {
                     if !email.attachments.is_empty() {
-                        println!("Background task: Found {} attachments in email", email.attachments.len());
+                        tracing::debug!("Background task: Found {} attachments in email", email.attachments.len());
                         
                         let mut twilio_media_sids = Vec::new();
                         let mut attachment_message_sids = Vec::new();
@@ -694,7 +688,7 @@ pub async fn handle_send_sms_tool_call(
                                             ).await {
                                                 Ok(sid) => {
                                                     attachment_message_sids.push(sid.clone());
-                                                    println!("Background task: Sent attachment {} with message SID: {} and media SID: {}", 
+                                                    tracing::debug!("Background task: Sent attachment {} with message SID: {} and media SID: {}", 
                                                         index + 1, sid, media_sid);
                                                 },
                                                 Err(e) => {
@@ -735,7 +729,7 @@ pub async fn handle_send_sms_tool_call(
                             ).await {
                                 Ok(sid) => {
                                     attachment_message_sids.push(sid.clone());
-                                    println!("Background task: Sent summary message with SID: {}", sid);
+                                    tracing::debug!("Background task: Sent summary message with SID: {}", sid);
                                 }
                                 Err(e) => {
                                     let error_msg = e.to_string();
@@ -759,15 +753,15 @@ pub async fn handle_send_sms_tool_call(
                                         let error_msg = e.to_string();
                                         error!("Background task: Failed to cleanup Twilio media {}: {}", media_sid, error_msg);
                                     } else {
-                                        println!("Background task: Successfully cleaned up Twilio media: {}", media_sid);
+                                        tracing::debug!("Background task: Successfully cleaned up Twilio media: {}", media_sid);
                                     }
                                 }
                             });
                         }
 
-                        println!("Background task: Completed processing {} attachments", email.attachments.len());
+                        tracing::debug!("Background task: Completed processing {} attachments", email.attachments.len());
                     } else {
-                        println!("Background task: No attachments found in email");
+                        tracing::debug!("Background task: No attachments found in email");
                     }
                 }
                 Err(e) => {
@@ -787,7 +781,7 @@ pub async fn handle_send_sms_tool_call(
     ).await {
         Ok(message_sid) => {
             message_sids.push(message_sid.clone());
-            println!("Successfully sent main SMS with SID: {}", message_sid);
+            tracing::debug!("Successfully sent main SMS with SID: {}", message_sid);
             
             let attachment_info = if payload.email_id.is_some() {
                 "Email attachments are being processed in the background and will be sent shortly."
@@ -886,14 +880,12 @@ pub async fn handle_perplexity_tool_call(
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<MessageCallPayload>,
 ) -> Json<serde_json::Value> {
-    println!("Received message: {}", payload.message);
     
 
     let system_prompt = "You are assisting an AI voice calling service. The questions you receive are from voice conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read aloud 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. Use natural language sentence structure 5. When listing multiple points, use simple numbering (1, 2, 3) or natural language transitions (First... Second... Finally...) 6. Focus on the most relevant information that addresses the user's immediate needs 7. If specific numbers, dates, or proper names are important, spell them out clearly 8. Format numerical data in a way that's easy to read aloud (e.g., twenty-five percent instead of 25%) Your responses will be incorporated into a voice conversation, so clarity and natural flow are essential.";
     
     match crate::utils::tool_exec::ask_perplexity(&payload.message, system_prompt).await {
         Ok(response) => {
-            println!("Perplexity response: {}", response);
             Json(json!({
                 "response": response
             }))
@@ -911,7 +903,6 @@ pub async fn handle_calendar_tool_call(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> Json<serde_json::Value> {
-    println!("Starting calendar tool call with params: {:?}", params);
     
     // Extract required parameters from query
     let user_id_str = match params.get("user_id") {
@@ -1027,7 +1018,7 @@ pub async fn handle_tasks_creation_tool_call(
 
     match crate::handlers::google_tasks::create_task(&state, user_id, &task_request).await {
         Ok(response) => {
-            println!("Successfully created task for user: {}", user_id);
+            tracing::debug!("Successfully created task for user: {}", user_id);
             Ok(response)
         },
         Err(e) => {
@@ -1054,11 +1045,11 @@ pub async fn handle_tasks_fetching_tool_call(
         }
     };
 
-    println!("Received tasks fetch request for user: {}", user_id);
+    tracing::debug!("Received tasks fetch request for user: {}", user_id);
 
     match crate::handlers::google_tasks::get_tasks(&state, user_id).await {
         Ok(response) => {
-            println!("Successfully fetched tasks for user: {}", user_id);
+            tracing::debug!("Successfully fetched tasks for user: {}", user_id);
             Ok(response)
         },
         Err(e) => {
@@ -1099,7 +1090,6 @@ pub async fn handle_email_search_tool_call(
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<EmailSearchPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Starting email search for term: {}", payload.search_term);
 
     // Extract user_id from query parameters
     let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
@@ -1391,7 +1381,6 @@ pub async fn handle_whatsapp_confirm_send(
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<WhatsAppConfirmPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Starting WhatsApp message confirmation for chat: {}", payload.chat_name);
 
     // Extract user_id from query parameters
     let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
@@ -1469,7 +1458,6 @@ pub async fn handle_whatsapp_confirm_send(
                 &user,
             ).await {
                 Ok(message_sid) => {
-                    println!("Successfully sent confirmation SMS with SID: {}", message_sid);
                     // set the confirm event message flag for the user so we know to continue conversation with sms
                     if let Err(e) = state.user_repository.set_confirm_send_event(user_id, true) {
                         error!("Failed to set confirm send event flag: {}", e);
@@ -1513,7 +1501,6 @@ pub async fn handle_calendar_event_confirm(
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<CalendarEventConfirmPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Starting calendar event confirmation for event: {}", payload.summary);
 
     // Extract user_id from query parameters
     let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
@@ -1589,7 +1576,6 @@ pub async fn handle_calendar_event_confirm(
         &user,
     ).await {
         Ok(message_sid) => {
-            println!("Successfully sent calendar confirmation SMS with SID: {}", message_sid);
             // Set the confirm event message flag for the user
             if let Err(e) = state.user_repository.set_confirm_send_event(user_id, true) {
                 error!("Failed to set confirm send event flag: {}", e);
@@ -1621,7 +1607,6 @@ pub async fn handle_whatsapp_search_tool_call(
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<WhatsAppSearchPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Starting WhatsApp room search for term: {}", payload.search_term);
 
     // Extract user_id from query parameters
     let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
@@ -1692,7 +1677,7 @@ pub async fn handle_whatsapp_fetch_specific_room_tool_call(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Starting WhatsApp specific room message fetch");
+    tracing::debug!("Starting WhatsApp specific room message fetch");
 
     // Extract user_id and chat_room from query parameters
     let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
@@ -1771,7 +1756,7 @@ pub async fn handle_whatsapp_fetch_tool_call(
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Starting WhatsApp message fetch with time range");
+    tracing::debug!("Starting WhatsApp message fetch with time range");
 
     // Extract user_id from query parameters
     let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
@@ -1879,7 +1864,7 @@ pub async fn handle_email_response_tool_call(
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<EmailResponsePayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Starting email response confirmation for email ID: {}", payload.email_id);
+    tracing::debug!("Starting email response confirmation for email ID: {}", payload.email_id);
 
     // Extract user_id from query parameters
     let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
@@ -1935,7 +1920,7 @@ pub async fn handle_email_response_tool_call(
 
             // admins can debug their own data
             if user_id == 1 {
-                println!("from_email e: {}", from_email.clone());
+                tracing::debug!("from_email e: {}", from_email.clone());
             }
 
             // Create confirmation message
@@ -1973,7 +1958,6 @@ pub async fn handle_email_response_tool_call(
                 &user,
             ).await {
                 Ok(message_sid) => {
-                    println!("Successfully sent email response confirmation SMS with SID: {}", message_sid);
                     // Set the confirm event message flag for the user
                     if let Err(e) = state.user_repository.set_confirm_send_event(user_id, true) {
                         error!("Failed to set confirm send event flag: {}", e);
@@ -2023,7 +2007,6 @@ pub async fn make_notification_call(
     user_id: String,
     user_timezone: Option<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Starting notification call to: {}", to_phone_number);
 
 // Get user information to check for discount tier
     let user = match state.user_repository.find_by_id(user_id.parse::<i32>().unwrap_or_default()) {
@@ -2055,7 +2038,7 @@ pub async fn make_notification_call(
         let custom_env_key = format!("TWILIO_USER_PHONE_NUMBER_ID_{}", user.id);
         match std::env::var(&custom_env_key) {
             Ok(id) => {
-                println!("Using custom phone number ID for user {}: {}", user.id, id);
+                tracing::debug!("Using custom phone number ID for user {}: {}", user.id, id);
                 id
             },
             Err(_) => {
@@ -2140,7 +2123,7 @@ pub async fn make_notification_call(
     let (hours, minutes) = match get_offset_with_jiff(timezone_str) {
         Ok((h, m)) => (h, m),
         Err(_) => {
-            println!("Failed to get timezone offset for {}, defaulting to UTC", timezone_str);
+            tracing::error!("Failed to get timezone offset for {}, defaulting to UTC", timezone_str);
             (0, 0) // UTC default
         }
     };
@@ -2305,11 +2288,9 @@ pub async fn handle_weather_tool_call(
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<LocationCallPayload>,
 ) -> Json<serde_json::Value> {
-    println!("Received weather request for location: {}, using: {}", payload.location, payload.units);
     
     match crate::utils::tool_exec::get_weather(&payload.location, &payload.units).await {
         Ok(weather_info) => {
-            println!("Weather response: {}", weather_info);
             Json(json!({
                 "response": weather_info
             }))

@@ -333,6 +333,8 @@ pub async fn handle_incoming_sms(
 
     // If this is a media-only webhook (no body but has media), skip processing
     if payload.body.trim().is_empty() && payload.num_media.as_ref().map_or(false, |n| n != "0") {
+        println!("only media, skipping..");
+        /*
         return (
             StatusCode::OK,
             [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -340,6 +342,7 @@ pub async fn handle_incoming_sms(
                 message: "Media-only webhook acknowledged".to_string(),
             })
         );
+        */
     }
 
     // Check for Shazam shortcut ('S' or 's')
@@ -1004,20 +1007,28 @@ pub async fn process_sms(
         payload.media_content_type0.as_ref()
     ) {
         if num_media != "0" && content_type.starts_with("image/") {
-            // Add the image URL message
+            // Add the image URL message with the text
             chat_messages.push(ChatMessage {
                 role: "user".to_string(),
                 content: chat_completion::Content::ImageUrl(vec![
                     chat_completion::ImageUrl {
                         r#type: chat_completion::ContentType::image_url,
-                        text: Some(processed_body),
+                        text: Some(processed_body.clone()),
                         image_url: Some(chat_completion::ImageUrlType {
-                            url: media_url.clone(),
+                            url: format!("{}.jpeg", media_url), // Add .jpeg extension to ensure proper handling
                         }),
                     },
                 ]),
 
             });
+
+            // Also add the text as a separate message if it's not empty 
+            if !processed_body.trim().is_empty() {
+                chat_messages.push(ChatMessage {
+                    role: "user".to_string(),
+                    content: chat_completion::Content::Text(format!("Text accompanying the image: {}", processed_body)),
+                });
+            }
         } else {
             // Add regular text message if no image
             chat_messages.push(ChatMessage {
@@ -2733,65 +2744,13 @@ pub async fn process_sms(
             (!fail, Some("Failed to get evaluation response".to_string()))
         }
     };
-    // Check if this will be their last message with current credits
-    let mut warnings = Vec::new();
+
     
-    // For regular users, check both credits_left and regular credits
-    if user.sub_tier.is_some() {
-        let message_cost = std::env::var("MESSAGE_COST")
-            .expect("MESSAGE_COST not set")
-            .parse::<f32>()
-            .unwrap_or(0.20);
-
-        // Check if this is the last message they can send with credits_left
-        if user.credits_left >= message_cost && user.credits_left < message_cost * 2.0 {
-            warnings.push("⚠️ (Last message using your monthly quota)");
-        }
-
-        // Check if they're about to run out of extra credits
-        if user.credits_left < message_cost && user.credits >= message_cost && user.credits < message_cost * 2.0 {
-            warnings.push("⚠️ (Last message using your overage credits)");
-        }
-    } else if user.discount || user.time_to_live.unwrap_or(i32::MAX) < 1747170000{
-        // For discounted/tier 1 users, just check regular credits
-        let message_cost = if user.phone_number.starts_with("+1") {
-            std::env::var("MESSAGE_COST_US")
-                .unwrap_or_else(|_| std::env::var("MESSAGE_COST").expect("MESSAGE_COST not set"))
-                .parse::<f32>()
-                .unwrap_or(0.10)
-        } else {
-            std::env::var("MESSAGE_COST")
-                .expect("MESSAGE_COST not set")
-                .parse::<f32>()
-                .unwrap_or(0.20)
-        };
-
-        if user.credits >= message_cost && user.credits < message_cost * 2.0 {
-            warnings.push("⚠️ (Last message before out of credits)");
-        }
-    } else {
-        let message_cost = std::env::var("MESSAGE_COST")
-            .expect("MESSAGE_COST not set")
-            .parse::<f32>()
-            .unwrap_or(0.20);
-        
-        if user.credits >= message_cost && user.credits < message_cost * 2.0 {
-            warnings.push("⚠️ (Last message before out of credits)");
-        }
-    }
 
     let final_response_with_notice = if is_clarifying {
-        if warnings.is_empty() {
-            format!("{} (free reply)", final_response)
-        } else {
-            format!("{} (free reply)\n\n{}", final_response, warnings.join("\n"))
-        }
+        format!("{} (free reply)", final_response)
     } else {
-        if warnings.is_empty() {
-            final_response
-        } else {
-            format!("{}\n\n{}", final_response, warnings.join("\n"))
-        }
+        final_response
     };
     println!("is_clarifying message: {}", is_clarifying);
     if is_clarifying {
