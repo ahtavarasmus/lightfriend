@@ -61,6 +61,7 @@ mod utils {
     pub mod whatsapp_utils;
     pub mod elevenlabs_prompts;
     pub mod imap_utils;
+    pub mod qr_utils;
 }
 
 mod api {

@@ -347,17 +347,44 @@ let group_states = use_state(|| {
                                     {"Send a photo of a QR code through SMS and receive its contents instantly. Perfect for quickly accessing information from QR codes without a smartphone."}
                                 </p>
                             </div>
-                            // Photo Translation (Coming Soon)
-                            <div class="service-item coming-soon">
+                            // Photo Translation
+                            <div class="service-item">
                                 <div class="service-header">
                                     <div class="service-name">
                                         {"🔤 Photo Translation"}
-                                        <span class="coming-soon-tag">{"Coming Soon"}</span>
+
                                     </div>
+                                    <button class="info-button" onclick={Callback::from(|_| {
+                                        if let Some(element) = web_sys::window()
+                                            .and_then(|w| w.document())
+                                            .and_then(|d| d.get_element_by_id("photo-translation-info"))
+                                        {
+                                            let display = element.get_attribute("style")
+                                                .unwrap_or_else(|| "display: none".to_string());
+                                            
+                                            if display.contains("none") {
+                                                let _ = element.set_attribute("style", "display: block");
+                                            } else {
+                                                let _ = element.set_attribute("style", "display: none");
+                                            }
+                                        }
+                                    })}>
+                                        {"ⓘ"}
+                                    </button>
                                 </div>
                                 <p class="service-description">
-                                    {"Send a photo of text in any language and receive its English translation instantly via SMS. Perfect for understanding foreign text without a smartphone."}
+                                    {"Send a photo of text in any language and receive its translation instantly via SMS. Perfect for menus, signs, documents, or any text you need to understand quickly."}
                                 </p>
+                                <div id="photo-translation-info" class="info-section" style="display: none">
+                                    <h4>{"How It Works"}</h4>
+                                    <div class="info-subsection">
+                                        <ul>
+                                            <li>{"1. Send a photo containing text to lightfriend"}</li>
+                                            <li>{"2. Specify the target language (or it will default to English)"}</li>
+                                            <li>{"3. Receive the translated text via SMS within seconds"}</li>
+                                        </ul>
+                                    </div>
+                                </div>
                             </div>
 
                         </div>

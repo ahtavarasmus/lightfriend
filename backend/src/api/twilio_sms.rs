@@ -1294,9 +1294,31 @@ pub async fn process_sms(
         }),
     );
 
+    let mut qr_code_properties = HashMap::new();
+    qr_code_properties.insert(
+        "image_url".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("The URL of the image containing the QR code".to_string()),
+            ..Default::default()
+        }),
+    );
+
 
     // Define tools
     let tools = vec![
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: String::from("scan_qr_code"),
+                description: Some(String::from("Scans and extracts data from a QR code in an image. Use this when the user sends an image that appears to contain a QR code.")),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(qr_code_properties),
+                    required: Some(vec![String::from("image_url")]),
+                },
+            },
+        },
         chat_completion::Tool {
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
@@ -2312,6 +2334,37 @@ pub async fn process_sms(
                             eprintln!("Failed to fetch WhatsApp messages: {}", e);
                             tool_answers.insert(tool_call_id, 
                                 "Failed to fetch WhatsApp messages. Please make sure you're connected to WhatsApp bridge.".to_string()
+                            );
+                        }
+                    }
+                } else if name == "scan_qr_code" {
+                    println!("Executing scan_qr_code tool call");
+                    #[derive(Deserialize)]
+                    struct QrCodeArgs {
+                        image_url: String,
+                    }
+
+                    let args: QrCodeArgs = match serde_json::from_str(arguments) {
+                        Ok(args) => args,
+                        Err(e) => {
+                            eprintln!("Failed to parse QR code arguments: {}", e);
+                            tool_answers.insert(tool_call_id, "Failed to parse QR code scan request.".to_string());
+                            continue;
+                        }
+                    };
+
+                    match crate::utils::qr_utils::scan_qr_code(&args.image_url).await {
+                        Ok(data) => {
+                            if data.is_empty() {
+                                tool_answers.insert(tool_call_id, "No QR code found in the image.".to_string());
+                            } else {
+                                tool_answers.insert(tool_call_id, format!("QR code content: {}", data));
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to scan QR code: {}", e);
+                            tool_answers.insert(tool_call_id, 
+                                "Failed to scan QR code from the image. Please make sure the QR code is clearly visible.".to_string()
                             );
                         }
                     }
