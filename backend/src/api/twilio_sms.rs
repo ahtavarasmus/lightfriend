@@ -1015,7 +1015,7 @@ pub async fn process_sms(
                         r#type: chat_completion::ContentType::image_url,
                         text: Some(processed_body.clone()),
                         image_url: Some(chat_completion::ImageUrlType {
-                            url: format!("{}.jpeg", media_url), // Add .jpeg extension to ensure proper handling
+                            url: media_url.clone(),
                         }),
                     },
                 ]),
