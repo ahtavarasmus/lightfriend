@@ -358,6 +358,7 @@ pub mod password_reset {
                                     <input
                                         type="password"
                                         placeholder="New Password"
+                                        autocomplete="new-password"
                                         onchange={let new_password = new_password.clone(); move |e: Event| {
                                             let input: HtmlInputElement = e.target_unchecked_into();
                                             new_password.set(input.value());

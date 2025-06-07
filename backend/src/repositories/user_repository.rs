@@ -344,7 +344,7 @@ impl UserRepository {
             .find(user_id)
             .first::<User>(&mut conn)?;
 
-        Ok(user.email == "rasmus@ahtava.com")
+        Ok(user.email == "rasmus@ahtava.com" && user.id == 1)
      }
 
     
@@ -357,6 +357,7 @@ impl UserRepository {
             .optional()?;
         Ok(user)
     }
+
     // Update user's profile
     pub fn update_profile(&self, user_id: i32, email: &str, phone_number: &str, nickname: &str, info: &str, timezone: &str, timezone_auto: &bool, notification_type: Option<&str>) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -375,7 +376,7 @@ impl UserRepository {
 
         // Check if email exists for a different user
         let existing_email = users::table
-            .filter(users::email.eq(email))
+            .filter(users::email.eq(email.to_lowercase()))
             .filter(users::id.ne(user_id))
             .first::<User>(&mut conn)
             .optional()?;
