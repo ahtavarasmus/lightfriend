@@ -1001,12 +1001,18 @@ pub async fn process_sms(
     }
 
     // Handle image if present
+    let mut has_image = false;
+    let mut image_url = None;
+    
     if let (Some(num_media), Some(media_url), Some(content_type)) = (
         payload.num_media.as_ref(),
         payload.media_url0.as_ref(),
         payload.media_content_type0.as_ref()
     ) {
         if num_media != "0" && content_type.starts_with("image/") {
+            has_image = true;
+            image_url = Some(media_url.clone());
+            
             // Add the image URL message with the text
             chat_messages.push(ChatMessage {
                 role: "user".to_string(),
@@ -2339,21 +2345,10 @@ pub async fn process_sms(
                     }
                 } else if name == "scan_qr_code" {
                     println!("Executing scan_qr_code tool call");
-                    #[derive(Deserialize)]
-                    struct QrCodeArgs {
-                        image_url: String,
-                    }
-
-                    let args: QrCodeArgs = match serde_json::from_str(arguments) {
-                        Ok(args) => args,
-                        Err(e) => {
-                            eprintln!("Failed to parse QR code arguments: {}", e);
-                            tool_answers.insert(tool_call_id, "Failed to parse QR code scan request.".to_string());
-                            continue;
-                        }
-                    };
-
-                    match crate::utils::qr_utils::scan_qr_code(&args.image_url).await {
+                    
+                    // Only proceed if we have an image URL from the message
+                    if let Some(url) = image_url.as_ref() {
+                        match crate::utils::qr_utils::scan_qr_code(url).await {
                         Ok(data) => {
                             if data.is_empty() {
                                 tool_answers.insert(tool_call_id, "No QR code found in the image.".to_string());
@@ -2367,6 +2362,10 @@ pub async fn process_sms(
                                 "Failed to scan QR code from the image. Please make sure the QR code is clearly visible.".to_string()
                             );
                         }
+                    } else {
+                        tool_answers.insert(tool_call_id, 
+                            "No image was provided in the message. Please send an image containing a QR code.".to_string()
+                        );
                     }
                 } else if name == "delete_sms_conversation_history" {
                     println!("Executing delete_sms_conversation_history tool call");
