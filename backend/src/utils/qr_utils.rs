@@ -56,21 +56,15 @@ pub async fn scan_qr_code(image_url: &str) -> Result<String, Box<dyn Error>> {
 
     // Create QR decoder
     tracing::info!("Creating QR decoder...");
-    let decoder = quircs::Quirc::new();
+    let mut decoder = quircs::Quirc::new();
 
     // Decode QR codes
     tracing::info!("Attempting to decode QR code...");
-    let codes = match decoder.identify(gray_img.width() as usize, gray_img.height() as usize, &gray_img) {
-        Ok(codes) => codes,
-        Err(e) => {
-            tracing::error!("Failed to identify QR codes: {:?}", e);
-            return Ok(String::new());
-        }
-    };
+    let codes = decoder.identify(gray_img.width() as usize, gray_img.height() as usize, &gray_img);
 
-    for (i, code) in codes.iter().enumerate() {
+    for (i, code) in codes.enumerate() {
         tracing::info!("Processing code {}", i);
-        match code.decode() {
+        match code?.decode() {
             Ok(decoded) => {
                 match String::from_utf8(decoded.payload) {
                     Ok(data) => {
