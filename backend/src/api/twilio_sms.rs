@@ -1013,7 +1013,7 @@ pub async fn process_sms(
             has_image = true;
             image_url = Some(media_url.clone());
             
-            println!("setting image_url var to: {:#?}", image_url);
+            println!("setting image_url var to: {}", image_url);
             // Add the image URL message with the text
             chat_messages.push(ChatMessage {
                 role: "user".to_string(),
@@ -1310,7 +1310,7 @@ pub async fn process_sms(
                 description: Some(String::from("Scans and extracts data from a QR code in an image. Use this when the user sends an image that appears to contain a QR code.")),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
-                    properties: None,
+                    properties: Some(placeholder_properties),
                     required: None,
                 },
             },
