@@ -188,12 +188,9 @@ pub fn landing() -> Html {
                         <p>{"Need your calendar? A WhatsApp reply? Just call or text LightFriend."}</p>
                         <ul class="feature-list">
                             <li><img src="/assets/whatsapplogo.png" alt="WhatsApp" class="feature-logo" /> {"WhatsApp"}</li>
-                            <li>{"📧 Emails"}</li>
-                            <li>{"📅 Calendar"}</li>
-                            <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI search"}</li>
-                            <li>{"📸 Photo Analysis & Translation(US & AUS only)"}</li>
-                            <li>{"📱 Qr Code Reader(US & AUS only)"}</li>
-                            <li>{"☀️ Weather, Tasks"}</li>
+                            <li>{"📧 Emails, 📅 Calendar & ✅ Tasks"}</li>
+                            <li><img src="/assets/perplexitylogo.png" loading="lazy" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI search & ☀️ Weather "}</li>
+                            <li>{"📸 Photo Analysis, Translation & 📱 Qr Code Reader (US & AUS only)"}</li>
                         </ul>
                         <div class="demo-link-container">
                             <a href="https://www.youtube.com/shorts/KrVdJbHPB-o" target="_blank" rel="noopener noreferrer" class="demo-link">
@@ -221,12 +218,9 @@ pub fn landing() -> Html {
                     <p>{"Need your calendar? A WhatsApp reply? Just call or text LightFriend."}</p>
                     <ul class="feature-list">
                         <li><img src="/assets/whatsapplogo.png" loading="lazy" alt="WhatsApp" class="feature-logo" /> {"WhatsApp"}</li>
-                        <li>{"📧 Emails"}</li>
-                        <li>{"📅 Calendar"}</li>
-                        <li><img src="/assets/perplexitylogo.png" loading="lazy" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI search"}</li>
-                        <li>{"📸 Photo analysis & translation(US & AUS only)"}</li>
-                        <li>{"📱 Qr code Reader(US & AUS only)"}</li>
-                        <li>{"☀️ Weather, Tasks"}</li>
+                        <li>{"📧 Emails, 📅 Calendar & ✅ Tasks"}</li>
+                        <li><img src="/assets/perplexitylogo.png" loading="lazy" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI search & ☀️ Weather "}</li>
+                        <li>{"📸 Photo Analysis, Translation & 📱Qr Code Reader (US & AUS only)"}</li>
                     </ul>
                     <div class="demo-link-container">
                         <a href="https://www.youtube.com/shorts/KrVdJbHPB-o" target="_blank" rel="noopener noreferrer" class="demo-link">
