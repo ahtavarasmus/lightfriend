@@ -1310,7 +1310,7 @@ pub async fn process_sms(
                 description: Some(String::from("Scans and extracts data from a QR code in an image. Use this when the user sends an image that appears to contain a QR code.")),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
-                    properties: Some(placeholder_properties),
+                    properties: Some(placeholder_properties.clone()),
                     required: None,
                 },
             },
@@ -1322,7 +1322,7 @@ pub async fn process_sms(
                 description: Some(String::from("Deletes all sms conversation history for a specific user. Use this when user asks to delete their chat history or conversations. It won't delete the history from their phone obviously.")),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
-                    properties: Some(placeholder_properties),
+                    properties: Some(placeholder_properties.clone()),
                     required: None,
                 },
             },
