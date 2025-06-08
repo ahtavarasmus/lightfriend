@@ -1013,7 +1013,7 @@ pub async fn process_sms(
             has_image = true;
             image_url = Some(media_url.clone());
             
-            println!("setting image_url var to: {}", image_url);
+            println!("setting image_url var to: {:#?}", image_url);
             // Add the image URL message with the text
             chat_messages.push(ChatMessage {
                 role: "user".to_string(),
