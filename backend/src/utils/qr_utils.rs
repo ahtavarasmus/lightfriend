@@ -1,8 +1,9 @@
 use reqwest;
 use image::DynamicImage;
-use bardecoder;
+
 use std::error::Error;
 use tracing;
+use quircs;
 
 pub async fn scan_qr_code(image_url: &str) -> Result<String, Box<dyn Error>> {
     tracing::info!("Starting QR code scan for URL: {}", image_url);
@@ -49,28 +50,44 @@ pub async fn scan_qr_code(image_url: &str) -> Result<String, Box<dyn Error>> {
         }
     };
     
+    // Convert to grayscale image
+    tracing::info!("Converting to grayscale...");
+    let gray_img = img.to_luma8();
+
     // Create QR decoder
     tracing::info!("Creating QR decoder...");
-    let decoder = bardecoder::default_decoder();
-    
+    let decoder = quircs::Quirc::new();
+
     // Decode QR codes
     tracing::info!("Attempting to decode QR code...");
-    let results = decoder.decode(&img);
-    
-    // Return first successful result or empty string
-    for (i, result) in results.into_iter().enumerate() {
-        tracing::info!("Processing result {}", i);
-        match result {
-            Ok(data) => {
-                tracing::info!("Successfully decoded QR code: {}", data);
-                return Ok(data);
+    let codes = match decoder.identify(gray_img.width() as usize, gray_img.height() as usize, &gray_img) {
+        Ok(codes) => codes,
+        Err(e) => {
+            tracing::error!("Failed to identify QR codes: {:?}", e);
+            return Ok(String::new());
+        }
+    };
+
+    for (i, code) in codes.iter().enumerate() {
+        tracing::info!("Processing code {}", i);
+        match code.decode() {
+            Ok(decoded) => {
+                match String::from_utf8(decoded.payload) {
+                    Ok(data) => {
+                        tracing::info!("Successfully decoded QR code: {}", data);
+                        return Ok(data);
+                    },
+                    Err(e) => {
+                        tracing::warn!("Failed to convert QR code data to string: {:?}", e);
+                    }
+                }
             },
             Err(e) => {
-                tracing::warn!("Failed to decode result {}: {:?}", i, e);
+                tracing::warn!("Failed to decode code {}: {:?}", i, e);
             }
         }
     }
-    
+
     tracing::info!("No QR code found in image");
     Ok(String::new()) // Return empty string if no QR code found
 }
