@@ -1013,6 +1013,7 @@ pub async fn process_sms(
             has_image = true;
             image_url = Some(media_url.clone());
             
+            println!("setting image_url var to: {:#?}", image_url);
             // Add the image URL message with the text
             chat_messages.push(ChatMessage {
                 role: "user".to_string(),
@@ -1300,17 +1301,6 @@ pub async fn process_sms(
         }),
     );
 
-    let mut qr_code_properties = HashMap::new();
-    qr_code_properties.insert(
-        "image_url".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The URL of the image containing the QR code".to_string()),
-            ..Default::default()
-        }),
-    );
-
-
     // Define tools
     let tools = vec![
         chat_completion::Tool {
@@ -1320,8 +1310,8 @@ pub async fn process_sms(
                 description: Some(String::from("Scans and extracts data from a QR code in an image. Use this when the user sends an image that appears to contain a QR code.")),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
-                    properties: Some(qr_code_properties),
-                    required: Some(vec![String::from("image_url")]),
+                    properties: None,
+                    required: None,
                 },
             },
         },
@@ -2344,8 +2334,8 @@ pub async fn process_sms(
                         }
                     }
                 } else if name == "scan_qr_code" {
-                    println!("Executing scan_qr_code tool call");
-                    
+                    println!("Executing scan_qr_code tool call with url: {:#?}", image_url);
+
                     // Only proceed if we have an image URL from the message
                     if let Some(url) = image_url.as_ref() {
                         match crate::utils::qr_utils::scan_qr_code(url).await {
