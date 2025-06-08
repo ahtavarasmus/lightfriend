@@ -191,7 +191,8 @@ pub fn landing() -> Html {
                             <li>{"📧 Emails"}</li>
                             <li>{"📅 Calendar"}</li>
                             <li><img src="/assets/perplexitylogo.png" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI search"}</li>
-                            <li>{"📸 Photo Analysis & Translation(in US & AUS only)"}</li>
+                            <li>{"📸 Photo Analysis & Translation(US & AUS only)"}</li>
+                            <li>{"📱 Qr Code Reader(US & AUS only)"}</li>
                             <li>{"☀️ Weather, Tasks"}</li>
                         </ul>
                         <div class="demo-link-container">
@@ -223,7 +224,9 @@ pub fn landing() -> Html {
                         <li>{"📧 Emails"}</li>
                         <li>{"📅 Calendar"}</li>
                         <li><img src="/assets/perplexitylogo.png" loading="lazy" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI search"}</li>
-                        <li>{"☀️ Weather, Tasks and even Shazam"}</li>
+                        <li>{"📸 Photo analysis & translation(US & AUS only)"}</li>
+                        <li>{"📱 Qr code Reader(US & AUS only)"}</li>
+                        <li>{"☀️ Weather, Tasks"}</li>
                     </ul>
                     <div class="demo-link-container">
                         <a href="https://www.youtube.com/shorts/KrVdJbHPB-o" target="_blank" rel="noopener noreferrer" class="demo-link">

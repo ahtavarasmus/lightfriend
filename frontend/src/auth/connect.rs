@@ -334,18 +334,46 @@ let group_states = use_state(|| {
                             </div>
                             */
 
-                            // QR Code Scanner (Coming Soon)
-                            <div class="service-item coming-soon">
+                            // QR Code Scanner
+                            <div class="service-item">
                                 <div class="service-header">
                                     <div class="service-name">
                                         <i class="fas fa-qrcode" style="color: #1E90FF; font-size: 24px; margin-right: 8px;"></i>
                                         {"QR Code Scanner"}
-                                        <span class="coming-soon-tag">{"Coming Soon"}</span>
+
                                     </div>
+                                    <button class="info-button" onclick={Callback::from(|_| {
+                                        if let Some(element) = web_sys::window()
+                                            .and_then(|w| w.document())
+                                            .and_then(|d| d.get_element_by_id("qr-scanner-info"))
+                                        {
+                                            let display = element.get_attribute("style")
+                                                .unwrap_or_else(|| "display: none".to_string());
+                                            
+                                            if display.contains("none") {
+                                                let _ = element.set_attribute("style", "display: block");
+                                            } else {
+                                                let _ = element.set_attribute("style", "display: none");
+                                            }
+                                        }
+                                    })}>
+                                        {"ⓘ"}
+                                    </button>
                                 </div>
                                 <p class="service-description">
-                                    {"Send a photo of a QR code through SMS and receive its contents instantly. Perfect for quickly accessing information from QR codes without a smartphone."}
+                                    {"Send a photo of any QR code through SMS and receive its contents instantly. For URLs, you can then either type them manually or have them automatically forwarded to your email if you're using The Light Phone. Note: Photo messaging (MMS) is only available in countries where Twilio supports MMS, including the US and Australia."}
                                 </p>
+                                <div id="qr-scanner-info" class="info-section" style="display: none">
+                                    <h4>{"How It Works"}</h4>
+                                    <div class="info-subsection">
+                                        <ul>
+                                            <li>{"1. Take a photo of any QR code"}</li>
+                                            <li>{"2. Send the photo to lightfriend via SMS"}</li>
+                                            <li>{"3. Receive the decoded content in seconds"}</li>
+                                            <li>{"4. For URLs: The Light Phone users get them automatically forwarded to email"}</li>
+                                        </ul>
+                                    </div>
+                                </div>
                             </div>
                             // Photo Translation
                             <div class="service-item">
@@ -373,7 +401,7 @@ let group_states = use_state(|| {
                                     </button>
                                 </div>
                                 <p class="service-description">
-                                    {"Send a photo of text in any language and receive its translation instantly via SMS. Perfect for menus, signs, documents, or any text you need to understand quickly."}
+                                    {"Send a photo of text in any language and receive its translation instantly via SMS. Perfect for menus, signs, documents, or any text you need to understand quickly. Note: Photo messaging (MMS) is only available in countries where Twilio supports MMS, including the US and Australia."}
                                 </p>
                                 <div id="photo-translation-info" class="info-section" style="display: none">
                                     <h4>{"How It Works"}</h4>
