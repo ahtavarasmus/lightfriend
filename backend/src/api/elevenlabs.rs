@@ -170,7 +170,26 @@ pub async fn fetch_assistant(
             tracing::debug!("Found user by their phone number");
             
             // Check if user has sufficient credits
-            if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "voice").await {
+            
+
+            // If user is not verified, verify them
+            if !user.verified {
+                if let Err(e) = state.user_repository.verify_user(user.id) {
+                    tracing::error!("Error verifying user: {}", e);
+                    // Continue even if verification fails
+                } else {
+                    if user.agent_language == "fi" {
+                        conversation_config_override.agent.first_message = "Tervetuloa! Numerosi on nyt vahvistettu. Miten voin auttaa?".to_string(); 
+                        conversation_config_override.tts.voice_id = fi_voice_id.clone();
+                    } else if user.agent_language == "de" {
+                        conversation_config_override.agent.first_message = "Willkommen! Ihre Nummer ist jetzt verifiziert. Wie kann ich Ihnen helfen?".to_string(); 
+                        conversation_config_override.tts.voice_id = de_voice_id.clone();
+                    } else {
+                        conversation_config_override.agent.first_message = "Welcome! Your number is now verified. Anyways, how can I help?".to_string(); 
+                        conversation_config_override.tts.voice_id = us_voice_id.clone();
+                    }
+                }
+            } else if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "voice").await {
                 // Get conversation for the user
                 let conversation = match state.user_conversations.get_conversation(
                     &user, 
@@ -210,29 +229,12 @@ pub async fn fetch_assistant(
                 ));
             }
 
-            // If user is not verified, verify them
-            if !user.verified {
-                if let Err(e) = state.user_repository.verify_user(user.id) {
-                    tracing::error!("Error verifying user: {}", e);
-                    // Continue even if verification fails
-                } else {
-                    if user.agent_language == "fi" {
-                        conversation_config_override.agent.first_message = "Tervetuloa! Numerosi on nyt vahvistettu. Miten voin auttaa?".to_string(); 
-                        conversation_config_override.tts.voice_id = fi_voice_id;
-                    } else if user.agent_language == "de" {
-                        conversation_config_override.agent.first_message = "Willkommen! Ihre Nummer ist jetzt verifiziert. Wie kann ich Ihnen helfen?".to_string(); 
-                        conversation_config_override.tts.voice_id = de_voice_id;
-                    } else {
-                        conversation_config_override.agent.first_message = "Welcome! Your number is now verified. Anyways, how can I help?".to_string(); 
-                        conversation_config_override.tts.voice_id = us_voice_id;
-                    }
-                }
-            } else if user.agent_language == "fi" {
+            if user.agent_language == "fi" {
                 conversation_config_override.agent.first_message = "Moi {{name}}!".to_string(); 
-                conversation_config_override.tts.voice_id = fi_voice_id;
+                conversation_config_override.tts.voice_id = fi_voice_id.clone();
             } else if user.agent_language == "de" {
                 conversation_config_override.agent.first_message = "Hallo {{name}}!".to_string(); 
-                conversation_config_override.tts.voice_id = de_voice_id;
+                conversation_config_override.tts.voice_id = de_voice_id.clone();
             }
 
             let nickname = match user.nickname {

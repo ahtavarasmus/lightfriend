@@ -507,7 +507,7 @@ pub async fn register(
         time_to_live: five_minutes_from_now,
         notify: true,
         verified: false,
-        credits: 0.30,
+        credits: 0.00,
         charge_when_under: false,
     };
 
