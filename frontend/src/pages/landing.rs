@@ -167,7 +167,7 @@ pub fn landing() -> Html {
                         </p>
                     </div>
                     <div class="hero-cta-group">
-                        <Link<Route> to={Route::Register} classes="forward-link">
+                        <Link<Route> to={Route::Pricing} classes="forward-link">
                             <button class="hero-cta">{"Get Started"}</button>
                         </Link<Route>>
                         <a href="/faq#try-service" class="faq-link">
@@ -247,7 +247,7 @@ pub fn landing() -> Html {
 
             <div class="section-header">
                 <div class="section-intro">
-                    <Link<Route> to={Route::Register} classes="forward-link">
+                    <Link<Route> to={Route::Pricing} classes="forward-link">
                         <button class="hero-cta">{"Get Started"}</button>
                     </Link<Route>>
                 </div>
@@ -277,7 +277,7 @@ pub fn landing() -> Html {
             <div class="footer-content">
                 <h2>{"Ready to Take Your Life Back?"}</h2>
                 <p class="subtitle">{"LightFriend lets you quit the scroll without disappearing. Join the dumbphone revolution."}</p>
-                <Link<Route> to={Route::Register} classes="forward-link">
+                <Link<Route> to={Route::Pricing} classes="forward-link">
                     <button class="hero-cta">{"Start Living Today"}</button>
                 </Link<Route>>
                 <p class="disclaimer">{"Works with any basic phone. No smartphone needed."}</p>
