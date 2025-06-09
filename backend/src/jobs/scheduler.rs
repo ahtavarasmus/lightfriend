@@ -29,7 +29,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                 subscribed_users.push(user);
                             },
                             Ok(false) => {
-                                info!("User {} does not have valid subscription or messages left for message monitoring", user.id);
+                                tracing::debug!("User {} does not have valid subscription or messages left for message monitoring", user.id);
                             },
                             Err(e) => {
                                 error!("Failed to check subscription status for user {}: {:?}", user.id, e);

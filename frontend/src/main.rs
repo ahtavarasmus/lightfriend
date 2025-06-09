@@ -271,14 +271,19 @@ let close_menu = {
         "nav-right"
     };
 
+    let close_class = if *menu_open {
+        "burger-menu close-burger-menu"
+    } else {
+        "burger-menu"
+    };
+
     html! {
         <nav class={classes!("top-nav", (*is_scrolled).then(|| "scrolled"))}>
             <div class="nav-content">
                 <Link<Route> to={Route::Home} classes="nav-logo">
                     {"lightfriend"}
                 </Link<Route>>
-                
-                <button class="burger-menu" onclick={toggle_menu}>
+                <button class={close_class} onclick={toggle_menu}>
                     <span></span>
                     <span></span>
                     <span></span>
@@ -286,18 +291,14 @@ let close_menu = {
                 <div class={menu_class}>
                     <button class="close-menu" onclick={close_menu.clone()}>{"✕"}</button>
                     {
-                        if !*logged_in {
-                            html! {
-                                <>
-                                    <div onclick={close_menu.clone()}>
-                                        <Link<Route> to={Route::Faq} classes="nav-link">
-                                            {"FAQ"}
-                                        </Link<Route>>
-                                    </div>
-                                </>
-                            }
-                        } else {
-                            html! {}
+                        html! {
+                            <>
+                                <div onclick={close_menu.clone()}>
+                                    <Link<Route> to={Route::Faq} classes="nav-link">
+                                        {"FAQ"}
+                                    </Link<Route>>
+                                </div>
+                            </>
                         }
 
                     }

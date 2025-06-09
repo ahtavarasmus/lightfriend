@@ -184,30 +184,29 @@ pub fn Home() -> Html {
                         <h2 class="section-title">
                             {
                                 if let Some(profile) = (*profile_data).as_ref() {
-                                    let credits = profile.credits.clone();
-                                    if credits <= 0.0 && profile.credits_left <= 0.0 {
-                                        html! {
-                                            <span class="out-of-credits-warning">{"You're out of credits!"}</span>
-                                        }
-                                    } else if credits > 0.0 && profile.credits_left <= 0.0 {
+                                    if profile.credits_left > 0.0 {
                                         html! {
                                             <span class="credits-status">
-                                                {format!("You have {:.2}€ worth of credits left! ", credits)}
+                                                {format!("You have {:.0} monthly units left!", profile.credits_left)}
+                                            </span>
+                                        }
+                                    } else if profile.credits > 0.0 {
+                                        html! {
+                                            <span class="credits-status">
+                                                {format!("You have {:.2}€ worth of overage credits left!", profile.credits)}
+                                            </span>
+                                        }
+                                    } else if profile.sub_tier.is_some() {
+                                        html! {
+                                            <span class="out-of-credits-warning">
+                                                {"Your monthly quota is used. Wait for next month or buy overage credits."}
                                             </span>
                                         }
                                     } else {
-                                        html! {
-                                            <span class="ready-status">
-                                                {"Your lightfriend is Ready!"}
-                                            </span>
-                                        }
+                                        html! {}
                                     }
                                 } else {
-                                    html! {
-                                        <span class="ready-status">
-                                            {"Your lightfriend is Ready!"}
-                                        </span>
-                                    }
+                                    html! {}
                                 }
                             }
                         </h2>
@@ -328,7 +327,7 @@ pub fn Home() -> Html {
                         </div>
                         
                         <p class="instruction-text">
-                            {"Select the best number for you above. (If there is no local number for you, you can email rasmus@ahtava.com and he will figure out if its possible)"}
+                            {"Select the best number for you above. No local number? Check Pricing page!"}
                             <br/>
                             <br/>
                         </p>
@@ -406,7 +405,7 @@ pub fn Home() -> Html {
                                     <div class="proactive-tab">
                                         {
                                             if let Some(profile) = (*profile_data).as_ref() {
-                                                if profile.sub_tier.is_some() {
+                                                if profile.sub_tier.as_ref().map_or(false, |tier| tier == "tier 2") {
                                                     html! {
                                                         <>
                                                             <Proactive user_id={profile.id} />
@@ -415,7 +414,7 @@ pub fn Home() -> Html {
                                                 } else {
                                                     html! {
                                                         <div class="subscription-required">
-                                                            <h3>{"Proactive Features Require a Subscription"}</h3>
+                                                            <h3>{"Proactive Features Require an Escape Plan Subscription"}</h3>
                                                             <p>{"Get access to proactive features like:"}</p>
                                                             <ul>
                                                                 <li>{"Priority message filtering"}</li>
@@ -1800,9 +1799,6 @@ pub fn Home() -> Html {
                         color: #ff4444;
                         font-weight: bold;
                         padding: 0.5rem 1rem;
-                        background: rgba(255, 68, 68, 0.1);
-                        border-radius: 6px;
-                        border: 1px solid rgba(255, 68, 68, 0.3);
                         animation: pulse 2s infinite;
                     }
 
@@ -1817,9 +1813,6 @@ pub fn Home() -> Html {
                         color: #00ff00;
                         font-weight: 500;
                         padding: 0.5rem 1rem;
-                        background: rgba(0, 255, 0, 0.1);
-                        border-radius: 6px;
-                        border: 1px solid rgba(0, 255, 0, 0.3);
                     }
 
                     @keyframes pulse {

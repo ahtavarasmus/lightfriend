@@ -388,7 +388,7 @@ let on_timezone_update = {
                     } else {
                         html! {
                             <span class="field-value">
-                                {(*user_profile).info.clone().unwrap_or("I'm from finland, always use Celsious and metric system, etc...".to_string())}
+                                {(*user_profile).info.clone().unwrap_or("".to_string())}
                             </span>
                         }
                     }

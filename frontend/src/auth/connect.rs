@@ -251,7 +251,7 @@ let group_states = use_state(|| {
                             <i class="fa-solid fa-globe"></i>
                             {"Internet Search"}
                             <div class="group-summary">
-                                <span class="service-count">{"3 tools ready!"}</span>
+                                <span class="service-count">{"4 tools ready!"}</span>
                                 <i class={if group_states.get("search").map(|s| s.expanded).unwrap_or(false) {
                                     "fas fa-chevron-up"
                                 } else {
