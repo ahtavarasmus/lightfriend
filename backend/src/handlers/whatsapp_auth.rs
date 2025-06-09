@@ -628,7 +628,6 @@ pub async fn resync_whatsapp(
         client.add_event_handler(|ev: SyncRoomMessageEvent| async move {
             match ev {
                 SyncRoomMessageEvent::Original(msg) => {
-                    println!("📨 Received message event: {:?}", msg.content.msgtype);
                     // Add more specific message handling logic here if needed
                 },
                 SyncRoomMessageEvent::Redacted(_) => {
