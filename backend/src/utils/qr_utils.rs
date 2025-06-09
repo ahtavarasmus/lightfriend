@@ -114,6 +114,6 @@ pub async fn scan_qr_code(image_url: &str) -> Result<MenuContent, Box<dyn Error>
     }
 
     tracing::info!("No QR code found in image");
-    Ok(String::new()) // Return empty string if no QR code found
+    Ok(MenuContent::Unknown("No QR code found".to_string()))
 }
 
