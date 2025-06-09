@@ -135,6 +135,7 @@ pub fn faq() -> Html {
         ("What's on my calendar today?", "📅 Your schedule for today:\n\n• 2:00 PM - Team standup (30 min)\n• 4:00 PM - Client call with ABC Corp (1 hour)\n• 6:30 PM - Dinner with family\n\nNext up: Team standup in 45 minutes"),
         ("When is the next Light Phone 3 estimated delivery date?", "📱 Light Phone 3 has estimated delivery date in August 2025 if you order today"),
         ("📸 [Image sent] Can you translate this menu?", "I see a Japanese restaurant menu in the image. Here's the translation:\n\n🍜 Ramen Section:\n1. Tonkotsu Ramen - $12\n   Rich pork bone broth\n2. Miso Ramen - $11\n   Traditional fermented soybean paste soup\n3. Shoyu Ramen - $11\n   Classic soy sauce based broth\n\n🍱 Side Dishes:\n• Gyoza (6 pcs) - $6\n• Edamame - $4\n• Karaage (Japanese fried chicken) - $7\n\nWould you like me to explain any of these dishes in more detail?"),
+        ("📸 [Image sent of QR code]", "The QR code contains the URL: https://lightfriend.ai (you can now open this on your computer, or if you have a light phone the link gets send automatically to your email)"),
     ];
 
     let start_demo = {

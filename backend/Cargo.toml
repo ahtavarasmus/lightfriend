@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+mime_guess = "2.0"
 image = "0.24"  # For image processing
 quircs = "0.10"  # For QR code scanning
 lettre = { version = "0.10", features = ["smtp-transport", "tokio1", "tokio1-native-tls"] }

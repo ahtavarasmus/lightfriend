@@ -158,7 +158,7 @@ pub fn pricing(props: &PricingProps) -> Html {
             <div class="pricing-grid">
                 <div class="pricing-card subscription basic">
                     <div class="card-header">
-                        <h3>{"Hard Mode"}</h3>
+                        <h3>{"Basic Plan"}</h3>
                         <div class="price">
                             <span class="amount">{format!("€{:.2}", basic_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
                             <span class="period">{"/month"}</span>
@@ -167,6 +167,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                             <p>{"Subscription includes:"}</p>
                             <ul class="quota-list">
                                 <li>{"📞 40-unit quota (1 message = 1 minute)"}</li>
+                                <li>{"📸 Photo Analysis & QR Code Reader (US & AUS only)"}</li>
                             </ul>
                         </div>
                     </div>
@@ -217,6 +218,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                             <ul class="quota-list">
                                 <li>{"📞 40-unit quota (1 message = 1 minute)"}</li>
                                 <li>{"🎯 Up to 60 filtered notifications/month"}</li>
+                                <li>{"📸 Photo Analysis & QR Code Reader (US & AUS only)"}</li>
                             </ul>
                         </div>
                     </div>
@@ -261,7 +263,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     <thead>
                         <tr>
                             <th>{"Feature"}</th>
-                            <th>{"Hard Mode"}</th>
+                            <th>{"Basic Plan"}</th>
                             <th>{"Escape Plan"}</th>
                         </tr>
                     </thead>
@@ -273,6 +275,16 @@ pub fn pricing(props: &PricingProps) -> Html {
                         </tr>
                         <tr>
                             <td>{"Fetch Current Weather"}</td>
+                            <td>{"✅"}</td>
+                            <td>{"✅"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"Photo Analysis & Translation (US & AUS only)"}</td>
+                            <td>{"✅"}</td>
+                            <td>{"✅"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"Fetch QR Code data from photo (US & AUS only)"}</td>
                             <td>{"✅"}</td>
                             <td>{"✅"}</td>
                         </tr>

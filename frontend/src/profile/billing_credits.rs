@@ -473,7 +473,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                 <div class="tooltip">
                                                     {
                                                         if sub_tier == "hard_mode" {
-                                                            "Hard Mode subscription gives your lightfriend access to Perplexity Search and Weather tool with 30 monthly message quota."
+                                                            "Basic Plan subscription gives your lightfriend access to Perplexity Search and Weather tool with 30 monthly message quota."
                                                         } else {
                                                             "Escape Plan subscription gives full capability to your lightfriend with 100 proactive notifications and 100 unit message/voice minute quota monthly."
                                                         }
@@ -482,7 +482,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                     <span class="tier-label">
                                                         {
                                                             if sub_tier == "hard_mode" {
-                                                                "Hard Mode"
+                                                                "Basic Plan"
                                                             } else {
                                                                 "Escape Plan"
                                                             }
@@ -509,7 +509,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                 <div class="discount-status">
                                                 <h3>{"Current Subscription"}</h3>
                                                 <div class="tooltip">
-                                                    {"Upgrade to Hard Mode for Perplexity Search and Weather tool with 30 monthly messages, or get Escape Plan for full access including Email, Calendar, and 100 monthly messages / voice minutes!"}
+                                                    {"Upgrade to Basic Plan Mode for Perplexity Search and Weather tool with 30 monthly messages, or get Escape Plan for full access including Email, Calendar, and 100 monthly messages / voice minutes!"}
                                                 </div>
                                                     <span>{"Inactive"}</span>
                                                 </div>
@@ -557,7 +557,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                             {
                                                 if let Some(sub_tier) = &user_profile.sub_tier {
                                                     if sub_tier == "hard_mode" {
-                                                        "Your Hard Mode subscription includes 30 monthly messages. When these run out, your purchased overage credits will be used."
+                                                        "Your Basic Plan Mode subscription includes 30 monthly messages. When these run out, your purchased overage credits will be used."
                                                     } else {
                                                         "Your Escape Plan subscription includes 100 monthly messages or voice minutes. When these run out, your purchased overage credits will be used."
                                                     }

@@ -5,7 +5,20 @@ use std::error::Error;
 use tracing;
 use quircs;
 
-pub async fn scan_qr_code(image_url: &str) -> Result<String, Box<dyn Error>> {
+use url::Url;
+use mime_guess::from_path;
+use regex::Regex;
+
+#[derive(Debug)]
+pub enum MenuContent {
+    Text(String),
+    ImageUrl(String),
+    PdfUrl(String),
+    WebpageUrl(String),
+    Unknown(String)
+}
+
+pub async fn scan_qr_code(image_url: &str) -> Result<MenuContent, Box<dyn Error>> {
     tracing::info!("Starting QR code scan for URL: {}", image_url);
     
     // Download the image
@@ -69,7 +82,25 @@ pub async fn scan_qr_code(image_url: &str) -> Result<String, Box<dyn Error>> {
                 match String::from_utf8(decoded.payload) {
                     Ok(data) => {
                         tracing::info!("Successfully decoded QR code: {}", data);
-                        return Ok(data);
+                        // Analyze the decoded content
+                        if let Ok(url) = Url::parse(&data) {
+                            // Check if it's a valid URL
+                            let path = url.path().to_lowercase();
+                            
+                            // Determine content type based on URL
+                            if path.ends_with(".pdf") {
+                                return Ok(MenuContent::PdfUrl(data));
+                            } else if path.ends_with(".jpg") || path.ends_with(".jpeg") 
+                                || path.ends_with(".png") || path.ends_with(".webp") {
+                                return Ok(MenuContent::ImageUrl(data));
+                            } else {
+                                // Might be a webpage with menu
+                                return Ok(MenuContent::WebpageUrl(data));
+                            }
+                        } else {
+                            // If it's not a URL, return as plain text
+                            return Ok(MenuContent::Text(data));
+                        }
                     },
                     Err(e) => {
                         tracing::warn!("Failed to convert QR code data to string: {:?}", e);

@@ -382,6 +382,7 @@ dependencies = [
  "magic-crypt",
  "mail-parser",
  "matrix-sdk",
+ "mime_guess",
  "mockall",
  "native-tls",
  "nonzero_ext",

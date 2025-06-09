@@ -2339,12 +2339,25 @@ pub async fn process_sms(
                     // Only proceed if we have an image URL from the message
                     if let Some(url) = image_url.as_ref() {
                         match crate::utils::qr_utils::scan_qr_code(url).await {
-                            Ok(data) => {
-                                if data.is_empty() {
-                                    tool_answers.insert(tool_call_id, "No QR code found in the image.".to_string());
-                                } else {
-                                    tool_answers.insert(tool_call_id, format!("QR code content: {}", data));
-                                }
+                            Ok(menu_content) => {
+                                let response = match menu_content {
+                                    crate::utils::qr_utils::MenuContent::Text(text) => {
+                                        format!("QR code contains text: {}", text)
+                                    },
+                                    crate::utils::qr_utils::MenuContent::ImageUrl(url) => {
+                                        format!("QR code contains a link to an image: {}", url)
+                                    },
+                                    crate::utils::qr_utils::MenuContent::PdfUrl(url) => {
+                                        format!("QR code contains a link to a PDF: {}", url)
+                                    },
+                                    crate::utils::qr_utils::MenuContent::WebpageUrl(url) => {
+                                        format!("QR code contains a webpage link: {}", url)
+                                    },
+                                    crate::utils::qr_utils::MenuContent::Unknown(content) => {
+                                        format!("QR code content: {}", content)
+                                    }
+                                };
+                                tool_answers.insert(tool_call_id, response);
                             },
                             Err(e) => {
                                 eprintln!("Failed to scan QR code: {}", e);
@@ -2357,7 +2370,7 @@ pub async fn process_sms(
                         tool_answers.insert(tool_call_id, 
                             "No image was provided in the message. Please send an image containing a QR code.".to_string()
                         );
-              }
+                    }
                 } else if name == "delete_sms_conversation_history" {
                     println!("Executing delete_sms_conversation_history tool call");
 

@@ -160,15 +160,15 @@ pub async fn create_hard_mode_subscription_checkout(
         println!("Stripe error details: {:?}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to create Hard Mode Subscription Checkout Session: {}", e)})),
+            Json(json!({"error": format!("Failed to create Basic Plan Subscription Checkout Session: {}", e)})),
         )
     })?;
 
-    println!("Hard mode subscription checkout session created successfully");
+    println!("Basic Plan subscription checkout session created successfully");
     
     Ok(Json(json!({
         "url": checkout_session.url.unwrap(),
-        "message": "Redirecting to Stripe Checkout for hard mode subscription"
+        "message": "Redirecting to Stripe Checkout for basic plan subscription"
     })))
 }
 
@@ -653,7 +653,7 @@ pub async fn stripe_webhook(
                     let world_price_id_il = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_IL").unwrap_or_default();
 
                     match price_id.as_deref() {
-                        // Hard Mode Subscription variants
+                        // Basic Plan Mode Subscription variants
                         Some(price) if price == hard_mode_price_id_us => {
                             state.user_repository.set_subscription_tier(user.id, Some("tier 1")).ok();
                             state.user_repository.update_user_credits_left(user.id, 40.0).ok();
