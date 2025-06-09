@@ -477,7 +477,7 @@ pub mod register {
                                                 let window_clone = window.clone();
                                                 wasm_bindgen_futures::spawn_local(async move {
                                                     gloo_timers::future::TimeoutFuture::new(1_000).await;
-                                                    let _ = window_clone.location().set_href("/pricing");
+                                                    let _ = window_clone.location().set_href("/");
                                                 });
                                             }
                                         }

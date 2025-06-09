@@ -123,8 +123,8 @@ fn switch(routes: Route) -> Html {
         },
         Route::Register => {
             info!("Rendering Register page");
-            html! { <Register /> }   
-        }
+            html! { <Register /> }
+        },
         Route::Admin => {
             info!("Rendering Admin page");
             html! { <AdminDashboard /> }

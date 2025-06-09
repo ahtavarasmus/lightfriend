@@ -81,22 +81,22 @@ pub fn Verify() -> Html {
                                     }
                                     return;
                                 }
-                                
-                            if let Ok(profile) = response.json::<UserProfile>().await {
-                                user_profile.set(Some(profile.clone()));
-                                if profile.verified {
-                                    // Stop polling and redirect to home
-                                    if let Some(interval) = interval_handle.borrow_mut().take() {
-                                        drop(interval);
-                                    }
-                                    navigator.push(&Route::Home);
-                                } else {
-                                    // Only set the phone number once when it's initially empty
-                                    if phone_number.is_empty() {
-                                        phone_number.set(profile.phone_number);
+                                    
+                                if let Ok(profile) = response.json::<UserProfile>().await {
+                                    user_profile.set(Some(profile.clone()));
+                                    if profile.verified {
+                                        // Stop polling and redirect to home
+                                        if let Some(interval) = interval_handle.borrow_mut().take() {
+                                            drop(interval);
+                                        }
+                                        navigator.push(&Route::Home);
+                                    } else {
+                                        // Only set the phone number once when it's initially empty
+                                        if phone_number.is_empty() {
+                                            phone_number.set(profile.phone_number);
+                                        }
                                     }
                                 }
-                            }
                             }
                             Err(_) => {
                                 gloo_console::error!("Failed to fetch profile");

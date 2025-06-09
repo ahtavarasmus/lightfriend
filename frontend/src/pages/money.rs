@@ -167,7 +167,6 @@ pub fn pricing(props: &PricingProps) -> Html {
                             <p>{"Subscription includes:"}</p>
                             <ul class="quota-list">
                                 <li>{"📞 40-unit quota (1 message = 1 minute)"}</li>
-                                <li>{"📸 Photo Analysis & QR Code Reader (US & AUS only)"}</li>
                             </ul>
                         </div>
                     </div>
@@ -195,12 +194,20 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 }
                             }
                         } else {
+                            let onclick = {
+                                Callback::from(move |e: MouseEvent| {
+                                    e.prevent_default();
+                                    if let Some(window) = web_sys::window() {
+                                        if let Ok(Some(storage)) = window.local_storage() {
+                                            let _ = storage.set_item("selected_plan", "hard_mode");
+                                            let _ = window.location().set_href("/register");
+                                        }
+                                    }
+                                })
+                            };
                             html! {
-                                <Link<Route> to={Route::Register} classes="forward-link signup-link">
-                                    <button class="iq-button signup-button"><b>{"Get Started"}</b></button>
-                                </Link<Route>>
+                                <button onclick={onclick} class="iq-button signup-button"><b>{"Get Started"}</b></button>
                             }
-
                         }
                     }
                 </div>
@@ -218,7 +225,6 @@ pub fn pricing(props: &PricingProps) -> Html {
                             <ul class="quota-list">
                                 <li>{"📞 40-unit quota (1 message = 1 minute)"}</li>
                                 <li>{"🎯 Up to 60 filtered notifications/month"}</li>
-                                <li>{"📸 Photo Analysis & QR Code Reader (US & AUS only)"}</li>
                             </ul>
                         </div>
                     </div>
@@ -246,10 +252,19 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 }
                             }
                         } else {
+                            let onclick = {
+                                Callback::from(move |e: MouseEvent| {
+                                    e.prevent_default();
+                                    if let Some(window) = web_sys::window() {
+                                        if let Ok(Some(storage)) = window.local_storage() {
+                                            let _ = storage.set_item("selected_plan", "world");
+                                            let _ = window.location().set_href("/register");
+                                        }
+                                    }
+                                })
+                            };
                             html! {
-                                <Link<Route> to={Route::Register} classes="forward-link signup-link">
-                                    <button class="iq-button signup-button pro-signup"><b>{"Buy Back Your Time"}</b></button>
-                                </Link<Route>>
+                                <button onclick={onclick} class="iq-button signup-button pro-signup"><b>{"Buy Back Your Time"}</b></button>
                             }
 
                         }

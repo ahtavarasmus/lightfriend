@@ -111,6 +111,62 @@ pub fn Home() -> Html {
     let active_tab = use_state(|| DashboardTab::Connections);
     let navigator = use_navigator().unwrap();
 
+    // Check for selected plan and redirect to Stripe checkout if needed
+    {
+        let profile_data = profile_data.clone();
+        let user_verified = user_verified.clone();
+        
+        use_effect_with_deps(move |_| {
+            // Only proceed if user is verified
+            if *user_verified {
+                if let Some(window) = web_sys::window() {
+                    if let Ok(Some(storage)) = window.local_storage() {
+                        if let Ok(Some(selected_plan)) = storage.get_item("selected_plan") {
+                            // Only proceed if user is logged in and has profile data
+                            if let Some(profile) = (*profile_data).as_ref() {
+                                let user_id = profile.id;
+                                let token = window.local_storage()
+                                    .ok()
+                                    .flatten()
+                                    .and_then(|storage| storage.get_item("token").ok())
+                                    .flatten();
+
+                                if let Some(token) = token {
+                                    // Remove the selected plan from storage
+                                    let _ = storage.remove_item("selected_plan");
+
+                                    // Create the appropriate endpoint based on the plan
+                                    let endpoint = if selected_plan == "hard_mode" {
+                                        format!("{}/api/stripe/hard-mode-subscription-checkout/{}", config::get_backend_url(), user_id)
+                                    } else {
+                                        format!("{}/api/stripe/subscription-checkout/{}", config::get_backend_url(), user_id)
+                                    };
+
+                                    // Redirect to Stripe checkout
+                                    wasm_bindgen_futures::spawn_local(async move {
+                                        let response = Request::post(&endpoint)
+                                            .header("Authorization", &format!("Bearer {}", token))
+                                            .send()
+                                            .await;
+
+                                        if let Ok(resp) = response {
+                                            if let Ok(json) = resp.json::<serde_json::Value>().await {
+                                                if let Some(url) = json.get("url").and_then(|u| u.as_str()) {
+                                                    let _ = window.location().set_href(url);
+                                                }
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            || ()
+        }, ());
+    }
+
     // Single profile fetch effect
     {
         let profile_data = profile_data.clone();
