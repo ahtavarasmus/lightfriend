@@ -828,8 +828,8 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         let state = state_clone.clone();
         Box::pin(async move {
             
-            // Clean up old notifications (older than 30 minutes)
-            let cleanup_threshold = (chrono::Utc::now() - chrono::Duration::minutes(30)).timestamp() as i32;
+            // Clean up old notifications (older than 24 hours to ensure we don't accidentally delete active reminders)
+            let cleanup_threshold = (chrono::Utc::now() - chrono::Duration::hours(24)).timestamp() as i32;
             if let Err(e) = state.user_repository.cleanup_old_calendar_notifications(cleanup_threshold) {
                 error!("Failed to clean up old calendar notifications: {}", e);
             }
@@ -881,10 +881,10 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     }
                 }
 
-                // Calculate time window for events (±5 minutes from now for more precise checking)
+                // Calculate time window for events (looking ahead 30 minutes)
                 let now = chrono::Utc::now();
-                let window_start = now - chrono::Duration::minutes(5);
-                let window_end = now + chrono::Duration::minutes(5);
+                let window_start = now;
+                let window_end = now + chrono::Duration::minutes(30);
 
                 // Fetch events in the time window
                 match crate::handlers::google_calendar::fetch_calendar_events(
@@ -904,9 +904,15 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         let reminder_time = start_time - chrono::Duration::minutes(reminder.minutes as i64);
                                         let current_time = chrono::Utc::now();
                                         
-                                        // Check if the reminder time has passed
-                                        // Only process events that occurred after the last activation time
-                                        if current_time >= reminder_time && start_time.timestamp() as i32 > last_activated {
+                                        // Calculate a 1-minute window around the reminder time
+                                        let reminder_window_start = reminder_time - chrono::Duration::seconds(30);
+                                        let reminder_window_end = reminder_time + chrono::Duration::seconds(30);
+                                        
+                                        // Only send notification if we're within the 1-minute window of the reminder time
+                                        // and the event start time is after the last activation time
+                                        if current_time >= reminder_window_start && 
+                                           current_time <= reminder_window_end && 
+                                           start_time.timestamp() as i32 > last_activated {
                                             // Clone all necessary data before the async block
                                             let event_id = event.id.clone();
                                             let minutes = reminder.minutes;
@@ -916,6 +922,18 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                 .unwrap_or(true); // Skip if error occurs
 
                                             if !notification_exists {
+                                                // Record this notification before sending to prevent duplicates
+                                                let new_notification = crate::models::user_models::NewCalendarNotification {
+                                                    user_id: user.id,
+                                                    event_id: reminder_time_key.clone(),
+                                                    notification_time: current_time.timestamp() as i32,
+                                                };
+                                                if let Err(e) = state.user_repository.create_calendar_notification(&new_notification)
+                                                {
+                                                    error!("Failed to record calendar notification: {}", e);
+                                                    continue; // Skip sending if we can't record it
+                                                }
+
                                                 // Clone event details we need for the notification
                                                 let event_summary = event.summary.clone().unwrap_or_else(|| "Untitled Event".to_string());
                                                 let event_description = event.description.clone();
@@ -1005,6 +1023,11 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                                                     // Spawn a new thread for sending the notification
                                                     tokio::spawn(async move {
+                                                        // Double-check notification hasn't been sent (race condition protection)
+                                                        if state_clone.user_repository.check_calendar_notification_exists(user_id, &reminder_time_key).unwrap_or(true) {
+                                                            return; // Skip if notification already exists
+                                                        }
+
                                                         // Check user's notification preference
                                                         let notification_type = user_notification_type.as_deref().unwrap_or("sms");
                                                         match notification_type {

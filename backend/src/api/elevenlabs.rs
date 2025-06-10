@@ -169,8 +169,6 @@ pub async fn fetch_assistant(
         Ok(Some(user)) => {
             tracing::debug!("Found user by their phone number");
             
-            // Check if user has sufficient credits
-            
 
             // If user is not verified, verify them
             if !user.verified {
