@@ -27,6 +27,7 @@ pub struct CalendarEvent {
     pub start: EventDateTime,
     pub end: EventDateTime,
     pub status: Option<String>,
+    #[serde(default)]
     pub reminders: Option<EventReminders>,
 }
 
@@ -34,6 +35,7 @@ pub struct CalendarEvent {
 pub struct EventReminders {
     #[serde(rename = "useDefault")]
     pub use_default: bool,
+    #[serde(default)]
     pub overrides: Vec<ReminderOverride>,
 }
 
@@ -595,6 +597,9 @@ async fn fetch_events_from_calendar(
     // URL encode the calendar ID to handle special characters
     let encoded_calendar_id = urlencoding::encode(calendar_id);
     
+    tracing::debug!("Fetching events for calendar: {}", calendar_id);
+    tracing::debug!("Time range: {} to {}", start_time, end_time);
+
     let response = client
         .get(&format!(
             "https://www.googleapis.com/calendar/v3/calendars/{}/events",
@@ -610,7 +615,10 @@ async fn fetch_events_from_calendar(
         ])
         .send()
         .await
-        .map_err(|e| CalendarError::ApiError(e.to_string()))?;
+        .map_err(|e| {
+            tracing::error!("Failed to send request for calendar {}: {}", calendar_id, e);
+            CalendarError::ApiError(e.to_string())
+        })?;
 
     // Handle 404 errors for holiday calendars gracefully
     if response.status() == reqwest::StatusCode::NOT_FOUND && calendar_id.contains("#holiday@group") {
@@ -618,16 +626,45 @@ async fn fetch_events_from_calendar(
         return Ok(Vec::new());
     }
 
-    if !response.status().is_success() {
+    let status = response.status();
+    if !status.is_success() {
+        let error_body = response.text().await.unwrap_or_else(|_| "Unable to read error response".to_string());
+        tracing::error!(
+            "Failed to fetch events for calendar {} with status {}: {}",
+            calendar_id,
+            status,
+            error_body
+        );
         return Err(CalendarError::ApiError(format!(
-            "Failed to fetch events for calendar {}: {}",
-            calendar_id, response.status()
+            "Failed to fetch events for calendar {}: {} - {}",
+            calendar_id, status, error_body
         )));
     }
 
-    let calendar_data: CalendarResponse = response.json().await
-        .map_err(|e| CalendarError::ParseError(e.to_string()))?;
+    // Get the response body as text first for debugging
+    let response_text = response.text().await.map_err(|e| {
+        tracing::error!("Failed to get response text for calendar {}: {}", calendar_id, e);
+        CalendarError::ParseError(e.to_string())
+    })?;
 
+    tracing::debug!("Response received for calendar {}, length: {}", calendar_id, response_text.len());
+
+    // Try to parse the response
+    let calendar_data: CalendarResponse = serde_json::from_str(&response_text).map_err(|e| {
+        tracing::error!(
+            "Failed to parse response for calendar {}: {}. Response: {}",
+            calendar_id,
+            e,
+            if response_text.len() > 1000 {
+                format!("{}... (truncated)", &response_text[..1000])
+            } else {
+                response_text.clone()
+            }
+        );
+        CalendarError::ParseError(format!("Failed to parse calendar response: {}", e))
+    })?;
+
+    tracing::debug!("Successfully parsed {} events for calendar {}", calendar_data.items.len(), calendar_id);
     Ok(calendar_data.items)
 }
 
