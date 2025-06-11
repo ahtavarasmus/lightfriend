@@ -242,20 +242,40 @@ pub fn Home() -> Html {
                                 if let Some(profile) = (*profile_data).as_ref() {
                                     html! {
                                         <div class="credits-grid">
-                                            if profile.credits_left > 0.0 {
-                                                <div class="credit-item" tabindex="0">
-                                                    <span class="credit-label">{"Messages"}</span>
-                                                    <span class="credit-value">{profile.credits_left as i32}</span>
-                                                    <div class="credit-tooltip">
-                                                        {"Part of your fixed monthly quota. Used for both messages and voice calls. Resets monthly with your subscription."}
+                                            if let Some(ref tier) = profile.sub_tier {
+                                                if profile.credits_left > 0.0 {
+                                                    <div class="credit-item" tabindex="0">
+                                                        <span class="credit-label">{"Messages"}</span>
+                                                        <span class="credit-value">{profile.credits_left as i32}</span>
+                                                        <div class="credit-tooltip">
+                                                            {"Part of your fixed monthly quota. Used for both messages and voice calls. Resets monthly with your subscription."}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                                <div class="credit-item" tabindex="0">
-                                                    <span class="credit-label">{"Voice Minutes"}</span>
-                                                    <span class="credit-value">{(profile.credits_left * 60.0) as i32}</span>
-                                                    <div class="credit-tooltip">
-                                                        {"Calculated from your monthly message quota (1 credit = 60 voice minutes). Shared with message credits and resets monthly."}
+                                                    <div class="credit-item" tabindex="0">
+                                                        <span class="credit-label">{"Voice Minutes"}</span>
+                                                        <span class="credit-value">{(profile.credits_left * 60.0) as i32}</span>
+                                                        <div class="credit-tooltip">
+                                                            {"Calculated from your monthly message quota (1 credit = 60 voice minutes). Shared with message credits and resets monthly."}
+                                                        </div>
                                                     </div>
+                                                }
+                                                if tier == "tier 2" {
+                                                    <div class="credit-item" tabindex="0">
+                                                        <span class="credit-label">{"Monthly Notifications"}</span>
+                                                        <span class="credit-value">{profile.msgs_left}</span>
+                                                        <div class="credit-tooltip">
+                                                            {"Used for proactive notifications about important events. Adjust filters or turn off notifications if you're receiving too many. Currently cannot be increased beyond monthly limit."}
+                                                        </div>
+                                                    </div>
+                                                }
+                                                if profile.credits_left <= 0.0 && profile.credits <= 0.0 {
+                                                    <div class="credit-warning">
+                                                        {"Monthly quota used. Wait for next month or buy credits."}
+                                                    </div>
+                                                }
+                                            } else {
+                                                <div class="credit-warning">
+                                                    {"No active subscription. Check out our pricing to get started!"}
                                                 </div>
                                             }
                                             if profile.credits > 0.0 {
@@ -263,22 +283,11 @@ pub fn Home() -> Html {
                                                     <span class="credit-label">{"Overage Credits"}</span>
                                                     <span class="credit-value">{format!("{:.2}€", profile.credits)}</span>
                                                     <div class="credit-tooltip">
-                                                        {"Additional credits you can purchase and use when monthly quota is depleted. Available only with active subscription. Can be bought in advance."}
+                                                        {"Additional credits you can purchase and use when monthly quota is depleted. Can be bought in advance."}
                                                     </div>
                                                 </div>
                                             }
-                                            <div class="credit-item" tabindex="0">
-                                                <span class="credit-label">{"Monthly Notifications"}</span>
-                                                <span class="credit-value">{profile.msgs_left}</span>
-                                                <div class="credit-tooltip">
-                                                    {"Used for proactive notifications about important events. Adjust filters or turn off notifications if you're receiving too many. Currently cannot be increased beyond monthly limit."}
-                                                </div>
-                                            </div>
-                                            if profile.credits_left <= 0.0 && profile.credits <= 0.0 && profile.sub_tier.is_some() {
-                                                <div class="credit-warning">
-                                                    {"Monthly quota used. Wait for next month or buy credits."}
-                                                </div>
-                                            }
+
                                         </div>
                                     }
                                 } else {
