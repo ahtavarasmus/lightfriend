@@ -237,35 +237,55 @@ pub fn Home() -> Html {
                 <div class="dashboard-container">
                     <h1 class="panel-title">{"Dashboard"}</h1>
                     <div class="status-section">
-                        <h2 class="section-title">
+                        <div class="credits-info">
                             {
                                 if let Some(profile) = (*profile_data).as_ref() {
-                                    if profile.credits_left > 0.0 {
-                                        html! {
-                                            <span class="credits-status">
-                                                {format!("You have {:.0} monthly units left!", profile.credits_left)}
-                                            </span>
-                                        }
-                                    } else if profile.credits > 0.0 {
-                                        html! {
-                                            <span class="credits-status">
-                                                {format!("You have {:.2}€ worth of overage credits left!", profile.credits)}
-                                            </span>
-                                        }
-                                    } else if profile.sub_tier.is_some() {
-                                        html! {
-                                            <span class="out-of-credits-warning">
-                                                {"Your monthly quota is used. Wait for next month or buy overage credits."}
-                                            </span>
-                                        }
-                                    } else {
-                                        html! {}
+                                    html! {
+                                        <div class="credits-grid">
+                                            if profile.credits_left > 0.0 {
+                                                <div class="credit-item" tabindex="0">
+                                                    <span class="credit-label">{"Messages"}</span>
+                                                    <span class="credit-value">{profile.credits_left as i32}</span>
+                                                    <div class="credit-tooltip">
+                                                        {"Part of your fixed monthly quota. Used for both messages and voice calls. Resets monthly with your subscription."}
+                                                    </div>
+                                                </div>
+                                                <div class="credit-item" tabindex="0">
+                                                    <span class="credit-label">{"Voice Minutes"}</span>
+                                                    <span class="credit-value">{(profile.credits_left * 60.0) as i32}</span>
+                                                    <div class="credit-tooltip">
+                                                        {"Calculated from your monthly message quota (1 credit = 60 voice minutes). Shared with message credits and resets monthly."}
+                                                    </div>
+                                                </div>
+                                            }
+                                            if profile.credits > 0.0 {
+                                                <div class="credit-item" tabindex="0">
+                                                    <span class="credit-label">{"Overage Credits"}</span>
+                                                    <span class="credit-value">{format!("{:.2}€", profile.credits)}</span>
+                                                    <div class="credit-tooltip">
+                                                        {"Additional credits you can purchase and use when monthly quota is depleted. Available only with active subscription. Can be bought in advance."}
+                                                    </div>
+                                                </div>
+                                            }
+                                            <div class="credit-item" tabindex="0">
+                                                <span class="credit-label">{"Monthly Notifications"}</span>
+                                                <span class="credit-value">{profile.msgs_left}</span>
+                                                <div class="credit-tooltip">
+                                                    {"Used for proactive notifications about important events. Adjust filters or turn off notifications if you're receiving too many. Currently cannot be increased beyond monthly limit."}
+                                                </div>
+                                            </div>
+                                            if profile.credits_left <= 0.0 && profile.credits <= 0.0 && profile.sub_tier.is_some() {
+                                                <div class="credit-warning">
+                                                    {"Monthly quota used. Wait for next month or buy credits."}
+                                                </div>
+                                            }
+                                        </div>
                                     }
                                 } else {
                                     html! {}
                                 }
                             }
-                        </h2>
+                        </div>
                         {
                             if let Some(profile) = (*profile_data).as_ref() {
                                 if profile.sub_tier.is_none() {
@@ -1858,11 +1878,119 @@ pub fn Home() -> Html {
                         animation: pulse 2s infinite;
                     }
 
-                    .credits-status {
+                    .credits-info {
+                        width: 100%;
+                        margin-bottom: 1rem;
+                    }
+
+                    .credits-grid {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+                        gap: 1rem;
+                        width: 100%;
+                    }
+
+                    .credit-item {
+                        background: rgba(30, 144, 255, 0.05);
+                        border: 1px solid rgba(30, 144, 255, 0.1);
+                        border-radius: 8px;
+                        padding: 0.75rem;
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        gap: 0.25rem;
+                        position: relative;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        outline: none;
+                    }
+
+                    .credit-item:hover,
+                    .credit-item:focus {
+                        background: rgba(30, 144, 255, 0.1);
+                        border-color: rgba(30, 144, 255, 0.2);
+                    }
+
+                    .credit-tooltip {
+                        position: absolute;
+                        bottom: calc(100% + 10px);
+                        left: 50%;
+                        transform: translateX(-50%);
+                        background: rgba(0, 0, 0, 0.9);
+                        color: #fff;
+                        padding: 1rem;
+                        border-radius: 8px;
+                        font-size: 0.85rem;
+                        width: max-content;
+                        max-width: 250px;
+                        z-index: 1000;
+                        opacity: 0;
+                        visibility: hidden;
+                        transition: all 0.3s ease;
+                        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+                        border: 1px solid rgba(30, 144, 255, 0.2);
+                        text-align: center;
+                    }
+
+                    .credit-tooltip::after {
+                        content: '';
+                        position: absolute;
+                        top: 100%;
+                        left: 50%;
+                        transform: translateX(-50%);
+                        border-width: 8px;
+                        border-style: solid;
+                        border-color: rgba(0, 0, 0, 0.9) transparent transparent transparent;
+                    }
+
+                    .credit-item:hover .credit-tooltip,
+                    .credit-item:focus .credit-tooltip {
+                        opacity: 1;
+                        visibility: visible;
+                    }
+
+                    @media (max-width: 768px) {
+                        .credit-item {
+                            padding: 1rem;
+                        }
+
+                        .credit-tooltip {
+                            position: fixed;
+                            bottom: 20px;
+                            left: 50%;
+                            transform: translateX(-50%);
+                            width: 90%;
+                            max-width: 300px;
+                            z-index: 1001;
+                        }
+
+                        .credit-tooltip::after {
+                            display: none;
+                        }
+                    }
+
+                    .credit-label {
+                        color: #999;
+                        font-size: 0.8rem;
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                    }
+
+                    .credit-value {
                         color: #7EB2FF;
+                        font-size: 1.1rem;
                         font-weight: 500;
-                        padding: 0.5rem 1rem;
+                    }
+
+                    .credit-warning {
+                        grid-column: 1 / -1;
+                        color: #ff4444;
+                        font-size: 0.9rem;
+                        text-align: center;
+                        padding: 0.5rem;
+                        background: rgba(255, 68, 68, 0.1);
                         border-radius: 6px;
+                        margin-top: 0.5rem;
                     }
 
                     .ready-status {

@@ -673,7 +673,7 @@ pub async fn fetch_calendar_events(
     user_id: i32,
     timeframe: TimeframeQuery,
 ) -> Result<Vec<CalendarEvent>, CalendarError> {
-    tracing::debug!("Fetching calendar events for timeframe: {:?} to {:?}", timeframe.start, timeframe.end);
+    tracing::info!("Fetching calendar events for timeframe: {:?} to {:?} for user: {}", timeframe.start, timeframe.end, user_id);
 
     // Get Google Calendar tokens
     tracing::debug!("Getting Google Calendar tokens for user_id: {}", user_id);
@@ -713,6 +713,7 @@ pub async fn fetch_calendar_events(
         end_time: &str
     ) -> Result<Vec<CalendarEvent>, CalendarError> {
         // First try to fetch calendar list to check permissions
+        tracing::info!("first try fetch calendar list to check permissions for user: {}", user_id);
         match fetch_calendar_list(client, access_token).await {
             Ok(calendars) => {
                 let mut all_events = Vec::new();
