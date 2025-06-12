@@ -252,10 +252,18 @@ pub fn Home() -> Html {
                                                         </div>
                                                     </div>
                                                     <div class="credit-item" tabindex="0">
-                                                        <span class="credit-label">{"Voice Minutes"}</span>
-                                                        <span class="credit-value">{(profile.credits_left * 60.0) as i32}</span>
+                                                        <span class="credit-label">{"Voice Time"}</span>
+                                                <span class="credit-value">
+                                                    {
+                                                        if profile.credits_left as i32 >= 1 {
+                                                            format!("{}m {}s", profile.credits_left as i32, ((profile.credits_left % 1.0) * 60.0) as i32)
+                                                        } else {
+                                                            format!("{}s", (profile.credits_left * 60.0) as i32)
+                                                        }
+                                                    }
+                                                </span>
                                                         <div class="credit-tooltip">
-                                                            {"Calculated from your monthly message quota (1 credit = 60 voice minutes). Shared with message credits and resets monthly."}
+                                                            {"Calculated from your monthly message quota (1 credit = 1 minute of voice time). Shared with message credits and resets monthly."}
                                                         </div>
                                                     </div>
                                                 }
