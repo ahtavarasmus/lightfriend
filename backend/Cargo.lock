@@ -404,6 +404,7 @@ dependencies = [
  "sha1",
  "sha2",
  "strsim",
+ "thiserror 1.0.69",
  "time",
  "tokio",
  "tokio-cron-scheduler",
