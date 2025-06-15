@@ -152,6 +152,10 @@ pub async fn create_hard_mode_subscription_checkout(
                 name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto),
                 shipping: None,
             }),
+            payment_intent_data: Some(stripe::CreateCheckoutSessionPaymentIntentData {
+                setup_future_usage: Some(stripe::CreateCheckoutSessionPaymentIntentDataSetupFutureUsage::OffSession),
+                ..Default::default()
+            }),
             ..Default::default()
         },
     )
@@ -291,8 +295,12 @@ pub async fn create_subscription_checkout(
             }),
             customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
                 address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
-                name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto), // Add this line
+                name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto),
                 shipping: None,
+            }),
+            payment_intent_data: Some(stripe::CreateCheckoutSessionPaymentIntentData {
+                setup_future_usage: Some(stripe::CreateCheckoutSessionPaymentIntentDataSetupFutureUsage::OffSession),
+                ..Default::default()
             }),
             ..Default::default()
         },
@@ -577,6 +585,69 @@ async fn create_new_customer(
     Ok(customer.id.to_string())
 }
 
+
+#[derive(Debug, Clone)]
+struct SubscriptionInfo {
+    country: Option<&'static str>,
+    tier: &'static str,
+}
+
+// Helper function to extract subscription info from price ID
+fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
+    // Default values
+    let mut info = SubscriptionInfo {
+        country: None,
+        tier: "tier 2", // Default to World tier
+    };
+
+    // Helper macro to reduce code duplication
+    macro_rules! check_price_id {
+        ($country:expr, $env_var:expr, $tier:expr) => {
+            if price_id == std::env::var($env_var).unwrap_or_default() {
+                info.country = Some($country);
+                info.tier = $tier;
+                return info;
+            }
+        };
+    }
+
+    // Tier 1 Plans (Hard Mode and Basic Daily)
+    for country in ["US", "FI", "UK", "AU", "IL"] {
+        // Check Hard Mode price IDs (older subscriptions)
+        check_price_id!(
+            country,
+            format!("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_{}", country),
+            "tier 1"
+        );
+        
+        // Check Basic Daily price IDs
+        check_price_id!(
+            country,
+            format!("STRIPE_SUBSCRIPTION_BASIC_DAILY_PRICE_ID_{}", country),
+            "tier 1"
+        );
+    }
+
+    // Tier 2 Plans (World and Escape Daily) 
+    for country in ["US", "FI", "UK", "AU", "IL"] {
+        // Check World price IDs (older subscriptions)
+        check_price_id!(
+            country,
+            format!("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_{}", country),
+            "tier 2"
+        );
+        
+        // Check Escape Daily price IDs
+        check_price_id!(
+            country,
+            format!("STRIPE_SUBSCRIPTION_ESCAPE_DAILY_PRICE_ID_{}", country),
+            "tier 2"
+        );
+    }
+
+    info
+}
+
 pub async fn stripe_webhook(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -587,7 +658,7 @@ pub async fn stripe_webhook(
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "Invalid payload encoding"})),
         ))?;
-    println!("Stripe webhook received");
+    tracing::info!("Stripe webhook received");
 
     // Initialize Stripe client
     let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY")
@@ -607,7 +678,7 @@ pub async fn stripe_webhook(
             Json(json!({"error": "Missing Stripe-Signature header"})),
         ))?;
 
-    println!("Stripe signature header found");
+    tracing::info!("Stripe signature header found");
     // Construct and verify the Stripe event using the signature
     let event = stripe::Webhook::construct_event(
         &payload_str,
@@ -618,241 +689,113 @@ pub async fn stripe_webhook(
         Json(json!({"error": format!("Invalid Stripe webhook signature: {}", e)})),
     ))?;
     
-    println!("Stripe event verified successfully: {}", event.type_);
+    tracing::info!("Stripe event verified successfully: {}", event.type_);
     // Process the event based on its type
     match event.type_ {
-        stripe::EventType::CustomerSubscriptionCreated => {
-            println!("Processing customer.subscription.created event");
+        
+        stripe::EventType::CustomerSubscriptionCreated | stripe::EventType::CustomerSubscriptionUpdated => {
+            tracing::info!("Processing subscription created/updated event");
             if let stripe::EventObject::Subscription(subscription) = event.data.object {
                 let customer_id = match subscription.customer {
                     stripe::Expandable::Id(id) => id,
                     stripe::Expandable::Object(customer) => customer.id,
                 };
-
-                // Get the price ID from the subscription
-                let price_id = subscription.items.data.first()
-                    .and_then(|item| item.price.as_ref())
-                    .map(|price| price.id.to_string());
 
                 if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
-                    // Check which subscription type it is based on the price ID
-                    let hard_mode_price_id = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID").unwrap_or_default();
-                    let world_price_id = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID").unwrap_or_default();
-
-                    // Get all possible price IDs for different regions
-                    let hard_mode_price_id_us = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_US").unwrap_or_default();
-                    let hard_mode_price_id_fi = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_FI").unwrap_or_default();
-                    let hard_mode_price_id_uk = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_UK").unwrap_or_default();
-                    let hard_mode_price_id_au = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_AU").unwrap_or_default();
-                    let hard_mode_price_id_il = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_IL").unwrap_or_default();
-
-                    let world_price_id_us = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_US").unwrap_or_default();
-                    let world_price_id_fi = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_FI").unwrap_or_default();
-                    let world_price_id_uk = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_UK").unwrap_or_default();
-                    let world_price_id_au = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_AU").unwrap_or_default();
-                    let world_price_id_il = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_IL").unwrap_or_default();
-
-                    match price_id.as_deref() {
-                        // Basic Plan Mode Subscription variants
-                        Some(price) if price == hard_mode_price_id_us => {
-                            state.user_repository.set_subscription_tier(user.id, Some("tier 1")).ok();
-                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
-                            println!("Updated subscription tier to 'tier 1', 40.0 credits_left for US hard mode subscriber {}", user.id);
-                        },
-                        Some(price) if price == hard_mode_price_id_fi || price == hard_mode_price_id_uk => {
-                            state.user_repository.set_subscription_tier(user.id, Some("tier 1")).ok();
-                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
-                            println!("Updated subscription tier to 'tier 1', 40.0 credits_left for FI/UK hard mode subscriber {}", user.id);
-                        },
-                        Some(price) if price == hard_mode_price_id_au => {
-                            state.user_repository.set_subscription_tier(user.id, Some("tier 1")).ok();
-                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
-                            println!("Updated subscription tier to 'tier 1', 40.0 credits_left for AU hard mode subscriber {}", user.id);
-                        },
-                        Some(price) if price == hard_mode_price_id_il => {
-                            state.user_repository.set_subscription_tier(user.id, Some("tier 1")).ok();
-                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
-                            println!("Updated subscription tier to 'tier 1', 40.0 credits_left for IL hard mode subscriber {}", user.id);
-                        },
-                        // World Subscription variants
-                        Some(price) if price == world_price_id_us => {
-                            state.user_repository.set_subscription_tier(user.id, Some("tier 2")).ok();
-                            state.user_repository.update_proactive_messages_left(user.id, 60).ok();
-                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
-                            println!("Updated subscription tier to 'tier 2', set 60 messages, 40.0 credits_left for US world subscriber {}", user.id);
-                        },
-                        Some(price) if price == world_price_id_fi || price == world_price_id_uk => {
-                            state.user_repository.set_subscription_tier(user.id, Some("tier 2")).ok();
-                            state.user_repository.update_proactive_messages_left(user.id, 60).ok();
-                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
-                            println!("Updated subscription tier to 'tier 2', set 60 messages, 40.0 credits_left for FI/UK world subscriber {}", user.id);
-                        },
-                        Some(price) if price == world_price_id_au => {
-                            state.user_repository.set_subscription_tier(user.id, Some("tier 2")).ok();
-                            state.user_repository.update_proactive_messages_left(user.id, 60).ok();
-                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
-                            println!("Updated subscription tier to 'tier 2', set 60 messages, 40.0 credits_left for AU world subscriber {}", user.id);
-                        },
-                        Some(price) if price == world_price_id_il => {
-                            state.user_repository.set_subscription_tier(user.id, Some("tier 2")).ok();
-                            state.user_repository.update_proactive_messages_left(user.id, 60).ok();
-                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
-                            println!("Updated subscription tier to 'tier 2', set 60 messages, 40.0 credits_left for IL world subscriber {}", user.id);
-                        },
-                        _ => {
-                            println!("Unknown subscription price ID, defaulting to tier 2");
-                            state.user_repository.set_subscription_tier(
-                                user.id,
-                                Some("tier 2"),
-                            ).ok();
-                            state.user_repository.update_proactive_messages_left(user.id, 60).ok();
-                            state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                    // Save the default payment method if it exists
+                    if let Some(default_payment_method) = subscription.default_payment_method {
+                        let payment_method_id = match default_payment_method {
+                            stripe::Expandable::Id(id) => id,
+                            stripe::Expandable::Object(pm) => pm.id,
+                        };
+                        
+                        tracing::info!("Saving default payment method ID: {}", payment_method_id);
+                        if let Err(e) = state.user_repository.set_stripe_payment_method_id(user.id, &payment_method_id) {
+                            tracing::error!("Failed to save payment method ID: {}", e);
                         }
                     }
-                    // Set initial credits_left for the subscription
-                    // Enable proactive IMAP messaging for subscribed users
-                    //state.user_repository.update_imap_proactive(user.id, true).ok();
-                    println!("Updated subscription tier to 'tier 2', set 60 messages, 20.0 credits_left, and enabled proactive IMAP for user {}", user.id);
 
-                    // Mark existing emails as processed to prevent spam
-                    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user.id, true, Some(100), true).await {
-                        Ok(emails) => {
-                            println!("Marked {} existing emails as processed for new subscriber {}", emails.len(), user.id);
+                    if let Some(price_id) = subscription.items.data.first()
+                        .and_then(|item| item.price.as_ref())
+                        .map(|price| price.id.to_string())
+                    {
+                        // Extract subscription info (both country and tier)
+                        let sub_info = extract_subscription_info(&price_id);
+                        
+                        // Update subscription country
+                        if let Err(e) = state.user_repository.update_sub_country(user.id, sub_info.country) {
+                            tracing::error!("Failed to update subscription country: {}", e);
                         }
-                        Err(e) => {
-                            println!("Failed to mark existing emails as processed for user {}: {:?}", user.id, e);
-                            // Continue processing even if marking emails fails
+
+                        // Update subscription tier
+                        if let Err(e) = state.user_repository.set_subscription_tier(user.id, Some(sub_info.tier)) {
+                            tracing::error!("Failed to update subscription tier: {}", e);
                         }
-                    }
-                }
-            }
-        },
-        stripe::EventType::CustomerSubscriptionUpdated => {
-            println!("Processing customer.subscription.updated event");
-            if let stripe::EventObject::Subscription(subscription) = event.data.object {
-                let customer_id = match subscription.customer {
-                    stripe::Expandable::Id(id) => id,
-                    stripe::Expandable::Object(customer) => customer.id,
-                };
 
-                // Check if this is an active subscription and a renewal
-                let is_active = subscription.status == stripe::SubscriptionStatus::Active;
-                let current_period_start = subscription.current_period_start;
-                
-                // The subscription was just renewed if current_period_start is very recent (within last minute)
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i64;
-                let is_renewal = is_active && (now - current_period_start) < 60; // Within last minute
+                        // Determine daily credit limit based on subscription country
+                        let daily_credits = match sub_info.country {
+                            Some("US") => 10.0,  // US
+                            Some("FI") => 4.0,   // Finland
+                            Some("UK") => 4.0,   // UK
+                            Some("AU") => 3.0,   // Australia
+                            Some("IL") => 2.0,   // Israel
+                            _ => 4.0,            // Default to Finland/UK limit
+                        };
 
-                if is_renewal {
-                    println!("Subscription renewal detected for customer at period start: {}", current_period_start);
-                    if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
-                        // Get the price ID from the subscription
-                        let price_id = subscription.items.data.first()
-                            .and_then(|item| item.price.as_ref())
-                            .map(|price| price.id.to_string());
+                        // Update the credits to the daily limit
+                        if let Err(e) = state.user_repository.update_sub_credits(user.id, daily_credits) {
+                            tracing::error!("Failed to update subscription credits: {}", e);
+                        } else {
+                            tracing::info!("Set daily credits to {} for user {} based on subscription country {:?}", 
+                                daily_credits, user.id, sub_info.country);
+                        }
 
-                        let hard_mode_price_id = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID").unwrap_or_default();
-                        let world_price_id = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID").unwrap_or_default();
-
-                        // Get all possible price IDs for different regions
-                        let hard_mode_price_id_us = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_US").unwrap_or_default();
-                        let hard_mode_price_id_fi = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_FI").unwrap_or_default();
-                        let hard_mode_price_id_uk = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_UK").unwrap_or_default();
-                        let hard_mode_price_id_au = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_AU").unwrap_or_default();
-                        let hard_mode_price_id_il = std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_IL").unwrap_or_default();
-
-                        let world_price_id_us = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_US").unwrap_or_default();
-                        let world_price_id_fi = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_FI").unwrap_or_default();
-                        let world_price_id_uk = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_UK").unwrap_or_default();
-                        let world_price_id_au = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_AU").unwrap_or_default();
-                        let world_price_id_il = std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_IL").unwrap_or_default();
-
-                        match price_id.as_deref() {
-                            // Hard Mode Subscription renewal variants
-                            Some(price) if price == hard_mode_price_id_us => {
-                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
-                                println!("40.0 credits_left for US hard mode user {} on subscription renewal", user.id);
-                            },
-                            Some(price) if price == hard_mode_price_id_fi || price == hard_mode_price_id_uk => {
-                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
-                                println!("40.0 credits_left for FI/UK hard mode user {} on subscription renewal", user.id);
-                            },
-                            Some(price) if price == hard_mode_price_id_au => {
-                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
-                                println!("40.0 credits_left for AU hard mode user {} on subscription renewal", user.id);
-                            },
-                            Some(price) if price == hard_mode_price_id_il => {
-                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
-                                println!("40.0 credits_left for IL hard mode user {} on subscription renewal", user.id);
-                            },
-                            // World Subscription renewal variants
-                            Some(price) if price == world_price_id_us => {
-                                state.user_repository.update_proactive_messages_left(user.id, 60).ok();
-                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
-                                println!("Reset to 60 messages and 40.0 credits_left for US world user {} on subscription renewal", user.id);
-                            },
-                            Some(price) if price == world_price_id_fi || price == world_price_id_uk => {
-                                state.user_repository.update_proactive_messages_left(user.id, 60).ok();
-                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
-                                println!("Reset to 60 messages and 40.0 credits_left for FI/UK world user {} on subscription renewal", user.id);
-                            },
-                            Some(price) if price == world_price_id_au => {
-                                state.user_repository.update_proactive_messages_left(user.id, 60).ok();
-                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
-                                println!("Reset to 60 messages and 40.0 credits_left for AU world user {} on subscription renewal", user.id);
-                            },
-                            Some(price) if price == world_price_id_il => {
-                                state.user_repository.update_proactive_messages_left(user.id, 60).ok();
-                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
-                                println!("Reset to 60 messages and 40.0 credits_left for IL world user {} on subscription renewal", user.id);
-                            },
-                            _ => {
-                                println!("Unknown subscription type for renewal, defaulting to tier 2 values");
-                                state.user_repository.update_proactive_messages_left(user.id, 60).ok();
-                                state.user_repository.update_user_credits_left(user.id, 40.0).ok();
+                        // If this is an Escape plan subscription (tier 2), set proactive messages to 80
+                        if sub_info.tier == "tier 2" {
+                            if let Err(e) = state.user_repository.update_proactive_messages_left(user.id, 80) {
+                                tracing::error!("Failed to update proactive messages: {}", e);
+                            } else {
+                                tracing::info!("Set proactive messages to 80 for Escape plan user {}", user.id);
                             }
                         }
-                    } else {
-                        println!("No user found for customer ID");
+
+                        tracing::info!("Updated subscription info for user {}: country={:#?}, tier={}", 
+                            user.id, sub_info.country, sub_info.tier);
                     }
-                } else {
-                    println!("Subscription updated but not a renewal (status: {:?}, period start: {})", subscription.status, current_period_start);
+
                 }
             }
         },
         stripe::EventType::CustomerSubscriptionDeleted => {
-            println!("Processing customer.subscription.deleted event");
+            tracing::info!("Processing customer.subscription.deleted event");
             if let stripe::EventObject::Subscription(subscription) = event.data.object {
                 let customer_id = match subscription.customer {
                     stripe::Expandable::Id(id) => id,
                     stripe::Expandable::Object(customer) => customer.id,
                 };
                 
-                // Remove user's subscription tier (set to None)
-                if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
-                    state.user_repository.set_subscription_tier(
-                        user.id,
-                        None,
-                    ).ok();
 
-                    state.user_repository.update_proactive_messages_left(user.id, 0).ok();
-                    state.user_repository.update_user_credits_left(user.id, 0.0).ok();
-                    println!("Removed subscription tier for user {}", user.id);
+                if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
+                    // Clear subscription tier and country
+                    if let Err(e) = state.user_repository.set_subscription_tier(user.id, None) {
+                        tracing::error!("Failed to clear subscription tier: {}", e);
+                    }
+                    if let Err(e) = state.user_repository.update_sub_country(user.id, None) {
+                        tracing::error!("Failed to clear subscription country: {}", e);
+                    }
+                    tracing::info!("Cleared subscription info for user {}", user.id);
                 }
             }
         },
         stripe::EventType::CheckoutSessionCompleted => {
-            println!("Processing checkout.session.completed event");
+            tracing::info!("Processing checkout.session.completed event");
             match event.data.object {
                 stripe::EventObject::CheckoutSession(session) => {
-                    println!("Checkout session found: {}", session.id);
+                    tracing::info!("Checkout session found: {}", session.id);
                     
                     // Skip processing if this is a subscription checkout
                     if matches!(session.mode, stripe::CheckoutSessionMode::Subscription) {
-                        println!("Ignoring subscription checkout session");
+                        tracing::info!("Ignoring subscription checkout session");
                         return Ok(StatusCode::OK);
                     }
                     if let Some(customer) = &session.customer {
@@ -860,12 +803,12 @@ pub async fn stripe_webhook(
                             stripe::Expandable::Id(id) => id.clone(),
                             stripe::Expandable::Object(customer) => customer.id.clone(),
                         };
-                        println!("Customer ID: {}", customer_id);
+                        tracing::info!("Customer ID: {}", customer_id);
 
                         // Update customer address with billing address from Checkout
                         if let Some(billing_details) = &session.shipping_details {
                             if let Some(address) = &billing_details.address {
-                                println!("Updating customer address with billing details");
+                                tracing::info!("Updating customer address with billing details");
                                 Customer::update(
                                     &client,
                                     &customer_id,
@@ -902,7 +845,7 @@ pub async fn stripe_webhook(
                             stripe::Expandable::Object(pi) => pi.id.clone(),
                         };
                         
-                        println!("Payment intent ID found");
+                        tracing::info!("Payment intent ID found");
                         let payment_intent = PaymentIntent::retrieve(&client, &payment_intent_id, &[])
                             .await
                             .map_err(|e| (
@@ -917,7 +860,6 @@ pub async fn stripe_webhook(
                                 stripe::Expandable::Object(pm) => pm.id.clone(),
                             };
                             
-                            println!("Payment method ID found");
                             // Save the payment method ID to your database for the customer
                             let user = state
                                 .user_repository
@@ -931,7 +873,7 @@ pub async fn stripe_webhook(
                                     Json(json!({"error": "Customer not found"})),
                                 ))?;
 
-                            println!("Found user with ID: {}", user.id);
+                            tracing::info!("Found user with ID: {}", user.id);
                             state
                                 .user_repository
                                 .set_stripe_payment_method_id(user.id, &payment_method_id)
@@ -939,7 +881,7 @@ pub async fn stripe_webhook(
                                     StatusCode::INTERNAL_SERVER_ERROR,
                                     Json(json!({"error": format!("Database error: {}", e)})),
                                 ))?;
-                            println!("Successfully saved payment method ID for user");
+                            tracing::info!("Successfully saved payment method ID for user");
 
                             let amount_in_cents = session.amount_subtotal.unwrap_or(0);
                             let amount = amount_in_cents as f32 / 100.00;
@@ -950,21 +892,21 @@ pub async fn stripe_webhook(
                                     StatusCode::INTERNAL_SERVER_ERROR,
                                     Json(json!({"error": format!("Database error: {}", e)})),
                                 ))?;
-                            println!("Increased the credits amount by {} successfully", amount);
+                            tracing::info!("Increased the credits amount by {} successfully", amount);
                         }
                     }
                 },
                 _ => {
-                    println!("Checkout session not found in event object");
+                    tracing::error!("Checkout session not found in event object");
                 }
             }
         },
         _ => {
-            println!("Ignoring non-checkout.session.completed event");
+            tracing::info!("Ignoring non-checkout.session.completed event");
         }
     }
 
-    println!("Webhook processed successfully");
+    tracing::info!("Webhook processed successfully");
     Ok(StatusCode::OK) // Return 200 OK for successful webhook processing
 }
 

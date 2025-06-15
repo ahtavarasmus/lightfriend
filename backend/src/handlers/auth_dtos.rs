@@ -10,7 +10,6 @@ pub struct NewUser {
     pub password_hash: String,
     pub phone_number: String,
     pub time_to_live: i32,
-    pub notify: bool,
     pub verified: bool,
     pub credits: f32,
     pub charge_when_under: bool,

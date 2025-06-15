@@ -39,6 +39,39 @@ impl UserRepository {
         Self { pool }
     }
 
+    // Helper function to ensure user settings exist, creating them if they don't
+    fn ensure_user_settings_exist(&self, user_id: i32) -> Result<(), DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Check if settings exist for this user
+        let settings_exist = user_settings::table
+            .filter(user_settings::user_id.eq(user_id))
+            .first::<crate::models::user_models::UserSettings>(&mut conn)
+            .optional()?
+            .is_some();
+
+        if !settings_exist {
+            // Create default settings
+            let new_settings = crate::models::user_models::NewUserSettings {
+                user_id,
+                notify: true, // Default to true for notifications about new features
+                notification_type: None, // Default to None (which means SMS)
+                timezone: None,
+                timezone_auto: None,
+                agent_language: "en".to_string(),
+                sub_country: None, // Default to no subscription country
+            };
+            
+            // Insert the new settings
+            diesel::insert_into(user_settings::table)
+                .values(&new_settings)
+                .execute(&mut conn)?;
+        }
+        
+        Ok(())
+    }
+
     // Helper function to create default proactive settings
     fn create_default_proactive_settings(&self, user_id: i32) -> Result<(), DieselError> {
         use crate::schema::proactive_settings;
@@ -301,10 +334,28 @@ impl UserRepository {
     }
 
     pub fn update_agent_language(&self, user_id: i32, language: &str) -> Result<(), DieselError> {
+        use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::agent_language.eq(language))
+
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::agent_language.eq(language))
             .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_sub_country(&self, user_id: i32, country: Option<&str>) -> Result<(), DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+
+        // Update the settings
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::sub_country.eq(country))
+            .execute(&mut conn)?;
+
+
         Ok(())
     }
 
@@ -360,59 +411,67 @@ impl UserRepository {
 
     // Update user's profile
     pub fn update_profile(&self, user_id: i32, email: &str, phone_number: &str, nickname: &str, info: &str, timezone: &str, timezone_auto: &bool, notification_type: Option<&str>) -> Result<(), DieselError> {
+        use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         println!("Repository: Updating user {} with notification type: {:?}", user_id, notification_type);
         
-        // Check if phone number exists for a different user
-        let existing_phone = users::table
-            .filter(users::phone_number.eq(phone_number))
-            .filter(users::id.ne(user_id))
-            .first::<User>(&mut conn)
-            .optional()?;
-            
-        if existing_phone.is_some() {
-            return Err(DieselError::RollbackTransaction);
-        }
+        // Start a transaction
+        conn.transaction(|conn| {
+            // Check if phone number exists for a different user
+            let existing_phone = users::table
+                .filter(users::phone_number.eq(phone_number))
+                .filter(users::id.ne(user_id))
+                .first::<User>(conn)
+                .optional()?;
+                
+            if existing_phone.is_some() {
+                return Err(DieselError::RollbackTransaction);
+            }
 
-        // Check if email exists for a different user
-        let existing_email = users::table
-            .filter(users::email.eq(email.to_lowercase()))
-            .filter(users::id.ne(user_id))
-            .first::<User>(&mut conn)
-            .optional()?;
-            
-        if existing_email.is_some() {
-            return Err(DieselError::NotFound);
-        }
+            // Check if email exists for a different user
+            let existing_email = users::table
+                .filter(users::email.eq(email.to_lowercase()))
+                .filter(users::id.ne(user_id))
+                .first::<User>(conn)
+                .optional()?;
+                
+            if existing_email.is_some() {
+                return Err(DieselError::NotFound);
+            }
 
-        // Get current user to check if phone number is changing
-        let current_user = users::table
-            .find(user_id)
-            .first::<User>(&mut conn)?;
+            // Get current user to check if phone number is changing
+            let current_user = users::table
+                .find(user_id)
+                .first::<User>(conn)?;
 
-        // If phone number is changing, set verified to false
-        let should_unverify = current_user.phone_number != phone_number;
+            // If phone number is changing, set verified to false
+            let should_unverify = current_user.phone_number != phone_number;
 
-        let result = diesel::update(users::table.find(user_id))
-            .set((
-                users::email.eq(email),
-                users::phone_number.eq(phone_number),
-                users::nickname.eq(nickname),
-                users::info.eq(info),
-                users::timezone.eq(timezone),
-                users::timezone_auto.eq(timezone_auto),
-                users::verified.eq(!should_unverify && current_user.verified), // Only keep verified true if phone number hasn't changed
-                users::notification_type.eq(notification_type),
-            ))
-            .execute(&mut conn);
-            
-        match &result {
-            Ok(_) => println!("Successfully updated user profile with notification type: {:?}", notification_type),
-            Err(e) => println!("Failed to update user profile: {:?}", e),
-        }
-        
-        result?;
-        Ok(())
+            // Update user table
+            diesel::update(users::table.find(user_id))
+                .set((
+                    users::email.eq(email),
+                    users::phone_number.eq(phone_number),
+                    users::nickname.eq(nickname),
+                    users::info.eq(info),
+                    users::verified.eq(!should_unverify && current_user.verified), // Only keep verified true if phone number hasn't changed
+                ))
+                .execute(conn)?;
+
+            // Ensure user settings exist
+            self.ensure_user_settings_exist(user_id)?;
+
+            // Update the settings
+            diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+                .set((
+                    user_settings::timezone.eq(timezone.to_string()),
+                    user_settings::timezone_auto.eq(timezone_auto),
+                    user_settings::notification_type.eq(notification_type.map(|s| s.to_string())),
+                ))
+                .execute(conn)?;
+
+            Ok(())
+        })
     }
 
     pub fn find_by_phone_number(&self, phone_number: &str) -> Result<Option<User>, DieselError> {
@@ -440,25 +499,67 @@ impl UserRepository {
 
     // Delete a user
     pub fn delete_user(&self, user_id: i32) -> Result<(), DieselError> {
-        use crate::schema::{usage_logs, conversations, google_calendar, gmail, unipile_connection};
+        use crate::schema::*;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // Start transaction
         conn.transaction(|conn| {
-            // Delete related records first
-            diesel::delete(usage_logs::table.filter(usage_logs::user_id.eq(user_id)))
+            // Delete all related records first
+            diesel::delete(bridges::table.filter(bridges::user_id.eq(user_id)))
                 .execute(conn)?;
-            
+
+            diesel::delete(calendar_notifications::table.filter(calendar_notifications::user_id.eq(user_id)))
+                .execute(conn)?;
+
             diesel::delete(conversations::table.filter(conversations::user_id.eq(user_id)))
                 .execute(conn)?;
-            
-            diesel::delete(google_calendar::table.filter(google_calendar::user_id.eq(user_id)))
+
+            diesel::delete(email_judgments::table.filter(email_judgments::user_id.eq(user_id)))
                 .execute(conn)?;
-            
+
             diesel::delete(gmail::table.filter(gmail::user_id.eq(user_id)))
                 .execute(conn)?;
-            
+
+            diesel::delete(google_calendar::table.filter(google_calendar::user_id.eq(user_id)))
+                .execute(conn)?;
+
+            diesel::delete(google_tasks::table.filter(google_tasks::user_id.eq(user_id)))
+                .execute(conn)?;
+
+            diesel::delete(imap_connection::table.filter(imap_connection::user_id.eq(user_id)))
+                .execute(conn)?;
+
+            diesel::delete(importance_priorities::table.filter(importance_priorities::user_id.eq(user_id)))
+                .execute(conn)?;
+
+            diesel::delete(keywords::table.filter(keywords::user_id.eq(user_id)))
+                .execute(conn)?;
+
+            diesel::delete(priority_senders::table.filter(priority_senders::user_id.eq(user_id)))
+                .execute(conn)?;
+
+            diesel::delete(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+                .execute(conn)?;
+
+            diesel::delete(processed_emails::table.filter(processed_emails::user_id.eq(user_id)))
+                .execute(conn)?;
+
+            diesel::delete(subscriptions::table.filter(subscriptions::user_id.eq(user_id)))
+                .execute(conn)?;
+
+            diesel::delete(task_notifications::table.filter(task_notifications::user_id.eq(user_id)))
+                .execute(conn)?;
+
             diesel::delete(unipile_connection::table.filter(unipile_connection::user_id.eq(user_id)))
+                .execute(conn)?;
+
+            diesel::delete(usage_logs::table.filter(usage_logs::user_id.eq(user_id)))
+                .execute(conn)?;
+
+            diesel::delete(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+                .execute(conn)?;
+
+            diesel::delete(waiting_checks::table.filter(waiting_checks::user_id.eq(user_id)))
                 .execute(conn)?;
 
             // Finally delete the user
@@ -614,33 +715,35 @@ impl UserRepository {
 
     // 
 
-    // Update user's notify preference
+    // Update user's notify preference in user_settings
     pub fn update_notify(&self, user_id: i32, notify: bool) -> Result<(), DieselError> {
+        use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::notify.eq(notify))
+        
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+
+        // Update the settings
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::notify.eq(notify))
             .execute(&mut conn)?;
+
+
         Ok(())
     }
 
     pub fn update_timezone(&self, user_id: i32, timezone: &str) -> Result<(), DieselError> {
+        use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
-        // First fetch the user to check timezone_auto
-        let user = users::table
-            .find(user_id)
-            .first::<User>(&mut conn)?;
-            
-        // Only update if timezone_auto is true
-        match user.timezone_auto {
-            Some(maybe) => {
-                if maybe {
-                    diesel::update(users::table.find(user_id))
-                        .set(users::timezone.eq(timezone.to_string()))
-                        .execute(&mut conn)?;
-                }
-            },
-            None => {},
+        // First fetch the user settings to check timezone_auto
+        let user_settings = self.get_user_settings(user_id)?;
+        // Only update if timezone_auto is false (manual timezone setting)
+        if !user_settings.timezone_auto.unwrap_or(false) {
+            diesel::update(user_settings::table)
+                .filter(user_settings::user_id.eq(user_id))
+                .set(user_settings::timezone.eq(timezone.to_string()))
+                .execute(&mut conn)?;
         }
         
         Ok(())
@@ -807,6 +910,45 @@ impl UserRepository {
             .select(users::stripe_checkout_session_id)
             .first::<Option<String>>(&mut conn)?;
         Ok(session_id)
+    }
+
+    pub fn get_user_settings(&self, user_id: i32) -> Result<crate::models::user_models::UserSettings, DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Try to get existing settings
+        let settings = user_settings::table
+            .filter(user_settings::user_id.eq(user_id))
+            .first::<crate::models::user_models::UserSettings>(&mut conn)
+            .optional()?;
+            
+        match settings {
+            Some(settings) => Ok(settings),
+            None => {
+                // Create default settings
+                let new_settings = crate::models::user_models::NewUserSettings {
+                    user_id,
+                    notify: true, // Default to true for notifications about new features
+                    notification_type: None, // Default to None (which means SMS)
+                    timezone: None,
+                    timezone_auto: None,
+                    agent_language: "en".to_string(),
+                    sub_country: None, // Default to no subscription country
+                };
+                
+                // Insert the new settings
+                diesel::insert_into(user_settings::table)
+                    .values(&new_settings)
+                    .execute(&mut conn)?;
+                    
+                // Fetch and return the newly created settings
+                let created_settings = user_settings::table
+                    .filter(user_settings::user_id.eq(user_id))
+                    .first::<crate::models::user_models::UserSettings>(&mut conn)?;
+                    
+                Ok(created_settings)
+            }
+        }
     }
 
     pub fn get_all_ongoing_usage(&self) -> Result<Vec<crate::models::user_models::UsageLog>, DieselError> {

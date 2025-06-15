@@ -55,17 +55,27 @@ pub async fn get_users(
 ) -> Result<Json<Vec<UserResponse>>, (StatusCode, Json<serde_json::Value>)> {
     println!("Attempting to get all users");
     let users_list = state.user_repository.get_all_users().map_err(|e| {
-        println!("Database error while fetching users: {}", e);
+        tracing::error!("Database error while fetching users: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error")}))
+            Json(json!({"error": "Database error"}))
         )
     })?;
     
     println!("Converting users to response format");
-    let users_response: Vec<UserResponse> = users_list
-        .into_iter()
-        .map(|user| UserResponse {
+    let mut users_response = Vec::with_capacity(users_list.len());
+    
+    for user in users_list {
+        // Get user settings, providing defaults if not found
+        let settings = state.user_repository.get_user_settings(user.id).map_err(|e| {
+            tracing::error!("Database error while fetching user settings: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Database error"}))
+            )
+        })?;
+
+        users_response.push(UserResponse {
             id: user.id,
             email: user.email,
             phone_number: user.phone_number,
@@ -73,15 +83,15 @@ pub async fn get_users(
             time_to_live: user.time_to_live,
             verified: user.verified,
             credits: user.credits,
-            notify: user.notify,
+            notify: settings.notify,
             preferred_number: user.preferred_number,
             sub_tier: user.sub_tier,
             msgs_left: user.msgs_left,
             credits_left: user.credits_left,
             discount: user.discount,
             discount_tier: user.discount_tier,
-        })
-        .collect();
+        });
+    }
 
     println!("Successfully retrieved {} users", users_response.len());
     Ok(Json(users_response))
@@ -505,7 +515,6 @@ pub async fn register(
         password_hash,
         phone_number: reg_r.phone_number,
         time_to_live: five_minutes_from_now,
-        notify: true,
         verified: false,
         credits: 0.00,
         charge_when_under: false,

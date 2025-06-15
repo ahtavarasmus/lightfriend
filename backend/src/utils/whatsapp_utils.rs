@@ -68,9 +68,10 @@ pub async fn fetch_whatsapp_messages(
 
     tracing::info!("Fetching WhatsApp messages for user {}", user_id);
     
-    // Get user for timezone info
+    // Get user and user settings for timezone info
     let user = state.user_repository.find_by_id(user_id)?
         .ok_or_else(|| anyhow!("User not found"))?;
+    let user_settings = state.user_repository.get_user_settings(user_id)?;
 
     // Get Matrix client and check bridge status (use cached version for better performance)
     let client = crate::utils::matrix_auth::get_cached_client(user_id, &state.user_repository, false, &state.matrix_clients).await?;
@@ -188,7 +189,8 @@ pub async fn fetch_whatsapp_messages(
         let room = room_info.room;
 
         let room_name = room_info.display_name;
-        let user_timezone = user.timezone.clone();
+    let user_settings = state.user_repository.get_user_settings(user_id)?;
+    let user_timezone = user_settings.timezone.clone();
         
         futures.push(async move {
     let mut options = matrix_sdk::room::MessagesOptions::backward();
@@ -391,6 +393,7 @@ pub async fn send_whatsapp_message(
     room.send(content.clone()).with_transaction_id(txn_id).await?;
     println!("Message sent!");
 
+    let user_settings = state.user_repository.get_user_settings(user_id)?;
     // Return the sent message details
     let current_timestamp = chrono::Utc::now().timestamp();
     Ok(WhatsAppMessage {
@@ -398,7 +401,7 @@ pub async fn send_whatsapp_message(
         sender_display_name: "You".to_string(),
         content: message.to_string(),
         timestamp: current_timestamp,
-        formatted_timestamp: format_timestamp(current_timestamp, user.timezone),
+        formatted_timestamp: format_timestamp(current_timestamp, user_settings.timezone),
         message_type: "text".to_string(),
         room_name: room.display_name().await?.to_string(),
     })
@@ -539,7 +542,8 @@ pub async fn fetch_whatsapp_room_messages(
 
     match matching_room {
         Some(room) => {
-            fetch_messages_from_room(room.room.clone(), chat_name, limit, user.timezone).await
+            let user_settings = state.user_repository.get_user_settings(user_id)?;
+            fetch_messages_from_room(room.room.clone(), chat_name, limit, user_settings.timezone).await
         },
         None => Err(anyhow!("No matching WhatsApp room found for '{}'", chat_name))
     }

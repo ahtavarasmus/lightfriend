@@ -19,6 +19,10 @@ use crate::schema::google_tasks;
 use crate::schema::task_notifications;
 use crate::schema::proactive_settings;
 use crate::schema::calendar_notifications;
+use crate::schema::user_settings;
+use crate::schema::ideas;
+use crate::schema::idea_upvotes;
+use crate::schema::idea_email_subscriptions;
 
 
 
@@ -34,7 +38,6 @@ pub struct User {
     pub time_to_live: Option<i32>, // if user has not verified their account in some time it will be deleted
     pub verified: bool, 
     pub credits: f32, // user purchased credits, will not expire, can be bought if has subscribtion or is a early user(discount = true)
-    pub notify: bool, // notify when new features
     pub info: Option<String>, // extra info about the user for the ai
     pub preferred_number: Option<String>, // number the user prefers lightfriend texting/calling them from
     pub charge_when_under: bool, // flag for if user wants to automatically buy more overage credits
@@ -44,19 +47,15 @@ pub struct User {
     pub stripe_checkout_session_id: Option<String>,
     pub matrix_username: Option<String>,
     pub encrypted_matrix_access_token: Option<String>,
-    pub timezone: Option<String>,
-    pub timezone_auto: Option<bool>,
     pub sub_tier: Option<String>,
     pub msgs_left: i32, // proactive messages for the monthly sub, resets every month to bought amount
     pub matrix_device_id: Option<String>,
     pub credits_left: f32, // free credits that reset every month while in the monthly sub. will always be consumed before one time credits
-    pub discount: bool, // if user can get buy overage credits without subscription(for early adopters)
     pub encrypted_matrix_password: Option<String>,
     pub encrypted_matrix_secret_storage_recovery_key: Option<String>,
     pub last_credits_notification: Option<i32>, // Unix timestamp of last insufficient credits notification to prevent spam
     pub confirm_send_event: bool, // flag that gets set when user wants to send something and it needs to be confirmed before sending 
-    pub agent_language: String, // language the agent will use to answer, default 'en'. 
-    pub notification_type: Option<String>, // "call" or "sms"(sms is default when none) // "call" also sends notification as sms
+    pub discount: bool, // if user can get buy overage credits without subscription(for early adopters)
     pub discount_tier: Option<String>, // could be None, "msg", "voice" or "full"
 }
 
@@ -497,4 +496,84 @@ pub struct NewImportancePriority {
     pub user_id: i32,
     pub threshold: i32,
     pub service_type: String,// like email, whatsapp, .. 
+}
+
+#[derive(Queryable, Selectable, Insertable, Clone)]
+#[diesel(table_name = user_settings)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct UserSettings {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub notify: bool, // if user wants to be notified about new features to lightfriend (not related to notifications)
+    pub notification_type: Option<String>, // "call" or "sms"(sms is default when none) // "call" also sends notification as sms
+    pub timezone: Option<String>,
+    pub timezone_auto: Option<bool>,
+    pub agent_language: String, // language the agent will use to answer, default 'en'. 
+    pub sub_country: Option<String>, // "US", "FI", "UK", "AU", "IL"
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = user_settings)]
+pub struct NewUserSettings {
+    pub user_id: i32,
+    pub notify: bool,
+    pub notification_type: Option<String>,
+    pub timezone: Option<String>,
+    pub timezone_auto: Option<bool>,
+    pub agent_language: String,
+    pub sub_country: Option<String>,
+}
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = ideas)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct Idea {
+    pub id: Option<i32>,
+    pub creator_id: String,
+    pub text: String,
+    pub created_at: i32,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = ideas)]
+pub struct NewIdea {
+    pub creator_id: String,
+    pub text: String,
+    pub created_at: i32,
+}
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = idea_upvotes)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct IdeaUpvote {
+    pub id: Option<i32>,
+    pub idea_id: i32,
+    pub voter_id: String,
+    pub created_at: i32,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = idea_upvotes)]
+pub struct NewIdeaUpvote {
+    pub idea_id: i32,
+    pub voter_id: String,
+    pub created_at: i32,
+}
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = idea_email_subscriptions)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct IdeaEmailSubscription {
+    pub id: Option<i32>,
+    pub idea_id: i32,
+    pub email: String,
+    pub created_at: i32,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = idea_email_subscriptions)]
+pub struct NewIdeaEmailSubscription {
+    pub idea_id: i32,
+    pub email: String,
+    pub created_at: i32,
 }

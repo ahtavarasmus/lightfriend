@@ -169,6 +169,19 @@ pub async fn fetch_assistant(
         Ok(Some(user)) => {
             tracing::debug!("Found user by their phone number");
             
+            let user_settings = match state.user_repository.get_user_settings(user.id) {
+                Ok(settings) => settings,
+                Err(e) => {
+                    error!("Failed to get user settings: {}", e);
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "Failed to get conversation",
+                            "message": "Internal server error"
+                        }))
+                    ));
+                }
+            };
 
             // If user is not verified, verify them
             if !user.verified {
@@ -176,10 +189,10 @@ pub async fn fetch_assistant(
                     tracing::error!("Error verifying user: {}", e);
                     // Continue even if verification fails
                 } else {
-                    if user.agent_language == "fi" {
+                    if user_settings.agent_language == "fi" {
                         conversation_config_override.agent.first_message = "Tervetuloa! Numerosi on nyt vahvistettu. Miten voin auttaa?".to_string(); 
                         conversation_config_override.tts.voice_id = fi_voice_id.clone();
-                    } else if user.agent_language == "de" {
+                    } else if user_settings.agent_language == "de" {
                         conversation_config_override.agent.first_message = "Willkommen! Ihre Nummer ist jetzt verifiziert. Wie kann ich Ihnen helfen?".to_string(); 
                         conversation_config_override.tts.voice_id = de_voice_id.clone();
                     } else {
@@ -227,10 +240,10 @@ pub async fn fetch_assistant(
                 ));
             }
 
-            if user.agent_language == "fi" {
+            if user_settings.agent_language == "fi" {
                 conversation_config_override.agent.first_message = "Moi {{name}}!".to_string(); 
                 conversation_config_override.tts.voice_id = fi_voice_id.clone();
-            } else if user.agent_language == "de" {
+            } else if user_settings.agent_language == "de" {
                 conversation_config_override.agent.first_message = "Hallo {{name}}!".to_string(); 
                 conversation_config_override.tts.voice_id = de_voice_id.clone();
             }
@@ -252,7 +265,7 @@ pub async fn fetch_assistant(
             dynamic_variables.insert("notification_message".to_string(), json!("".to_string()));
 
             // Get timezone from user info or default to UTC
-            let timezone_str = match user.timezone {
+            let timezone_str = match user_settings.timezone {
                 Some(ref tz) => tz.as_str(),
                 None => "UTC",
             };

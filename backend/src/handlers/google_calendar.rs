@@ -9,7 +9,8 @@ use serde_json::json;
 use serde::{Deserialize, Serialize};
 use oauth2::TokenResponse;
 use reqwest::header::{AUTHORIZATION, ACCEPT, CONTENT_TYPE};
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Utc, Duration, TimeZone};
+use chrono_tz::Tz;
 
 use crate::AppState;
 
@@ -415,6 +416,25 @@ pub async fn handle_calendar_fetching(
     start: &str,
     end: &str,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Get user's timezone from settings
+    let user_timezone = match state.user_repository.get_user_settings(user_id) {
+        Ok(settings) => {
+            match settings.timezone {
+                Some(tz) => match tz.parse::<Tz>() {
+                    Ok(parsed_tz) => Some(parsed_tz),
+                    Err(_) => {
+                        tracing::warn!("Invalid timezone format for user {}: {}", user_id, tz);
+                        None
+                    }
+                },
+                None => None
+            }
+        },
+        Err(e) => {
+            tracing::error!("Failed to get user settings: {}", e);
+            None
+        }
+    };
     tracing::debug!("Starting calendar tool call for user: {}", user_id);
     
     // Parse start and end times
@@ -497,27 +517,47 @@ pub async fn handle_calendar_fetching(
             // Format events into a more readable response
             let formatted_events: Vec<serde_json::Value> = events.into_iter()
                 .map(|event| {
+                    println!("event: {:#?}", event.summary.clone());
                     let start_time = event.start.date_time
-                        .map(|dt| dt.to_rfc3339())
+                        .map(|dt| {
+                            if let Some(tz) = user_timezone {
+                                dt.with_timezone(&tz).to_rfc3339()
+                            } else {
+                                dt.to_rfc3339()
+                            }
+                        })
                         .or(event.start.date);
                     
                     let end_time = event.end.date_time
-                        .map(|dt| dt.to_rfc3339())
+                        .map(|dt| {
+                            if let Some(tz) = user_timezone {
+                                dt.with_timezone(&tz).to_rfc3339()
+                            } else {
+                                dt.to_rfc3339()
+                            }
+                        })
                         .or(event.end.date);
 
+                    // Calculate duration in minutes
+                    let duration_minutes = match (event.start.date_time, event.end.date_time) {
+                        (Some(start), Some(end)) => {
+                            let duration = end.signed_duration_since(start);
+                            duration.num_minutes()
+                        },
+                        _ => 0 // Default to 0 for all-day events or invalid times
+                    };
+
                     let summary = event.summary.unwrap_or_else(|| "No title".to_string());
-                    println!("Formatting event: {}", summary);
 
                     json!({
                         "summary": summary,
                         "start": start_time,
                         "end": end_time,
-                        "status": event.status.unwrap_or_else(|| "confirmed".to_string())
+                        "duration_minutes": duration_minutes
                     })
                 })
                 .collect();
 
-            println!("Returning {} formatted events", formatted_events.len());
             Ok(Json(json!({
                 "events": formatted_events
             })))
@@ -551,6 +591,8 @@ pub async fn handle_calendar_fetching(
         }
     }
 }
+
+
 async fn fetch_calendar_list(
     client: &reqwest::Client,
     access_token: &str,

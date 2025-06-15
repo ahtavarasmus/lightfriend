@@ -51,6 +51,7 @@ mod handlers {
     pub mod google_tasks;
     pub mod google_tasks_auth;
     pub mod telegram_auth;
+    pub mod idea_widget;
 }
 
 mod utils {
@@ -429,6 +430,15 @@ async fn main() {
         .route("/api/profile/calendar-proactive", post(profile_handlers::update_calendar_proactive))
         .route("/api/profile/whatsapp-proactive", get(profile_handlers::get_whatsapp_proactive))
         .route("/api/profile/whatsapp-proactive", post(profile_handlers::update_whatsapp_proactive))
+        .route("/api/profile/migrate-to-daily/{user_id}", post(profile_handlers::migrate_to_daily))
+
+        /*
+        // Idea widget routes
+        .route("/api/ideas", post(handlers::idea_widget::create_idea))
+        .route("/api/ideas", get(handlers::idea_widget::get_ideas))
+        .route("/api/ideas/{id}/upvote", post(handlers::idea_widget::upvote_idea))
+        .route("/api/ideas/{id}/subscribe", post(handlers::idea_widget::subscribe_email))
+        */
 
 
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));

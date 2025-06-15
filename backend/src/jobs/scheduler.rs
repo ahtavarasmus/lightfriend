@@ -228,6 +228,15 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         debug!("Skipping further processing for user {} due to no messages left", user.id);
                                         continue;
                                     }
+                                    // Get user settings first
+                                    let user_settings = match state.user_repository.get_user_settings(user.id) {
+                                        Ok(settings) => settings,
+                                        Err(e) => {
+                                            error!("Failed to get user settings: {}", e);
+                                            continue;
+                                        }
+                                    };
+
                                     let sender_number = match user.preferred_number.clone() {
                                         Some(number) => {
                                             tracing::debug!("Using user's preferred number: {}", number);
@@ -385,8 +394,8 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         notification
                                     };
 
-                                    // Check user's notification preference
-                                    let notification_type = user.notification_type.as_deref().unwrap_or("sms");
+                                    // Check user's notification preference from settings
+                                    let notification_type = user_settings.notification_type.as_deref().unwrap_or("sms");
                                     match notification_type {
                                         "call" => {
                                             // For calls, we need a brief intro and detailed message
@@ -409,7 +418,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                 notification_first_message,
                                                 final_notification.clone(),
                                                 user.id.to_string(),
-                                                user.timezone,
+                                                                user_settings.timezone,
                                             ).await {
                                                 Ok(mut response) => {
                                                     // Add dynamic variables to the client data
@@ -822,6 +831,88 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
     sched.add(task_cleanup_job).await.expect("Failed to add task cleanup job to scheduler");
 
+    // Create a job that runs at midnight UTC to reset credits_left for subscribers
+    let state_clone = Arc::clone(&state);
+    let credits_reset_job = Job::new_async("0 0 0 * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            debug!("Running daily credits reset for subscribers...");
+            
+            // Get all users
+            match state.user_repository.get_all_users() {
+                Ok(users) => {
+                    for user in users {
+                        // Check if user has a subscription
+                        if let Ok(Some(tier)) = state.user_repository.get_subscription_tier(user.id) {
+                            // Get user settings to check country
+                            match state.user_repository.get_user_settings(user.id) {
+                                Ok(settings) => {
+
+                                    // Skip if sub_country is not set (used to block older subs)
+                                    if settings.sub_country.is_none() {
+                                        debug!("Skipping credits reset for user {} - no subscription country set", user.id);
+                                        continue;
+                                    }
+
+                                    // Define credits based on country and tier
+                                    let new_credits = match (settings.sub_country.as_deref(), tier.as_str()) {
+                                        // Tier 1 (Basic Plan) credits
+                                        (Some("US"), "tier 1") => Ok(10.0),  // United States: 10/day
+                                        (Some("FI"), "tier 1") => Ok(4.0),   // Finland: 4/day
+                                        (Some("UK"), "tier 1") => Ok(4.0),   // United Kingdom: 4/day
+                                        (Some("AU"), "tier 1") => Ok(3.0),   // Australia: 3/day
+                                        (Some("IL"), "tier 1") => Ok(2.0),   // Israel: 2/day
+                                        
+                                        // Tier 2 (Escape Plan) credits
+                                        (Some("US"), "tier 2") => Ok(15.0),  // United States: 15/day
+                                        (Some("FI"), "tier 2") => Ok(10.0),  // Finland: 10/day
+                                        (Some("UK"), "tier 2") => Ok(10.0),  // United Kingdom: 10/day
+                                        (Some("AU"), "tier 2") => Ok(6.0),   // Australia: 6/day
+                                        (Some("IL"), "tier 2") => Ok(3.0),   // Israel: 3/day
+                                        
+                                        (Some(country), tier_type) => {
+                                            error!("Invalid country/tier combination for user {}: country '{}', tier '{}'", user.id, country, tier_type);
+                                            Err(format!("Unsupported country '{}' for tier '{}'", country, tier_type))
+                                        },
+                                        (None, tier_type) => {
+                                            error!("Missing country for user {} with tier '{}'", user.id, tier_type);
+                                            Err("Country not set for user".to_string())
+                                        }
+                                    };
+
+                                    match new_credits {
+                                        Ok(credits) => {
+                                            // Reset credits_left for the user
+                                            if let Err(e) = state.user_repository.update_sub_credits(user.id, credits) {
+                                                error!("Failed to reset credits for user {}: {}", user.id, e);
+                                            } else {
+                                                debug!("Successfully reset credits_left to {} for user {} (tier: {}, country: {})", 
+                                                    credits, 
+                                                    user.id, 
+                                                    tier,
+                                                    settings.sub_country.as_deref().unwrap_or("unknown")
+                                                );
+                                            }
+                                        },
+                                        Err(e) => {
+                                            error!("Failed to determine credits for user {}: {}", user.id, e);
+                                            // Consider sending an alert or notification here for admin attention
+                                        }
+                                    }
+
+                                }
+                                Err(e) => error!("Failed to get settings for user {}: {}", user.id, e),
+                            }
+                        }
+                    }
+                }
+                Err(e) => error!("Failed to fetch users for credits reset: {}", e),
+            }
+        })
+    }).expect("Failed to create credits reset job");
+
+    sched.add(credits_reset_job).await.expect("Failed to add credits reset job to scheduler");
+
                 // Create a job that runs every minute to check for upcoming calendar events
                 let state_clone = Arc::clone(&state);
                 let calendar_notification_job = Job::new_async("0 * * * * *", move |_, _| {
@@ -919,11 +1010,20 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                         .unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"));
 
                                                     // Send notification based on user preference
+                                                    // Get user settings
+                                                    let user_settings = match state.user_repository.get_user_settings(user.id) {
+                                                        Ok(settings) => settings,
+                                                        Err(e) => {
+                                                            error!("Failed to get user settings: {}", e);
+                                                            continue;
+                                                        }
+                                                    };
+
                                                     debug!("🗓️ Calendar notification: Preparing to send notification for user {} via {}", 
                                                         user.id, 
-                                                        user.notification_type.as_deref().unwrap_or("sms"));
+                                                        user_settings.notification_type.as_deref().unwrap_or("sms"));
 
-                                                    match user.notification_type.as_deref().unwrap_or("sms") {
+                                                    match user_settings.notification_type.as_deref().unwrap_or("sms") {
                                                         "call" => {
                                                             debug!("🗓️ Calendar notification: Initiating call notification process for user {}", user.id);
                                                             
@@ -955,7 +1055,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                                             intro,
                                                                             notification_clone,
                                                                             user_clone.id.to_string(),
-                                                                            user_clone.timezone.clone(),
+                                                                user_settings.timezone.clone(),
                                                                         ).await {
                                                                             Ok(_) => debug!("🗓️ Calendar notification: Successfully completed call notification for user {}", user_clone.id),
                                                                             Err((_, e)) => error!("🗓️ Calendar notification: Failed to make call notification for user {}: {:?}", user_clone.id, e),

@@ -13,33 +13,39 @@ pub async fn check_user_credits(
     let (message_cost, voice_second_cost) = if user.credits_left > 0.0 {
         (1.0, 1.0/60.0)
     } else {
-        // Otherwise use country-based pricing
-        let msg_cost = if user.phone_number.starts_with("+1") {
-            0.10 // US
-        } else if user.phone_number.starts_with("+358") {
-            0.30 // Finland
-        } else if user.phone_number.starts_with("+44") {
-            0.30 // UK
-        } else if user.phone_number.starts_with("+61") {
-            0.40 // Australia
-        } else if user.phone_number.starts_with("+972") {
-            0.90 // Israel
-        } else {
-            0.30 // Default to Finland/UK rate
+        // First try to get country from user settings
+        let country = match state.user_repository.get_user_settings(user.id) {
+            Ok(settings) => settings.sub_country,
+            Err(e) => {
+                eprintln!("Failed to get user settings: {}", e);
+                None
+            }
         };
 
-        let voice_cost = if user.phone_number.starts_with("+1") {
-            0.0033 // US: 0.20/minute
-        } else if user.phone_number.starts_with("+358") {
-            0.0042 // Finland: 0.25/minute
-        } else if user.phone_number.starts_with("+44") {
-            0.0042 // UK: 0.25/minute
-        } else if user.phone_number.starts_with("+61") {
-            0.0042 // Australia: 0.25/minute
-        } else if user.phone_number.starts_with("+972") {
-            0.0033 // Israel: 0.20/minute
-        } else {
-            0.0042 // Default to Finland/UK/AU rate
+        // Get pricing based on country (from settings or phone number)
+        let (msg_cost, voice_cost) = match country.as_deref() {
+            Some("US") => (0.10, 0.0033),  // US: $0.10/msg, $0.20/minute
+            Some("FI") => (0.30, 0.0042),  // Finland: €0.30/msg, €0.25/minute
+            Some("UK") => (0.30, 0.0042),  // UK: £0.30/msg, £0.25/minute
+            Some("AU") => (0.40, 0.0042),  // Australia: A$0.40/msg, A$0.25/minute
+            Some("IL") => (0.90, 0.0033),  // Israel: ₪0.90/msg, ₪0.20/minute
+            Some(_) => (0.30, 0.0042),     // Default rate for unrecognized country codes
+            None => {
+                // Fallback to phone number based detection
+                if user.phone_number.starts_with("+1") {
+                    (0.10, 0.0033)  // US
+                } else if user.phone_number.starts_with("+358") {
+                    (0.30, 0.0042)  // Finland
+                } else if user.phone_number.starts_with("+44") {
+                    (0.30, 0.0042)  // UK
+                } else if user.phone_number.starts_with("+61") {
+                    (0.40, 0.0042)  // Australia
+                } else if user.phone_number.starts_with("+972") {
+                    (0.90, 0.0033)  // Israel
+                } else {
+                    (0.30, 0.0042)  // Default to Finland/UK rate
+                }
+            }
         };
         (msg_cost, voice_cost)
     };
@@ -156,33 +162,39 @@ pub fn deduct_user_credits(
     let (message_cost, voice_second_cost) = if user.credits_left > 0.0 {
         (1.0, 1.0/60.0) // message quota is calculated at 1e per msg and 1e per voice minute(just easy to calculate) and there are 40e worth for every month on every subscription
     } else {
-        // Otherwise use country-based pricing
-        let msg_cost = if user.phone_number.starts_with("+1") {
-            0.10 // US
-        } else if user.phone_number.starts_with("+358") {
-            0.30 // Finland
-        } else if user.phone_number.starts_with("+44") {
-            0.30 // UK
-        } else if user.phone_number.starts_with("+61") {
-            0.40 // Australia
-        } else if user.phone_number.starts_with("+972") {
-            0.90 // Israel
-        } else {
-            0.30 // Default to Finland/UK rate
+        // First try to get country from user settings
+        let country = match state.user_repository.get_user_settings(user_id) {
+            Ok(settings) => settings.sub_country,
+            Err(e) => {
+                eprintln!("Failed to get user settings: {}", e);
+                None
+            }
         };
 
-        let voice_cost = if user.phone_number.starts_with("+1") {
-            0.0033 // US: 0.20/minute
-        } else if user.phone_number.starts_with("+358") {
-            0.0042 // Finland: 0.25/minute
-        } else if user.phone_number.starts_with("+44") {
-            0.0042 // UK: 0.25/minute
-        } else if user.phone_number.starts_with("+61") {
-            0.0042 // Australia: 0.25/minute
-        } else if user.phone_number.starts_with("+972") {
-            0.0033 // Israel: 0.20/minute
-        } else {
-            0.0042 // Default to Finland/UK/AU rate
+        // Get pricing based on country (from settings or phone number)
+        let (msg_cost, voice_cost) = match country.as_deref() {
+            Some("US") => (0.10, 0.0033),  // US: $0.10/msg, $0.20/minute
+            Some("FI") => (0.30, 0.0042),  // Finland: €0.30/msg, €0.25/minute
+            Some("UK") => (0.30, 0.0042),  // UK: £0.30/msg, £0.25/minute
+            Some("AU") => (0.40, 0.0042),  // Australia: A$0.40/msg, A$0.25/minute
+            Some("IL") => (0.90, 0.0033),  // Israel: ₪0.90/msg, ₪0.20/minute
+            Some(_) => (0.30, 0.0042),     // Default rate for unrecognized country codes
+            None => {
+                // Fallback to phone number based detection
+                if user.phone_number.starts_with("+1") {
+                    (0.10, 0.0033)  // US
+                } else if user.phone_number.starts_with("+358") {
+                    (0.30, 0.0042)  // Finland
+                } else if user.phone_number.starts_with("+44") {
+                    (0.30, 0.0042)  // UK
+                } else if user.phone_number.starts_with("+61") {
+                    (0.40, 0.0042)  // Australia
+                } else if user.phone_number.starts_with("+972") {
+                    (0.90, 0.0033)  // Israel
+                } else {
+                    (0.30, 0.0042)  // Default to Finland/UK rate
+                }
+            }
         };
         (msg_cost, voice_cost)
     };

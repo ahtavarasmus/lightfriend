@@ -202,6 +202,22 @@ pub async fn delete_twilio_conversation(conversation_sid: &str, user: &User) -> 
 
 
 pub async fn create_twilio_conversation_for_participant(user: &User, proxy_address: String) -> Result<(String, String), Box<dyn Error>> {
+    // Validate phone numbers
+    if !user.phone_number.starts_with("+") {
+        return Err("Invalid user phone number format - must start with +".into());
+    }
+
+    if !proxy_address.starts_with("+") {
+        return Err("Invalid proxy address format - must start with +".into());
+    }
+
+    // Log the phone numbers being used
+    tracing::info!(
+        "Creating conversation with user phone: {} and proxy: {}",
+        user.phone_number,
+        proxy_address
+    );
+
     // Check if user has SMS discount tier and use their credentials if they do
     let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
         (
@@ -231,6 +247,9 @@ pub async fn create_twilio_conversation_for_participant(user: &User, proxy_addre
     println!("conversation.conversation_sid: {}",conversation.sid);
 
     // Add the user as participant
+    // Add participant with additional logging
+    tracing::info!("Adding participant to conversation {}", conversation.sid);
+    
     let participant_response = client
         .post(format!(
             "https://conversations.twilio.com/v1/Conversations/{}/Participants",
@@ -244,37 +263,57 @@ pub async fn create_twilio_conversation_for_participant(user: &User, proxy_addre
         .send()
         .await?;
 
+    tracing::info!(
+        "Participant addition response status: {}",
+        participant_response.status()
+    );
+
 
     let status = participant_response.status();
     if !status.is_success() {
         let error_text = participant_response.text().await?;
-        println!("Participant addition response: {}", error_text);
+        tracing::error!(
+            "Failed to add participant. Status: {}, Error: {}",
+            status,
+            error_text
+        );
         
-        // Check if this is the "participant already exists" error
-        if status.as_u16() == 409 {
-            // Extract the existing conversation SID from the error message
-            if let Some(conv_sid) = error_text.find("Conversation ").and_then(|i| {
-                let start = i + "Conversation ".len();
-                error_text[start..].find('"').map(|end| error_text[start..start+end].to_string())
-            }) {
-                // Fetch the conversation details to get the service_sid
-                let conversation: ConversationResponse = client
-                    .get(format!(
-                        "https://conversations.twilio.com/v1/Conversations/{}",
-                        conv_sid
-                    ))
-                    .basic_auth(&account_sid, Some(&auth_token))
-                    .send()
-                    .await?
-                    .json()
-                    .await?;
-                
-                println!("Found existing conversation: {}", conv_sid);
-                return Ok((conv_sid, conversation.chat_service_sid));
+        // Handle specific error cases
+        match status.as_u16() {
+            409 => {
+                tracing::info!("Participant already exists in a conversation");
+                // Extract the existing conversation SID from the error message
+                if let Some(conv_sid) = error_text.find("Conversation ").and_then(|i| {
+                    let start = i + "Conversation ".len();
+                    error_text[start..].find('"').map(|end| error_text[start..start+end].to_string())
+                }) {
+                    // Fetch the conversation details to get the service_sid
+                    let conversation: ConversationResponse = client
+                        .get(format!(
+                            "https://conversations.twilio.com/v1/Conversations/{}",
+                            conv_sid
+                        ))
+                        .basic_auth(&account_sid, Some(&auth_token))
+                        .send()
+                        .await?
+                        .json()
+                        .await?;
+                    
+                    println!("Found existing conversation: {}", conv_sid);
+                    return Ok((conv_sid, conversation.chat_service_sid));
+                }
             }
+            400 => {
+                if error_text.contains("Invalid messaging binding address") {
+                    return Err("Invalid phone number format. Please ensure both numbers are in E.164 format (+1234567890)".into());
+                }
+            }
+            401 => return Err("Authentication failed with Twilio. Please check your credentials.".into()),
+            403 => return Err("Permission denied. Please check your Twilio account permissions.".into()),
+            _ => {}
         }
         
-        return Err(error_text.into());
+        return Err(format!("Failed to add participant: {}", error_text).into());
     }
 
     println!("Successfully added participant to conversation");

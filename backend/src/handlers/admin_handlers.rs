@@ -147,10 +147,18 @@ pub async fn broadcast_email(
     let mut error_details = Vec::new();
 
     for user in users {
-        if !user.notify {
-            tracing::debug!("Skipping user {} - notifications disabled", user.email);
-            continue;
-        }
+        // Get user settings
+        let user_settings = match state.user_repository.get_user_settings(user.id) {
+            Ok(settings) if !settings.notify => {
+                tracing::debug!("Skipping user {} - notifications disabled", user.email);
+                continue;
+            },
+            Ok(_) => (), // Continue if notify is true or no settings exist
+            Err(e) => {
+                tracing::error!("Failed to get user settings for {}: {}", user.email, e);
+                continue;
+            }
+        };
 
         // Skip users with invalid or empty email addresses
         if user.email.is_empty() || !user.email.contains('@') || !user.email.contains('.') {
@@ -262,9 +270,15 @@ async fn process_broadcast_messages(
                 continue;
             }
         };
-        if !user.notify {
-            continue;
-        }
+        // Get user settings
+        let user_settings = match state.user_repository.get_user_settings(user.id) {
+            Ok(settings) if !settings.notify => continue,
+            Ok(_) => (), // Continue if notify is true or no settings exist
+            Err(e) => {
+                eprintln!("Failed to get user settings for {}: {}", user.email, e);
+                continue;
+            }
+        };
 
 
         let conversation_result = state

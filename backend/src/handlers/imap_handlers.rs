@@ -649,9 +649,9 @@ pub async fn fetch_emails_imap(
             (clean_content, snippet)
         }).unwrap_or_else(|| (String::new(), String::new()));
 
-            let user_timezone = state.user_repository.find_by_id(user_id)
+            let user_timezone = state.user_repository.get_user_settings(user_id)
                 .ok()
-                .and_then(|u| u.unwrap().timezone);
+                .and_then(|settings| settings.timezone);
             
             tracing::debug!("User timezone from repository: {:?}", user_timezone);
 
@@ -903,9 +903,9 @@ pub async fn fetch_single_email_imap(
         .logout()
         .map_err(|e| ImapError::ConnectionError(format!("Failed to logout: {}", e)))?;
 
-    let date_formatted = date.map(|dt| format_timestamp(dt.timestamp(), state.user_repository.find_by_id(user_id)
+    let date_formatted = date.map(|dt| format_timestamp(dt.timestamp(), state.user_repository.get_user_settings(user_id)
         .ok()
-        .and_then(|u| u.unwrap().timezone)));
+        .and_then(|settings| settings.timezone)));
 
     Ok(ImapEmail {
         id: email_id.to_string(),

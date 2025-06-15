@@ -16,6 +16,83 @@ use serde_json::json;
 
 use crate::AppState;
 
+pub async fn migrate_to_daily(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(user_id): Path<i32>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Check if user is modifying their own settings or is an admin
+    if auth_user.user_id != user_id && !auth_user.is_admin {
+        tracing::error!("You can only migrate your own subscription unless you're an admin");
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "You can only migrate your own subscription unless you're an admin"}))
+        ));
+    }
+
+    // Get user's phone number
+    let user = state.user_repository.find_by_id(user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)}))
+        ))?
+        .ok_or_else(|| (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "User not found"}))
+        ))?;
+
+    // Determine country code from phone number
+    let country_code = if user.phone_number.starts_with("+1") {
+        "US"
+    } else if user.phone_number.starts_with("+358") {
+        "FI"
+    } else if user.phone_number.starts_with("+61") {
+        "AU"
+    } else if user.phone_number.starts_with("+44") {
+        "UK"
+    } else if user.phone_number.starts_with("+972") {
+        "IL"
+    } else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Unsupported country code in phone number"}))
+        ));
+    };
+
+    // Get daily credit limit based on country
+    let daily_credits = match country_code {
+        "US" => 10.0,  // Basic plan limit for US
+        "FI" => 4.0,   // Basic plan limit for Finland
+        "UK" => 4.0,   // Basic plan limit for UK
+        "AU" => 3.0,   // Basic plan limit for Australia
+        "IL" => 2.0,   // Basic plan limit for Israel
+        _ => return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid country code"}))
+        )),
+    };
+
+    // Update the sub_country
+    state.user_repository.update_sub_country(user_id, Some(country_code))
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to update subscription country: {}", e)}))
+        ))?;
+
+    // Update the credits to the daily limit
+    state.user_repository.update_sub_credits(user_id, daily_credits)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to update subscription credits: {}", e)}))
+        ))?;
+
+    Ok(Json(json!({
+        "message": "Successfully migrated to daily reset plan",
+        "country": country_code,
+        "daily_credits": daily_credits
+    })))
+}
+
 
 #[derive(Deserialize)]
 pub struct UpdateProfileRequest {
@@ -62,6 +139,7 @@ pub struct ProfileResponse {
     discount: bool,
     agent_language: String,
     notification_type: Option<String>,
+    sub_country: Option<String>,
 }
 
 use crate::handlers::auth_middleware::AuthUser;
@@ -72,14 +150,20 @@ pub async fn get_profile(
     auth_user: AuthUser,
 ) -> Result<Json<ProfileResponse>, (StatusCode, Json<serde_json::Value>)> {
 
-    // Get user profile from database
+    // Get user profile and settings from database
     let user = state.user_repository.find_by_id(auth_user.user_id).map_err(|e| (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": format!("Database error: {}", e)}))
     ))?;
 
+
     match user {
         Some(user) => {
+
+            let user_settings = state.user_repository.get_user_settings(auth_user.user_id).map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)}))
+            ))?;
             let current_time = std::time::SystemTime::now()
                                                     .duration_since(std::time::UNIX_EPOCH)
                                                     .unwrap()
@@ -97,20 +181,21 @@ pub async fn get_profile(
                 time_to_live: ttl,
                 time_to_delete: time_to_delete,
                 credits: user.credits,
-                notify: user.notify,
+                notify: user_settings.notify,
                 info: user.info,
                 preferred_number: user.preferred_number,
                 charge_when_under: user.charge_when_under,
                 charge_back_to: user.charge_back_to,
                 stripe_payment_method_id: user.stripe_payment_method_id,
-                timezone: user.timezone,
-                timezone_auto: user.timezone_auto,
+                timezone: user_settings.timezone,
+                timezone_auto: user_settings.timezone_auto,
                 sub_tier: user.sub_tier,
                 msgs_left: user.msgs_left,
                 credits_left: user.credits_left,
                 discount: user.discount,
-                agent_language: user.agent_language,
-                notification_type: user.notification_type,
+                agent_language: user_settings.agent_language,
+                notification_type: user_settings.notification_type,
+                sub_country: user_settings.sub_country,
             }))
         }
         None => Err((
@@ -136,7 +221,7 @@ pub async fn update_preferred_number(
     auth_user: AuthUser,
     Json(_request): Json<PreferredNumberRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Get user to check their subscription status
+    // Get user and settings to check their subscription status
     let user = state.user_repository.find_by_id(auth_user.user_id)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -560,6 +645,7 @@ pub async fn delete_user(
     auth_user: AuthUser,
     axum::extract::Path(user_id): axum::extract::Path<i32>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    println!("deleting");
 
     // Check if the user is deleting their own account or is an admin
     if auth_user.user_id != user_id && !state.user_repository.is_admin(auth_user.user_id).map_err(|e| (
@@ -573,10 +659,12 @@ pub async fn delete_user(
     }
 
     tracing::info!("Attempting to delete user {}", user_id);
+    println!("deleting");
     
     // First verify the user exists
     match state.user_repository.find_by_id(user_id) {
         Ok(Some(_)) => {
+            println!("user exists");
             // User exists, proceed with deletion
             match state.user_repository.delete_user(user_id) {
                 Ok(_) => {

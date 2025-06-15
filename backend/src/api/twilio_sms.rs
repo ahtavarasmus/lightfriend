@@ -923,7 +923,22 @@ pub async fn process_sms(
     };
 
     // Get timezone from user info or default to UTC
-    let timezone_str = match user.timezone {
+    // Get user settings to access timezone
+    let user_settings = match state.user_repository.get_user_settings(user.id) {
+        Ok(settings) => settings,
+        Err(e) => {
+            eprintln!("Failed to get user settings: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                axum::Json(TwilioResponse {
+                    message: "Failed to process user settings".to_string(),
+                })
+            );
+        }
+    };
+
+    let timezone_str = match user_settings.timezone {
         Some(ref tz) => tz.as_str(),
         None => "UTC",
     };
@@ -958,7 +973,7 @@ pub async fn process_sms(
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes. Always use all tools immidiately that you think will be needed to complete the user's query and base your response to those responses.\n\n### Tool Usage Guidelines:\n- Provide all relevant details in the response immediately. \n- Tools that involve sending or creating something(eg. send_whatsapp_message), you can call them straight away using the available information without confirming with the user. These tools will send extra confirmation message to user anyways before doing anything.\n\n### Date and Time Handling:\n- Use **RFC3339/ISO8601 format** (e.g., '2024-03-23T14:30:00Z') for all date/time inputs.\n- If no specific time is mentioned:\n  - Use the **current time** for start and **24 hours ahead** for end or the otherway around depending on the tool.\n- Always consider the user's timezone: {} with offset {}.\n- For queries about:\n  - **\"Today\"**: Use 00:00 to 23:59 of the current day.\n  - **\"Tomorrow\"**: Use 00:00 to 23:59 of the next day.\n\n### Additional Guidelines:\n- **Weather Queries**: If no location is specified, assume the user’s home location from user info.\n- **Email Queries**: For `fetch_specific_email`, provide the whole message body or a summary if too long—never just the subject.\n- **WhatsApp Fetching**: Use the room name directly from the user’s message/context without searching rooms.\n\nNever use markdown or HTML in responses. User information: {}. Always use tools to fetch the latest information before answering.", formatted_time, timezone_str, offset, user_info)),
+        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes. Always use all tools immidiately that you think will be needed to complete the user's query and base your response to those responses. IMPORTANT: For calendar events, you must return the exact output from the calendar tool without any modifications, additional text, or formatting. Never add bullet points, markdown formatting (like **, -, #), or any other special characters.\n\n### Tool Usage Guidelines:\n- Provide all relevant details in the response immediately. \n- Tools that involve sending or creating something(eg. send_whatsapp_message), you can call them straight away using the available information without confirming with the user. These tools will send extra confirmation message to user anyways before doing anything.\n\n### Date and Time Handling:\n- Always work with times in the user's timezone: {} with offset {}.\n- When user mentions times without dates, assume they mean the nearest future occurrence.\n- For time inputs to tools, convert to RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z').\n- For displaying times to users:\n  - Use 12-hour format with AM/PM (e.g., '2:30 PM')\n  - Include timezone-adjusted dates in a friendly format (e.g., 'today', 'tomorrow', or 'Jun 15')\n  - Show full date only when it's not today/tomorrow\n- If no specific time is mentioned:\n  - For calendar queries: Show today's events (and tomorrow's if after 6 PM)\n  - For other time ranges: Use current time to 24 hours ahead\n- For queries about:\n  - 'Today': Use 00:00 to 23:59 of the current day in user's timezone\n  - 'Tomorrow': Use 00:00 to 23:59 of tomorrow in user's timezone\n  - 'This week': Use remaining days of current week\n  - 'Next week': Use Monday to Sunday of next week\n\n### Additional Guidelines:\n- Weather Queries: If no location is specified, assume the user's home location from user info.\n- Email Queries: For fetch_specific_email, provide the whole message body or a summary if too long—never just the subject.\n- WhatsApp Fetching: Use the room name directly from the user's message/context without searching rooms.\n\nNever use markdown, HTML, or any special formatting characters in responses. Return all information in plain text only. User information: {}. Always use tools to fetch the latest information before answering.", formatted_time, timezone_str, offset, user_info)),
     }];
     
     // Process the message body to remove "forget" if it exists at the start
@@ -1116,7 +1131,7 @@ pub async fn process_sms(
         "start".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Start time in RFC3339 format in UTC (e.g., '2024-03-16T00:00:00Z')".to_string()),
+            description: Some("Start time in RFC3339 format (e.g., '2024-03-16T00:00:00Z')".to_string()),
             ..Default::default()
         }),
     );
@@ -1124,7 +1139,7 @@ pub async fn process_sms(
         "end".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("End time in RFC3339 format in UTC (e.g., '2024-03-16T00:00:00Z')".to_string()),
+            description: Some("End time in RFC3339 format (e.g., '2024-03-16T00:00:00Z')".to_string()),
             ..Default::default()
         }),
     );
@@ -1439,8 +1454,10 @@ pub async fn process_sms(
         chat_completion::Tool {
             r#type: chat_completion::ToolType::Function,
             function: types::Function {
-                name: String::from("calendar"),
-                description: Some(String::from("Fetches the user's calendar events for the specified time frame.")),
+                name: String::from("fetch_calendar_events"),
+                description: Some(String::from(
+                    "Fetches the user's calendar events for the specified time frame, or defaults to today if no time frame is provided. If the current time is after 6 PM in the user's timezone (assumed PDT unless specified), also include tomorrow's events when no time frame is given. CRITICAL: Return the tool's output EXACTLY as received, with NO additional text, NO numbering, NO markdown formatting (no **, -, etc.), NO HTML, and NO modifications. The tool formats events as 'summary: HH:MM AM/PM - HH:MM AM/PM date' for timed events or 'summary: All day, date' for all-day events, joined by '|'. Example output: 'Meeting: 1:00 PM - 2:00 PM today|Vacation: All day, Jun 16 - Jun 17'. DO NOT add 'Today's events:', numbering, bullet points, or any other text or formatting. Pass through the raw event list exactly as provided. Never use markdown formatting like **, -, or other special characters for formatting."
+                )),
                 parameters: types::FunctionParameters {
                     schema_type: types::JSONSchemaType::Object,
                     properties: Some(calendar_properties),
@@ -1658,7 +1675,7 @@ pub async fn process_sms(
                     let c: WeatherQuestion = match serde_json::from_str(arguments) {
                         Ok(q) => q,
                         Err(e) => {
-                            eprintln!("Failed to parse calendar question: {}", e);
+                            eprintln!("Failed to parse weather question: {}", e);
                             continue;
                         }
                     };
@@ -2385,7 +2402,7 @@ pub async fn process_sms(
                             );
                         }
                     }
-                } else if name == "calendar" {
+                } else if name == "fetch_calendar_events" {
                     println!("Executing calendar tool call");
                     let c: CalendarTimeFrame = match serde_json::from_str(arguments) {
                         Ok(q) => q,
@@ -2397,10 +2414,90 @@ pub async fn process_sms(
 
                     match crate::handlers::google_calendar::handle_calendar_fetching(&state, user.id, &c.start, &c.end).await {
                         Ok(Json(response)) => {
+
+                            use chrono::{DateTime, FixedOffset, Local, NaiveDate};
+                            use serde_json::Value;
+                            
+
                             if let Some(events) = response.get("events") {
-                                tool_answers.insert(tool_call_id, format!("Here are your calendar events: {}", events.to_string()));
+                                let empty_vec = Vec::new();
+                                let events_array = events.as_array().unwrap_or(&empty_vec);
+                                let mut formatted_events = Vec::new();
+                                let today = Local::today().with_timezone(&FixedOffset::west_opt(7 * 3600).unwrap()).naive_local();
+
+                                // Collect events with their start times for sorting
+                                let mut events_with_time: Vec<(Value, Option<DateTime<FixedOffset>>)> = events_array.iter().map(|event| {
+                                    let start_str = event.get("start").and_then(Value::as_str).unwrap_or("");
+                                    let start_time = DateTime::parse_from_rfc3339(start_str).ok();
+                                    (event.clone(), start_time)
+                                }).collect();
+
+                                // Sort by start time, placing events without times (all-day) at the end
+                                events_with_time.sort_by(|a, b| {
+                                    match (a.1, b.1) {
+                                        (Some(t1), Some(t2)) => t1.cmp(&t2),
+                                        (Some(_), None) => std::cmp::Ordering::Less,
+                                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                                        (None, None) => std::cmp::Ordering::Equal,
+                                    }
+                                });
+
+                                for (event, _) in events_with_time.iter() {
+                                    let summary = event.get("summary").and_then(|s| s.as_str()).unwrap_or("Untitled");
+                                    let duration = event.get("duration_minutes").and_then(|d| d.as_i64()).unwrap_or(0);
+                                    let start_str = event.get("start").and_then(|s| s.as_str()).unwrap_or("");
+                                    let end_str = event.get("end").and_then(|s| s.as_str()).unwrap_or("");
+
+                                    let formatted_event = if duration == 0 || start_str.len() == 10 { // All-day event
+                                        let start_date = NaiveDate::parse_from_str(start_str, "%Y-%m-%d")
+                                            .or_else(|_| NaiveDate::parse_from_str(end_str, "%Y-%m-%d"))
+                                            .unwrap_or(today);
+                                        let end_date = NaiveDate::parse_from_str(end_str, "%Y-%m-%d")
+                                            .or_else(|_| NaiveDate::parse_from_str(start_str, "%Y-%m-%d"))
+                                            .unwrap_or(start_date);
+                                        
+                                        if start_date == end_date {
+                                            format!("{}: All day, {}", summary, start_date.format("%b %d"))
+                                        } else {
+                                            format!(
+                                                "{}: All day, {} - {}",
+                                                summary, start_date.format("%b %d"), end_date.format("%b %d")
+                                            )
+                                        }
+                                    } else { // Timed event
+                                        match (DateTime::parse_from_rfc3339(start_str),
+                                              DateTime::parse_from_rfc3339(end_str)) {
+                                            (Ok(start_dt), Ok(end_dt)) => {
+                                                let date_str = if start_dt.date_naive() == today {
+                                                    "today".to_string()
+                                                } else {
+                                                    start_dt.format("%b %d").to_string()
+                                                };
+                                                format!(
+                                                    "{}: {} - {} {}",
+                                                    summary,
+                                                    start_dt.format("%l:%M %p"),
+                                                    end_dt.format("%l:%M %p"),
+                                                    date_str
+                                                )
+                                            },
+                                            _ => continue, // Skip invalid timed events
+                                        }
+                                    };
+
+                                    formatted_events.push(formatted_event);
+                                }
+
+                                let formatted_response = if formatted_events.is_empty() {
+                                    "No events scheduled.".to_string()
+                                } else {
+                                    formatted_events.join(", ")
+                                };
+
+                                tool_answers.insert(tool_call_id, formatted_response.clone());
+                                println!("Formatted events: {}", formatted_response);
                             } else {
-                                tool_answers.insert(tool_call_id, "No events found for this time period.".to_string());
+                                tool_answers.insert(tool_call_id, "No events scheduled.".to_string());
                             }
 
                         }
