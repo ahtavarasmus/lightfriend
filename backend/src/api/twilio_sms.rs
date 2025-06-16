@@ -2584,11 +2584,11 @@ pub async fn process_sms(
     let should_charge = if payload.body.to_lowercase().starts_with("forget") {
         true
     } else {
-        !messages.iter()
+        messages.iter()
             .rev() // Reverse to get latest messages first
             .find(|msg| msg.author == "lightfriend") // Find the latest AI message
             .map(|msg| msg.body.contains("(free reply)")) // Check if it contains "(free reply)"
-            .unwrap_or(false) // Default to charging if no AI message found
+            .unwrap_or(true) // Default to charging if no AI message found
     };
 
     // Create clarification check function properties
