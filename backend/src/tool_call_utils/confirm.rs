@@ -187,6 +187,126 @@ pub async fn handle_confirmation(
         }
     }
 
+    // Handle WhatsApp message confirmation
+    if let Some(captures) = Regex::new(r"Confirm sending WhatsApp message to '([^']+)' with content: '([^']+)'")
+        .ok()
+        .and_then(|re| re.captures(&last_ai_message.body)) {
+        
+        let recipient = captures.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
+        let message_content = captures.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
+
+        // Redact the confirmation message
+        if let Err(e) = crate::api::twilio_utils::redact_message(
+            conversation_sid,
+            &last_ai_message.sid,
+            "WhatsApp message confirmation message redacted",
+            user,
+        ).await {
+            tracing::error!("Failed to redact WhatsApp confirmation message: {}", e);
+        }
+
+        match user_response.as_str() {
+            "yes" => {
+                // Send the WhatsApp message
+                match crate::utils::whatsapp_utils::send_whatsapp_message(
+                    state,
+                    user.id,
+                    &recipient,
+                    &message_content,
+                ).await {
+                    Ok(_) => {
+                        // Reset the confirmation flag
+                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                            tracing::error!("Failed to reset confirm_send_event flag: {}", e);
+                        }
+
+                        // Send confirmation via Twilio
+                        tracing::debug!("sending messages since user said yes");
+                        let confirmation_msg = format!("Message sent successfully to {}", recipient);
+                        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                            conversation_sid,
+                            twilio_number,
+                            &confirmation_msg,
+                            true,
+                            user,
+                        ).await {
+                            tracing::error!("Failed to send confirmation message: {}", e);
+                        }
+
+                        // Deduct credits for the confirmation response
+                        if let Err(e) = crate::utils::usage::deduct_user_credits(state, user.id, "message", None) {
+                            tracing::error!("Failed to deduct user credits for WhatsApp confirmation: {}", e);
+                        }
+
+                        response = Some((
+                            StatusCode::OK,
+                            [(axum::http::header::CONTENT_TYPE, "application/json")],
+                            Json(TwilioResponse {
+                                message: confirmation_msg,
+                            })
+                        ));
+                        should_continue = false;
+                    }
+                    Err(e) => {
+                        // Send error message via Twilio
+                        tracing::debug!("sending failed to send the message to whatsapp sms");
+                        let error_msg = format!("Failed to send message: {} (not charged)", e);
+                        if let Err(send_err) = crate::api::twilio_utils::send_conversation_message(
+                            conversation_sid,
+                            twilio_number,
+                            &error_msg,
+                            true,
+                            user,
+                        ).await {
+                            tracing::error!("Failed to send error message: {}", send_err);
+                        }
+
+                        response = Some((
+                            StatusCode::OK,
+                            [(axum::http::header::CONTENT_TYPE, "application/json")],
+                            Json(TwilioResponse {
+                                message: error_msg,
+                            })
+                        ));
+                        should_continue = false;
+                    }
+                }
+            }
+            "no" => {
+                // Reset the confirmation flag
+                if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                    tracing::error!("Failed to reset confirm_send_event flag: {}", e);
+                }
+
+                let cancel_msg = "WhatsApp message cancelled.";
+                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    conversation_sid,
+                    twilio_number,
+                    cancel_msg,
+                    true,
+                    user,
+                ).await {
+                    tracing::error!("Failed to send cancellation confirmation: {}", e);
+                }
+
+                response = Some((
+                    StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    Json(TwilioResponse {
+                        message: cancel_msg.to_string(),
+                    })
+                ));
+                should_continue = false;
+            }
+            _ => {
+                // Reset the confirmation flag since we're treating this as a new message
+                if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                    tracing::error!("Failed to reset confirm_send_event flag: {}", e);
+                }
+            }
+        }
+    }
+
     // Handle email response confirmation
     if let Some(captures) = Regex::new(r"Confirm sending email response to '([^']+)' regarding '([^']+)' with content: '([^']+)' id:\((\d+)\)")
         .ok()

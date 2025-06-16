@@ -10,74 +10,9 @@ use mime_guess::from_path;
 use regex::Regex;
 use openai_api_rs::v1::{chat_completion, types};
 use std::collections::HashMap;
+use crate::tool_call_utils::internet::MenuContent;
 
-pub enum MenuContent {
-    Text(String),
-    ImageUrl(String),
-    PdfUrl(String),
-    WebpageUrl(String),
-    Unknown(String)
-}
 
-pub fn get_qr_tool() -> chat_completion::Tool {
-    let mut placeholder_properties = HashMap::new();
-    placeholder_properties.insert(
-        "param".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("put nothing here".to_string()),
-            ..Default::default()
-        }),
-    );
-
-    chat_completion::Tool {
-        r#type: chat_completion::ToolType::Function,
-        function: types::Function {
-            name: String::from("scan_qr_code"),
-            description: Some(String::from("Scans and extracts data from a QR code in an image. Use this when the user sends an image that appears to contain a QR code.")),
-            parameters: types::FunctionParameters {
-                schema_type: types::JSONSchemaType::Object,
-                properties: Some(placeholder_properties),
-                required: None,
-            },
-        },
-    }
-}
-
-pub async fn handle_qr_scan(image_url: Option<&str>) -> String {
-    match image_url {
-        Some(url) => {
-            match scan_qr_code(url).await {
-                Ok(menu_content) => {
-                    match menu_content {
-                        MenuContent::Text(text) => {
-                            format!("QR code contains text: {}", text)
-                        },
-                        MenuContent::ImageUrl(url) => {
-                            format!("QR code contains a link to an image: {}", url)
-                        },
-                        MenuContent::PdfUrl(url) => {
-                            format!("QR code contains a link to a PDF: {}", url)
-                        },
-                        MenuContent::WebpageUrl(url) => {
-                            format!("QR code contains a webpage link: {}", url)
-                        },
-                        MenuContent::Unknown(content) => {
-                            format!("QR code content: {}", content)
-                        }
-                    }
-                },
-                Err(e) => {
-                    eprintln!("Failed to scan QR code: {}", e);
-                    "Failed to scan QR code from the image. Please make sure the QR code is clearly visible.".to_string()
-                }
-            }
-        },
-        None => {
-            "No image was provided in the message. Please send an image containing a QR code.".to_string()
-        }
-    }
-}
 
 pub async fn scan_qr_code(image_url: &str) -> Result<MenuContent, Box<dyn Error>> {
     tracing::info!("Starting QR code scan for URL: {}", image_url);
