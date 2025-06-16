@@ -57,6 +57,7 @@ pub struct User {
     pub confirm_send_event: bool, // flag that gets set when user wants to send something and it needs to be confirmed before sending 
     pub discount: bool, // if user can get buy overage credits without subscription(for early adopters)
     pub discount_tier: Option<String>, // could be None, "msg", "voice" or "full"
+    pub free_reply: bool, // flag that gets set when previous message needs more information to finish the reply
 }
 
 

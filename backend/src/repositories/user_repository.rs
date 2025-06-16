@@ -978,6 +978,14 @@ impl UserRepository {
         Ok(())
     }
 
+    pub fn set_free_reply(&self, user_id: i32, free_reply: bool) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table.find(user_id))
+            .set(users::free_reply.eq(free_reply))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
     pub fn update_usage_log_timestamps(&self, sid: &str, recharge_threshold_timestamp: Option<i32>, zero_credits_timestamp: Option<i32>) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(usage_logs::table)

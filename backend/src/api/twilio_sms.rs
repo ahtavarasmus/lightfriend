@@ -2578,18 +2578,15 @@ pub async fn process_sms(
         }
     };
 
-    let processing_time_secs = start_time.elapsed().as_secs(); // Calculate processing time
 
-    // Check if the latest AI message in history had a free reply string
-    let should_charge = if payload.body.to_lowercase().starts_with("forget") {
-        true
+    let should_charge = if user.free_reply && !payload.body.to_lowercase().starts_with("forget") {
+        false
     } else {
-        messages.iter()
-            .rev() // Reverse to get latest messages first
-            .find(|msg| msg.author == "lightfriend") // Find the latest AI message
-            .map(|msg| msg.body.contains("(free reply)")) // Check if it contains "(free reply)"
-            .unwrap_or(true) // Default to charging if no AI message found
+        true
     };
+    if let Err(e) = state.user_repository.set_free_reply(user.id, false) {
+        eprintln!("Failed to reset set_free_reply flag: {}", e);
+    }
 
     // Create clarification check function properties
     let mut clarify_properties = HashMap::new();
@@ -2899,12 +2896,14 @@ pub async fn process_sms(
     };
 
     
+    let mut final_response_with_notice = final_response.clone();
+    if is_clarifying {
+        if let Err(e) = state.user_repository.set_free_reply(user.id, true) {
+            eprintln!("Failed to set the set_free_reply flag: {}", e);
+        }
+        final_response_with_notice = format!("{} (free reply)", final_response);
+    }
 
-    let final_response_with_notice = if is_clarifying {
-        format!("{} (free reply)", final_response)
-    } else {
-        final_response
-    };
     println!("is_clarifying message: {}", is_clarifying);
     if is_clarifying {
         redact_the_body = false;
@@ -2923,6 +2922,8 @@ pub async fn process_sms(
         final_eval = format!("clarifying reason: {}", clarify_expl);
     }
     println!("FINAL_EVAL: {}", final_eval);
+
+    let processing_time_secs = start_time.elapsed().as_secs(); // Calculate processing time
 
     // If in test mode, skip sending the actual message and return the response directly
     if is_test {

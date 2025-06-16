@@ -286,6 +286,7 @@ diesel::table! {
         confirm_send_event -> Bool,
         discount -> Bool,
         discount_tier -> Nullable<Text>,
+        free_reply -> Bool,
     }
 }
 
