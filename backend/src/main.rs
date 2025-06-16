@@ -65,6 +65,16 @@ mod utils {
     pub mod qr_utils;
 }
 
+mod tool_call_utils {
+    pub mod whatsapp;
+    pub mod email;
+    pub mod calendar;
+    pub mod tasks;
+    pub mod utils;
+    pub mod internet;
+    pub mod management;
+}
+
 mod api {
     pub mod vapi_endpoints;
     pub mod vapi_dtos;
@@ -75,6 +85,7 @@ mod api {
     pub mod shazam_call;
     pub mod langfuse;
 }
+
 
 mod error;
 

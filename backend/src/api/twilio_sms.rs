@@ -1068,440 +1068,23 @@ pub async fn process_sms(
 
     println!("chat_messages: {:#?}",chat_messages);
 
-
-    let mut waiting_check_properties = HashMap::new();
-    waiting_check_properties.insert(
-        "content".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The content to look for in emails".to_string()),
-            ..Default::default()
-        }),
-    );
-    waiting_check_properties.insert(
-        "due_date".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Number),
-            description: Some("Unix timestamp for when this check should be completed by, default to two weeks into the future.".to_string()),
-            ..Default::default()
-        }),
-    );
-    waiting_check_properties.insert(
-        "remove_when_found".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some("Whether to remove the check once the content is found, default to true.".to_string()),
-            ..Default::default()
-        }),
-    );
-
-    let mut plex_properties = HashMap::new();
-    plex_properties.insert(
-        "query".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The question or topic to get information about".to_string()),
-            ..Default::default()
-        }),
-    );
-
-    let mut weather_properties = HashMap::new();
-    weather_properties.insert(
-        "location".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Location of the place where we want to search the weather.".to_string()),
-            ..Default::default()
-        }),
-    );
-    weather_properties.insert(
-        "units".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Units that the weather should be returned as. Should be either 'metric' or 'imperial'".to_string()),
-            ..Default::default()
-        }),
-    );
-
-
-
-
-    let mut calendar_properties = HashMap::new();
-    calendar_properties.insert(
-        "start".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Start time in RFC3339 format (e.g., '2024-03-16T00:00:00Z')".to_string()),
-            ..Default::default()
-        }),
-    );
-    calendar_properties.insert(
-        "end".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("End time in RFC3339 format (e.g., '2024-03-16T00:00:00Z')".to_string()),
-            ..Default::default()
-        }),
-    );
-    // Add calendar event properties
-    let mut calendar_event_properties = HashMap::new();
-    calendar_event_properties.insert(
-        "summary".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The title/summary of the calendar event".to_string()),
-            ..Default::default()
-        }),
-    );
-    calendar_event_properties.insert(
-        "start_time".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Start time in RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z')".to_string()),
-            ..Default::default()
-        }),
-    );
-    calendar_event_properties.insert(
-        "duration_minutes".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Number),
-            description: Some("Duration of the event in minutes".to_string()),
-            ..Default::default()
-        }),
-    );
-    calendar_event_properties.insert(
-        "description".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Optional description of the event. Do not add unless user asks specifically.".to_string()),
-            ..Default::default()
-        }),
-    );
-    calendar_event_properties.insert(
-        "add_notification".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some("Whether to add a notification reminder (defaults to true unless specified)".to_string()),
-            ..Default::default()
-        }),
-    );
-
-    let mut tasks_properties = HashMap::new();
-    tasks_properties.insert(
-        "param".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Can be anything, will fetch all tasks regardless".to_string()),
-            ..Default::default()
-        }),
-    );
-
-    let mut whatsapp_messages_properties = HashMap::new();
-    whatsapp_messages_properties.insert(
-        "start".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Start time in RFC3339 format in UTC (e.g., '2024-03-16T00:00:00Z')".to_string()),
-            ..Default::default()
-        }),
-    );
-    whatsapp_messages_properties.insert(
-        "end".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("End time in RFC3339 format in UTC (e.g., '2024-03-16T00:00:00Z')".to_string()),
-            ..Default::default()
-        }),
-    );
-
-    let mut whatsapp_room_messages_properties = HashMap::new();
-    whatsapp_room_messages_properties.insert(
-        "chat_name".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The name of the WhatsApp chat/room to fetch messages from".to_string()),
-            ..Default::default()
-        }),
-    );
-    whatsapp_room_messages_properties.insert(
-        "limit".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Number),
-            description: Some("Optional: Maximum number of messages to fetch (default: 20)".to_string()),
-            ..Default::default()
-        }),
-    );
-
-    let mut whatsapp_search_properties = HashMap::new();
-    whatsapp_search_properties.insert(
-        "search_term".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Search term to find WhatsApp rooms/contacts".to_string()),
-            ..Default::default()
-        }),
-    );
-
-    let mut whatsapp_send_properties = HashMap::new();
-    whatsapp_send_properties.insert(
-        "chat_name".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The chat name or room name to send the message to. Doesn't have to be exact since fuzzy search is used.".to_string()),
-            ..Default::default()
-        }),
-    );
-    whatsapp_send_properties.insert(
-        "message".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The message content to send".to_string()),
-            ..Default::default()
-        }),
-    );
-
-    let mut create_task_properties = HashMap::new();
-    create_task_properties.insert(
-        "title".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The title of the task".to_string()),
-            ..Default::default()
-        }),
-    );
-    create_task_properties.insert(
-        "description".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Optional description of the task".to_string()),
-            ..Default::default()
-        }),
-    );
-    create_task_properties.insert(
-        "due_time".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Optional due time in RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z')".to_string()),
-            ..Default::default()
-        }),
-    );
-
-    let mut imap_properties = HashMap::new();
-    imap_properties.insert(
-        "param".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Can be anything, will fetch last 5 emails regardless".to_string()),
-            ..Default::default()
-        }),
-    );
-
-    let mut specific_email_properties = HashMap::new();
-    specific_email_properties.insert(
-        "query".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The search query to find a specific email".to_string()),
-            ..Default::default()
-        }),
-    );
-
-    let mut placeholder_properties = HashMap::new();
-    placeholder_properties.insert(
-        "param".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("put nothing here".to_string()),
-            ..Default::default()
-        }),
-    );
-
     // Define tools
     let tools = vec![
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("scan_qr_code"),
-                description: Some(String::from("Scans and extracts data from a QR code in an image. Use this when the user sends an image that appears to contain a QR code.")),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(placeholder_properties.clone()),
-                    required: None,
-                },
-            },
-        },
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("delete_sms_conversation_history"),
-                description: Some(String::from("Deletes all sms conversation history for a specific user. Use this when user asks to delete their chat history or conversations. It won't delete the history from their phone obviously.")),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(placeholder_properties.clone()),
-                    required: None,
-                },
-            },
-        },
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("send_whatsapp_message"),
-                description: Some(String::from("Sends a WhatsApp message to a specific chat. This tool will first make a confirmation message for the user, which they can then confirm or not. The chat_name will be used to fuzzy search for the actual chat name and then confirmed with the user.")),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(whatsapp_send_properties),
-                    required: Some(vec![String::from("chat_name"), String::from("message")]),
-                },
-            },
-        },
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("fetch_whatsapp_messages"),
-                description: Some(String::from("Fetches recent WhatsApp messages. Use this when user asks about their WhatsApp messages or conversations.")),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(whatsapp_messages_properties),
-                    required: Some(vec![String::from("start"), String::from("end")]),
-                },
-            },
-        },
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("fetch_whatsapp_room_messages"),
-                description: Some(String::from("Fetches messages from a specific WhatsApp chat/room. Use this when user asks about messages from a specific WhatsApp contact or group. You should return the latest messages that person or chat has sent to the user.")),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(whatsapp_room_messages_properties),
-                    required: Some(vec![String::from("chat_name")]),
-                },
-            },
-        },
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("search_whatsapp_rooms"),
-                description: Some(String::from("Searches for WhatsApp rooms/contacts by name.")),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(whatsapp_search_properties),
-                    required: Some(vec![String::from("search_term")]),
-                },
-            },
-        },
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("create_waiting_check"),
-                description: Some(String::from("Creates a waiting check for monitoring emails. Use this when user wants to be notified about specific emails or content in their emails.")),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(waiting_check_properties),
-                    required: Some(vec![String::from("content")]),
-                },
-            },
-        },
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("fetch_imap_emails"),
-                description: Some(String::from("Fetches the last 5 emails using IMAP. Use this when user asks about their recent emails or wants to check their inbox.")),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(imap_properties),
-                    required: None,
-                },
-            },
-        },
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("fetch_specific_email"),
-                description: Some(String::from("Search and fetch a specific email based on a query. Use this when user asks about a specific email or wants to find an email about a particular topic. You must ALWAYS respond with the whole message body or summary of the body if too long. Never reply with just the subject line!")),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(specific_email_properties),
-                    required: Some(vec![String::from("query")]),
-                },
-            },
-        },
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("ask_perplexity"),
-                description: Some(String::from("Get factual or timely information about any topic")),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(plex_properties),
-                    required: Some(vec![String::from("query")]),
-                },
-            },
-        },
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("get_weather"),
-                description: Some(String::from("Fetches the current weather for the given location. The AI should use the user's home location from user info if none is specified in the query.")),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(weather_properties),
-                    required: Some(vec![String::from("location"), String::from("units")]),
-                },
-            },
-        },
-
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("fetch_calendar_events"),
-                description: Some(String::from(
-                    "Fetches the user's calendar events for the specified time frame, or defaults to today if no time frame is provided. If the current time is after 6 PM in the user's timezone (assumed PDT unless specified), also include tomorrow's events when no time frame is given. CRITICAL: Return the tool's output EXACTLY as received, with NO additional text, NO numbering, NO markdown formatting (no **, -, etc.), NO HTML, and NO modifications. The tool formats events as 'summary: HH:MM AM/PM - HH:MM AM/PM date' for timed events or 'summary: All day, date' for all-day events, joined by '|'. Example output: 'Meeting: 1:00 PM - 2:00 PM today|Vacation: All day, Jun 16 - Jun 17'. DO NOT add 'Today's events:', numbering, bullet points, or any other text or formatting. Pass through the raw event list exactly as provided. Never use markdown formatting like **, -, or other special characters for formatting."
-                )),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(calendar_properties),
-                    required: Some(vec![String::from("start"), String::from("end")]),
-                },
-            },
-        },
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("create_calendar_event"),
-                description: Some(String::from("Creates a new Google Calendar event. Use this when user wants to schedule or add an event to their calendar. This tool will first make a confirmation message for the user, which they can then confirm or not.")),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(calendar_event_properties),
-                    required: Some(vec![String::from("summary"), String::from("start_time"), String::from("duration_minutes")]),
-                },
-            },
-        },
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("fetch_tasks"),
-                description: Some(String::from("Fetches the user's Google Tasks. Use this when user asks about their tasks, reminders, or ideas.")),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(tasks_properties),
-                    required: None,
-                },
-            },
-        },
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("create_task"),
-                description: Some(String::from("Creates a new Google Task. Use this when user wants to add a task, reminder, or idea.")),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(create_task_properties),
-                    required: Some(vec![String::from("title")]),
-                },
-            },
-        },
-        
+        crate::tool_call_utils::whatsapp::get_send_whatsapp_message_tool(),
+        crate::tool_call_utils::whatsapp::get_fetch_whatsapp_messages_tool(),
+        crate::tool_call_utils::whatsapp::get_fetch_whatsapp_room_messages_tool(),
+        crate::tool_call_utils::whatsapp::get_search_whatsapp_rooms_tool(),
+        crate::tool_call_utils::email::get_fetch_emails_tool(),
+        crate::tool_call_utils::email::get_fetch_specific_email_tool(),
+        crate::tool_call_utils::management::get_delete_sms_conversation_history_tool(),
+        crate::tool_call_utils::management::get_create_waiting_check_tool(),
+        crate::tool_call_utils::internet::get_scan_qr_code_tool(),
+        crate::tool_call_utils::internet::get_ask_perplexity_tool(),
+        crate::tool_call_utils::internet::get_weather_tool(),
+        crate::tool_call_utils::calendar::get_fetch_calendar_event_tool(),
+        crate::tool_call_utils::calendar::get_create_calendar_event_tool(),
+        crate::tool_call_utils::tasks::get_fetch_tasks_tool(),
+        crate::tool_call_utils::tasks::get_create_tasks_tool(),
     ];
 
     let api_key = match env::var("OPENROUTER_API_KEY") {
@@ -1694,60 +1277,10 @@ pub async fn process_sms(
                     };
                 } else if name == "use_shazam" {
                     tool_answers.insert(tool_call_id, "The Shazam feature has been discontinued due to insufficient usage. Thank you for your understanding.".to_string());
-                } else if name == "fetch_imap_emails" {
-                    println!("Executing fetch_imap_emails tool call");
-                    let queryObj = crate::handlers::imap_handlers::FetchEmailsQuery { limit: None };
-                    match crate::handlers::imap_handlers::fetch_full_imap_emails(
-                        axum::extract::State(state.clone()),
-                        auth_user,
-                        axum::extract::Query(queryObj),
-                    ).await {
-                        Ok(Json(response)) => {
-                            if let Some(emails) = response.get("emails") {
-                                if let Some(emails_array) = emails.as_array() {
-                                    let mut response = String::new();
-                                    for (i, email) in emails_array.iter().rev().take(5).enumerate() {
-                                        let subject = email.get("subject").and_then(|s| s.as_str()).unwrap_or("No subject");
-                                        let from = email.get("from").and_then(|f| f.as_str()).unwrap_or("Unknown sender");
-
-                                        let date_formatted = email.get("date_formatted")
-                                            .and_then(|d| d.as_str())
-                                            .unwrap_or("Unknown date");
-                                        
-                                        if i == 0 {
-                                            response.push_str(&format!("{}. {} from {} ({}):\n", i + 1, subject, from, date_formatted));
-                                        } else {
-                                            response.push_str(&format!("\n\n{}. {} from {} ({}):\n", i + 1, subject, from, date_formatted));
-                                        }
-                                    }
-                                    
-                                    if emails_array.len() > 5 {
-                                        response.push_str(&format!("\n\n(+ {} more emails)", emails_array.len() - 5));
-                                    }
-                                    
-                                    if emails_array.is_empty() {
-                                        response = "No recent emails found.".to_string();
-                                    }
-                                    
-                                    tool_answers.insert(tool_call_id, response);
-                                } else {
-                                    tool_answers.insert(tool_call_id, "Failed to parse emails.".to_string());
-                                }
-                            } else {
-                                tool_answers.insert(tool_call_id, "No emails found.".to_string());
-                            }
-
-                        }
-                        Err((status, Json(error))) => {
-                            let error_message = match status {
-                                StatusCode::BAD_REQUEST => "No IMAP connection found. Please check your email settings.",
-                                StatusCode::UNAUTHORIZED => "Your email credentials need to be updated.",
-                                _ => "Failed to fetch emails. Please try again later.",
-                            };
-                            tool_answers.insert(tool_call_id, error_message.to_string());
-                            eprintln!("Failed to fetch IMAP emails: {:?}", error);
-                        }
-                    }
+                } else if name == "fetch_emails" {
+                    println!("Executing fetch_emails tool call");
+                    let response = crate::tool_call_utils::email::handle_fetch_emails(&state, user.id).await;
+                    tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_specific_email" {
                     println!("Executing fetch_specific_email tool call");
                     #[derive(Deserialize)]
@@ -1763,42 +1296,8 @@ pub async fn process_sms(
                         }
                     };
 
-                    // Fetch the latest 20 emails with full content
-                    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user.id, true, Some(20), false).await {
-                        Ok(emails) => {
-                            if emails.is_empty() {
-                                tool_answers.insert(tool_call_id, "No emails found.".to_string());
-                                continue;
-                            }
-
-                            // Format all emails into a searchable response
-                            let mut response = format!("Search query: '{}'\n\nLatest emails (newest first):\n\n", query.query);
-                            for (i, email) in emails.iter().enumerate() {
-                                let formatted_email = format!(
-                                    "Email {}:\nFrom: {}\nSubject: {}\nDate: {}\n\n{}\n",
-                                    i + 1,
-                                    email.from.as_deref().unwrap_or("Unknown"),
-                                    email.subject.as_deref().unwrap_or("No subject"),
-                                    email.date_formatted.as_deref().unwrap_or("No date"),
-                                    email.body.as_deref().unwrap_or("No content"),
-                                );
-                                response.push_str(&formatted_email);
-                            }
-
-                            tool_answers.insert(tool_call_id, response);
-                        }
-                        Err(e) => {
-                            let error_message = match e {
-                                ImapError::NoConnection => "No IMAP connection found. Please check your email settings.",
-                                ImapError::CredentialsError(_) => "Your email credentials need to be updated.",
-                                ImapError::ConnectionError(msg) | ImapError::FetchError(msg) | ImapError::ParseError(msg) => {
-                                    eprintln!("Failed to fetch emails: {}", msg);
-                                    "Failed to fetch emails. Please try again later."
-                                }
-                            };
-                            tool_answers.insert(tool_call_id, error_message.to_string());
-                        }
-                    }
+                    let response = crate::tool_call_utils::email::handle_fetch_specific_email(&state, user.id, &query.query).await;
+                    tool_answers.insert(tool_call_id, response);
                 } else if name == "create_waiting_check" {
                     println!("Executing create_waiting_check tool call");
                     match handle_create_waiting_check(&state, user.id, arguments).await {
@@ -1812,585 +1311,86 @@ pub async fn process_sms(
                     }
                 } else if name == "create_calendar_event" {
                     println!("Executing create_calendar_event tool call");
-                    #[derive(Deserialize)]
-                    struct CalendarEventArgs {
-                        summary: String,
-                        start_time: String,
-                        duration_minutes: i32,
-                        description: Option<String>,
-                        add_notification: Option<bool>,
-                    }
-
-                    let args: CalendarEventArgs = match serde_json::from_str(arguments) {
-                        Ok(args) => args,
-                        Err(e) => {
-                            eprintln!("Failed to parse calendar event arguments: {}", e);
-
-                            continue;
-                        }
-                    };
-
-                    // Set the confirmation flag
-                    if let Err(e) = state.user_repository.set_confirm_send_event(user.id, true) {
-                        eprintln!("Failed to set confirm_send_event flag: {}", e);
-                        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                            &conversation.conversation_sid,
-                            &conversation.twilio_number,
-                            "Failed to prepare calendar event creation. (not charged, contact rasmus@ahtava.com)",
-                            true,
-                            &user,
-                        ).await {
-                            eprintln!("Failed to send error message: {}", e);
-                        }
-                        return (
-                            StatusCode::OK,
-                            [(axum::http::header::CONTENT_TYPE, "application/json")],
-                            axum::Json(TwilioResponse {
-                                message: "Failed to prepare calendar event creation".to_string(),
-                            })
-                        );
-                    }
-
-                    // Format the confirmation message
-                    let confirmation_msg = if let Some(desc) = args.description {
-                        format!(
-                            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes with description: '{}' (yes-> send, no -> discard) (free reply)",
-                            args.summary, args.start_time, args.duration_minutes, desc
-                        )
-                    } else {
-                        format!(
-                            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes (yes-> send, no -> discard) (free reply)",
-                            args.summary, args.start_time, args.duration_minutes
-                        )
-                    };
-
-                    // Send the confirmation message
-                    match crate::api::twilio_utils::send_conversation_message(
+                    match crate::tool_call_utils::calendar::handle_create_calendar_event(
+                        &state,
+                        user.id,
                         &conversation.conversation_sid,
                         &conversation.twilio_number,
-                        &confirmation_msg,
-                        false, // Don't redact since we need to extract info from this message later
+                        arguments,
                         &user,
                     ).await {
-                        Ok(_) => {
-                            // Deduct credits for the confirmation message
-                            if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
-                                eprintln!("Failed to deduct user credits: {}", e);
-                            }
-                            return (
-                                StatusCode::OK,
-                                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                axum::Json(TwilioResponse {
-                                    message: "Calendar event confirmation sent".to_string(),
-                                })
-                            );
-                        }
+                        Ok(response) => return response,
                         Err(e) => {
-                            eprintln!("Failed to send confirmation message: {}", e);
+                            eprintln!("Failed to handle calendar event creation: {}", e);
                             return (
-                                StatusCode::OK,
+                                StatusCode::INTERNAL_SERVER_ERROR,
                                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                                 axum::Json(TwilioResponse {
-                                    message: "Failed to send calendar event confirmation".to_string(),
+                                    message: "Failed to process calendar event request".to_string(),
                                 })
                             );
                         }
                     }
                 } else if name == "create_task" {
                     println!("Executing create_task tool call");
-                    #[derive(Deserialize)]
-                    struct CreateTaskArgs {
-                        title: String,
-                        description: Option<String>,
-                        due_time: Option<String>,
-                    }
-
-                    let args: CreateTaskArgs = match serde_json::from_str(arguments) {
-                        Ok(args) => args,
-                        Err(e) => {
-                            eprintln!("Failed to parse create task arguments: {}", e);
-                            tool_answers.insert(tool_call_id, "Failed to create task due to invalid arguments.".to_string());
-                            continue;
-                        }
-                    };
-
-                    // Convert due_time string to DateTime<Utc> if provided
-                    let due_time = if let Some(dt_str) = args.due_time {
-                        match chrono::DateTime::parse_from_rfc3339(&dt_str) {
-                            Ok(dt) => Some(dt.with_timezone(&chrono::Utc)),
-                            Err(e) => {
-                                eprintln!("Failed to parse due time: {}", e);
-                                None
-                            }
-                        }
-                    } else {
-                        None
-                    };
-
-                    let task_request = crate::handlers::google_tasks::CreateTaskRequest {
-                        title: args.title,
-                        description: args.description,
-                        due_time,
-                    };
-
-                    match crate::handlers::google_tasks::create_task(&state, user.id, &task_request).await {
-                        Ok(Json(response)) => {
-                            tool_answers.insert(tool_call_id, "Task created successfully.".to_string());
-                        }
-                        Err((status, Json(error))) => {
-                            let error_message = match status {
-                                StatusCode::UNAUTHORIZED => "You need to connect your Google Tasks first. Visit the website to set it up.",
-                                _ => "Failed to create task. Please try again later.",
-                            };
-                            tool_answers.insert(tool_call_id, error_message.to_string());
-                            eprintln!("Failed to create task: {:?}", error);
-                        }
-                    }
+                    let response = crate::tool_call_utils::tasks::handle_create_task(&state, user.id, arguments).await;
+                    tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_tasks" {
                     println!("Executing fetch_tasks tool call");
-                    match crate::handlers::google_tasks::get_tasks(&state, user.id).await {
-                        Ok(Json(response)) => {
-                            if let Some(tasks) = response.get("tasks") {
-                                if let Some(tasks_array) = tasks.as_array() {
-                                    if tasks_array.is_empty() {
-                                        tool_answers.insert(tool_call_id, "You don't have any tasks in your list.".to_string());
-                                    } else {
-                                        let mut response = String::new();
-                                        for (i, task) in tasks_array.iter().enumerate() {
-                                            let title = task.get("title").and_then(|t| t.as_str()).unwrap_or("Untitled");
-                                            let status = task.get("status").and_then(|s| s.as_str()).unwrap_or("unknown");
-                                            let due = task.get("due").and_then(|d| d.as_str()).unwrap_or("");
-                                            let notes = task.get("notes").and_then(|n| n.as_str()).unwrap_or("");
-                                            
-                                            let status_emoji = if status == "completed" { "✅" } else { "📝" };
-                                            let due_text = if !due.is_empty() {
-                                                format!(" (due: {})", due)
-                                            } else {
-                                                String::new()
-                                            };
-                                            
-                                            if i == 0 {
-                                                response.push_str(&format!("{}. {} {}{}", i + 1, status_emoji, title, due_text));
-                                            } else {
-                                                response.push_str(&format!("\n{}. {} {}{}", i + 1, status_emoji, title, due_text));
-                                            }
-                                            
-                                            if !notes.is_empty() {
-                                                response.push_str(&format!("\n   Note: {}", notes));
-                                            }
-                                        }
-                                        tool_answers.insert(tool_call_id, response);
-                                    }
-                                } else {
-                                    tool_answers.insert(tool_call_id, "Failed to parse tasks list.".to_string());
-                                }
-                            } else {
-                                tool_answers.insert(tool_call_id, "No tasks found.".to_string());
-                            }
-                        }
-                        Err((status, Json(error))) => {
-                            let error_message = match status {
-                                StatusCode::UNAUTHORIZED => "You need to connect your Google Tasks first. Visit the website to set it up.",
-                                _ => "Failed to fetch tasks. Please try again later.",
-                            };
-                            tool_answers.insert(tool_call_id, error_message.to_string());
-                            eprintln!("Failed to fetch tasks: {:?}", error);
-                        }
-                    }
+                    let response = crate::tool_call_utils::tasks::handle_fetch_tasks(&state, user.id, arguments).await;
+                    tool_answers.insert(tool_call_id, response);
                 } else if name == "send_whatsapp_message" {
                     println!("Executing send_whatsapp_message tool call");
-                    #[derive(Deserialize)]
-                    struct WhatsAppSendArgs {
-                        chat_name: String,
-                        message: String,
-                    }
-
-                    let args: WhatsAppSendArgs = match serde_json::from_str(arguments) {
-                        Ok(args) => args,
-                        Err(e) => {
-                            eprintln!("Failed to parse WhatsApp send arguments: {}", e);
-                            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                                &conversation.conversation_sid,
-                                &conversation.twilio_number,
-                                "Failed to parse message sending request. (not charged, contact rasmus@ahtava.com)",
-                                true,
-                                &user,
-                            ).await {
-                                eprintln!("Failed to send error message: {}", e);
-                            }
-                            return (
-                                StatusCode::OK,
-                                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                axum::Json(TwilioResponse {
-                                    message: "Failed to parse WhatsApp message request".to_string(),
-                                })
-                            );
-                        }
-                    };
-
-                    // First search for the chat room
-                    match crate::utils::whatsapp_utils::search_whatsapp_rooms(
+                    match crate::tool_call_utils::whatsapp::handle_send_whatsapp_message(
                         &state,
                         user.id,
-                        &args.chat_name,
+                        &conversation.conversation_sid,
+                        &conversation.twilio_number,
+                        arguments,
+                        &user,
                     ).await {
-                        Ok(rooms) => {
-                            if rooms.is_empty() {
-                                let error_msg = format!("No WhatsApp contacts found matching '{}'.", args.chat_name);
-                                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                                    &conversation.conversation_sid,
-                                    &conversation.twilio_number,
-                                    &error_msg,
-                                    true,
-                                    &user,
-                                ).await {
-                                    eprintln!("Failed to send error message: {}", e);
-                                }
-                                return (
-                                    StatusCode::OK,
-                                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                    axum::Json(TwilioResponse {
-                                        message: error_msg,
-                                    })
-                                );
-                            }
-
-                            // Get the best match (first result)
-                            let best_match = &rooms[0];
-                            let exact_name = best_match.display_name.trim_end_matches(" (WA)").to_string();
-
-                            // Set the confirmation flag
-                            if let Err(e) = state.user_repository.set_confirm_send_event(user.id, true) {
-                                eprintln!("Failed to set confirm_send_event flag: {}", e);
-                                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                                    &conversation.conversation_sid,
-                                    &conversation.twilio_number,
-                                    "Failed to prepare WhatsApp message sending. (not charged, contact rasmus@ahtava.com)",
-                                    true,
-                                    &user,
-                                ).await {
-                                    eprintln!("Failed to send error message: {}", e);
-                                }
-                                return (
-                                    StatusCode::OK,
-                                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                    axum::Json(TwilioResponse {
-                                        message: "Failed to prepare WhatsApp message sending".to_string(),
-                                    })
-                                );
-                            }
-
-                            // Format the confirmation message with the found contact name
-                            let confirmation_msg = format!(
-                                "Confirm the sending of WhatsApp message to '{}' with content: '{}' (yes-> send, no -> discard) (free reply)",
-                                exact_name, args.message
-                            );
-
-                            // Send the confirmation message
-                            match crate::api::twilio_utils::send_conversation_message(
-                                &conversation.conversation_sid,
-                                &conversation.twilio_number,
-                                &confirmation_msg,
-                                false, // Don't redact since we need to extract info from this message later
-                                &user,
-                            ).await {
-                                Ok(_) => {
-                                    // Deduct credits for the confirmation message
-                                    if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
-                                        eprintln!("Failed to deduct user credits: {}", e);
-                                    }
-                                    return (
-                                        StatusCode::OK,
-                                        [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                        axum::Json(TwilioResponse {
-                                            message: "WhatsApp message confirmation sent".to_string(),
-                                        })
-                                    );
-                                }
-                                Err(e) => {
-                                    eprintln!("Failed to send confirmation message: {}", e);
-                                    return (
-                                        StatusCode::OK,
-                                        [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                        axum::Json(TwilioResponse {
-                                            message: "Failed to send WhatsApp confirmation".to_string(),
-                                        })
-                                    );
-                                }
-                            }
-                        }
+                        Ok(response) => return response,
                         Err(e) => {
-                            eprintln!("Failed to search WhatsApp rooms: {}", e);
-                            let error_msg = "Failed to find WhatsApp contact. Please make sure you're connected to WhatsApp bridge.";
-                            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                                &conversation.conversation_sid,
-                                &conversation.twilio_number,
-                                error_msg,
-                                true,
-                                &user,
-                            ).await {
-                                eprintln!("Failed to send error message: {}", e);
-                            }
+                            eprintln!("Failed to handle WhatsApp message sending: {}", e);
                             return (
-                                StatusCode::OK,
+                                StatusCode::INTERNAL_SERVER_ERROR,
                                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                                 axum::Json(TwilioResponse {
-                                    message: error_msg.to_string(),
+                                    message: "Failed to process WhatsApp message request".to_string(),
                                 })
                             );
                         }
                     }
                 } else if name == "search_whatsapp_rooms" {
                     println!("Executing search_whatsapp_rooms tool call");
-                    #[derive(Deserialize)]
-                    struct WhatsAppSearchArgs {
-                        search_term: String,
-                    }
-
-                    let args: WhatsAppSearchArgs = match serde_json::from_str(arguments) {
-                        Ok(args) => args,
-                        Err(e) => {
-                            eprintln!("Failed to parse WhatsApp search arguments: {}", e);
-                            tool_answers.insert(tool_call_id, "Failed to parse search request.".to_string());
-                            continue;
-                        }
-                    };
-
-                    match crate::utils::whatsapp_utils::search_whatsapp_rooms(
+                    let response = crate::tool_call_utils::whatsapp::handle_search_whatsapp_rooms(
                         &state,
                         user.id,
-                        &args.search_term,
-                    ).await {
-                        Ok(rooms) => {
-                            if rooms.is_empty() {
-                                tool_answers.insert(tool_call_id, format!("No WhatsApp contacts found matching '{}'.", args.search_term));
-                            } else {
-                                let mut response = String::new();
-                                for (i, room) in rooms.iter().take(5).enumerate() {
-                                    if i == 0 {
-                                        response.push_str(&format!("{}. {} (last active: {})", 
-                                            i + 1,
-                                            room.display_name.trim_end_matches(" (WA)"),
-                                            room.last_activity_formatted
-                                        ));
-                                    } else {
-                                        response.push_str(&format!("\n{}. {} (last active: {})", 
-                                            i + 1,
-                                            room.display_name.trim_end_matches(" (WA)"),
-                                            room.last_activity_formatted
-                                        ));
-                                    }
-                                }
-                                
-                                if rooms.len() > 5 {
-                                    response.push_str(&format!("\n\n(+ {} more contacts)", rooms.len() - 5));
-                                }
-                                
-                                tool_answers.insert(tool_call_id, response);
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to search WhatsApp rooms: {}", e);
-                            tool_answers.insert(tool_call_id, 
-                                "Failed to search WhatsApp contacts. Please make sure you're connected to WhatsApp bridge.".to_string()
-                            );
-                        }
-                    }
+                        arguments,
+                    ).await;
+                    tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_whatsapp_room_messages" {
                     println!("Executing fetch_whatsapp_room_messages tool call");
-                    #[derive(Deserialize)]
-                    struct WhatsAppRoomArgs {
-                        chat_name: String,
-                        limit: Option<u64>,
-                    }
-
-                    let args: WhatsAppRoomArgs = match serde_json::from_str(arguments) {
-                        Ok(args) => args,
-                        Err(e) => {
-                            eprintln!("Failed to parse WhatsApp room arguments: {}", e);
-                            tool_answers.insert(tool_call_id, "Failed to parse room message request.".to_string());
-                            continue;
-                        }
-                    };
-
-                    match crate::utils::whatsapp_utils::fetch_whatsapp_room_messages(
+                    let response = crate::tool_call_utils::whatsapp::handle_fetch_whatsapp_room_messages(
                         &state,
                         user.id,
-                        &args.chat_name,
-                        args.limit,
-                    ).await {
-                        Ok((messages, room_name)) => {
-                            if messages.is_empty() {
-                                tool_answers.insert(tool_call_id, format!("No messages found in chat '{}'.", room_name.trim_end_matches(" (WA)")));
-                            } else {
-                                let mut response = format!("Messages from '{}':\n\n", room_name.trim_end_matches(" (WA)"));
-                                for (i, msg) in messages.iter().take(10).enumerate() {
-                                    let content = if msg.content.chars().count() > 100 {
-                                        let truncated: String = msg.content.chars().take(97).collect();
-                                        format!("{}...", truncated)
-                                    } else {
-                                        msg.content.clone()
-                                    };
-                                    
-                                    if i == 0 {
-                                        response.push_str(&format!("{}. {} at {}:\n{}", 
-                                            i + 1, 
-                                            msg.sender_display_name,
-                                            msg.formatted_timestamp,
-                                            content
-                                        ));
-                                    } else {
-                                        response.push_str(&format!("\n\n{}. {} at {}:\n{}", 
-                                            i + 1, 
-                                            msg.sender_display_name,
-                                            msg.formatted_timestamp,
-                                            content
-                                        ));
-                                    }
-                                }
-                                
-                                if messages.len() > 10 {
-                                    response.push_str(&format!("\n\n(+ {} more messages)", messages.len() - 10));
-                                }
-                                
-                                tool_answers.insert(tool_call_id, response);
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to fetch WhatsApp room messages: {}", e);
-                            tool_answers.insert(tool_call_id, 
-                                format!("Failed to fetch messages from '{}'. Please make sure you're connected to WhatsApp bridge and the chat exists.", args.chat_name)
-                            );
-                        }
-                    }
+                        arguments,
+                    ).await;
+                    tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_whatsapp_messages" {
                     println!("Executing fetch_whatsapp_messages tool call");
-                    #[derive(Deserialize)]
-                    struct WhatsAppTimeFrame {
-                        start: String,
-                        end: String,
-                    }
-
-                    let time_frame: WhatsAppTimeFrame = match serde_json::from_str(arguments) {
-                        Ok(tf) => tf,
-                        Err(e) => {
-                            eprintln!("Failed to parse WhatsApp time frame: {}", e);
-                            tool_answers.insert(tool_call_id, "Failed to parse time frame for WhatsApp messages.".to_string());
-                            continue;
-                        }
-                    };
-
-                    // Parse the RFC3339 timestamps into Unix timestamps
-                    let start_time = match chrono::DateTime::parse_from_rfc3339(&time_frame.start) {
-                        Ok(dt) => dt.timestamp(),
-                        Err(e) => {
-                            eprintln!("Failed to parse start time: {}", e);
-                            tool_answers.insert(tool_call_id, "Invalid start time format. Please use RFC3339 format.".to_string());
-                            continue;
-                        }
-                    };
-
-                    let end_time = match chrono::DateTime::parse_from_rfc3339(&time_frame.end) {
-                        Ok(dt) => dt.timestamp(),
-                        Err(e) => {
-                            eprintln!("Failed to parse end time: {}", e);
-                            tool_answers.insert(tool_call_id, "Invalid end time format. Please use RFC3339 format.".to_string());
-                            continue;
-                        }
-                    };
-
-                    match crate::utils::whatsapp_utils::fetch_whatsapp_messages(
+                    let response = crate::tool_call_utils::whatsapp::handle_fetch_whatsapp_messages(
                         &state,
                         user.id,
-                        start_time,
-                        end_time,
-                    ).await {
-                        Ok(messages) => {
-                            if messages.is_empty() {
-                                tool_answers.insert(tool_call_id, "No WhatsApp messages found for this time period.".to_string());
-                            } else {
-                                let mut response = String::new();
-                                for (i, msg) in messages.iter().take(15).enumerate() {
-                                    let content = if msg.content.len() > 100 {
-                                        format!("{}...", &msg.content[..97])
-                                    } else {
-                                        msg.content.clone()
-                                    };
-                                    
-                                    if i == 0 {
-                                        response.push_str(&format!("{}. {} in {} at {}:\n{}", 
-                                            i + 1, 
-                                            msg.sender_display_name,
-                                            msg.room_name,
-                                            msg.formatted_timestamp,
-                                            content
-                                        ));
-                                    } else {
-                                        response.push_str(&format!("\n\n{}. {} in {} at {}:\n{}", 
-                                            i + 1, 
-                                            msg.sender_display_name,
-                                            msg.room_name,
-                                            msg.formatted_timestamp,
-                                            content
-                                        ));
-                                    }
-                                }
-                                
-                                if messages.len() > 15 {
-                                    response.push_str(&format!("\n\n(+ {} more messages)", messages.len() - 15));
-                                }
-                                
-                                tool_answers.insert(tool_call_id, response);
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Failed to fetch WhatsApp messages: {}", e);
-                            tool_answers.insert(tool_call_id, 
-                                "Failed to fetch WhatsApp messages. Please make sure you're connected to WhatsApp bridge.".to_string()
-                            );
-                        }
-                    }
-                } else if name == "scan_qr_code" {
+                        arguments,
+                    ).await;
+                    tool_answers.insert(tool_call_id, response);
+                                } else if name == "scan_qr_code" {
                     println!("Executing scan_qr_code tool call with url: {:#?}", image_url);
-
-                    // Only proceed if we have an image URL from the message
-                    if let Some(url) = image_url.as_ref() {
-                        match crate::utils::qr_utils::scan_qr_code(url).await {
-                            Ok(menu_content) => {
-                                let response = match menu_content {
-                                    crate::utils::qr_utils::MenuContent::Text(text) => {
-                                        format!("QR code contains text: {}", text)
-                                    },
-                                    crate::utils::qr_utils::MenuContent::ImageUrl(url) => {
-                                        format!("QR code contains a link to an image: {}", url)
-                                    },
-                                    crate::utils::qr_utils::MenuContent::PdfUrl(url) => {
-                                        format!("QR code contains a link to a PDF: {}", url)
-                                    },
-                                    crate::utils::qr_utils::MenuContent::WebpageUrl(url) => {
-                                        format!("QR code contains a webpage link: {}", url)
-                                    },
-                                    crate::utils::qr_utils::MenuContent::Unknown(content) => {
-                                        format!("QR code content: {}", content)
-                                    }
-                                };
-                                tool_answers.insert(tool_call_id, response);
-                            },
-                            Err(e) => {
-                                eprintln!("Failed to scan QR code: {}", e);
-                                tool_answers.insert(tool_call_id, 
-                                    "Failed to scan QR code from the image. Please make sure the QR code is clearly visible.".to_string()
-                                );
-                            }
-                        }
-                    } else {
-                        tool_answers.insert(tool_call_id, 
-                            "No image was provided in the message. Please send an image containing a QR code.".to_string()
-                        );
-                    }
+                    let response = crate::tool_call_utils::internet::handle_qr_scan(image_url.as_deref()).await;
+                    tool_answers.insert(tool_call_id, response);
                 } else if name == "delete_sms_conversation_history" {
                     println!("Executing delete_sms_conversation_history tool call");
-
                     match crate::api::twilio_utils::delete_bot_conversations(&user.phone_number, &user).await {
                         Ok(_) => {
                             tool_answers.insert(tool_call_id, "Successfully deleted all bot conversations.".to_string());
@@ -2403,114 +1403,13 @@ pub async fn process_sms(
                         }
                     }
                 } else if name == "fetch_calendar_events" {
-                    println!("Executing calendar tool call");
-                    let c: CalendarTimeFrame = match serde_json::from_str(arguments) {
-                        Ok(q) => q,
-                        Err(e) => {
-                            eprintln!("Failed to parse calendar question: {}", e);
-                            continue;
-                        }
-                    };
-
-                    match crate::handlers::google_calendar::handle_calendar_fetching(&state, user.id, &c.start, &c.end).await {
-                        Ok(Json(response)) => {
-
-                            use chrono::{DateTime, FixedOffset, Local, NaiveDate};
-                            use serde_json::Value;
-                            
-
-                            if let Some(events) = response.get("events") {
-                                let empty_vec = Vec::new();
-                                let events_array = events.as_array().unwrap_or(&empty_vec);
-                                let mut formatted_events = Vec::new();
-                                let today = Local::today().with_timezone(&FixedOffset::west_opt(7 * 3600).unwrap()).naive_local();
-
-                                // Collect events with their start times for sorting
-                                let mut events_with_time: Vec<(Value, Option<DateTime<FixedOffset>>)> = events_array.iter().map(|event| {
-                                    let start_str = event.get("start").and_then(Value::as_str).unwrap_or("");
-                                    let start_time = DateTime::parse_from_rfc3339(start_str).ok();
-                                    (event.clone(), start_time)
-                                }).collect();
-
-                                // Sort by start time, placing events without times (all-day) at the end
-                                events_with_time.sort_by(|a, b| {
-                                    match (a.1, b.1) {
-                                        (Some(t1), Some(t2)) => t1.cmp(&t2),
-                                        (Some(_), None) => std::cmp::Ordering::Less,
-                                        (None, Some(_)) => std::cmp::Ordering::Greater,
-                                        (None, None) => std::cmp::Ordering::Equal,
-                                    }
-                                });
-
-                                for (event, _) in events_with_time.iter() {
-                                    let summary = event.get("summary").and_then(|s| s.as_str()).unwrap_or("Untitled");
-                                    let duration = event.get("duration_minutes").and_then(|d| d.as_i64()).unwrap_or(0);
-                                    let start_str = event.get("start").and_then(|s| s.as_str()).unwrap_or("");
-                                    let end_str = event.get("end").and_then(|s| s.as_str()).unwrap_or("");
-
-                                    let formatted_event = if duration == 0 || start_str.len() == 10 { // All-day event
-                                        let start_date = NaiveDate::parse_from_str(start_str, "%Y-%m-%d")
-                                            .or_else(|_| NaiveDate::parse_from_str(end_str, "%Y-%m-%d"))
-                                            .unwrap_or(today);
-                                        let end_date = NaiveDate::parse_from_str(end_str, "%Y-%m-%d")
-                                            .or_else(|_| NaiveDate::parse_from_str(start_str, "%Y-%m-%d"))
-                                            .unwrap_or(start_date);
-                                        
-                                        if start_date == end_date {
-                                            format!("{}: All day, {}", summary, start_date.format("%b %d"))
-                                        } else {
-                                            format!(
-                                                "{}: All day, {} - {}",
-                                                summary, start_date.format("%b %d"), end_date.format("%b %d")
-                                            )
-                                        }
-                                    } else { // Timed event
-                                        match (DateTime::parse_from_rfc3339(start_str),
-                                              DateTime::parse_from_rfc3339(end_str)) {
-                                            (Ok(start_dt), Ok(end_dt)) => {
-                                                let date_str = if start_dt.date_naive() == today {
-                                                    "today".to_string()
-                                                } else {
-                                                    start_dt.format("%b %d").to_string()
-                                                };
-                                                format!(
-                                                    "{}: {} - {} {}",
-                                                    summary,
-                                                    start_dt.format("%l:%M %p"),
-                                                    end_dt.format("%l:%M %p"),
-                                                    date_str
-                                                )
-                                            },
-                                            _ => continue, // Skip invalid timed events
-                                        }
-                                    };
-
-                                    formatted_events.push(formatted_event);
-                                }
-
-                                let formatted_response = if formatted_events.is_empty() {
-                                    "No events scheduled.".to_string()
-                                } else {
-                                    formatted_events.join(", ")
-                                };
-
-                                tool_answers.insert(tool_call_id, formatted_response.clone());
-                                println!("Formatted events: {}", formatted_response);
-                            } else {
-                                tool_answers.insert(tool_call_id, "No events scheduled.".to_string());
-                            }
-
-                        }
-                        Err((status, json_error)) => {
-                            let error_message = match status {
-                                StatusCode::BAD_REQUEST => "No active Google Calendar connection found. Visit the website to connect.",
-                                StatusCode::UNAUTHORIZED => "Your calendar connection needs to be renewed. Please reconnect on the website.",
-                                _ => "Failed to fetch calendar events. Please try again later.",
-                            };
-                            tool_answers.insert(tool_call_id, error_message.to_string());
-                            eprintln!("Failed to fetch calendar events: {:?}", json_error);
-                        }
-                    }
+                    println!("Executing fetch_calendar_events tool call");
+                    let response = crate::tool_call_utils::calendar::handle_fetch_calendar_events(
+                        &state,
+                        user.id,
+                        arguments,
+                    ).await;
+                    tool_answers.insert(tool_call_id, response);
                 }
             }
 

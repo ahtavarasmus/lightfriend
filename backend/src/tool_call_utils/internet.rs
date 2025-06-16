@@ -1,25 +1,8 @@
-use reqwest;
-use image::DynamicImage;
 
-use std::error::Error;
-use tracing;
-use quircs;
+pub fn get_scan_qr_code_tool() -> openai_api_rs::v1::chat_completion::Tool {
+    use openai_api_rs::v1::{chat_completion, types};
+    use std::collections::HashMap;
 
-use url::Url;
-use mime_guess::from_path;
-use regex::Regex;
-use openai_api_rs::v1::{chat_completion, types};
-use std::collections::HashMap;
-
-pub enum MenuContent {
-    Text(String),
-    ImageUrl(String),
-    PdfUrl(String),
-    WebpageUrl(String),
-    Unknown(String)
-}
-
-pub fn get_qr_tool() -> chat_completion::Tool {
     let mut placeholder_properties = HashMap::new();
     placeholder_properties.insert(
         "param".to_string(),
@@ -42,6 +25,87 @@ pub fn get_qr_tool() -> chat_completion::Tool {
             },
         },
     }
+}
+
+pub fn get_weather_tool() -> openai_api_rs::v1::chat_completion::Tool {
+    use openai_api_rs::v1::{chat_completion, types};
+    use std::collections::HashMap;
+
+    let mut weather_properties = HashMap::new();
+    weather_properties.insert(
+        "location".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Location of the place where we want to search the weather.".to_string()),
+            ..Default::default()
+        }),
+    );
+    weather_properties.insert(
+        "units".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Units that the weather should be returned as. Should be either 'metric' or 'imperial'".to_string()),
+            ..Default::default()
+        }),
+    );
+
+    chat_completion::Tool {
+        r#type: chat_completion::ToolType::Function,
+        function: types::Function {
+            name: String::from("get_weather"),
+            description: Some(String::from("Fetches the current weather for the given location. The AI should use the user's home location from user info if none is specified in the query.")),
+            parameters: types::FunctionParameters {
+                schema_type: types::JSONSchemaType::Object,
+                properties: Some(weather_properties),
+                required: Some(vec![String::from("location"), String::from("units")]),
+            },
+        },
+    }
+}
+
+
+pub fn get_ask_perplexity_tool() -> openai_api_rs::v1::chat_completion::Tool {
+    use openai_api_rs::v1::{chat_completion, types};
+    use std::collections::HashMap;
+
+    let mut plex_properties = HashMap::new();
+    plex_properties.insert(
+        "query".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("The question or topic to get information about".to_string()),
+            ..Default::default()
+        }),
+    );
+
+    chat_completion::Tool {
+        r#type: chat_completion::ToolType::Function,
+        function: types::Function {
+            name: String::from("ask_perplexity"),
+            description: Some(String::from("Get factual or timely information about any topic")),
+            parameters: types::FunctionParameters {
+                schema_type: types::JSONSchemaType::Object,
+                properties: Some(plex_properties),
+                required: Some(vec![String::from("query")]),
+            },
+        },
+    }
+}
+
+
+use reqwest;
+use std::error::Error;
+use tracing;
+use quircs;
+use url::Url;
+
+#[derive(Debug)]
+pub enum MenuContent {
+    Text(String),
+    ImageUrl(String),
+    PdfUrl(String),
+    WebpageUrl(String),
+    Unknown(String)
 }
 
 pub async fn handle_qr_scan(image_url: Option<&str>) -> String {
