@@ -26,6 +26,7 @@ pub async fn handle_confirmation(
     let mut redact_body = true;
     let mut response = None;
 
+    tracing::info!("Checking confirm_send_event flag: {}", user.confirm_send_event);
     if !user.confirm_send_event {
         tracing::info!("RETURNING FROM HANDLE_CONFIRMATION SINCE CONFIRM_SEND_EVENT WAS FALSE");
         return ConfirmationResult {
@@ -189,11 +190,12 @@ pub async fn handle_confirmation(
     }
 
     // Handle WhatsApp message confirmation
+    tracing::info!("Last AI message body: {}", last_ai_message.body);
     if let Some(captures) = Regex::new(r"Confirm sending WhatsApp message to '([^']+)' with content: '([^']+)'")
         .ok()
         .and_then(|re| re.captures(&last_ai_message.body)) {
 
-        println!("REGEX captured the confirmation message fromt the last message");
+        tracing::info!("REGEX captured the confirmation message from the last message");
         
         let recipient = captures.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
         let message_content = captures.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
