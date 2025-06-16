@@ -13,6 +13,10 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use crate::tool_call_utils::utils::{
+    ChatMessage, create_openai_client, create_eval_tools, create_clarify_tools,
+    ClarifyResponse, EvalResponse,
+};
 use chrono::Utc;
 
 
@@ -23,12 +27,6 @@ use openai_api_rs::v1::{
     common::GPT4_O,
 };
 
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct ChatMessage {
-    role: String,
-    content: chat_completion::Content,
-}
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct TwilioMessageResponse {
@@ -97,185 +95,6 @@ pub struct TwilioResponse {
     pub message: String,
 }
 
-#[derive(Deserialize)]
-struct WaitingCheckArgs {
-    content: String,
-    due_date: Option<i64>,
-    remove_when_found: Option<bool>,
-}
-
-async fn handle_create_waiting_check(
-    state: &Arc<AppState>,
-    user_id: i32,
-    args: &str,
-) -> Result<String, Box<dyn Error>> {
-    let args: WaitingCheckArgs = serde_json::from_str(args)?;
-
-    // Calculate default due date (2 weeks from now) if not provided
-    let due_date = args.due_date.unwrap_or_else(|| {
-        let two_weeks = chrono::Duration::weeks(2);
-        (chrono::Utc::now() + two_weeks).timestamp()
-    }) as i32;
-
-    // Default remove_when_found to true if not provided
-    let remove_when_found = args.remove_when_found.unwrap_or(true);
-
-    let new_check = crate::models::user_models::NewWaitingCheck {
-        user_id,
-        due_date,
-        content: args.content,
-        remove_when_found,
-        service_type: "imap".to_string(), // Default to email service type
-    };
-
-    state.user_repository.create_waiting_check(&new_check)?;
-
-    Ok("I'll keep an eye out for that in your emails and notify you when I find it.".to_string())
-}
-
-pub async fn send_shazam_answer_to_user(
-    state: Arc<crate::shazam_call::ShazamState>,
-    user_id: i32,
-    message: &str,
-    success: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // Add check for user's subscription status
-    tracing::info!("Starting send_shazam_answer_to_user for user_id: {}", user_id);
-    tracing::info!("Message to send: {}", message);
-
-    let user = match state.user_repository.find_by_id(user_id) {
-        Ok(Some(user)) => {
-            tracing::info!("Found user with phone number: {}", user.phone_number);
-            user
-        },
-        Ok(None) => {
-            tracing::info!("User not found with id: {}", user_id);
-            return Err("User not found".into());
-        },
-        Err(e) => {
-            eprintln!("Database error while finding user {}: {}", user_id, e);
-            return Err(Box::new(e));
-        },
-    };
-    let message_credits_cost = if user.phone_number.starts_with("+1") {
-        std::env::var("MESSAGE_COST_US")
-            .unwrap_or_else(|_| std::env::var("MESSAGE_COST").expect("MESSAGE_COST not set"))
-            .parse::<f32>()
-            .unwrap_or(0.10)
-    } else {
-        std::env::var("MESSAGE_COST")
-            .expect("MESSAGE_COST not set")
-            .parse::<f32>()
-            .unwrap_or(0.15)
-    };
-
-    tracing::info!("Determining sender number for user {}", user_id);
-    let sender_number = match user.preferred_number.clone() {
-        Some(number) => {
-            tracing::info!("Using user's preferred number: {}", number);
-            number
-        },
-        None => {
-            let number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set");
-            tracing::info!("Using default SHAZAM_PHONE_NUMBER: {}", number);
-            number
-        },
-    };
-
-    tracing::info!("Getting conversation for user {} with sender number {}", user_id, sender_number);
-    // First check if there are any existing conversations
-    let conversation = state
-        .user_conversations
-        .get_conversation(&user, sender_number.to_string())
-        .await?;
-
-    // Verify the conversation is still active by fetching participants
-    let participants = crate::api::twilio_utils::fetch_conversation_participants(&user, &conversation.conversation_sid).await?;
-    
-    if participants.is_empty() {
-        tracing::error!("No active participants found in conversation {}", conversation.conversation_sid);
-        return Err("No active participants in conversation".into());
-    }
-
-    // Check if the user's number is still active in the conversation
-    let user_participant = participants.iter().find(|p| {
-        p.messaging_binding.as_ref()
-            .and_then(|b| b.address.as_ref())
-            .map_or(false, |addr| addr == &user.phone_number)
-    });
-
-    if user_participant.is_none() {
-        tracing::error!("User {} is no longer active in conversation {}", user.phone_number, conversation.conversation_sid);
-        return Err("User is no longer active in conversation".into());
-    }
-    tracing::info!("Retrieved conversation with SID: {}", conversation.conversation_sid);
-
-    tracing::info!("Sending message to conversation {}", conversation.conversation_sid);
-    match crate::api::twilio_utils::send_conversation_message(
-        &conversation.conversation_sid,
-        &conversation.twilio_number,
-        message,
-        true,
-        &user,
-    )
-    .await {
-        Ok(message_sid) => {
-
-            // Deduct credits for the message
-            if let Err(e) = state.user_repository
-                .update_user_credits(user.id, user.credits - message_credits_cost) {
-                eprintln!("Failed to update user credits after Shazam message: {}", e);
-                return Err("Failed to process credits points".into());
-            }
-
-            // Log the SMS usage
-            if let Err(e) = state.user_repository.log_usage(
-                user.id,
-                Some(message_sid),
-                "sms".to_string(),
-                Some(message_credits_cost),
-                None,
-                Some(success),
-                Some("shazam response".to_string()),
-                None,
-                None,
-                None,
-            ) {
-                eprintln!("Failed to log Shazam SMS usage: {}", e);
-                // Continue execution even if logging fails
-            }
-        }
-        Err(e) => {
-            tracing::error!("Failed to send conversation message: {}", e);
-            return Err("Failed to send shazam response to the user".into());
-        }
-    }
-
-    /* TODO have to make this whole charging thing in a separate function at some point
-    // Check if credits are under threshold and handle automatic charging
-    match state.user_repository.is_credits_under_threshold(user.id) {
-        Ok(is_under) => {
-            if is_under && user.charge_when_under {
-                println!("User {} credits is under threshold after Shazam message, attempting automatic charge", user.id);
-                use axum::extract::{State, Path};
-                let state_clone = Arc::clone(&state);
-                tokio::spawn(async move {
-                    let _ = crate::handlers::stripe_handlers::automatic_charge(
-                        State(state_clone),
-                        Path(user.id),
-                    ).await;
-                });
-                println!("Initiated automatic recharge for user after Shazam message");
-            }
-        },
-        Err(e) => eprintln!("Failed to check if user credits is under threshold after Shazam message: {}", e),
-    }
-    */
-
-    Ok(())
-}
-
-
 
 // New wrapper handler for the regular SMS endpoint
 pub async fn handle_regular_sms(
@@ -329,21 +148,7 @@ pub async fn handle_incoming_sms(
     State(state): State<Arc<AppState>>,
     Form(payload): Form<TwilioWebhookPayload>,
 ) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
-    println!("Received SMS from: {} to: {}", payload.from, payload.to);
-
-    // If this is a media-only webhook (no body but has media), skip processing
-    if payload.body.trim().is_empty() && payload.num_media.as_ref().map_or(false, |n| n != "0") {
-        println!("only media, skipping..");
-        /*
-        return (
-            StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, "application/json")],
-            axum::Json(TwilioResponse {
-                message: "Media-only webhook acknowledged".to_string(),
-            })
-        );
-        */
-    }
+    tracing::debug!("Received SMS from: {} to: {}", payload.from, payload.to);
 
     // Check for Shazam shortcut ('S' or 's')
     if payload.body.trim() == "S" || payload.body.trim() == "s" {
@@ -361,7 +166,7 @@ pub async fn handle_incoming_sms(
     if payload.body.trim().to_uppercase() == "STOP" {
         if let Ok(Some(user)) = state.user_repository.find_by_phone_number(&payload.from) {
             if let Err(e) = state.user_repository.update_notify(user.id, false) {
-                eprintln!("Failed to update notify status: {}", e);
+                tracing::error!("Failed to update notify status: {}", e);
             } else {
                 return (
                     StatusCode::OK,
@@ -379,8 +184,8 @@ pub async fn handle_incoming_sms(
         let result = process_sms(&state, payload.clone(), false).await;
         
         if result.0 != StatusCode::OK {
-            eprintln!("Background SMS processing failed with status: {:?}", result.0);
-            eprintln!("Error response: {:?}", result.1);
+            tracing::error!("Background SMS processing failed with status: {:?}", result.0);
+            tracing::error!("Error response: {:?}", result.1);
         }
     });
     
@@ -395,35 +200,7 @@ pub async fn handle_incoming_sms(
     )
 }
 
-// Helper function to check if a tool is accessible based on user's status
-fn requires_subscription(tool_name: &str, sub_tier: Option<String>, has_discount: bool) -> bool {
-    println!("\n=== Subscription Check Details ===");
-    println!("Tool name: {}", tool_name);
-    println!("Has subscription: {:#?}", sub_tier);
-    println!("Has discount: {}", has_discount);
-    
-    // Tier 2 subscribers get access to everything
-    if Some("tier 2".to_string()) == sub_tier || has_discount {
-        println!("✅ User has tier 2 subscription - granting full access");
-        return false;
-    } else if Some("tier 1".to_string()) == sub_tier {
-        let in_allowed_tools = tool_name.contains("perplexity") ||
-            tool_name.contains("weather") ||
-            tool_name.contains("assistant");
 
-        if in_allowed_tools {
-            return false;
-        }
-    }
-    return true;
-}
-
-
-// Helper function to get subscription error message
-fn get_subscription_error(tool_name: &str) -> String {
-    format!("This feature ({}) requires a subscription. Please visit our website to subscribe.", tool_name
-    )
-}
 
 pub async fn process_sms(
     state: &Arc<AppState>,
@@ -443,10 +220,10 @@ pub async fn process_sms(
                 payload.media_content_type0.as_ref()
             ) {
                 if user.id == 1 {
-                    println!("Media information:");
-                    println!("  Number of media items: {}", num_media);
-                    println!("  Media URL: {}", media_url);
-                    println!("  Content type: {}", content_type);
+                    tracing::debug!("Media information:");
+                    tracing::debug!("  Number of media items: {}", num_media);
+                    tracing::debug!("  Media URL: {}", media_url);
+                    tracing::debug!("  Content type: {}", content_type);
                 }
             }
             
@@ -477,7 +254,7 @@ pub async fn process_sms(
     let conversation = match state.user_conversations.get_conversation(&user, payload.to).await {
         Ok(conv) => conv,
         Err(e) => {
-            eprintln!("Failed to ensure conversation exists: {}", e);
+            tracing::error!("Failed to ensure conversation exists: {}", e);
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -492,421 +269,30 @@ pub async fn process_sms(
     let messages = match fetch_conversation_messages(&conversation.conversation_sid).await {
         Ok(msgs) => msgs,
         Err(e) => {
-            eprintln!("Failed to fetch conversation messages: {}", e);
+            tracing::error!("Failed to fetch conversation messages: {}", e);
             Vec::new()
         }
     };
-    println!("messages: {:#?}", messages);
 
     let last_msg = messages.iter().find(|msg| msg.author == "lightfriend");
-    println!("last msg: {:#?}", last_msg);
 
-    // if AI decides it needs more information we should put this as false so next message knows whatsup
+    // Handle confirmation logic
     let mut redact_the_body = true;
     if let Some(last_ai_message) = last_msg {
-        if user.confirm_send_event {
-            println!("last message was confirmation to send event since the flag was set");
-            let user_response = payload.body.trim().to_lowercase();
-            
-            // Check for calendar event confirmation
-            if let Some(captures) = regex::Regex::new(r"Confirm creating calendar event: '([^']+)' starting at '([^']+)' for (\d+) minutes(\s*with description: '([^']+)')?.*")
-                .ok()
-                .and_then(|re| re.captures(&last_ai_message.body)) {
+        let confirmation_result = crate::tool_call_utils::confirm::handle_confirmation(
+            &state,
+            &user,
+            &conversation.conversation_sid,
+            &conversation.twilio_number,
+            &payload.body,
+            Some(last_ai_message)
+        ).await;
 
-                
-                let summary = captures.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
-                let start_time = captures.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
-                let duration = captures.get(3).and_then(|m| m.as_str().parse::<i32>().ok()).unwrap_or_default();
-                let description = captures.get(5).map(|m| m.as_str().to_string());
+        redact_the_body = confirmation_result.redact_body;
 
-                // Redact the confirmation message
-                if let Err(e) = crate::api::twilio_utils::redact_message(
-                    &conversation.conversation_sid,
-                    &last_ai_message.sid,
-                    "Calendar event confirmation message redacted",
-                    &user,
-                ).await {
-                    eprintln!("Failed to redact calendar confirmation message: {}", e);
-                }
-
-                match user_response.as_str() {
-                    "yes" => {
-                        // Reset the confirmation flag
-                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
-                            eprintln!("Failed to reset confirm_send_event flag: {}", e);
-                        }
-
-                        // Create the calendar event
-                        let event_request = crate::handlers::google_calendar::CreateEventRequest {
-                            start_time: match chrono::DateTime::parse_from_rfc3339(&start_time) {
-                                Ok(dt) => dt.with_timezone(&chrono::Utc),
-                                Err(e) => {
-                                    eprintln!("Failed to parse start time: {}", e);
-                                    if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                                        &conversation.conversation_sid,
-                                        &conversation.twilio_number,
-                                        "Failed to create calendar event due to invalid start time.",
-                                        true,
-                                        &user,
-                                    ).await {
-                                        eprintln!("Failed to send error message: {}", e);
-                                    }
-                                    return (
-                                        StatusCode::OK,
-                                        [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                        axum::Json(TwilioResponse {
-                                            message: "Failed to create calendar event".to_string(),
-                                        })
-                                    );
-                                }
-                            },
-                            duration_minutes: duration,
-                            summary,
-                            description,
-                            add_notification: true,
-                        };
- 
-                        let auth_user = crate::handlers::auth_middleware::AuthUser {
-                            user_id: user.id, 
-                            is_admin: false,
-                        };
-
-                        match crate::handlers::google_calendar::create_calendar_event(
-                            State(state.clone()),
-                            auth_user,
-                            Json(event_request),
-                        ).await {
-                            Ok(_) => {
-                                // Send confirmation via Twilio
-                                let confirmation_msg = "Calendar event created successfully!";
-                                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                                    &conversation.conversation_sid,
-                                    &conversation.twilio_number,
-                                    confirmation_msg,
-                                    true,
-                                    &user,
-                                ).await {
-                                    eprintln!("Failed to send confirmation message: {}", e);
-                                }
-
-                                // Deduct credits for the confirmation response
-                                if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
-                                    eprintln!("Failed to deduct user credits for calendar confirmation: {}", e);
-                                }
-
-                                return (
-                                    StatusCode::OK,
-                                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                    axum::Json(TwilioResponse {
-                                        message: confirmation_msg.to_string(),
-                                    })
-                                );
-                            }
-                            Err((status, Json(error))) => {
-                                let error_msg = format!("Failed to create calendar event: {} (not charged)", error["error"].as_str().unwrap_or("Unknown error"));
-                                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                                    &conversation.conversation_sid,
-                                    &conversation.twilio_number,
-                                    &error_msg,
-                                    true,
-                                    &user,
-                                ).await {
-                                    eprintln!("Failed to send error message: {}", e);
-                                }
-                                return (
-                                    StatusCode::OK,
-                                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                    axum::Json(TwilioResponse {
-                                        message: error_msg,
-                                    })
-                                );
-                            }
-                        }
-                    }
-                    "no" => {
-                        // Reset the confirmation flag
-                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
-                            eprintln!("Failed to reset confirm_send_event flag: {}", e);
-                        }
-
-                        // Send cancellation confirmation
-                        let cancel_msg = "Calendar event creation cancelled.";
-                        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                            &conversation.conversation_sid,
-                            &conversation.twilio_number,
-                            cancel_msg,
-                            true,
-                            &user,
-                        ).await {
-                            eprintln!("Failed to send cancellation confirmation: {}", e);
-                        }
-
-                        return (
-                            StatusCode::OK,
-                            [(axum::http::header::CONTENT_TYPE, "application/json")],
-                            axum::Json(TwilioResponse {
-                                message: cancel_msg.to_string(),
-                            })
-                        );
-                    }
-                    _ => {
-                        // Reset the confirmation flag since we're treating this as a new message
-                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
-                            eprintln!("Failed to reset confirm_send_event flag: {}", e);
-                        }
-                        // Continue with normal message processing
-                    }
-                }
-            }
-            
-            // Check for email response confirmation
-            if let Some(captures) = regex::Regex::new(r"Confirm sending email response to '([^']+)' regarding '([^']+)' with content: '([^']+)' id:\((\d+)\)")
-                .ok()
-                .and_then(|re| re.captures(&last_ai_message.body)) {
-
-                let recipient = captures.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
-                let subject = captures.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
-                let response_text = captures.get(3).map(|m| m.as_str().to_string()).unwrap_or_default();
-                let email_id = captures.get(4).map(|m| m.as_str().to_string()).unwrap_or_default();
-
-                // Redact the confirmation message after extracting the necessary information
-                if let Err(e) = crate::api::twilio_utils::redact_message(
-                    &conversation.conversation_sid,
-                    &last_ai_message.sid,
-                    &format!("Confirm sending email response to '[RECIPIENT_REDACTED]' regarding '[SUBJECT_REDACTED]' with content: '[CONTENT_REDACTED]' id:[ID_REDACTED]"),
-                    &user,
-                ).await {
-                    eprintln!("Failed to redact email confirmation message: {}", e);
-                }
-
-                match user_response.as_str() {
-                    "yes" => {
-                        // Reset the confirmation flag
-                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
-                            eprintln!("Failed to reset confirm_send_event flag: {}", e);
-                        }
-
-                        // Create request for email response
-                        let email_request = crate::handlers::imap_handlers::EmailResponseRequest {
-                            email_id: email_id.clone(),
-                            response_text: response_text.clone(),
-                        };
-
-                        let auth_user = crate::handlers::auth_middleware::AuthUser {
-                            user_id: user.id,
-                            is_admin: false,
-                        };
-
-                        // Send the email response
-                        match crate::handlers::imap_handlers::respond_to_email(
-                            State(state.clone()),
-                            auth_user,
-                            Json(email_request),
-                        ).await {
-                            Ok(_) => {
-                                // Send confirmation via Twilio
-                                let confirmation_msg = format!("Email response sent successfully to {} regarding '{}'", recipient, subject);
-                                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                                    &conversation.conversation_sid,
-                                    &conversation.twilio_number,
-                                    &confirmation_msg,
-                                    true,
-                                    &user,
-                                ).await {
-                                    eprintln!("Failed to send confirmation message: {}", e);
-                                }
-
-                                // Deduct credits for the confirmation response
-                                if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
-                                    eprintln!("Failed to deduct user credits for email confirmation: {}", e);
-                                }
-
-                                return (
-                                    StatusCode::OK,
-                                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                    axum::Json(TwilioResponse {
-                                        message: confirmation_msg,
-                                    })
-                                );
-                            }
-                            Err((status, Json(error))) => {
-                                let error_msg = format!("Failed to send email response: {} (not charged)", error["error"].as_str().unwrap_or("Unknown error"));
-                                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                                    &conversation.conversation_sid,
-                                    &conversation.twilio_number,
-                                    &error_msg,
-                                    true,
-                                    &user,
-                                ).await {
-                                    eprintln!("Failed to send error message: {}", e);
-                                }
-                                return (
-                                    StatusCode::OK,
-                                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                    axum::Json(TwilioResponse {
-                                        message: error_msg,
-                                    })
-                                );
-                            }
-                        }
-                    }
-                    "no" => {
-                        // Reset the confirmation flag
-                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
-                            eprintln!("Failed to reset confirm_send_event flag: {}", e);
-                        }
-
-                        // Send cancellation confirmation
-                        let cancel_msg = "Email response cancelled.";
-                        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                            &conversation.conversation_sid,
-                            &conversation.twilio_number,
-                            cancel_msg,
-                            true,
-                            &user,
-                        ).await {
-                            eprintln!("Failed to send cancellation confirmation: {}", e);
-                        }
-
-                        return (
-                            StatusCode::OK,
-                            [(axum::http::header::CONTENT_TYPE, "application/json")],
-                            axum::Json(TwilioResponse {
-                                message: cancel_msg.to_string(),
-                            })
-                        );
-                    }
-                    _ => {
-                        // Reset the confirmation flag since we're treating this as a new message
-                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
-                            eprintln!("Failed to reset confirm_send_event flag: {}", e);
-                        }
-                        // Continue with normal message processing
-                    }
-                }
-            }
-
-            // Extract chat name and message content from the confirmation message
-            if let Some(captures) = regex::Regex::new(r"Confirm the sending of WhatsApp message to '([^']+)' with content: '([^']+)'.*?(?:\(yes->|$)")
-                .ok()
-                .and_then(|re| re.captures(&last_ai_message.body)) {
-
-                let chat_name = captures.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
-                println!("chatname: {}",chat_name);
-                let message_content = captures.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
-                println!("content: {}",message_content);
-
-                // Redact the confirmation message after extracting the necessary information
-                if let Err(e) = crate::api::twilio_utils::redact_message(
-                    &conversation.conversation_sid,
-                    &last_ai_message.sid,
-                    &format!("Confirm the sending of WhatsApp message to '[CHAT_NAME_REDACTED]' with content: '[MESSAGE_CONTENT_REDACTED]'"),
-                    &user,
-                ).await {
-                    eprintln!("Failed to redact confirmation message: {}", e);
-                }
-
-                match user_response.as_str() {
-                    "yes" => {
-                        // Send the WhatsApp message
-                        match crate::utils::whatsapp_utils::send_whatsapp_message(
-                            &state,
-                            user.id,
-                            &chat_name,
-                            &message_content,
-                        ).await {
-                            Ok(_) => {
-                                // Reset the confirmation flag
-                                if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
-                                    eprintln!("Failed to reset confirm_send_event flag: {}", e);
-                                }
-
-                                // Send confirmation via Twilio
-                                println!("sending messages since user said yes");
-                                let confirmation_msg = format!("Message sent successfully to {}", chat_name);
-                                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                                    &conversation.conversation_sid,
-                                    &conversation.twilio_number,
-                                    &confirmation_msg,
-                                    true,
-                                    &user,
-                                ).await {
-                                    eprintln!("Failed to send confirmation message: {}", e);
-                                }
-
-                                // Deduct credits for the confirmation response
-                                if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
-                                    eprintln!("Failed to deduct user credits for WhatsApp confirmation: {}", e);
-                                }
-
-                                return (
-                                    StatusCode::OK,
-                                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                    axum::Json(TwilioResponse {
-                                        message: confirmation_msg,
-                                    })
-                                );
-                            }
-                            Err(e) => {
-                                // Send error message via Twilio
-                                println!("sending failed to send the message to whatsapp sms");
-                                let error_msg = format!("Failed to send message: {}(not charged)", e);
-                                if let Err(send_err) = crate::api::twilio_utils::send_conversation_message(
-                                    &conversation.conversation_sid,
-                                    &conversation.twilio_number,
-                                    &error_msg,
-                                    true,
-                                    &user,
-                                ).await {
-                                    eprintln!("Failed to send error message: {}", send_err);
-                                }
-                                return (
-                                    StatusCode::OK,
-                                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                    axum::Json(TwilioResponse {
-                                        message: error_msg,
-                                    })
-                                );
-                            }
-                        }
-                    }
-                    "no" => {
-                        // Reset the confirmation flag
-                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
-                            eprintln!("Failed to reset confirm_send_event flag: {}", e);
-                        }
-
-                        // Send cancellation confirmation via Twilio
-                        println!("User said not so we are sending message discarded confirmation");
-                        let cancel_msg = "Message sending cancelled.";
-                        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                            &conversation.conversation_sid,
-                            &conversation.twilio_number,
-                            cancel_msg,
-                            true,
-                            &user,
-                        ).await {
-                            eprintln!("Failed to send cancellation confirmation: {}", e);
-                        }
-
-                        return (
-                            StatusCode::OK,
-                            [(axum::http::header::CONTENT_TYPE, "application/json")],
-                            axum::Json(TwilioResponse {
-                                message: cancel_msg.to_string(),
-                            })
-                        );
-                    }
-                    _ => {
-                        println!("User said something else than yes or no so continuing");
-                        // Reset the confirmation flag since we're treating this as a new message
-                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
-                            eprintln!("Failed to reset confirm_send_event flag: {}", e);
-                        }
-                        // If user provided something else than yes/no, treat it as a new message
-                        // and continue with normal message processing
-                    }
-                }
+        if !confirmation_result.should_continue {
+            if let Some(response) = confirmation_result.response {
+                return response;
             }
         }
     }
@@ -927,7 +313,7 @@ pub async fn process_sms(
     let user_settings = match state.user_repository.get_user_settings(user.id) {
         Ok(settings) => settings,
         Err(e) => {
-            eprintln!("Failed to get user settings: {}", e);
+            tracing::error!("Failed to get user settings: {}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -947,7 +333,7 @@ pub async fn process_sms(
     let (hours, minutes) = match crate::api::elevenlabs::get_offset_with_jiff(timezone_str) {
         Ok((h, m)) => (h, m),
         Err(_) => {
-            println!("Failed to get timezone offset for {}, defaulting to UTC", timezone_str);
+            tracing::error!("Failed to get timezone offset for {}, defaulting to UTC", timezone_str);
             (0, 0) // UTC default
         }
     };
@@ -961,7 +347,6 @@ pub async fn process_sms(
 
     // Format current time in RFC3339 for the user's timezone
     let formatted_time = Utc::now().with_timezone(&user_timezone).to_rfc3339();
-    println!("FORMATTED_TIME: {}", formatted_time);
 
     // Format offset string (e.g., "+02:00" or "-05:30")
     let offset = format!("{}{:02}:{:02}", 
@@ -992,10 +377,10 @@ pub async fn process_sms(
         if num_media != "0" {
             // Extract media SID from URL
             if let Some(media_sid) = media_url.split("/Media/").nth(1) {
-                println!("Attempting to delete media with SID: {}", media_sid);
+                tracing::debug!("Attempting to delete media with SID: {}", media_sid);
                 match crate::api::twilio_utils::delete_twilio_message_media(&media_sid, &user).await {
-                    Ok(_) => println!("Successfully deleted media: {}", media_sid),
-                    Err(e) => eprintln!("Failed to delete media {}: {}", media_sid, e),
+                    Ok(_) => tracing::debug!("Successfully deleted media: {}", media_sid),
+                    Err(e) => tracing::error!("Failed to delete media {}: {}", media_sid, e),
                 }
             }
         }
@@ -1016,7 +401,6 @@ pub async fn process_sms(
     }
 
     // Handle image if present
-    let mut has_image = false;
     let mut image_url = None;
     
     if let (Some(num_media), Some(media_url), Some(content_type)) = (
@@ -1025,10 +409,9 @@ pub async fn process_sms(
         payload.media_content_type0.as_ref()
     ) {
         if num_media != "0" && content_type.starts_with("image/") {
-            has_image = true;
             image_url = Some(media_url.clone());
             
-            println!("setting image_url var to: {:#?}", image_url);
+            tracing::debug!("setting image_url var to: {:#?}", image_url);
             // Add the image URL message with the text
             chat_messages.push(ChatMessage {
                 role: "user".to_string(),
@@ -1066,8 +449,6 @@ pub async fn process_sms(
         });
     }
 
-    println!("chat_messages: {:#?}",chat_messages);
-
     // Define tools
     let tools = vec![
         crate::tool_call_utils::whatsapp::get_send_whatsapp_message_tool(),
@@ -1087,38 +468,19 @@ pub async fn process_sms(
         crate::tool_call_utils::tasks::get_create_tasks_tool(),
     ];
 
-    let api_key = match env::var("OPENROUTER_API_KEY") {
-        Ok(key) => key,
-        Err(_) => {
-            eprintln!("OPENROUTER_API_KEY not set");
+    let client = match create_openai_client() {
+        Ok(client) => client,
+        Err(e) => {
+            tracing::error!("Failed to create OpenAI client: {}", e);
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(TwilioResponse {
-                    message: "Server configuration error".to_string(),
+                    message: "Failed to initialize AI service".to_string(),
                 })
             );
         }
     };
-
-    let client = match OpenAIClient::builder()
-        .with_endpoint("https://openrouter.ai/api/v1")
-        .with_api_key(api_key)
-        .build() {
-            Ok(client) => client,
-            Err(e) => {
-                eprintln!("Failed to build OpenAI client: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    axum::Json(TwilioResponse {
-                        message: "Failed to initialize AI service".to_string(),
-                    })
-                );
-            }
-        };
-
-    println!("built client");
 
     // Convert ChatMessage vec into ChatCompletionMessage vec
     let completion_messages: Vec<chat_completion::ChatCompletionMessage> = chat_messages
@@ -1137,66 +499,45 @@ pub async fn process_sms(
         })
         .collect();
 
-    let req = chat_completion::ChatCompletionRequest::new(
+    let result = match client.chat_completion(chat_completion::ChatCompletionRequest::new(
         GPT4_O.to_string(),
         completion_messages.clone(),
     )
     .tools(tools)
     .tool_choice(chat_completion::ToolChoiceType::Auto)
-    .max_tokens(250); // This will result in responses around 400-450 characters
-
-    println!("built request");
-
-    let result = match client.chat_completion(req).await {
+    .max_tokens(250)).await {
         Ok(result) => result,
         Err(e) => {
-            eprintln!("Failed to get chat completion: {}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        [(axum::http::header::CONTENT_TYPE, "application/json")],
-                        axum::Json(TwilioResponse {
-                            message: "Failed to process your request".to_string(),
-                        })
-                    );
+            tracing::error!("Failed to get chat completion: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                axum::Json(TwilioResponse {
+                    message: "Failed to process your request".to_string(),
+                })
+            );
         }
     };
 
-    println!("built completion");
-
-    println!("Processing model response with finish reason: {:?}", result.choices[0].finish_reason);
     let mut fail = false;
     let mut tool_answers: HashMap<String, String> = HashMap::new(); // tool_call id and answer
     let final_response = match result.choices[0].finish_reason {
         None | Some(chat_completion::FinishReason::stop) => {
-            println!("Model provided direct response (no tool calls needed)");
+            tracing::debug!("Model provided direct response (no tool calls needed)");
             // Direct response from the model
             let resp = result.choices[0].message.content.clone().unwrap_or_default();
             resp
         }
         Some(chat_completion::FinishReason::tool_calls) => {
-            println!("Model requested tool calls - beginning tool execution phase");
-            #[derive(Deserialize, Serialize)]
-            struct PerplexityQuestion {
-                query: String,
-            }
-            #[derive(Deserialize, Serialize)]
-            struct WeatherQuestion {
-                location: String,
-                units: String,
-            }
-            #[derive(Deserialize, Serialize)]
-            struct CalendarTimeFrame {
-                start: String,
-                end: String,
-            }
-            
+            tracing::debug!("Model requested tool calls - beginning tool execution phase");
+                        
             let tool_calls = match result.choices[0].message.tool_calls.as_ref() {
                 Some(calls) => {
-                    println!("Found {} tool call(s) in response", calls.len());
+                    tracing::debug!("Found {} tool call(s) in response", calls.len());
                     calls
                 },
                 None => {
-                    eprintln!("No tool calls found in response despite tool_calls finish reason");
+                    tracing::error!("No tool calls found in response despite tool_calls finish reason");
                     return (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -1209,21 +550,21 @@ pub async fn process_sms(
 
             for tool_call in tool_calls {
                 let tool_call_id = tool_call.id.clone();
-                println!("Processing tool call: {:?} with id: {:?}", tool_call, tool_call_id);
+                tracing::debug!("Processing tool call: {:?} with id: {:?}", tool_call, tool_call_id);
                 let name = match &tool_call.function.name {
                     Some(n) => {
-                        println!("Tool call function name: {}", n);
+                        tracing::debug!("Tool call function name: {}", n);
                         n
                     },
                     None => {
-                        println!("Tool call missing function name, skipping");
+                        tracing::debug!("Tool call missing function name, skipping");
                         continue;
                     },
                 };
 
                 // Check if user has access to this tool
-                if requires_subscription(name, user.sub_tier.clone(), user.discount) {
-                    println!("Attempted to use subscription-only tool {} without proper subscription", name);
+                if crate::tool_call_utils::utils::requires_subscription(name, user.sub_tier.clone(), user.discount) {
+                    tracing::info!("Attempted to use subscription-only tool {} without proper subscription", name);
                     tool_answers.insert(tool_call_id, format!("This feature ({}) requires a subscription. Please visit our website to subscribe.", name));
                     continue;
                 }
@@ -1232,11 +573,16 @@ pub async fn process_sms(
                     None => continue,
                 };
                 if name == "ask_perplexity" {
-                    println!("Executing ask_perplexity tool call");
+                    tracing::debug!("Executing ask_perplexity tool call");
+                    #[derive(Deserialize, Serialize)]
+                    struct PerplexityQuestion {
+                        query: String,
+                    }
+
                     let c: PerplexityQuestion = match serde_json::from_str(arguments) {
                         Ok(q) => q,
                         Err(e) => {
-                            eprintln!("Failed to parse perplexity question: {}", e);
+                            tracing::error!("Failed to parse perplexity question: {}", e);
                             continue;
                         }
                     };
@@ -1245,20 +591,25 @@ pub async fn process_sms(
                     let sys_prompt = format!("You are assisting an AI text messaging service. The questions you receive are from text messaging conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. When listing multiple points, use simple numbering (1, 2, 3) 5. Focus on the most relevant information that addresses the user's immediate needs. This is what you should know about the user who this information is going to in their own words: {}", user_info);
                     match crate::utils::tool_exec::ask_perplexity(&query, &sys_prompt).await {
                         Ok(answer) => {
-                            println!("Successfully received Perplexity answer");
+                            tracing::debug!("Successfully received Perplexity answer");
                             tool_answers.insert(tool_call_id, answer);
                         }
                         Err(e) => {
-                            eprintln!("Failed to get perplexity answer: {}", e);
+                            tracing::error!("Failed to get perplexity answer: {}", e);
                             continue;
                         }
                     };
                 } else if name == "get_weather" {
-                    println!("Executing get_weather tool call");
+                    tracing::debug!("Executing get_weather tool call");
+                    #[derive(Deserialize, Serialize)]
+                    struct WeatherQuestion {
+                        location: String,
+                        units: String,
+                    }
                     let c: WeatherQuestion = match serde_json::from_str(arguments) {
                         Ok(q) => q,
                         Err(e) => {
-                            eprintln!("Failed to parse weather question: {}", e);
+                            tracing::error!("Failed to parse weather question: {}", e);
                             continue;
                         }
                     };
@@ -1267,22 +618,22 @@ pub async fn process_sms(
 
                     match crate::utils::tool_exec::get_weather(&location, &units).await {
                         Ok(answer) => {
-                            println!("Successfully received weather answer");
+                            tracing::debug!("Successfully received weather answer");
                             tool_answers.insert(tool_call_id, answer);
                         }
                         Err(e) => {
-                            eprintln!("Failed to get weather answer: {}", e);
+                            tracing::error!("Failed to get weather answer: {}", e);
                             continue;
                         }
                     };
                 } else if name == "use_shazam" {
                     tool_answers.insert(tool_call_id, "The Shazam feature has been discontinued due to insufficient usage. Thank you for your understanding.".to_string());
                 } else if name == "fetch_emails" {
-                    println!("Executing fetch_emails tool call");
+                    tracing::debug!("Executing fetch_emails tool call");
                     let response = crate::tool_call_utils::email::handle_fetch_emails(&state, user.id).await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_specific_email" {
-                    println!("Executing fetch_specific_email tool call");
+                    tracing::debug!("Executing fetch_specific_email tool call");
                     #[derive(Deserialize)]
                     struct EmailQuery {
                         query: String,
@@ -1291,7 +642,7 @@ pub async fn process_sms(
                     let query: EmailQuery = match serde_json::from_str(arguments) {
                         Ok(q) => q,
                         Err(e) => {
-                            eprintln!("Failed to parse email query: {}", e);
+                            tracing::error!("Failed to parse email query: {}", e);
                             continue;
                         }
                     };
@@ -1299,18 +650,18 @@ pub async fn process_sms(
                     let response = crate::tool_call_utils::email::handle_fetch_specific_email(&state, user.id, &query.query).await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "create_waiting_check" {
-                    println!("Executing create_waiting_check tool call");
-                    match handle_create_waiting_check(&state, user.id, arguments).await {
+                    tracing::debug!("Executing create_waiting_check tool call");
+                    match crate::tool_call_utils::management::handle_create_waiting_check(&state, user.id, arguments).await {
                         Ok(answer) => {
                             tool_answers.insert(tool_call_id, answer);
                         }
                         Err(e) => {
-                            eprintln!("Failed to create waiting check: {}", e);
+                            tracing::error!("Failed to create waiting check: {}", e);
                             tool_answers.insert(tool_call_id, "Sorry, I couldn't set up the email monitoring. Please try again.".to_string());
                         }
                     }
                 } else if name == "create_calendar_event" {
-                    println!("Executing create_calendar_event tool call");
+                    tracing::debug!("Executing create_calendar_event tool call");
                     match crate::tool_call_utils::calendar::handle_create_calendar_event(
                         &state,
                         user.id,
@@ -1321,7 +672,7 @@ pub async fn process_sms(
                     ).await {
                         Ok(response) => return response,
                         Err(e) => {
-                            eprintln!("Failed to handle calendar event creation: {}", e);
+                            tracing::error!("Failed to handle calendar event creation: {}", e);
                             return (
                                 StatusCode::INTERNAL_SERVER_ERROR,
                                 [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -1332,15 +683,15 @@ pub async fn process_sms(
                         }
                     }
                 } else if name == "create_task" {
-                    println!("Executing create_task tool call");
+                    tracing::debug!("Executing create_task tool call");
                     let response = crate::tool_call_utils::tasks::handle_create_task(&state, user.id, arguments).await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_tasks" {
-                    println!("Executing fetch_tasks tool call");
+                    tracing::debug!("Executing fetch_tasks tool call");
                     let response = crate::tool_call_utils::tasks::handle_fetch_tasks(&state, user.id, arguments).await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "send_whatsapp_message" {
-                    println!("Executing send_whatsapp_message tool call");
+                    tracing::debug!("Executing send_whatsapp_message tool call");
                     match crate::tool_call_utils::whatsapp::handle_send_whatsapp_message(
                         &state,
                         user.id,
@@ -1351,7 +702,7 @@ pub async fn process_sms(
                     ).await {
                         Ok(response) => return response,
                         Err(e) => {
-                            eprintln!("Failed to handle WhatsApp message sending: {}", e);
+                            tracing::error!("Failed to handle WhatsApp message sending: {}", e);
                             return (
                                 StatusCode::INTERNAL_SERVER_ERROR,
                                 [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -1362,7 +713,7 @@ pub async fn process_sms(
                         }
                     }
                 } else if name == "search_whatsapp_rooms" {
-                    println!("Executing search_whatsapp_rooms tool call");
+                    tracing::debug!("Executing search_whatsapp_rooms tool call");
                     let response = crate::tool_call_utils::whatsapp::handle_search_whatsapp_rooms(
                         &state,
                         user.id,
@@ -1370,7 +721,7 @@ pub async fn process_sms(
                     ).await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_whatsapp_room_messages" {
-                    println!("Executing fetch_whatsapp_room_messages tool call");
+                    tracing::debug!("Executing fetch_whatsapp_room_messages tool call");
                     let response = crate::tool_call_utils::whatsapp::handle_fetch_whatsapp_room_messages(
                         &state,
                         user.id,
@@ -1378,32 +729,32 @@ pub async fn process_sms(
                     ).await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_whatsapp_messages" {
-                    println!("Executing fetch_whatsapp_messages tool call");
+                    tracing::debug!("Executing fetch_whatsapp_messages tool call");
                     let response = crate::tool_call_utils::whatsapp::handle_fetch_whatsapp_messages(
                         &state,
                         user.id,
                         arguments,
                     ).await;
                     tool_answers.insert(tool_call_id, response);
-                                } else if name == "scan_qr_code" {
-                    println!("Executing scan_qr_code tool call with url: {:#?}", image_url);
+                } else if name == "scan_qr_code" {
+                    tracing::debug!("Executing scan_qr_code tool call with url: {:#?}", image_url);
                     let response = crate::tool_call_utils::internet::handle_qr_scan(image_url.as_deref()).await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "delete_sms_conversation_history" {
-                    println!("Executing delete_sms_conversation_history tool call");
+                    tracing::debug!("Executing delete_sms_conversation_history tool call");
                     match crate::api::twilio_utils::delete_bot_conversations(&user.phone_number, &user).await {
                         Ok(_) => {
                             tool_answers.insert(tool_call_id, "Successfully deleted all bot conversations.".to_string());
                         }
                         Err(e) => {
-                            eprintln!("Failed to delete bot conversations: {}", e);
+                            tracing::error!("Failed to delete bot conversations: {}", e);
                             tool_answers.insert(tool_call_id, 
                                 format!("Failed to delete conversations: {}", e)
                             );
                         }
                     }
                 } else if name == "fetch_calendar_events" {
-                    println!("Executing fetch_calendar_events tool call");
+                    tracing::debug!("Executing fetch_calendar_events tool call");
                     let response = crate::tool_call_utils::calendar::handle_fetch_calendar_events(
                         &state,
                         user.id,
@@ -1440,22 +791,21 @@ pub async fn process_sms(
                 }
             }
 
-            println!("Making follow-up request to model with tool call answers");
+            tracing::debug!("Making follow-up request to model with tool call answers");
             let follow_up_req = chat_completion::ChatCompletionRequest::new(
                 GPT4_O.to_string(),
                 follow_up_messages,
             )
             .max_tokens(100); // Consistent token limit for follow-up messages
-            println!("Follow-up request created");
 
             match client.chat_completion(follow_up_req).await {
                 Ok(follow_up_result) => {
-                    println!("Received follow-up response from model");
+                    tracing::debug!("Received follow-up response from model");
                     let response = follow_up_result.choices[0].message.content.clone().unwrap_or_default();
                     response
                 }
                 Err(e) => {
-                    eprintln!("Failed to get follow-up completion: {}", e);
+                    tracing::error!("Failed to get follow-up completion: {}", e);
                     fail = true;
                     tool_answers.values().next()
                         .map(|ans| format!("Based on my research: {} (you were not charged for this message)", ans.chars().take(370).collect::<String>()))
@@ -1484,332 +834,41 @@ pub async fn process_sms(
         true
     };
     if let Err(e) = state.user_repository.set_free_reply(user.id, false) {
-        eprintln!("Failed to reset set_free_reply flag: {}", e);
+        tracing::error!("Failed to reset set_free_reply flag: {}", e);
     }
 
-    // Create clarification check function properties
-    let mut clarify_properties = HashMap::new();
-    clarify_properties.insert(
-        "is_clarifying".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some("Whether the AI's response is asking a clarifying question instead of providing an answer".to_string()),
-            ..Default::default()
-        }),
-    );
-    clarify_properties.insert(
-        "explanation".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Brief explanation of why this is or isn't a clarifying question without revealing conversation content.".to_string()),
-            ..Default::default()
-        }),
-    );
+    // Perform clarification check
+    let (is_clarifying, clarify_explanation) = crate::tool_call_utils::utils::perform_clarification_check(
+        &client,
+        &messages,
+        &payload.body,
+        &final_response
+    ).await;
 
-    // Define clarification check tool
-    let clarify_tools = vec![
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("check_clarification"),
-                description: Some(String::from(
-                    "Determines if the AI's response is asking a clarifying question instead of providing an answer"
-                )),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(clarify_properties),
-                    required: Some(vec![String::from("is_clarifying")]),
-                },
-            },
-        },
-    ];
+    // Perform evaluation
+    let (eval_result, eval_reason) = crate::tool_call_utils::utils::perform_evaluation(
+        &client,
+        &messages,
+        &payload.body,
+        &final_response,
+        fail
+    ).await;
 
-    // Create clarification check messages with more context
-    let mut clarify_messages = vec![
-        chat_completion::ChatCompletionMessage {
-            role: chat_completion::MessageRole::system,
-            content: chat_completion::Content::Text(
-                "You are an evaluator that determines if an AI response is asking for REQUIRED information OR is seeking for CONFIRMATION to complete the UNFINISHED task. Unfinished task is an answer where the AI did not provide ANY useful information yet to the user. Default to FALSE otherwise.\n\n\
-                Examples of TRUE clarifying questions:\n\
-                - User: 'Send a message to mom' -> AI: 'I see multiple contacts named mom. Which one should I send the message to?'\n\
-                - User: 'Check my calendar' -> AI: 'For which date range would you like me to check your calendar?'\n\
-                - User: 'What's the weather?' -> AI: 'Which location would you like the weather for?'\n\n\
-                - User: 'Can you send message hey hows it going to mom?' -> AI: 'I found the contact \'Mom\' on WhatsApp. Do you want me to send \'hey hows it going\' to this contact?'\n\n\
-                Examples that should be FALSE (complete answers with optional follow-ups):\n\
-                - User: 'Show contacts named mom' -> AI: 'You have 2 contacts: 1. Mom (mobile) 2. Mom (work).'\n\
-                - User: 'Get my recent emails' -> AI: 'Here are your latest emails: [email list]. Would you like to see more?'\n\
-                - User: 'Check weather in London' -> AI: 'It's sunny and 20°C in London. Would you like to check another city?'\n\n\
-                Key rules:\n\
-                2. Follow-up questions after answering the original question are NOT clarifying questions\n\
-                3. Only mark TRUE if the AI is asking to confirm the data it got from the user or it CANNOT provide an answer without more information\n\
-                4. When in doubt, return FALSE".to_string(),
-            ),
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
-        },
-    ];
-
-    // Add up to 3 previous message pairs for context
-    let context_messages: Vec<_> = messages.iter()
-        .rev()
-        .take(6) // Take 6 messages (3 pairs of user-assistant exchanges)
-        .collect();
-
-    if !context_messages.is_empty() {
-        clarify_messages.push(chat_completion::ChatCompletionMessage {
-            role: chat_completion::MessageRole::user,
-            content: chat_completion::Content::Text(
-                format!(
-                    "Previous conversation:\n{}",
-                    context_messages.iter()
-                        .rev() // Reverse back to chronological order
-                        .map(|msg| format!("[{}]: {}", 
-                            if msg.author == "lightfriend" { "AI" } else { "User" },
-                            msg.body
-                        ))
-                        .collect::<Vec<String>>()
-                        .join("\n")
-                )
-            ),
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
-        });
-    }
-
-    // Add the current exchange
-    clarify_messages.push(chat_completion::ChatCompletionMessage {
-        role: chat_completion::MessageRole::user,
-        content: chat_completion::Content::Text(format!(
-            "Current exchange:\nUser: {}\nAI: {}",
-            payload.body,
-            final_response
-        )),
-        name: None,
-        tool_calls: None,
-        tool_call_id: None,
-    });
-
-    let clarify_req = chat_completion::ChatCompletionRequest::new(
-        "openai/gpt-4o-mini".to_string(),
-        clarify_messages,
-    )
-    .tools(clarify_tools)
-    .tool_choice(chat_completion::ToolChoiceType::Required)
-    .max_tokens(100);
-
-    #[derive(Deserialize)]
-    struct ClarifyResponse {
-        #[serde(deserialize_with = "deserialize_bool")]
-        is_clarifying: bool,
-        explanation: Option<String>,
-    }
-
-    // If message starts with "forget", skip clarification check
-    let (is_clarifying, clarify_explanation) = match client.chat_completion(clarify_req).await {
-            Ok(result) => {
-                println!("Got clarification check response from model");
-                if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
-                    if let Some(first_call) = tool_calls.first() {
-                        if let Some(args) = &first_call.function.arguments {
-                            match serde_json::from_str::<ClarifyResponse>(args) {
-                                Ok(clarify) => {
-                                    println!("Clarification check result: is_clarifying={}, explanation={:?}", 
-                                        clarify.is_clarifying, clarify.explanation);
-                                    (clarify.is_clarifying, clarify.explanation)
-                                },
-                                Err(e) => {
-                                    println!("Failed to parse clarification response: {}", e);
-                                    (false, Some("Failed to parse clarification check".to_string()))
-                                },
-                            }
-                        } else {
-                            println!("No arguments found in clarification tool call");
-                            (false, Some("Missing clarification check arguments".to_string()))
-                        }
-                    } else {
-                        println!("No clarification tool calls found");
-                        (false, Some("No clarification check tool calls found".to_string()))
-                    }
-                } else {
-                    println!("No tool calls section in clarification response");
-                    (false, Some("No clarification check tool calls received".to_string()))
-                }
-            }
-            Err(e) => {
-                println!("Failed to get clarification check response: {}", e);
-                (false, Some("Failed to get clarification check response".to_string()))
-            }
-        };
-
-    
-
-    let mut eval_properties = HashMap::new();
-    eval_properties.insert(
-        "success".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some("Whether the response was successful and provided the information user asked for. Note that the information might not look like success(whatsapp message fetch returns missed call notice), but should still be considered successful.".to_string()),
-            ..Default::default()
-        }),
-    );
-    eval_properties.insert(
-        "reason".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Reason for failure if success is false, explaining the issue without revealing conversation content".to_string()),
-            ..Default::default()
-        }),
-    );
-    // Define evaluation tool
-    let eval_tools = vec![
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("evaluate_response"),
-                description: Some(String::from(
-                    "Evaluates the AI response based on success."
-                )),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(eval_properties),
-                    required: Some(vec![String::from("success")]),
-                },
-            },
-        },
-    ];
-
-    // Create evaluation messages
-    let eval_messages = vec![
-        chat_completion::ChatCompletionMessage {
-            role: chat_completion::MessageRole::system,
-            content: chat_completion::Content::Text(
-                "You are a conversation evaluator. Assess the latest user's query in the context of the conversation history and the AI's response to it. Use the evaluate_response function to provide feedback.\n\n\
-                ### Guidelines:\n\
-                - **Success**: True if the AI successfully answered the user's request; false otherwise.".to_string(),
-            ),
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
-        },
-        chat_completion::ChatCompletionMessage {
-            role: chat_completion::MessageRole::user,
-            content: chat_completion::Content::Text(format!(
-                "Conversation history: {}\nLatest user message: {}\nAI response: {}",
-                messages.iter()
-                    .map(|msg| format!("[{}]: {}", 
-                        if msg.author == "lightfriend" { "AI" } else { "User" },
-                        if msg.body.chars().count() > 50 {
-                            format!("{}...", msg.body.chars().take(50).collect::<String>())
-                        } else {
-                            msg.body.clone()
-                        }
-                    ))
-                    .collect::<Vec<String>>()
-                    .join("\n"),
-                payload.body,
-                final_response
-            )),
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
-        },
-    ];
-
-    let eval_req = chat_completion::ChatCompletionRequest::new(
-        "openai/gpt-4o-mini".to_string(),
-        eval_messages,
-    )
-    .tools(eval_tools)
-    .tool_choice(chat_completion::ToolChoiceType::Required)
-    .max_tokens(200);
-
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum BoolValue {
-        Bool(bool),
-        String(String),
-    }
-
-    impl From<BoolValue> for bool {
-        fn from(value: BoolValue) -> Self {
-            match value {
-                BoolValue::Bool(b) => b,
-                BoolValue::String(s) => s.to_lowercase() == "true",
-            }
-        }
-    }
-
-    #[derive(Deserialize)]
-    struct EvalResponse {
-        #[serde(deserialize_with = "deserialize_bool")]
-        success: bool,
-        reason: Option<String>,
-    }
-
-    fn deserialize_bool<'de, D>(deserializer: D) -> Result<bool, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(BoolValue::deserialize(deserializer)?.into())
-    }
-
-    let (eval_result, eval_reason) = match client.chat_completion(eval_req).await {
-        Ok(result) => {
-            println!("Got evaluation response from model");
-            if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
-                println!("Found tool calls in evaluation response");
-                if let Some(first_call) = tool_calls.first() {
-                    println!("Processing first tool call");
-                    if let Some(args) = &first_call.function.arguments {
-                        println!("Tool call arguments: {}", args);
-                        match serde_json::from_str::<EvalResponse>(args) {
-                            Ok(eval) => {
-                                println!("Successfully parsed evaluation response: success={}, reason={:?}", 
-                                    eval.success, eval.reason);
-                                (eval.success, eval.reason)
-                            },
-                            Err(e) => {
-                                println!("Failed to parse evaluation response: {}, falling back to default", e);
-                                (!fail, Some("Failed to parse evaluation response".to_string()))
-                            },
-                        }
-                    } else {
-                        println!("No arguments found in tool call");
-                        (!fail, Some("Missing evaluation arguments".to_string()))
-                    }
-                } else {
-                    println!("No tool calls found in response");
-                    (!fail, Some("No evaluation tool calls found".to_string()))
-                }
-            } else {
-                println!("No tool calls section in response");
-                (!fail, Some("No evaluation tool calls received".to_string()))
-            }
-        }
-        Err(e) => {
-            println!("Failed to get evaluation response: {}", e);
-            (!fail, Some("Failed to get evaluation response".to_string()))
-        }
-    };
-
-    
     let mut final_response_with_notice = final_response.clone();
     if is_clarifying {
         if let Err(e) = state.user_repository.set_free_reply(user.id, true) {
-            eprintln!("Failed to set the set_free_reply flag: {}", e);
+            tracing::error!("Failed to set the set_free_reply flag: {}", e);
         }
         final_response_with_notice = format!("{} (free reply)", final_response);
     }
 
-    println!("is_clarifying message: {}", is_clarifying);
+    tracing::debug!("is_clarifying message: {}", is_clarifying);
     if is_clarifying {
         redact_the_body = false;
     }
 
     let status = if should_charge {"charging".to_string()} else {"this was free reply".to_string()};
-    println!("STATUS: {}", status);
+    tracing::debug!("STATUS: {}", status);
     let mut final_eval: String = "".to_string();
     if let Some(eval) = eval_reason {
         if let Some(clarify_expl) = clarify_explanation {
@@ -1820,7 +879,7 @@ pub async fn process_sms(
     } else if let Some(clarify_expl) = clarify_explanation {
         final_eval = format!("clarifying reason: {}", clarify_expl);
     }
-    println!("FINAL_EVAL: {}", final_eval);
+    tracing::debug!("FINAL_EVAL: {}", final_eval);
 
     let processing_time_secs = start_time.elapsed().as_secs(); // Calculate processing time
 
@@ -1839,7 +898,7 @@ pub async fn process_sms(
             None,
             None
         ) {
-            eprintln!("Failed to log test SMS usage: {}", e);
+            tracing::error!("Failed to log test SMS usage: {}", e);
         }
 
         return (
@@ -1855,7 +914,7 @@ pub async fn process_sms(
     match crate::api::twilio_utils::send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number, &final_response_with_notice, redact_the_body, &user).await {
         Ok(message_sid) => {
             // Always log the SMS usage metadata and eval(no content!)
-            println!("status of the message: {}", status);
+            tracing::debug!("status of the message: {}", status);
             if let Err(e) = state.user_repository.log_usage(
                 user.id,
                 Some(message_sid),
@@ -1868,14 +927,14 @@ pub async fn process_sms(
                 None,
                 None,
             ) {
-                eprintln!("Failed to log SMS usage: {}", e);
+                tracing::error!("Failed to log SMS usage: {}", e);
                 // Continue execution even if logging fails
             }
 
             if should_charge {
                 // Only deduct credits if we should charge
                 if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
-                    eprintln!("Failed to deduct user credits: {}", e);
+                    tracing::error!("Failed to deduct user credits: {}", e);
                     return (
                         StatusCode::INTERNAL_SERVER_ERROR,
                         [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -1888,7 +947,7 @@ pub async fn process_sms(
                 match state.user_repository.is_credits_under_threshold(user.id) {
                     Ok(is_under) => {
                         if is_under {
-                            println!("User {} credits is under threshold, attempting automatic charge", user.id);
+                            tracing::debug!("User {} credits is under threshold, attempting automatic charge", user.id);
                             // Get user information
                             if user.charge_when_under {
                                 use axum::extract::{State, Path};
@@ -1898,13 +957,12 @@ pub async fn process_sms(
                                         State(state_clone),
                                         Path(user.id),
                                     ).await;
-                                    println!("Recharged the user successfully back up!");
+                                    tracing::debug!("Recharged the user successfully back up!");
                                 });
-                                println!("recharged the user successfully back up!");
                             }
                         }
                     },
-                    Err(e) => eprintln!("Failed to check if user credits is under threshold: {}", e),
+                    Err(e) => tracing::error!("Failed to check if user credits is under threshold: {}", e),
                 }
             }
 
@@ -1917,7 +975,7 @@ pub async fn process_sms(
             )
         }
         Err(e) => {
-            eprintln!("Failed to send conversation message: {}", e);
+            tracing::error!("Failed to send conversation message: {}", e);
             // Log the failed attempt with error message in status
             let error_status = format!("failed to send: {}", e);
             if let Err(log_err) = state.user_repository.log_usage(
@@ -1932,7 +990,7 @@ pub async fn process_sms(
                 None,
                 None,
             ) {
-                eprintln!("Failed to log SMS usage after send error: {}", log_err);
+                tracing::error!("Failed to log SMS usage after send error: {}", log_err);
             }
             (
                 StatusCode::INTERNAL_SERVER_ERROR,

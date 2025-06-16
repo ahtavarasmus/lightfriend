@@ -73,6 +73,7 @@ mod tool_call_utils {
     pub mod utils;
     pub mod internet;
     pub mod management;
+    pub mod confirm;
 }
 
 mod api {

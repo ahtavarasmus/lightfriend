@@ -71,3 +71,44 @@ pub fn get_delete_sms_conversation_history_tool() -> openai_api_rs::v1::chat_com
         },
     }
 }
+
+use serde::Deserialize;
+use std::sync::Arc;
+use crate::AppState;
+use std::error::Error;
+
+#[derive(Deserialize)]
+pub struct WaitingCheckArgs {
+    pub content: String,
+    pub due_date: Option<i64>,
+    pub remove_when_found: Option<bool>,
+}
+
+pub async fn handle_create_waiting_check(
+    state: &Arc<AppState>,
+    user_id: i32,
+    args: &str,
+) -> Result<String, Box<dyn Error>> {
+    let args: WaitingCheckArgs = serde_json::from_str(args)?;
+
+    // Calculate default due date (2 weeks from now) if not provided
+    let due_date = args.due_date.unwrap_or_else(|| {
+        let two_weeks = chrono::Duration::weeks(2);
+        (chrono::Utc::now() + two_weeks).timestamp()
+    }) as i32;
+
+    // Default remove_when_found to true if not provided
+    let remove_when_found = args.remove_when_found.unwrap_or(true);
+
+    let new_check = crate::models::user_models::NewWaitingCheck {
+        user_id,
+        due_date,
+        content: args.content,
+        remove_when_found,
+        service_type: "imap".to_string(), // Default to email service type
+    };
+
+    state.user_repository.create_waiting_check(&new_check)?;
+
+    Ok("I'll keep an eye out for that in your emails and notify you when I find it.".to_string())
+}

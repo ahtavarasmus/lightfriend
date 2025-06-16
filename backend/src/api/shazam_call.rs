@@ -264,7 +264,7 @@ pub async fn process_audio_with_shazam(state: Arc<ShazamState>) {
 
                         match state.user_repository.find_by_phone_number(&to_number) {
                             Ok(Some(user)) => {
-                                match crate::twilio_sms::send_shazam_answer_to_user(state.clone(), user.id, &song_name, true).await {
+                                match send_shazam_answer_to_user(state.clone(), user.id, &song_name, true).await {
                                     Ok(_) => {
                                         println!("Successfully sent Shazam result to user {}: {}", user.id, song_name);
                                     }
@@ -285,6 +285,127 @@ pub async fn process_audio_with_shazam(state: Arc<ShazamState>) {
             }
         }
     }
+}
+
+pub async fn send_shazam_answer_to_user(
+    state: Arc<crate::shazam_call::ShazamState>,
+    user_id: i32,
+    message: &str,
+    success: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Add check for user's subscription status
+    tracing::info!("Starting send_shazam_answer_to_user for user_id: {}", user_id);
+    tracing::info!("Message to send: {}", message);
+
+    let user = match state.user_repository.find_by_id(user_id) {
+        Ok(Some(user)) => {
+            tracing::info!("Found user with phone number: {}", user.phone_number);
+            user
+        },
+        Ok(None) => {
+            tracing::info!("User not found with id: {}", user_id);
+            return Err("User not found".into());
+        },
+        Err(e) => {
+            eprintln!("Database error while finding user {}: {}", user_id, e);
+            return Err(Box::new(e));
+        },
+    };
+    let message_credits_cost = if user.phone_number.starts_with("+1") {
+        std::env::var("MESSAGE_COST_US")
+            .unwrap_or_else(|_| std::env::var("MESSAGE_COST").expect("MESSAGE_COST not set"))
+            .parse::<f32>()
+            .unwrap_or(0.10)
+    } else {
+        std::env::var("MESSAGE_COST")
+            .expect("MESSAGE_COST not set")
+            .parse::<f32>()
+            .unwrap_or(0.15)
+    };
+
+    tracing::info!("Determining sender number for user {}", user_id);
+    let sender_number = match user.preferred_number.clone() {
+        Some(number) => {
+            tracing::info!("Using user's preferred number: {}", number);
+            number
+        },
+        None => {
+            let number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set");
+            tracing::info!("Using default SHAZAM_PHONE_NUMBER: {}", number);
+            number
+        },
+    };
+
+    tracing::info!("Getting conversation for user {} with sender number {}", user_id, sender_number);
+    // First check if there are any existing conversations
+    let conversation = state
+        .user_conversations
+        .get_conversation(&user, sender_number.to_string())
+        .await?;
+
+    // Verify the conversation is still active by fetching participants
+    let participants = crate::api::twilio_utils::fetch_conversation_participants(&user, &conversation.conversation_sid).await?;
+    
+    if participants.is_empty() {
+        tracing::error!("No active participants found in conversation {}", conversation.conversation_sid);
+        return Err("No active participants in conversation".into());
+    }
+
+    // Check if the user's number is still active in the conversation
+    let user_participant = participants.iter().find(|p| {
+        p.messaging_binding.as_ref()
+            .and_then(|b| b.address.as_ref())
+            .map_or(false, |addr| addr == &user.phone_number)
+    });
+
+    if user_participant.is_none() {
+        tracing::error!("User {} is no longer active in conversation {}", user.phone_number, conversation.conversation_sid);
+        return Err("User is no longer active in conversation".into());
+    }
+    tracing::info!("Retrieved conversation with SID: {}", conversation.conversation_sid);
+
+    tracing::info!("Sending message to conversation {}", conversation.conversation_sid);
+    match crate::api::twilio_utils::send_conversation_message(
+        &conversation.conversation_sid,
+        &conversation.twilio_number,
+        message,
+        true,
+        &user,
+    )
+    .await {
+        Ok(message_sid) => {
+
+            // Deduct credits for the message
+            if let Err(e) = state.user_repository
+                .update_user_credits(user.id, user.credits - message_credits_cost) {
+                eprintln!("Failed to update user credits after Shazam message: {}", e);
+                return Err("Failed to process credits points".into());
+            }
+
+            // Log the SMS usage
+            if let Err(e) = state.user_repository.log_usage(
+                user.id,
+                Some(message_sid),
+                "sms".to_string(),
+                Some(message_credits_cost),
+                None,
+                Some(success),
+                Some("shazam response".to_string()),
+                None,
+                None,
+                None,
+            ) {
+                eprintln!("Failed to log Shazam SMS usage: {}", e);
+                // Continue execution even if logging fails
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to send conversation message: {}", e);
+            return Err("Failed to send shazam response to the user".into());
+        }
+    }
+
+    Ok(())
 }
 
 use std::env;
