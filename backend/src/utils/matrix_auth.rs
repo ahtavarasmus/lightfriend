@@ -560,20 +560,16 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>, setup_encryption: b
         println!("🔐 Setting up encryption keys and secret storage");
         let mut redo_secret_storage = false;
 
-        // Get bridge bot username from environment variable or use default pattern
-        let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
-            .unwrap_or_else(|_| "@whatsappbot:".to_string());
-            
-            // Handle cross-signing setup
-            match setup_cross_signing(&client, &username, &password, user.encrypted_matrix_secret_storage_recovery_key.as_ref()).await {
-                Ok(should_update_storage) => {
-                    if should_update_storage {
-                        redo_secret_storage = true;
-                        println!("🚩 Marked for secret storage update");
-                    }
-                },
-                Err(e) => return Err(e),
-            }
+        // Handle cross-signing setup
+        match setup_cross_signing(&client, &username, &password, user.encrypted_matrix_secret_storage_recovery_key.as_ref()).await {
+            Ok(should_update_storage) => {
+                if should_update_storage {
+                    redo_secret_storage = true;
+                    println!("🚩 Marked for secret storage update");
+                }
+            },
+            Err(e) => return Err(e),
+        }
 
         println!("🔄 Setting up encryption backups");
         match setup_backups(&client, user.encrypted_matrix_secret_storage_recovery_key.as_ref()).await {

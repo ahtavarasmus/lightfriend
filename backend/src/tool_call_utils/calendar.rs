@@ -3,6 +3,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 use axum::Json;
 use chrono::{DateTime, FixedOffset, Local, NaiveDate};
+use chrono_tz;
 use serde_json::Value;
 
 pub fn get_fetch_calendar_event_tool() -> openai_api_rs::v1::chat_completion::Tool {
@@ -232,16 +233,32 @@ pub async fn handle_create_calendar_event(
 ) -> Result<(axum::http::StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<crate::api::twilio_sms::TwilioResponse>), Box<dyn std::error::Error>> {
     let args: CalendarEventArgs = serde_json::from_str(args)?;
 
+    // Get user's timezone from settings
+    let user_settings = state.user_core.get_user_settings(user_id)?;
+    let timezone = user_settings.timezone.unwrap_or_else(|| String::from("UTC"));
+    
+    // Parse the start time
+    let start_time = chrono::DateTime::parse_from_rfc3339(&args.start_time)
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+    
+    // Convert to user's timezone
+    let user_tz: chrono_tz::Tz = timezone.parse()
+        .unwrap_or(chrono_tz::UTC);
+    let local_time = start_time.with_timezone(&user_tz);
+    
+    // Format the date and time
+    let formatted_time = local_time.format("%B %d at %I:%M %p %Z").to_string();
+    
     // Format the confirmation message
     let confirmation_msg = if let Some(ref desc) = args.description {
         format!(
-            "Create calendar event: '{}' starting at '{}' for {} minutes with description: '{}' (yes-> send, no -> discard) (free reply)",
-            args.summary, args.start_time, args.duration_minutes, desc
+            "Create event: '{}' starting {} for {} minutes with description: '{}' (yes-> send, no -> discard) (free reply)",
+            args.summary, formatted_time, args.duration_minutes, desc
         )
     } else {
         format!(
-            "Create calendar event: '{}' starting at '{}' for {} minutes (yes-> send, no -> discard) (free reply)",
-            args.summary, args.start_time, args.duration_minutes
+            "Create event: '{}' starting {} for {} minutes (yes-> send, no -> discard) (free reply)",
+            args.summary, formatted_time, args.duration_minutes
         )
     };
 
