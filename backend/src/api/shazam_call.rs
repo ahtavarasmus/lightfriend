@@ -14,6 +14,7 @@ use base64::{Engine as _, engine::general_purpose};
 use serde_json::{Value, from_str};
 use crate::repositories::user_repository::UserRepository;
 use crate::repositories::user_conversations::UserConversations;
+use crate::repositories::user_core::UserCore;
 use hound::{WavWriter, WavSpec};
 use std::io::Cursor;
 use tracing::{info, error};
@@ -24,15 +25,17 @@ pub type UserCallMap = Arc<Mutex<HashMap<String, String>>>; // callSid -> user_i
 pub struct ShazamState {
     pub sessions: CallSessions,
     pub user_calls: UserCallMap,
+    pub user_core: Arc<UserCore>,
     pub user_repository: Arc<UserRepository>,
     pub user_conversations: Arc<UserConversations>,
 }
 
 impl ShazamState {
-    pub fn new(user_repository: Arc<UserRepository>, user_conversations: Arc<UserConversations>) -> Self {
+    pub fn new(user_core: Arc<UserCore>, user_repository: Arc<UserRepository>, user_conversations: Arc<UserConversations>) -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             user_calls: Arc::new(Mutex::new(HashMap::new())),
+            user_core,
             user_repository,
             user_conversations,
         }
@@ -49,7 +52,7 @@ pub async fn start_call_for_user(
     let account_sid = std::env::var("TWILIO_ACCOUNT_SID").expect("TWILIO_ACCOUNT_SID must be set");
     let auth_token = std::env::var("TWILIO_AUTH_TOKEN").expect("TWILIO_AUTH_TOKEN must be set");
     
-    let user = match state.user_repository.find_by_id(user_id.parse().unwrap()) {
+    let user = match state.user_core.find_by_id(user_id.parse().unwrap()) {
         Ok(Some(user)) => user,
         _ => return "User not found".to_string(),
     };
@@ -246,7 +249,7 @@ pub async fn process_audio_with_shazam(state: Arc<ShazamState>) {
                     let to_number = {
                         let user_calls_lock = state.user_calls.lock().await;
                         if let Some(user_id) = user_calls_lock.get(call_sid) {
-                            if let Ok(Some(user)) = state.user_repository.find_by_id(user_id.parse().unwrap()) {
+                            if let Ok(Some(user)) = state.user_core.find_by_id(user_id.parse().unwrap()) {
                                 user.phone_number
                             } else {
                                 String::new()
@@ -262,7 +265,7 @@ pub async fn process_audio_with_shazam(state: Arc<ShazamState>) {
                         println!("Successfully identified: {}", song_name);
 
 
-                        match state.user_repository.find_by_phone_number(&to_number) {
+                        match state.user_core.find_by_phone_number(&to_number) {
                             Ok(Some(user)) => {
                                 match send_shazam_answer_to_user(state.clone(), user.id, &song_name, true).await {
                                     Ok(_) => {
@@ -297,7 +300,7 @@ pub async fn send_shazam_answer_to_user(
     tracing::info!("Starting send_shazam_answer_to_user for user_id: {}", user_id);
     tracing::info!("Message to send: {}", message);
 
-    let user = match state.user_repository.find_by_id(user_id) {
+    let user = match state.user_core.find_by_id(user_id) {
         Ok(Some(user)) => {
             tracing::info!("Found user with phone number: {}", user.phone_number);
             user

@@ -417,7 +417,7 @@ pub async fn handle_calendar_fetching(
     end: &str,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Get user's timezone from settings
-    let user_timezone = match state.user_repository.get_user_settings(user_id) {
+    let user_timezone = match state.user_core.get_user_settings(user_id) {
         Ok(settings) => {
             match settings.timezone {
                 Some(tz) => match tz.parse::<Tz>() {

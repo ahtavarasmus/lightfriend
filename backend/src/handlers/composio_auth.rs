@@ -249,7 +249,7 @@ pub async fn get_integration_handler(
     };
 
     // Verify user exists
-    if state.user_repository.find_by_id(claims.sub).map_err(|e| {
+    if state.user_core.find_by_id(claims.sub).map_err(|e| {
         println!("Database error: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -397,7 +397,7 @@ pub async fn initiate_connection_handler(
     use crate::models::user_models::NewComposioConnection;
 
     // First verify that the user exists
-    if state.user_repository.find_by_id(request.user_id).map_err(|e| {
+    if state.user_core.find_by_id(request.user_id).map_err(|e| {
         error!(
             error = %e,
             user_id = request.user_id,

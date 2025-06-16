@@ -31,7 +31,7 @@ pub async fn migrate_to_daily(
     }
 
     // Get user's phone number
-    let user = state.user_repository.find_by_id(user_id)
+    let user = state.user_core.find_by_id(user_id)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)}))
@@ -73,7 +73,7 @@ pub async fn migrate_to_daily(
     };
 
     // Update the sub_country
-    state.user_repository.update_sub_country(user_id, Some(country_code))
+    state.user_core.update_sub_country(user_id, Some(country_code))
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to update subscription country: {}", e)}))
@@ -151,7 +151,7 @@ pub async fn get_profile(
 ) -> Result<Json<ProfileResponse>, (StatusCode, Json<serde_json::Value>)> {
 
     // Get user profile and settings from database
-    let user = state.user_repository.find_by_id(auth_user.user_id).map_err(|e| (
+    let user = state.user_core.find_by_id(auth_user.user_id).map_err(|e| (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": format!("Database error: {}", e)}))
     ))?;
@@ -160,7 +160,7 @@ pub async fn get_profile(
     match user {
         Some(user) => {
 
-            let user_settings = state.user_repository.get_user_settings(auth_user.user_id).map_err(|e| (
+            let user_settings = state.user_core.get_user_settings(auth_user.user_id).map_err(|e| (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)}))
             ))?;
@@ -222,7 +222,7 @@ pub async fn update_preferred_number(
     Json(_request): Json<PreferredNumberRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Get user and settings to check their subscription status
-    let user = state.user_repository.find_by_id(auth_user.user_id)
+    let user = state.user_core.find_by_id(auth_user.user_id)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)}))
@@ -253,7 +253,7 @@ pub async fn update_preferred_number(
     };
 
     // Update preferred number
-    state.user_repository.update_preferred_number(auth_user.user_id, &preferred_number)
+    state.user_core.update_preferred_number(auth_user.user_id, &preferred_number)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)}))
@@ -283,7 +283,7 @@ pub async fn update_notify(
     }
 
     // Update notify preference
-    state.user_repository.update_notify(user_id, request.notify)
+    state.user_core.update_notify(user_id, request.notify)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)}))
@@ -300,7 +300,7 @@ pub async fn update_timezone(
     Json(request): Json<TimezoneUpdateRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
 
-    match state.user_repository.update_timezone(
+    match state.user_core.update_timezone(
         auth_user.user_id,
         &request.timezone,
     ) {
@@ -349,7 +349,7 @@ pub async fn update_profile(
         ));
     }
 
-    match state.user_repository.update_profile(
+    match state.user_core.update_profile(
         auth_user.user_id,
         &update_req.email,
         &update_req.phone_number,
@@ -361,7 +361,7 @@ pub async fn update_profile(
     ) {
         Ok(_) => {
             // Update agent language separately // TODO put to same down the line
-            if let Err(e) = state.user_repository.update_agent_language(auth_user.user_id, &update_req.agent_language) {
+            if let Err(e) = state.user_core.update_agent_language(auth_user.user_id, &update_req.agent_language) {
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"error": format!("Failed to update agent language: {}", e)}))
@@ -645,28 +645,21 @@ pub async fn delete_user(
     auth_user: AuthUser,
     axum::extract::Path(user_id): axum::extract::Path<i32>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    println!("deleting");
+    tracing::info!("Deleting user: {}", auth_user.user_id);
 
-    // Check if the user is deleting their own account or is an admin
-    if auth_user.user_id != user_id && !state.user_repository.is_admin(auth_user.user_id).map_err(|e| (
-        StatusCode::INTERNAL_SERVER_ERROR,
-        Json(json!({"error": format!("Database error: {}", e)}))
-    ))? {
+    if auth_user.user_id != user_id && !auth_user.is_admin {
         return Err((
             StatusCode::FORBIDDEN,
             Json(json!({"error": "You can only delete your own account unless you're an admin"}))
         ));
     }
-
-    tracing::info!("Attempting to delete user {}", user_id);
-    println!("deleting");
     
     // First verify the user exists
-    match state.user_repository.find_by_id(user_id) {
+    match state.user_core.find_by_id(user_id) {
         Ok(Some(_)) => {
             println!("user exists");
             // User exists, proceed with deletion
-            match state.user_repository.delete_user(user_id) {
+            match state.user_core.delete_user(user_id) {
                 Ok(_) => {
                     tracing::info!("Successfully deleted user {}", user_id);
                     Ok(Json(json!({"message": "User deleted successfully"})))

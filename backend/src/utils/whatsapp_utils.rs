@@ -60,7 +60,7 @@ fn format_timestamp(timestamp: i64, timezone: Option<String>) -> String {
 }
 
 pub async fn fetch_whatsapp_messages(
-    state: &AppState,
+    state: &Arc<AppState>,
     user_id: i32,
     start_time: i64,
     end_time: i64,
@@ -69,12 +69,12 @@ pub async fn fetch_whatsapp_messages(
     tracing::info!("Fetching WhatsApp messages for user {}", user_id);
     
     // Get user and user settings for timezone info
-    let user = state.user_repository.find_by_id(user_id)?
+    let user = state.user_core.find_by_id(user_id)?
         .ok_or_else(|| anyhow!("User not found"))?;
-    let user_settings = state.user_repository.get_user_settings(user_id)?;
+    let user_settings = state.user_core.get_user_settings(user_id)?;
 
     // Get Matrix client and check bridge status (use cached version for better performance)
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state.user_repository, false, &state.matrix_clients).await?;
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state, false, &state.matrix_clients).await?;
 
     let bridge = state.user_repository.get_whatsapp_bridge(user_id)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
@@ -189,7 +189,7 @@ pub async fn fetch_whatsapp_messages(
         let room = room_info.room;
 
         let room_name = room_info.display_name;
-    let user_settings = state.user_repository.get_user_settings(user_id)?;
+    let user_settings = state.user_core.get_user_settings(user_id)?;
     let user_timezone = user_settings.timezone.clone();
         
         futures.push(async move {
@@ -281,13 +281,13 @@ use std::collections::HashMap;
 
 
 pub async fn send_whatsapp_message(
-    state: &AppState,
+    state: &Arc<AppState>,
     user_id: i32,
     chat_name: &str,
     message: &str,
 ) -> Result<WhatsAppMessage> {
     // Get user for timezone info
-    let user = state.user_repository.find_by_id(user_id)?
+    let user = state.user_core.find_by_id(user_id)?
         .ok_or_else(|| anyhow!("User not found"))?;
     // Get bridge bot username from environment variable or use default pattern
     let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
@@ -297,7 +297,7 @@ pub async fn send_whatsapp_message(
     // Normalize phone number format
     
     tracing::debug!("Attempting to get Matrix client for user {}", user_id);
-    let client = match crate::utils::matrix_auth::get_cached_client(user_id, &state.user_repository, false, &state.matrix_clients).await {
+    let client = match crate::utils::matrix_auth::get_cached_client(user_id, &state, false, &state.matrix_clients).await {
         Ok(client) => {
             tracing::debug!("Successfully obtained cached Matrix client");
             client
@@ -393,7 +393,7 @@ pub async fn send_whatsapp_message(
     room.send(content.clone()).with_transaction_id(txn_id).await?;
     println!("Message sent!");
 
-    let user_settings = state.user_repository.get_user_settings(user_id)?;
+    let user_settings = state.user_core.get_user_settings(user_id)?;
     // Return the sent message details
     let current_timestamp = chrono::Utc::now().timestamp();
     Ok(WhatsAppMessage {
@@ -420,13 +420,13 @@ struct WhatsAppSearchRoom {
 }
 
 pub async fn fetch_whatsapp_room_messages(
-    state: &AppState,
+    state: &Arc<AppState>,
     user_id: i32,
     chat_name: &str,
     limit: Option<u64>,
 ) -> Result<(Vec<WhatsAppMessage>, String)> {
 
-    let user = state.user_repository.find_by_id(user_id)?
+    let user = state.user_core.find_by_id(user_id)?
         .ok_or_else(|| anyhow!("User not found"))?;
     
     tracing::info!(
@@ -444,7 +444,7 @@ pub async fn fetch_whatsapp_room_messages(
         return Err(anyhow!("WhatsApp bridge not found"));
     }
 
-    let client = crate::utils::matrix_auth::get_client(user_id, &state.user_repository, false).await?;
+    let client = crate::utils::matrix_auth::get_client(user_id, &state, false).await?;
 
     let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
         .unwrap_or_else(|_| "@whatsappbot:".to_string());
@@ -542,7 +542,7 @@ pub async fn fetch_whatsapp_room_messages(
 
     match matching_room {
         Some(room) => {
-            let user_settings = state.user_repository.get_user_settings(user_id)?;
+            let user_settings = state.user_core.get_user_settings(user_id)?;
             fetch_messages_from_room(room.room.clone(), chat_name, limit, user_settings.timezone).await
         },
         None => Err(anyhow!("No matching WhatsApp room found for '{}'", chat_name))
@@ -1122,14 +1122,14 @@ async fn evaluate_message_with_llm(
 }
 
 async fn send_whatsapp_notification(
-    state: &AppState,
+    state: &Arc<AppState>,
     user_id: i32,
     chat_name: &str,
     content: &str,
     reason: &str,
 ) {
     // Get user info
-    let user = match state.user_repository.find_by_id(user_id) {
+    let user = match state.user_core.find_by_id(user_id) {
         Ok(Some(user)) => user,
         Ok(None) => {
             tracing::error!("User {} not found for notification", user_id);
@@ -1206,7 +1206,7 @@ async fn send_whatsapp_notification(
 
 
 pub async fn search_whatsapp_rooms(
-    state: &AppState,
+    state: &Arc<AppState>,
     user_id: i32,
     search_term: &str,
 ) -> Result<Vec<WhatsAppRoom>> {
@@ -1216,7 +1216,7 @@ pub async fn search_whatsapp_rooms(
     tracing::info!("Searching WhatsApp rooms for user {} ", user_id);
 
     // Get Matrix client using cached version for better performance
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state.user_repository, false, &state.matrix_clients).await?;
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state, false, &state.matrix_clients).await?;
 
     // Check if we're logged in first
     let bridge = state.user_repository.get_whatsapp_bridge(user_id)?;

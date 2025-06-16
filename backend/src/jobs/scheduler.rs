@@ -20,7 +20,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
         Box::pin(async move {
             
             // Get all users with valid message monitor subscription
-            let users_with_subscription = match state.user_repository.get_all_users() {
+            let users_with_subscription = match state.user_core.get_all_users() {
                 Ok(users) => {
                     let mut subscribed_users = Vec::new();
                     for user in users {
@@ -229,7 +229,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         continue;
                                     }
                                     // Get user settings first
-                                    let user_settings = match state.user_repository.get_user_settings(user.id) {
+                                    let user_settings = match state.user_core.get_user_settings(user.id) {
                                         Ok(settings) => settings,
                                         Err(e) => {
                                             error!("Failed to get user settings: {}", e);
@@ -525,7 +525,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                         if let Some(threshold_timestamp) = log.recharge_threshold_timestamp {
                             let current_timestamp = chrono::Utc::now().timestamp() as i32;
                             if current_timestamp >= threshold_timestamp {
-                                match state.user_repository.has_auto_topup_enabled(log.user_id) {
+                                match state.user_core.has_auto_topup_enabled(log.user_id) {
                                     Ok(true) => {
                                         debug!("has auto top up");
                                         debug!("conversation_data status: {}",conversation_data["status"]);
@@ -608,209 +608,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
     sched.add(usage_monitor_job).await.expect("Failed to add usage monitor job to scheduler");
 
-    /*
-    // Create a job that runs every minute to check for due tasks
-    let state_clone = Arc::clone(&state);
-    let task_monitor_job = Job::new_async("0 * * * * *", move |_, _| {
-        let state = state_clone.clone();
-        Box::pin(async move {
-            
-            // Get all users with valid Google Tasks connection
-            let users = match state.user_repository.get_all_users() {
-                Ok(users) => users,
-                Err(e) => {
-                    error!("Failed to fetch users: {}", e);
-                    return;
-                }
-            };
-
-            for user in users {
-                // Check if user has messages left and valid subscription
-                match state.user_repository.has_valid_subscription_tier_with_messages(user.id, "tier 2") {
-                    Ok(true) => (),
-                    Ok(false) => {
-                        debug!("User {} does not have valid subscription or messages left", user.id);
-                        continue;
-                    },
-                    Err(e) => {
-                        error!("Failed to check subscription status for user {}: {}", user.id, e);
-                        continue;
-                    }
-                }
-
-                // Check if user has enabled proactive calendar notifications
-                match state.user_repository.get_proactive_calendar(user.id) {
-                    Ok(true) => (),
-                    Ok(false) => {
-                        debug!("User {} has not enabled proactive calendar notifications", user.id);
-                        continue;
-                    },
-                    Err(e) => {
-                        error!("Failed to check proactive calendar setting for user {}: {}", user.id, e);
-                        continue;
-                    }
-                }
-
-                // Check if user has active Google Tasks connection
-                match state.user_repository.has_active_google_tasks(user.id) {
-                    Ok(true) => (),
-                    Ok(false) => continue,
-                    Err(e) => {
-                        error!("Failed to check Google Tasks status for user {}: {}", user.id, e);
-                        continue;
-                    }
-                }
-
-                // Fetch user's tasks
-                let tasks = match google_tasks::get_tasks(&state, user.id).await {
-                    Ok(response) => {
-                        match response.0.get("tasks") {
-                            Some(tasks) => {
-                                match serde_json::from_value::<Vec<Task>>(tasks.clone()) {
-                                    Ok(tasks) => tasks,
-                                    Err(e) => {
-                                        error!("Failed to parse tasks for user {}: {}", user.id, e);
-                                        continue;
-                                    }
-                                }
-                            },
-                            None => {
-                                error!("No tasks field in response for user {}", user.id);
-                                continue;
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        error!("Failed to fetch tasks for user {}: {:?}", user.id, e);
-                        continue;
-                    }
-                };
-
-                let now = chrono::Utc::now();
-                let mut due_tasks = Vec::new();
-
-                // Check each task
-                for task in tasks {
-                    // Skip if task is already completed
-                    if task.status != "needsAction" {
-                        continue;
-                    }
-
-                    // Check if task has a due date and is due
-                    if let Some(ref due_str) = task.due_time {
-                        // Parse the due date string into a timestamp
-                        if let Ok(due_time) = chrono::DateTime::parse_from_rfc3339(&due_str) {
-                            let due_timestamp = due_time.timestamp();
-                            let current_timestamp = now.timestamp();
-                            let thirty_days_ago_timestamp = (now - chrono::Duration::days(30)).timestamp();
-                            
-                            // Compare timestamps directly
-                            if due_timestamp <= current_timestamp && due_timestamp > thirty_days_ago_timestamp {
-                                // Check if we've already notified about this task
-                                match state.user_repository.get_task_notification(user.id, &task.id) {
-                                    Ok(Some(_)) => continue, // Already notified
-                                    Ok(None) => due_tasks.push(task),
-                                    Err(e) => {
-                                        error!("Failed to check task notification status: {}", e);
-                                        continue;
-                                    }
-                                }
-                            }
-                        } else {
-                            error!("Failed to parse due date '{}' for task {}", due_str, task.id);
-                            continue;
-                        }
-                    }
-                }
-
-                if due_tasks.is_empty() {
-                    continue;
-                }
-
-                // Check if we should process this notification based on messages left
-                let should_continue = match state.user_repository.decrease_messages_left(user.id) {
-                    Ok(msgs_left) => {
-                        debug!("User {} has {} messages left after decrease", user.id, msgs_left);
-                        msgs_left > 0
-                    },
-                    Err(e) => {
-                        error!("Failed to decrease messages left for user {}: {}", user.id, e);
-                        false
-                    }
-                };
-
-                if !should_continue {
-                    debug!("Skipping further processing for user {} due to no messages left", user.id);
-                    continue;
-                }
-
-                // Get the user's preferred number or default
-                let sender_number = match user.preferred_number.clone() {
-                    Some(number) => {
-                        debug!("Using user's preferred number: {}", number);
-                        number
-                    },
-                    None => {
-                        let number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set");
-                        debug!("Using default SHAZAM_PHONE_NUMBER: {}", number);
-                        number
-                    },
-                };
-
-                // Get the conversation for the user
-                let conversation = match state.user_conversations.get_conversation(&user, sender_number).await {
-                    Ok(conv) => conv,
-                    Err(e) => {
-                        error!("Failed to ensure conversation exists: {}", e);
-                        continue;
-                    }
-                };
-
-                // Format notification message
-                let tasks_text = due_tasks.iter()
-                    .map(|task| {
-                        let desc = task.notes.as_deref().unwrap_or("").to_string();
-                        if desc.is_empty() {
-                            task.title.clone()
-                        } else {
-                            format!("{}: {}", task.title, desc)
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-
-                let notification = format!(
-                    "You have {} overdue Google Tasks:\n\n{}",
-                    due_tasks.len(),
-                    tasks_text
-                );
-
-                // Send notification
-                match twilio_utils::send_conversation_message(
-                    &conversation.conversation_sid,
-                    &conversation.twilio_number,
-                    &notification
-                ).await {
-                    Ok(_) => {
-                        debug!("Successfully sent task notification to user {}", user.id);
-                        
-                        // Record notifications
-                        let current_time = chrono::Utc::now().timestamp() as i32;
-                        for task in due_tasks {
-                            if let Err(e) = state.user_repository.create_task_notification(user.id, &task.id, current_time) {
-                                error!("Failed to record task notification: {}", e);
-                            }
-                        }
-                    },
-                    Err(e) => error!("Failed to send task notification: {}", e),
-                }
-            }
-        })
-    }).expect("Failed to create task monitor job");
-
-    sched.add(task_monitor_job).await.expect("Failed to add task monitor job to scheduler");
-    */
-
     // Create a job that runs daily to clean up old task notifications
     let state_clone = Arc::clone(&state);
     let task_cleanup_job = Job::new_async("0 0 0 * * *", move |_, _| {  // Runs at midnight every day
@@ -839,13 +636,13 @@ pub async fn start_scheduler(state: Arc<AppState>) {
             debug!("Running daily credits reset for subscribers...");
             
             // Get all users
-            match state.user_repository.get_all_users() {
+            match state.user_core.get_all_users() {
                 Ok(users) => {
                     for user in users {
                         // Check if user has a subscription
                         if let Ok(Some(tier)) = state.user_repository.get_subscription_tier(user.id) {
                             // Get user settings to check country
-                            match state.user_repository.get_user_settings(user.id) {
+                            match state.user_core.get_user_settings(user.id) {
                                 Ok(settings) => {
 
                                     // Skip if sub_country is not set (used to block older subs)
@@ -927,7 +724,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                         }
 
                         // Get all users with valid Google Calendar connection and subscription
-                        let users = match state.user_repository.get_all_users() {
+                        let users = match state.user_core.get_all_users() {
                             Ok(users) => users.into_iter().filter(|user| {
                                 // Check subscription and calendar status
                                 matches!(state.user_repository.has_valid_subscription_tier_with_messages(user.id, "tier 2"), Ok(true)) &&
@@ -1011,7 +808,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                                                     // Send notification based on user preference
                                                     // Get user settings
-                                                    let user_settings = match state.user_repository.get_user_settings(user.id) {
+                                                    let user_settings = match state.user_core.get_user_settings(user.id) {
                                                         Ok(settings) => settings,
                                                         Err(e) => {
                                                             error!("Failed to get user settings: {}", e);
@@ -1146,7 +943,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     // Try to get cached client first
                                     match crate::utils::matrix_auth::get_cached_client(
                                         user_id,
-                                        &state_clone.user_repository,
+                                        &state_clone,
                                         false,
                                         &state_clone.matrix_clients
                                     ).await {
@@ -1188,7 +985,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                     error!("Matrix sync error for user {}: {}", user_id, e);
                                                     
                                                     // Try to recover the client
-                                                    if let Ok(new_client) = crate::utils::matrix_auth::get_client(user_id, &state_clone.user_repository, true).await {
+                                                    if let Ok(new_client) = crate::utils::matrix_auth::get_client(user_id, &state_clone, true).await {
                                                         tracing::debug!("Successfully recovered client for user {}", user_id);
                                                         if let Err(e) = new_client.sync(sync_settings).await {
                                                             error!("Recovered client sync failed for user {}: {}", user_id, e);
@@ -1214,64 +1011,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     }).expect("Failed to create matrix sync job");
 
     sched.add(matrix_sync_job).await.expect("Failed to add matrix sync job to scheduler");
-
-    /*
-    // Create a job that runs daily to manage Matrix invitation tasks
-    let state_clone = Arc::clone(&state);
-    let matrix_invitation_job = Job::new_async("0 * * * * *", move |_, _| {  // runs every fifteen minutes 
-        let state = state_clone.clone();
-        Box::pin(async move {
-            tracing::debug!("Managing Matrix invitation tasks...");
-            
-            // Get all users with active WhatsApp connection
-            match state.user_repository.get_users_with_matrix_bridge_connections() {
-                Ok(users) => {
-                    let mut invitation_tasks = state.matrix_invitation_tasks.lock().await;
-                    
-                    // Remove any invitation tasks for users who are no longer active
-                    invitation_tasks.retain(|user_id, task| {
-                        if !users.contains(user_id) {
-                            tracing::debug!("Removing invitation task for inactive user {}", user_id);
-                            task.abort();
-                            false
-                        } else {
-                            true
-                        }
-                    });
-
-                    // Start invitation tasks for new active users
-                    for user_id in users {
-                        if !invitation_tasks.contains_key(&user_id) {
-                            tracing::debug!("Starting new invitation task for user {}", user_id);
-                            
-                            // Create a new invitation task
-                            let state_clone = Arc::clone(&state);
-                            let handle = tokio::spawn(async move {
-                                match crate::utils::matrix_auth::get_client(user_id, &state_clone.user_repository, true).await {
-                                    Ok(client) => {
-                                        tracing::debug!("Starting Matrix invitation acceptance for user {}", user_id);
-                                        // Run the invitation acceptance loop for 15 minutes
-                                        if let Err(e) = crate::handlers::whatsapp_auth::accept_room_invitations(client, Duration::from_secs(900)).await {
-                                            tracing::error!("Error in accept_room_invitations: {}", e);
-                                        }
-                                    },
-                                    Err(e) => {
-                                        error!("Failed to get Matrix client for user {}: {}", user_id, e);
-                                    }
-                                }
-                            });
-                            
-                            invitation_tasks.insert(user_id, handle);
-                        }
-                    }
-                },
-                Err(e) => error!("Failed to get active WhatsApp users: {}", e),
-            }
-        })
-    }).expect("Failed to create matrix invitation job");
-
-    sched.add(matrix_invitation_job).await.expect("Failed to add matrix invitation job to scheduler");
-    */
        
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");

@@ -233,7 +233,7 @@ pub async fn handle_create_calendar_event(
     let args: CalendarEventArgs = serde_json::from_str(args)?;
 
     // Set the confirmation flag
-    if let Err(e) = state.user_repository.set_confirm_send_event(user_id, true) {
+    if let Err(e) = state.user_core.set_confirm_send_event(user_id, true) {
         eprintln!("Failed to set confirm_send_event flag: {}", e);
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
             conversation_sid,

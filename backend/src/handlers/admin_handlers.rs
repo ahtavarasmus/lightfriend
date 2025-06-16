@@ -60,7 +60,7 @@ pub async fn verify_user(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
 
     // Verify the user
-    state.user_repository.verify_user(user_id).map_err(|e| (
+    state.user_core.verify_user(user_id).map_err(|e| (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": format!("Database error: {}", e)}))
     ))?;
@@ -96,7 +96,7 @@ pub async fn update_preferred_number_admin(
     }
 
     // Update the user's preferred number
-    state.user_repository.update_preferred_number(user_id, &preferred_number).map_err(|e| (
+    state.user_core.update_preferred_number(user_id, &preferred_number).map_err(|e| (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": format!("Database error: {}", e)}))
     ))?;
@@ -119,7 +119,7 @@ pub async fn broadcast_email(
         ));
     }
 
-    let users = state.user_repository.get_all_users().map_err(|e| {
+    let users = state.user_core.get_all_users().map_err(|e| {
         tracing::error!("Database error when fetching users: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -148,7 +148,7 @@ pub async fn broadcast_email(
 
     for user in users {
         // Get user settings
-        let user_settings = match state.user_repository.get_user_settings(user.id) {
+        let user_settings = match state.user_core.get_user_settings(user.id) {
             Ok(settings) if !settings.notify => {
                 tracing::debug!("Skipping user {} - notifications disabled", user.email);
                 continue;
@@ -219,7 +219,7 @@ pub async fn broadcast_message(
     Json(request): Json<BroadcastMessageRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
 
-    let users = state.user_repository.get_all_users().map_err(|e| (
+    let users = state.user_core.get_all_users().map_err(|e| (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": format!("Database error: {}", e)}))
     ))?;
@@ -271,7 +271,7 @@ async fn process_broadcast_messages(
             }
         };
         // Get user settings
-        let user_settings = match state.user_repository.get_user_settings(user.id) {
+        let user_settings = match state.user_core.get_user_settings(user.id) {
             Ok(settings) if !settings.notify => continue,
             Ok(_) => (), // Continue if notify is true or no settings exist
             Err(e) => {
@@ -345,7 +345,7 @@ pub async fn update_discount_tier(
     };
 
     // Update the discount tier
-    state.user_repository.update_discount_tier(user_id, tier).map_err(|e| (
+    state.user_core.update_discount_tier(user_id, tier).map_err(|e| (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": format!("Database error: {}", e)}))
     ))?;
@@ -361,7 +361,7 @@ pub async fn update_monthly_credits(
     axum::extract::Path((user_id, amount)): axum::extract::Path<(f32, f32)>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Get current user
-    let user = state.user_repository.find_by_id(user_id as i32)
+    let user = state.user_core.find_by_id(user_id as i32)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)}))
@@ -392,7 +392,7 @@ pub async fn update_user_messages(
     axum::extract::Path((user_id, amount)): axum::extract::Path<(i32, i32)>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Get current user
-    let user = state.user_repository.find_by_id(user_id)
+    let user = state.user_core.find_by_id(user_id)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)}))
@@ -577,7 +577,7 @@ pub async fn test_sms(
     Json(request): Json<TestSmsRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Get the user for the test
-    let user = state.user_repository.find_by_id(request.user_id)
+    let user = state.user_core.find_by_id(request.user_id)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)}))
@@ -627,7 +627,7 @@ pub async fn set_preferred_number_default(
     
 
     // Get the user's phone number
-    let user = state.user_repository.find_by_id(user_id)
+    let user = state.user_core.find_by_id(user_id)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Database error: {}", e)}))
@@ -638,7 +638,7 @@ pub async fn set_preferred_number_default(
         ))?;
 
     // Set the preferred number
-    match state.user_repository.set_preferred_number_to_default(user_id, &user.phone_number) {
+    match state.user_core.set_preferred_number_to_default(user_id, &user.phone_number) {
         Ok(preferred_number) => Ok(Json(json!({
             "message": "Preferred number set successfully",
             "preferred_number": preferred_number

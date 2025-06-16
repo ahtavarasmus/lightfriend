@@ -99,7 +99,7 @@ pub async fn check_subscription_access(
     };
 
     // Get user from database
-    let user = match state.user_repository.find_by_id(user_id) {
+    let user = match state.user_core.find_by_id(user_id) {
         Ok(Some(user)) => {
             debug!("Found user: {}", user.email);
             user
@@ -249,7 +249,7 @@ impl FromRequestParts<Arc<AppState>> for AuthUser {
 
         // Check if user is admin
         let is_admin = state
-            .user_repository
+            .user_core
             .is_admin(claims.sub)
             .map_err(|_| AuthError {
                 status: StatusCode::INTERNAL_SERVER_ERROR,

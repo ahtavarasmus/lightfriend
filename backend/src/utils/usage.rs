@@ -14,7 +14,7 @@ pub async fn check_user_credits(
         (1.0, 1.0/60.0)
     } else {
         // First try to get country from user settings
-        let country = match state.user_repository.get_user_settings(user.id) {
+        let country = match state.user_core.get_user_settings(user.id) {
             Ok(settings) => settings.sub_country,
             Err(e) => {
                 eprintln!("Failed to get user settings: {}", e);
@@ -85,7 +85,7 @@ pub async fn check_user_credits(
                 let twilio_number = conversation.twilio_number.clone();
                 
                 // Update the last notification timestamp
-                if let Err(e) = state.user_repository.update_last_credits_notification(user.id, current_time) {
+                if let Err(e) = state.user_core.update_last_credits_notification(user.id, current_time) {
                     eprintln!("Failed to update last_credits_notification: {}", e);
                 }
 
@@ -137,7 +137,7 @@ pub fn deduct_user_credits(
     voice_seconds: Option<i32>,
 ) -> Result<(), String> {
 
-    let user = match state.user_repository.find_by_id(user_id) {
+    let user = match state.user_core.find_by_id(user_id) {
         Ok(Some(user)) => user,
         Ok(None) => return Err("User not found".to_string()),
         Err(e) => {
@@ -163,7 +163,7 @@ pub fn deduct_user_credits(
         (1.0, 1.0/60.0) // message quota is calculated at 1e per msg and 1e per voice minute(just easy to calculate) and there are 40e worth for every month on every subscription
     } else {
         // First try to get country from user settings
-        let country = match state.user_repository.get_user_settings(user_id) {
+        let country = match state.user_core.get_user_settings(user_id) {
             Ok(settings) => settings.sub_country,
             Err(e) => {
                 eprintln!("Failed to get user settings: {}", e);

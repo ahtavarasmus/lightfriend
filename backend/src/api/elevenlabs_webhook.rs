@@ -239,7 +239,7 @@ pub async fn elevenlabs_webhook(
     };
 
     // Fetch user from user_repository
-    let user = match state.user_repository.find_by_id(user_id) {
+    let user = match state.user_core.find_by_id(user_id) {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((

@@ -94,14 +94,18 @@ mod models {
     pub mod user_models;
 }
 mod repositories {
+    pub mod user_core;
     pub mod user_repository;
     pub mod user_conversations;
+    pub mod user_subscriptions;
+    pub mod connection_auth;
 }
 mod schema;
 mod jobs {
     pub mod scheduler;
 }
 
+use repositories::user_core::UserCore;
 use repositories::user_repository::UserRepository;
 use repositories::user_conversations::UserConversations;
 
@@ -137,6 +141,7 @@ type GoogleOAuthClient = BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet
 
 pub struct AppState {
     db_pool: DbPool,
+    user_core: Arc<UserCore>,
     user_repository: Arc<UserRepository>,
     user_conversations: Arc<UserConversations>,
     sessions: shazam_call::CallSessions,
@@ -210,6 +215,7 @@ async fn main() {
         .build(manager)
         .expect("Failed to create pool");
 
+    let user_core= Arc::new(UserCore::new(pool.clone()));
     let user_repository = Arc::new(UserRepository::new(pool.clone()));
     let user_conversations = Arc::new(UserConversations::new(pool.clone()));
 
@@ -248,6 +254,7 @@ async fn main() {
     let state = Arc::new(AppState {
         db_pool: pool,
         password_reset_otps: DashMap::new(),
+        user_core: user_core.clone(),
         user_repository: user_repository.clone(),
         user_conversations: user_conversations.clone(),
         sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -503,6 +510,7 @@ async fn main() {
     let shazam_state = crate::api::shazam_call::ShazamState {
         sessions: state.sessions.clone(),
         user_calls: state.user_calls.clone(),
+        user_core: state.user_core.clone(),
         user_repository: state.user_repository.clone(),
         user_conversations: state.user_conversations.clone(),
     };

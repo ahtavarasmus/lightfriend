@@ -51,7 +51,7 @@ async fn connect_whatsapp_with_retry(
     bridge_bot: &str,
     phone_number: &str,
     user_id: i32,
-    user_repository: &crate::repositories::user_repository::UserRepository,
+    state: &Arc<AppState>,
 ) -> Result<(OwnedRoomId, String)> {
     const MAX_RETRIES: u32 = 3;
     const RETRY_DELAY: Duration = Duration::from_secs(2);
@@ -86,7 +86,7 @@ async fn connect_whatsapp_with_retry(
                     sleep(RETRY_DELAY).await;
                     
                    // Reinitialize client (bypass cache since we're recovering from an error)
-                    match matrix_auth::get_client(user_id, user_repository, true).await {
+                    match matrix_auth::get_client(user_id, &state, true).await {
                         Ok(new_client) => {
                             *client = new_client; // Update the client reference
                             tracing::info!("Client reinitialized, retrying operation");
@@ -225,7 +225,7 @@ pub async fn start_whatsapp_connection(
 
     // Fetch user's phone number
     let phone_number = state
-        .user_repository
+        .user_core
         .find_by_id(auth_user.user_id)
         .map_err(|e| {
             tracing::error!("Failed to fetch phone number: {}", e);
@@ -243,7 +243,7 @@ pub async fn start_whatsapp_connection(
 
     tracing::debug!("📝 Getting Matrix client...");
     // Get or create Matrix client using the centralized function
-    let mut client = matrix_auth::get_cached_client(auth_user.user_id, &state.user_repository, true, &state.matrix_clients)
+    let mut client = matrix_auth::get_cached_client(auth_user.user_id, &state, true, &state.matrix_clients)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);
@@ -266,7 +266,7 @@ pub async fn start_whatsapp_connection(
         &bridge_bot,
         &phone_number,
         auth_user.user_id,
-        &state.user_repository,
+        &state,
     )
     .await
     .map_err(|e| {
@@ -604,7 +604,7 @@ pub async fn resync_whatsapp(
     };
 
     // Get Matrix client using the cached version
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state.user_repository, false, &state.matrix_clients)
+    let client = matrix_auth::get_cached_client(auth_user.user_id, &state, false, &state.matrix_clients)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get Matrix client: {}", e);
@@ -727,7 +727,7 @@ pub async fn disconnect_whatsapp(
     };
 
     // Get or create Matrix client using the cached version
-    let client = matrix_auth::get_cached_client(auth_user.user_id, &state.user_repository, false, &state.matrix_clients)
+    let client = matrix_auth::get_cached_client(auth_user.user_id, &state, false, &state.matrix_clients)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get or create Matrix client: {}", e);

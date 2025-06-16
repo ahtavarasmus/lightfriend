@@ -54,7 +54,7 @@ pub async fn get_users(
     _auth_user: AuthUser,
 ) -> Result<Json<Vec<UserResponse>>, (StatusCode, Json<serde_json::Value>)> {
     println!("Attempting to get all users");
-    let users_list = state.user_repository.get_all_users().map_err(|e| {
+    let users_list = state.user_core.get_all_users().map_err(|e| {
         tracing::error!("Database error while fetching users: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -67,7 +67,7 @@ pub async fn get_users(
     
     for user in users_list {
         // Get user settings, providing defaults if not found
-        let settings = state.user_repository.get_user_settings(user.id).map_err(|e| {
+        let settings = state.user_core.get_user_settings(user.id).map_err(|e| {
             tracing::error!("Database error while fetching user settings: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -124,7 +124,7 @@ pub async fn login(
     }
     
 
-    let user = match state.user_repository.find_by_email(&login_req.email) {
+    let user = match state.user_core.find_by_email(&login_req.email) {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((
@@ -255,7 +255,7 @@ pub async fn request_password_reset(
         ));
     }
     // Find user by email
-    let user = match state.user_repository.find_by_email(&reset_req.email) {
+    let user = match state.user_core.find_by_email(&reset_req.email) {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((
@@ -399,7 +399,7 @@ pub async fn verify_password_reset(
         })?;
 
     // Update password in database
-    if let Err(e) = state.user_repository.update_password(&verify_req.email, &password_hash) {
+    if let Err(e) = state.user_core.update_password(&verify_req.email, &password_hash) {
         println!("Failed to update password: {}", e);
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -440,7 +440,7 @@ pub async fn register(
 
     // Check if email exists
     println!("Checking if email exists...");
-    if state.user_repository.email_exists(&reg_req.email).map_err(|e| {
+    if state.user_core.email_exists(&reg_req.email).map_err(|e| {
         println!("Database error while checking email: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR, 
@@ -472,7 +472,7 @@ pub async fn register(
     }
     // Check if phone number exists
     println!("Checking if phone number exists...");
-    if state.user_repository.phone_number_exists(&reg_req.phone_number).map_err(|e| {
+    if state.user_core.phone_number_exists(&reg_req.phone_number).map_err(|e| {
         println!("Database error while checking phone number: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR, 
@@ -520,7 +520,7 @@ pub async fn register(
         charge_when_under: false,
     };
 
-    state.user_repository.create_user(new_user).map_err(|e| {
+    state.user_core.create_user(new_user).map_err(|e| {
         println!("User creation failed: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -531,7 +531,7 @@ pub async fn register(
     println!("User registered successfully, setting preferred number");
     
     // Get the newly created user to get their ID
-    let user = state.user_repository.find_by_email(&reg_req.email)
+    let user = state.user_core.find_by_email(&reg_req.email)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to retrieve user")}))
@@ -542,7 +542,7 @@ pub async fn register(
         ))?;
 
     // Set preferred number
-    state.user_repository.set_preferred_number_to_default(user.id, &reg_req.phone_number)
+    state.user_core.set_preferred_number_to_default(user.id, &reg_req.phone_number)
         .map_err(|e| {
             println!("Failed to set preferred number: {}", e);
             (
@@ -552,7 +552,7 @@ pub async fn register(
         })?;
 
     println!("Preferred number set successfully, generating tokens");
-    let user = state.user_repository.find_by_email(&reg_req.email)
+    let user = state.user_core.find_by_email(&reg_req.email)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to retrieve user")}))

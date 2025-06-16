@@ -209,7 +209,7 @@ pub async fn handle_send_whatsapp_message(
             let exact_name = best_match.display_name.trim_end_matches(" (WA)").to_string();
 
             // Set the confirmation flag
-            if let Err(e) = state.user_repository.set_confirm_send_event(user_id, true) {
+            if let Err(e) = state.user_core.set_confirm_send_event(user_id, true) {
                 tracing::error!("Failed to set confirm_send_event flag: {}", e);
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     conversation_sid,

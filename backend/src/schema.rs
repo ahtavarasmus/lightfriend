@@ -214,6 +214,20 @@ diesel::table! {
 }
 
 diesel::table! {
+    temp_variables (id) {
+        id -> Integer,
+        user_id -> Integer,
+        confirm_send_event_type -> Text,
+        confirm_send_event_recipient -> Nullable<Text>,
+        confirm_send_event_subject -> Nullable<Text>,
+        confirm_send_event_content -> Nullable<Text>,
+        confirm_send_event_start_time -> Nullable<Text>,
+        confirm_send_event_duration -> Nullable<Text>,
+        confirm_send_event_id -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
     unipile_connection (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -314,6 +328,7 @@ diesel::joinable!(priority_senders -> users (user_id));
 diesel::joinable!(proactive_settings -> users (user_id));
 diesel::joinable!(processed_emails -> users (user_id));
 diesel::joinable!(subscriptions -> users (user_id));
+diesel::joinable!(temp_variables -> users (user_id));
 diesel::joinable!(user_settings -> users (user_id));
 diesel::joinable!(waiting_checks -> users (user_id));
 
@@ -336,6 +351,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     processed_emails,
     subscriptions,
     task_notifications,
+    temp_variables,
     unipile_connection,
     usage_logs,
     user_settings,

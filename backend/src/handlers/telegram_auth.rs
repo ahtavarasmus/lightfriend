@@ -164,7 +164,7 @@ pub async fn disconnect_telegram(
     };
 
     // Get Matrix client
-    let client = matrix_auth::get_client(auth_user.user_id, &state.user_repository, false)
+    let client = matrix_auth::get_client(auth_user.user_id, &state, false)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get Matrix client: {}", e);
@@ -214,7 +214,7 @@ pub async fn start_telegram_connection(
 ) -> Result<AxumJson<TelegramConnectionResponse>, (StatusCode, AxumJson<serde_json::Value>)> {
     println!("🚀 Starting Telegram connection process for user {}", auth_user.user_id);
 
-    let mut client = matrix_auth::get_client(auth_user.user_id, &state.user_repository, true)
+    let mut client = matrix_auth::get_client(auth_user.user_id, &state, true)
         .await
         .map_err(|e| {
             tracing::error!("Failed to get Matrix client: {}", e);

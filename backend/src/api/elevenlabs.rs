@@ -165,11 +165,11 @@ pub async fn fetch_assistant(
     };
 
 
-    match state.user_repository.find_by_phone_number(&caller_number) {
+    match state.user_core.find_by_phone_number(&caller_number) {
         Ok(Some(user)) => {
             tracing::debug!("Found user by their phone number");
             
-            let user_settings = match state.user_repository.get_user_settings(user.id) {
+            let user_settings = match state.user_core.get_user_settings(user.id) {
                 Ok(settings) => settings,
                 Err(e) => {
                     error!("Failed to get user settings: {}", e);
@@ -185,7 +185,7 @@ pub async fn fetch_assistant(
 
             // If user is not verified, verify them
             if !user.verified {
-                if let Err(e) = state.user_repository.verify_user(user.id) {
+                if let Err(e) = state.user_core.verify_user(user.id) {
                     tracing::error!("Error verifying user: {}", e);
                     // Continue even if verification fails
                 } else {
@@ -400,7 +400,7 @@ pub async fn handle_create_waiting_check_email_tool_call(
     let remove_when_found = payload.remove_when_found.unwrap_or(true);
 
     // Verify user exists
-    match state.user_repository.find_by_id(payload.user_id) {
+    match state.user_core.find_by_id(payload.user_id) {
         Ok(Some(_user)) => {
             let new_check = crate::models::user_models::NewWaitingCheck {
                 user_id: payload.user_id,
@@ -610,7 +610,7 @@ pub async fn handle_send_sms_tool_call(
     };
 
     // Fetch user from user_repository
-    let user = match state.user_repository.find_by_id(user_id) {
+    let user = match state.user_core.find_by_id(user_id) {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((
@@ -1409,7 +1409,7 @@ pub async fn handle_whatsapp_confirm_send(
     };
 
     // Get user from database
-    let user = match state.user_repository.find_by_id(user_id) {
+    let user = match state.user_core.find_by_id(user_id) {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((
@@ -1472,7 +1472,7 @@ pub async fn handle_whatsapp_confirm_send(
             ).await {
                 Ok(message_sid) => {
                     // set the confirm event message flag for the user so we know to continue conversation with sms
-                    if let Err(e) = state.user_repository.set_confirm_send_event(user_id, true) {
+                    if let Err(e) = state.user_core.set_confirm_send_event(user_id, true) {
                         error!("Failed to set confirm send event flag: {}", e);
                         // Continue execution even if setting flag fails
                     }
@@ -1529,7 +1529,7 @@ pub async fn handle_calendar_event_confirm(
     };
 
     // Get user from database
-    let user = match state.user_repository.find_by_id(user_id) {
+    let user = match state.user_core.find_by_id(user_id) {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((
@@ -1590,7 +1590,7 @@ pub async fn handle_calendar_event_confirm(
     ).await {
         Ok(message_sid) => {
             // Set the confirm event message flag for the user
-            if let Err(e) = state.user_repository.set_confirm_send_event(user_id, true) {
+            if let Err(e) = state.user_core.set_confirm_send_event(user_id, true) {
                 error!("Failed to set confirm send event flag: {}", e);
                 // Continue execution even if setting flag fails
             }
@@ -1893,7 +1893,7 @@ pub async fn handle_email_response_tool_call(
     };
 
     // Get user from database
-    let user = match state.user_repository.find_by_id(user_id) {
+    let user = match state.user_core.find_by_id(user_id) {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((
@@ -1972,7 +1972,7 @@ pub async fn handle_email_response_tool_call(
             ).await {
                 Ok(message_sid) => {
                     // Set the confirm event message flag for the user
-                    if let Err(e) = state.user_repository.set_confirm_send_event(user_id, true) {
+                    if let Err(e) = state.user_core.set_confirm_send_event(user_id, true) {
                         error!("Failed to set confirm send event flag: {}", e);
                         // Continue execution even if setting flag fails
                     }
@@ -2022,7 +2022,7 @@ pub async fn make_notification_call(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
 
 // Get user information to check for discount tier
-    let user = match state.user_repository.find_by_id(user_id.parse::<i32>().unwrap_or_default()) {
+    let user = match state.user_core.find_by_id(user_id.parse::<i32>().unwrap_or_default()) {
         Ok(Some(user)) => user,
         Ok(None) => {
             error!("User not found for ID: {}", user_id);
@@ -2215,7 +2215,7 @@ pub async fn make_notification_call(
     })?;
 
     // Get user information before spawning the thread
-    let user = match state.user_repository.find_by_id(user_id.parse::<i32>().unwrap_or_default()) {
+    let user = match state.user_core.find_by_id(user_id.parse::<i32>().unwrap_or_default()) {
         Ok(Some(user)) => user,
         Ok(None) => {
             error!("User not found for ID: {}", user_id);

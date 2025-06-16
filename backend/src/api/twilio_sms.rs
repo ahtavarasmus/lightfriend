@@ -102,7 +102,7 @@ pub async fn handle_regular_sms(
     Form(payload): Form<TwilioWebhookPayload>,
 ) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
     // First check if this user has a discount_tier == sms - they shouldn't be using this endpoint, but their own dedicated
-    match state.user_repository.find_by_phone_number(&payload.from) {
+    match state.user_core.find_by_phone_number(&payload.from) {
         Ok(Some(user)) => {
             if let Some(tier) = user.discount_tier {
                 if tier == "msg".to_string() {
@@ -164,8 +164,8 @@ pub async fn handle_incoming_sms(
 
     // Check for STOP command
     if payload.body.trim().to_uppercase() == "STOP" {
-        if let Ok(Some(user)) = state.user_repository.find_by_phone_number(&payload.from) {
-            if let Err(e) = state.user_repository.update_notify(user.id, false) {
+        if let Ok(Some(user)) = state.user_core.find_by_phone_number(&payload.from) {
+            if let Err(e) = state.user_core.update_notify(user.id, false) {
                 tracing::error!("Failed to update notify status: {}", e);
             } else {
                 return (
@@ -209,7 +209,7 @@ pub async fn process_sms(
 ) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
     let start_time = std::time::Instant::now(); // Track processing time
 
-    let user = match state.user_repository.find_by_phone_number(&payload.from) {
+    let user = match state.user_core.find_by_phone_number(&payload.from) {
         Ok(Some(user)) => {
             tracing::info!("Found user with ID: {} for phone number: {}", user.id, payload.from);
             
@@ -313,7 +313,7 @@ pub async fn process_sms(
 
     // Get timezone from user info or default to UTC
     // Get user settings to access timezone
-    let user_settings = match state.user_repository.get_user_settings(user.id) {
+    let user_settings = match state.user_core.get_user_settings(user.id) {
         Ok(settings) => settings,
         Err(e) => {
             tracing::error!("Failed to get user settings: {}", e);
@@ -836,7 +836,7 @@ pub async fn process_sms(
     } else {
         true
     };
-    if let Err(e) = state.user_repository.set_free_reply(user.id, false) {
+    if let Err(e) = state.user_core.set_free_reply(user.id, false) {
         tracing::error!("Failed to reset set_free_reply flag: {}", e);
     }
 
@@ -859,7 +859,7 @@ pub async fn process_sms(
 
     let mut final_response_with_notice = final_response.clone();
     if is_clarifying {
-        if let Err(e) = state.user_repository.set_free_reply(user.id, true) {
+        if let Err(e) = state.user_core.set_free_reply(user.id, true) {
             tracing::error!("Failed to set the set_free_reply flag: {}", e);
         }
         final_response_with_notice = format!("{} (free reply)", final_response);

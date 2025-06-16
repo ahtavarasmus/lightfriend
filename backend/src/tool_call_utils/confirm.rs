@@ -70,7 +70,7 @@ pub async fn handle_confirmation(
         match user_response.as_str() {
             "yes" => {
                 // Reset the confirmation flag
-                if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
                     tracing::error!("Failed to reset confirm_send_event flag: {}", e);
                 }
 
@@ -156,7 +156,7 @@ pub async fn handle_confirmation(
             }
             "no" => {
                 // Reset the confirmation flag
-                if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
                     tracing::error!("Failed to reset confirm_send_event flag: {}", e);
                 }
 
@@ -182,7 +182,7 @@ pub async fn handle_confirmation(
             }
             _ => {
                 // Reset the confirmation flag since we're treating this as a new message
-                if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
                     tracing::error!("Failed to reset confirm_send_event flag: {}", e);
                 }
             }
@@ -221,7 +221,7 @@ pub async fn handle_confirmation(
                 ).await {
                     Ok(_) => {
                         // Reset the confirmation flag
-                        if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                        if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
                             tracing::error!("Failed to reset confirm_send_event flag: {}", e);
                         }
 
@@ -279,7 +279,7 @@ pub async fn handle_confirmation(
             }
             "no" => {
                 // Reset the confirmation flag
-                if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
                     tracing::error!("Failed to reset confirm_send_event flag: {}", e);
                 }
 
@@ -305,7 +305,7 @@ pub async fn handle_confirmation(
             }
             _ => {
                 // Reset the confirmation flag since we're treating this as a new message
-                if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
                     tracing::error!("Failed to reset confirm_send_event flag: {}", e);
                 }
             }
@@ -335,7 +335,7 @@ pub async fn handle_confirmation(
         match user_response.as_str() {
             "yes" => {
                 // Reset the confirmation flag
-                if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
                     tracing::error!("Failed to reset confirm_send_event flag: {}", e);
                 }
 
@@ -399,7 +399,7 @@ pub async fn handle_confirmation(
             }
             "no" => {
                 // Reset the confirmation flag
-                if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
                     tracing::error!("Failed to reset confirm_send_event flag: {}", e);
                 }
 
@@ -425,7 +425,7 @@ pub async fn handle_confirmation(
             }
             _ => {
                 // Reset the confirmation flag since we're treating this as a new message
-                if let Err(e) = state.user_repository.set_confirm_send_event(user.id, false) {
+                if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
                     tracing::error!("Failed to reset confirm_send_event flag: {}", e);
                 }
             }

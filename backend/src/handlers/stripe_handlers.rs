@@ -55,7 +55,7 @@ pub async fn create_hard_mode_subscription_checkout(
 
     // Verify user exists in database
     let user = state
-        .user_repository
+        .user_core
         .find_by_id(user_id)
         .map_err(|e| {
             println!("Database error when finding user: {}", e);
@@ -88,7 +88,7 @@ pub async fn create_hard_mode_subscription_checkout(
         Ok(Some(id)) => id,
         Ok(None) => {
             let user = state
-                .user_repository
+                .user_core
                 .find_by_id(user_id)
                 .map_err(|e| (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -201,7 +201,7 @@ pub async fn create_subscription_checkout(
 
     // Verify user exists in database
     let user = state
-        .user_repository
+        .user_core
         .find_by_id(user_id)
         .map_err(|e| {
             println!("Database error when finding user: {}", e);
@@ -234,7 +234,7 @@ pub async fn create_subscription_checkout(
         Ok(Some(id)) => id,
         Ok(None) => {
             let user = state
-                .user_repository
+                .user_core
                 .find_by_id(user_id)
                 .map_err(|e| (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -405,7 +405,7 @@ pub async fn create_checkout_session(
 
     // Fetch user from the database
     let user = state
-        .user_repository
+        .user_core
         .find_by_id(user_id)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -723,7 +723,7 @@ pub async fn stripe_webhook(
                         let sub_info = extract_subscription_info(&price_id);
                         
                         // Update subscription country
-                        if let Err(e) = state.user_repository.update_sub_country(user.id, sub_info.country) {
+                        if let Err(e) = state.user_core.update_sub_country(user.id, sub_info.country) {
                             tracing::error!("Failed to update subscription country: {}", e);
                         }
 
@@ -780,7 +780,7 @@ pub async fn stripe_webhook(
                     if let Err(e) = state.user_repository.set_subscription_tier(user.id, None) {
                         tracing::error!("Failed to clear subscription tier: {}", e);
                     }
-                    if let Err(e) = state.user_repository.update_sub_country(user.id, None) {
+                    if let Err(e) = state.user_core.update_sub_country(user.id, None) {
                         tracing::error!("Failed to clear subscription country: {}", e);
                     }
                     tracing::info!("Cleared subscription info for user {}", user.id);
@@ -924,7 +924,7 @@ pub async fn automatic_charge(
 
     // Fetch user from the database
     let user = state
-        .user_repository
+        .user_core
         .find_by_id(user_id)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,

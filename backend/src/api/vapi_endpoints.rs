@@ -194,7 +194,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
     if let Some(phone_number) = event.get_phone_number() {
         println!("Found phone number: {}", phone_number);
         
-        match state.user_repository.find_by_phone_number(&phone_number) {
+        match state.user_core.find_by_phone_number(&phone_number) {
             Ok(Some(user)) => {
                 println!("User found for phone number: {}", phone_number);
  
@@ -205,7 +205,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
 
 
                 if let Some(assistant_number) = event.get_assistant_number() {
-                    if let Err(e) = state.user_repository.update_preferred_number(user.id, &assistant_number) {
+                    if let Err(e) = state.user_core.update_preferred_number(user.id, &assistant_number) {
                         println!("Error updating preferred number: {}", e);
                     } else {
                         println!("Successfully updated preferred number to: {}", assistant_number);
@@ -250,7 +250,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                 } else {
                     println!("Verifying user: {}", phone_number);
                     
-                    match state.user_repository.verify_user(user.id) {
+                    match state.user_core.verify_user(user.id) {
                         Ok(_) => {
                             println!("User verified successfully");
                             let nickname = user.nickname.unwrap_or_else(|| "".to_string());
@@ -346,7 +346,7 @@ pub async fn handle_end_of_call_report(
         println!("⏱️ Call Duration: {:.2} seconds", duration);
         
         // Update user's remaining credits based on call duration
-        if let Ok(Some(user)) = state.user_repository.find_by_phone_number(&phone_number) {
+        if let Ok(Some(user)) = state.user_core.find_by_phone_number(&phone_number) {
 
             let voice_second_cost = std::env::var("VOICE_SECOND_COST")
                 .expect("VOICE_SECOND_COST not set")

@@ -23,6 +23,7 @@ use crate::schema::user_settings;
 use crate::schema::ideas;
 use crate::schema::idea_upvotes;
 use crate::schema::idea_email_subscriptions;
+use crate::schema::temp_variables;
 
 
 
@@ -58,6 +59,34 @@ pub struct User {
     pub discount: bool, // if user can get buy overage credits without subscription(for early adopters)
     pub discount_tier: Option<String>, // could be None, "msg", "voice" or "full"
     pub free_reply: bool, // flag that gets set when previous message needs more information to finish the reply
+}
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = temp_variables)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct TempVariable {
+    pub id: i32,
+    pub user_id: i32,
+    pub confirm_send_event_type: String,
+    pub confirm_send_event_recipient: Option<String>,
+    pub confirm_send_event_subject: Option<String>,
+    pub confirm_send_event_content: Option<String>,
+    pub confirm_send_event_start_time: Option<String>,
+    pub confirm_send_event_duration: Option<String>,
+    pub confirm_send_event_id: Option<String>,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = temp_variables)]
+pub struct NewTempVariable {
+    pub user_id: i32,
+    pub confirm_send_event_type: String,
+    pub confirm_send_event_recipient: Option<String>,
+    pub confirm_send_event_subject: Option<String>,
+    pub confirm_send_event_content: Option<String>,
+    pub confirm_send_event_start_time: Option<String>,
+    pub confirm_send_event_duration: Option<String>,
+    pub confirm_send_event_id: Option<String>,
 }
 
 

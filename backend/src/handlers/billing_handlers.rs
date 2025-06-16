@@ -152,7 +152,7 @@ pub async fn update_topup(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
 
     // Update the user's auto-topup settings with fixed threshold of 3.00
-    match state.user_repository.update_auto_topup(
+    match state.user_core.update_auto_topup(
         auth_user.user_id, 
         settings.active, 
         settings.amount, 
