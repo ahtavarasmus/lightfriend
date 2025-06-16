@@ -30,6 +30,8 @@ use crate::{
     DbPool,
 };
 
+use crate::utils::encryption::{encrypt, decrypt};
+
 pub struct UserRepository {
     pool: DbPool
 }
@@ -174,15 +176,9 @@ impl UserRepository {
         use crate::schema::imap_connection;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        // Get encryption key from environment
-        let encryption_key = std::env::var("ENCRYPTION_KEY")
-            .expect("ENCRYPTION_KEY must be set");
-
-        use magic_crypt::MagicCryptTrait;
-        let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
-
         // Encrypt password
-        let encrypted_password = cipher.encrypt_str_to_base64(password);
+        let encrypted_password = encrypt(password)
+            .map_err(|_| diesel::result::Error::RollbackTransaction)?;
 
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -224,10 +220,6 @@ impl UserRepository {
         use crate::schema::imap_connection;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        // Get encryption key from environment
-        let encryption_key = std::env::var("ENCRYPTION_KEY")
-            .expect("ENCRYPTION_KEY must be set");
-
         // Get the active IMAP connection for the user
         let imap_conn = imap_connection::table
             .filter(imap_connection::user_id.eq(user_id))
@@ -236,11 +228,8 @@ impl UserRepository {
             .optional()?;
 
         if let Some(conn) = imap_conn {
-            use magic_crypt::MagicCryptTrait;
-            let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
-
             // Decrypt the password
-            match cipher.decrypt_base64_to_string(&conn.encrypted_password) {
+            match decrypt(&conn.encrypted_password) {
                 Ok(decrypted_password) => Ok(Some((conn.description, decrypted_password, conn.imap_server, conn.imap_port))),
                 Err(_) => Err(diesel::result::Error::RollbackTransaction)
             }
@@ -1838,27 +1827,8 @@ impl UserRepository {
             .optional()?;
 
         if let Some(connection) = connection {
-            // Get encryption key from environment
-            let encryption_key = match std::env::var("ENCRYPTION_KEY") {
-                Ok(key) => key,
-                Err(_) => {
-                    tracing::error!("ENCRYPTION_KEY not set in environment");
-                    return Err(DieselError::RollbackTransaction);
-                }
-            };
-
-            use magic_crypt::MagicCryptTrait;
-            let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
-
-            // Log the encrypted tokens for debugging
-            tracing::debug!(
-                "Attempting to decrypt tokens - Access token length: {}, Refresh token length: {}", 
-                connection.encrypted_access_token.len(),
-                connection.encrypted_refresh_token.len()
-            );
-
             // Decrypt access token
-            let access_token = match cipher.decrypt_base64_to_string(&connection.encrypted_access_token) {
+            let access_token = match decrypt(&connection.encrypted_access_token) {
                 Ok(token) => {
                     tracing::debug!("Successfully decrypted access token");
                     token
@@ -1870,7 +1840,7 @@ impl UserRepository {
             };
 
             // Decrypt refresh token
-            let refresh_token = match cipher.decrypt_base64_to_string(&connection.encrypted_refresh_token) {
+            let refresh_token = match decrypt(&connection.encrypted_refresh_token) {
                 Ok(token) => {
                     tracing::debug!("Successfully decrypted refresh token");
                     token
@@ -1898,15 +1868,8 @@ impl UserRepository {
         use crate::schema::google_calendar;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        // Get encryption key from environment
-        let encryption_key = std::env::var("ENCRYPTION_KEY")
-            .expect("ENCRYPTION_KEY must be set");
-
-        use magic_crypt::MagicCryptTrait;
-        let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
-
-        // Encrypt new access token
-        let encrypted_access_token = cipher.encrypt_str_to_base64(new_access_token);
+        let encrypted_access_token = encrypt(new_access_token)
+            .map_err(|_| DieselError::RollbackTransaction)?;
 
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1985,18 +1948,7 @@ impl UserRepository {
             .optional()?;
 
         if let Some(connection) = connection {
-            let encryption_key = match std::env::var("ENCRYPTION_KEY") {
-                Ok(key) => key,
-                Err(_) => {
-                    tracing::error!("ENCRYPTION_KEY not set in environment");
-                    return Err(DieselError::RollbackTransaction);
-                }
-            };
-
-            use magic_crypt::MagicCryptTrait;
-            let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
-
-            let access_token = match cipher.decrypt_base64_to_string(&connection.encrypted_access_token) {
+            let access_token = match decrypt(&connection.encrypted_access_token) {
                 Ok(token) => token,
                 Err(e) => {
                     tracing::error!("Failed to decrypt access token: {:?}", e);
@@ -2004,7 +1956,7 @@ impl UserRepository {
                 }
             };
 
-            let refresh_token = match cipher.decrypt_base64_to_string(&connection.encrypted_refresh_token) {
+            let refresh_token = match decrypt(&connection.encrypted_refresh_token) {
                 Ok(token) => token,
                 Err(e) => {
                     tracing::error!("Failed to decrypt refresh token: {:?}", e);
@@ -2027,13 +1979,8 @@ impl UserRepository {
         use crate::schema::gmail;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        let encryption_key = std::env::var("ENCRYPTION_KEY")
-            .expect("ENCRYPTION_KEY must be set");
-
-        use magic_crypt::MagicCryptTrait;
-        let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
-
-        let encrypted_access_token = cipher.encrypt_str_to_base64(new_access_token);
+        let encrypted_access_token = encrypt(new_access_token)
+            .map_err(|_| DieselError::RollbackTransaction)?;
 
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -2088,18 +2035,7 @@ impl UserRepository {
             .optional()?;
 
         if let Some(connection) = connection {
-            let encryption_key = match std::env::var("ENCRYPTION_KEY") {
-                Ok(key) => key,
-                Err(_) => {
-                    tracing::error!("ENCRYPTION_KEY not set in environment");
-                    return Err(DieselError::RollbackTransaction);
-                }
-            };
-
-            use magic_crypt::MagicCryptTrait;
-            let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
-
-            let access_token = match cipher.decrypt_base64_to_string(&connection.encrypted_access_token) {
+            let access_token = match decrypt(&connection.encrypted_access_token) {
                 Ok(token) => token,
                 Err(e) => {
                     tracing::error!("Failed to decrypt access token: {:?}", e);
@@ -2107,7 +2043,7 @@ impl UserRepository {
                 }
             };
 
-            let refresh_token = match cipher.decrypt_base64_to_string(&connection.encrypted_refresh_token) {
+            let refresh_token = match decrypt(&connection.encrypted_refresh_token) {
                 Ok(token) => token,
                 Err(e) => {
                     tracing::error!("Failed to decrypt refresh token: {:?}", e);
@@ -2130,13 +2066,8 @@ impl UserRepository {
         use crate::schema::google_tasks;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        let encryption_key = std::env::var("ENCRYPTION_KEY")
-            .expect("ENCRYPTION_KEY must be set");
-
-        use magic_crypt::MagicCryptTrait;
-        let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
-
-        let encrypted_access_token = cipher.encrypt_str_to_base64(new_access_token);
+        let encrypted_access_token = encrypt(new_access_token)
+            .map_err(|_| DieselError::RollbackTransaction)?;
 
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -2177,15 +2108,12 @@ impl UserRepository {
         use crate::schema::google_tasks;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        let encryption_key = std::env::var("ENCRYPTION_KEY")
-            .expect("ENCRYPTION_KEY must be set");
-
-        use magic_crypt::MagicCryptTrait;
-        let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
-
-        let encrypted_access_token = cipher.encrypt_str_to_base64(access_token);
+        let encrypted_access_token = encrypt(access_token)
+            .map_err(|_| DieselError::RollbackTransaction)?;
         let encrypted_refresh_token = refresh_token
-            .map(|token| cipher.encrypt_str_to_base64(token))
+            .map(|token| encrypt(token))
+            .transpose()
+            .map_err(|_| DieselError::RollbackTransaction)?
             .unwrap_or_default();
 
         let current_time = std::time::SystemTime::now()
@@ -2221,11 +2149,11 @@ impl UserRepository {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Encrypt the access token before storing
-        let encrypted_token = crate::utils::matrix_auth::encrypt_token(access_token)
+        let encrypted_token = encrypt(access_token)
             .map_err(|_| DieselError::RollbackTransaction)?;
 
         // Encrypt the password before storing
-        let encrypted_password = crate::utils::matrix_auth::encrypt_token(password)
+        let encrypted_password = encrypt(password)
             .map_err(|_| DieselError::RollbackTransaction)?;
 
         diesel::update(users::table.find(user_id))
@@ -2243,7 +2171,7 @@ impl UserRepository {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Encrypt the access token before storing
-        let encrypted_token = crate::utils::matrix_auth::encrypt_token(access_token)
+        let encrypted_token = encrypt(access_token)
             .map_err(|_| DieselError::RollbackTransaction)?;
 
         diesel::update(users::table.find(user_id))
@@ -2260,7 +2188,7 @@ impl UserRepository {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Encrypt the password before storing
-        let encrypted_key= crate::utils::matrix_auth::encrypt_token(recovery_key)
+        let encrypted_key= encrypt(recovery_key)
             .map_err(|_| DieselError::RollbackTransaction)?;
 
         diesel::update(users::table.find(user_id))
@@ -2278,7 +2206,7 @@ impl UserRepository {
 
         match encrypted_key {
             Some(key) => {
-                let rec_key= crate::utils::matrix_auth::decrypt_token(&key)
+                let rec_key= decrypt(&key)
                     .map_err(|_| DieselError::RollbackTransaction)?;
                 Ok(Some(rec_key))
             },
@@ -2295,9 +2223,9 @@ impl UserRepository {
 
         match (user.matrix_username, user.encrypted_matrix_access_token, user.matrix_device_id, user.encrypted_matrix_password) {
             (Some(username), Some(encrypted_token), Some(device_id), Some(encrypted_password)) => {
-                let token = crate::utils::matrix_auth::decrypt_token(&encrypted_token)
+                let token = decrypt(&encrypted_token)
                     .map_err(|_| DieselError::RollbackTransaction)?;
-                let password= crate::utils::matrix_auth::decrypt_token(&encrypted_password)
+                let password= decrypt(&encrypted_password)
                     .map_err(|_| DieselError::RollbackTransaction)?;
                 Ok(Some((username, token, device_id, password)))
             },
@@ -2589,25 +2517,21 @@ impl UserRepository {
         expires_in: i32,
     ) -> Result<(), DieselError> {
         use crate::schema::gmail;
+        use crate::models::user_models::NewGmail;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
-        let encryption_key = std::env::var("ENCRYPTION_KEY")
-            .expect("ENCRYPTION_KEY must be set");
-
-        use magic_crypt::MagicCryptTrait;
-        let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
-
-        let encrypted_access_token = cipher.encrypt_str_to_base64(access_token);
+        let encrypted_access_token = encrypt(access_token)
+            .map_err(|_| DieselError::RollbackTransaction)?;
         let encrypted_refresh_token = refresh_token
-            .map(|token| cipher.encrypt_str_to_base64(token))
+            .map(|token| encrypt(token))
+            .transpose()
+            .map_err(|_| DieselError::RollbackTransaction)?
             .unwrap_or_default();
 
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as i32;
-
-        use crate::models::user_models::NewGmail;
 
         let new_connection = NewGmail {
             user_id,
@@ -2652,22 +2576,16 @@ impl UserRepository {
     ) -> Result<(), DieselError> {
         use crate::schema::google_calendar;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-
+        
         println!("Creating google calendar connection for user: {}", user_id);
         println!("Got refresh token: {:?}", refresh_token);
-
-        // Get encryption key from environment
-        let encryption_key = std::env::var("ENCRYPTION_KEY")
-            .expect("ENCRYPTION_KEY must be set");
-
-        use magic_crypt::MagicCryptTrait;
-        // Create encryption cipher
-        let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
-
-        // Encrypt tokens
-        let encrypted_access_token = cipher.encrypt_str_to_base64(access_token);
+        
+        let encrypted_access_token = encrypt(access_token)
+            .map_err(|_| DieselError::RollbackTransaction)?;
         let encrypted_refresh_token = refresh_token
-            .map(|token| cipher.encrypt_str_to_base64(token))
+            .map(|token| encrypt(token))
+            .transpose()
+            .map_err(|_| DieselError::RollbackTransaction)?
             .unwrap_or_default();
 
         println!("Encrypted refresh token: {}", encrypted_refresh_token);
