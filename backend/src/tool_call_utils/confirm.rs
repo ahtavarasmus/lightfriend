@@ -10,7 +10,6 @@ use crate::api::twilio_sms::TwilioMessageResponse;
 pub struct ConfirmationResult {
     pub should_continue: bool,
     pub response: Option<(StatusCode, [(axum::http::HeaderName, &'static str); 1], Json<TwilioResponse>)>,
-    pub redact_body: bool,
 }
 
 pub async fn handle_confirmation(
@@ -18,61 +17,46 @@ pub async fn handle_confirmation(
     user: &User,
     conversation_sid: &str,
     twilio_number: &String,
+    event_type: &String,
     user_message: &str,
-    last_ai_message: Option<&TwilioMessageResponse>,
 ) -> ConfirmationResult {
     // Default values
-    let mut should_continue = true;
-    let mut redact_body = true;
+    let mut should_continue = false;
     let mut response = None;
-
-    tracing::info!("Checking confirm_send_event flag: {}", user.confirm_send_event);
-    if !user.confirm_send_event {
-        tracing::info!("RETURNING FROM HANDLE_CONFIRMATION SINCE CONFIRM_SEND_EVENT WAS FALSE");
-        return ConfirmationResult {
-            should_continue,
-            response,
-            redact_body,
-        };
-    }
-
-    let last_ai_message = match last_ai_message {
-        Some(msg) => msg,
-        None => return ConfirmationResult {
-            should_continue,
-            response,
-            redact_body,
-        },
-    };
 
     let user_response = user_message.trim().to_lowercase();
 
-    // Handle calendar event confirmation
-    if let Some(captures) = Regex::new(r"Confirm creating calendar event: '([^']+)' starting at '([^']+)' for (\d+) minutes(\s*with description: '([^']+)')?.*")
-        .ok()
-        .and_then(|re| re.captures(&last_ai_message.body)) {
-        
-        let summary = captures.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
-        let start_time = captures.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
-        let duration = captures.get(3).and_then(|m| m.as_str().parse::<i32>().ok()).unwrap_or_default();
-        let description = captures.get(5).map(|m| m.as_str().to_string());
+    if event_type == &"calendar".to_string() {
+        // Handle calendar event confirmation
+        // Get the calendar event details from temp variables
+        let (summary, start_time, duration, description) = match state.user_core.get_calendar_temp_variable(user.id) {
+            Ok(Some((summary, start_time, duration_str, description))) => (
+                summary.unwrap_or_default(),
+                start_time.unwrap_or_default(),
+                duration_str.unwrap_or_default().parse::<i32>().unwrap_or(30),
+                description
+            ),
+            _ => {
+                response = Some((
+                    StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    Json(TwilioResponse {
+                        message: "Failed to create calendar event due to internal error.".to_string(),
+                    })
+                ));
 
-        // Redact the confirmation message
-        if let Err(e) = crate::api::twilio_utils::redact_message(
-            conversation_sid,
-            &last_ai_message.sid,
-            "Calendar event confirmation message redacted",
-            user,
-        ).await {
-            tracing::error!("Failed to redact calendar confirmation message: {}", e);
-        }
-
+                // Clear the confirmation state
+                if let Err(e) = state.user_core.clear_confirm_send_event(user.id) {
+                    tracing::error!("Failed to clear confirmation state: {}", e);
+                }
+                return ConfirmationResult {
+                    should_continue,
+                    response,
+                };
+            }
+        };
         match user_response.as_str() {
             "yes" => {
-                // Reset the confirmation flag
-                if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
-                    tracing::error!("Failed to reset confirm_send_event flag: {}", e);
-                }
 
                 // Create the calendar event
                 let event_request = crate::handlers::google_calendar::CreateEventRequest {
@@ -87,11 +71,13 @@ pub async fn handle_confirmation(
                                     message: "Failed to create calendar event due to invalid start time.".to_string(),
                                 })
                             ));
-                            should_continue = false;
+                            // Clear the confirmation state
+                            if let Err(e) = state.user_core.clear_confirm_send_event(user.id) {
+                                tracing::error!("Failed to clear confirmation state: {}", e);
+                            }
                             return ConfirmationResult {
                                 should_continue,
                                 response,
-                                redact_body,
                             };
                         }
                     },
@@ -130,7 +116,6 @@ pub async fn handle_confirmation(
                                 message: confirmation_msg.to_string(),
                             })
                         ));
-                        should_continue = false;
                     }
                     Err((status, Json(error))) => {
                         let error_msg = format!("Failed to create calendar event: {} (not charged)", error["error"].as_str().unwrap_or("Unknown error"));
@@ -150,16 +135,10 @@ pub async fn handle_confirmation(
                                 message: error_msg,
                             })
                         ));
-                        should_continue = false;
                     }
                 }
             }
             "no" => {
-                // Reset the confirmation flag
-                if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
-                    tracing::error!("Failed to reset confirm_send_event flag: {}", e);
-                }
-
                 let cancel_msg = "Calendar event creation cancelled.";
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     conversation_sid,
@@ -178,37 +157,37 @@ pub async fn handle_confirmation(
                         message: cancel_msg.to_string(),
                     })
                 ));
-                should_continue = false;
             }
             _ => {
-                // Reset the confirmation flag since we're treating this as a new message
-                if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
-                    tracing::error!("Failed to reset confirm_send_event flag: {}", e);
-                }
+                should_continue = true;
             }
         }
-    }
+    } else if event_type == &"whatsapp".to_string() {
+        // Get the WhatsApp message details from temp variables
+        let whatsapp_details = match state.user_core.get_whatsapp_temp_variable(user.id) {
+            Ok(Some((recipient, message_content))) => {
+                (recipient.unwrap_or_default(), message_content.unwrap_or_default())
+            },
+            _ => {
+                response = Some((
+                    StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    Json(TwilioResponse {
+                        message: "Failed to send WhatsApp message due to internal error.".to_string(),
+                    })
+                ));
+                // Clear the confirmation state
+                if let Err(e) = state.user_core.clear_confirm_send_event(user.id) {
+                    tracing::error!("Failed to clear confirmation state: {}", e);
+                }
+                return ConfirmationResult {
+                    should_continue,
+                    response,
+                };
+            }
+        };
 
-    // Handle WhatsApp message confirmation
-    tracing::info!("Last AI message body: {}", last_ai_message.body);
-    if let Some(captures) = Regex::new(r"Confirm sending WhatsApp message to '([^']+)' with content: '([^']+)'")
-        .ok()
-        .and_then(|re| re.captures(&last_ai_message.body)) {
-
-        tracing::info!("REGEX captured the confirmation message from the last message");
-        
-        let recipient = captures.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
-        let message_content = captures.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
-
-        // Redact the confirmation message
-        if let Err(e) = crate::api::twilio_utils::redact_message(
-            conversation_sid,
-            &last_ai_message.sid,
-            "WhatsApp message confirmation message redacted",
-            user,
-        ).await {
-            tracing::error!("Failed to redact WhatsApp confirmation message: {}", e);
-        }
+        let (recipient, message_content) = whatsapp_details;
 
         match user_response.as_str() {
             "yes" => {
@@ -220,11 +199,6 @@ pub async fn handle_confirmation(
                     &message_content,
                 ).await {
                     Ok(_) => {
-                        // Reset the confirmation flag
-                        if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
-                            tracing::error!("Failed to reset confirm_send_event flag: {}", e);
-                        }
-
                         // Send confirmation via Twilio
                         tracing::info!("SENDING messages since user said yes");
                         let confirmation_msg = format!("Message sent successfully to {}", recipient);
@@ -238,11 +212,6 @@ pub async fn handle_confirmation(
                             tracing::error!("Failed to send confirmation message: {}", e);
                         }
 
-                        // Deduct credits for the confirmation response
-                        if let Err(e) = crate::utils::usage::deduct_user_credits(state, user.id, "message", None) {
-                            tracing::error!("Failed to deduct user credits for WhatsApp confirmation: {}", e);
-                        }
-
                         response = Some((
                             StatusCode::OK,
                             [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -250,7 +219,6 @@ pub async fn handle_confirmation(
                                 message: confirmation_msg,
                             })
                         ));
-                        should_continue = false;
                     }
                     Err(e) => {
                         // Send error message via Twilio
@@ -273,16 +241,10 @@ pub async fn handle_confirmation(
                                 message: error_msg,
                             })
                         ));
-                        should_continue = false;
                     }
                 }
             }
             "no" => {
-                // Reset the confirmation flag
-                if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
-                    tracing::error!("Failed to reset confirm_send_event flag: {}", e);
-                }
-
                 let cancel_msg = "WhatsApp message cancelled.";
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     conversation_sid,
@@ -301,43 +263,46 @@ pub async fn handle_confirmation(
                         message: cancel_msg.to_string(),
                     })
                 ));
-                should_continue = false;
             }
             _ => {
-                // Reset the confirmation flag since we're treating this as a new message
-                if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
-                    tracing::error!("Failed to reset confirm_send_event flag: {}", e);
-                }
+                should_continue = true;
             }
         }
-    }
+    } else if event_type == &"email".to_string() {
+        // Get the email response details from temp variables
+        let email_details = match state.user_core.get_email_temp_variable(user.id) {
+            Ok(Some((recipient, subject, response_text, email_id))) => {
+                (
+                    recipient.unwrap_or_default(),
+                    subject.unwrap_or_default(),
+                    response_text.unwrap_or_default(),
+                    email_id.unwrap_or_default()
+                )
+            },
+            _ => {
+                response = Some((
+                    StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    Json(TwilioResponse {
+                        message: "Failed to send email response due to internal error.".to_string(),
+                    })
+                ));
 
-    // Handle email response confirmation
-    if let Some(captures) = Regex::new(r"Confirm sending email response to '([^']+)' regarding '([^']+)' with content: '([^']+)' id:\((\d+)\)")
-        .ok()
-        .and_then(|re| re.captures(&last_ai_message.body)) {
+                // Clear the confirmation state
+                if let Err(e) = state.user_core.clear_confirm_send_event(user.id) {
+                    tracing::error!("Failed to clear confirmation state: {}", e);
+                }
+                return ConfirmationResult {
+                    should_continue,
+                    response,
+                };
+            }
+        };
 
-        let recipient = captures.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
-        let subject = captures.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
-        let response_text = captures.get(3).map(|m| m.as_str().to_string()).unwrap_or_default();
-        let email_id = captures.get(4).map(|m| m.as_str().to_string()).unwrap_or_default();
-
-        // Redact the confirmation message
-        if let Err(e) = crate::api::twilio_utils::redact_message(
-            conversation_sid,
-            &last_ai_message.sid,
-            &format!("Confirm sending email response to '[RECIPIENT_REDACTED]' regarding '[SUBJECT_REDACTED]' with content: '[CONTENT_REDACTED]' id:[ID_REDACTED]"),
-            user,
-        ).await {
-            tracing::error!("Failed to redact email confirmation message: {}", e);
-        }
+        let (recipient, subject, response_text, email_id) = email_details;
 
         match user_response.as_str() {
             "yes" => {
-                // Reset the confirmation flag
-                if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
-                    tracing::error!("Failed to reset confirm_send_event flag: {}", e);
-                }
 
                 let email_request = crate::handlers::imap_handlers::EmailResponseRequest {
                     email_id: email_id.clone(),
@@ -373,7 +338,6 @@ pub async fn handle_confirmation(
                                 message: confirmation_msg,
                             })
                         ));
-                        should_continue = false;
                     }
                     Err((status, Json(error))) => {
                         let error_msg = format!("Failed to send email response: {} (not charged)", error["error"].as_str().unwrap_or("Unknown error"));
@@ -393,15 +357,10 @@ pub async fn handle_confirmation(
                                 message: error_msg,
                             })
                         ));
-                        should_continue = false;
                     }
                 }
             }
             "no" => {
-                // Reset the confirmation flag
-                if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
-                    tracing::error!("Failed to reset confirm_send_event flag: {}", e);
-                }
 
                 let cancel_msg = "Email response cancelled.";
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
@@ -421,23 +380,20 @@ pub async fn handle_confirmation(
                         message: cancel_msg.to_string(),
                     })
                 ));
-                should_continue = false;
             }
             _ => {
-                // Reset the confirmation flag since we're treating this as a new message
-                if let Err(e) = state.user_core.set_confirm_send_event(user.id, false) {
-                    tracing::error!("Failed to reset confirm_send_event flag: {}", e);
-                }
+                should_continue = true;
             }
         }
     }
 
-    redact_body = should_continue;
+    // Clear the confirmation state
+    if let Err(e) = state.user_core.clear_confirm_send_event(user.id) {
+        tracing::error!("Failed to clear confirmation state: {}", e);
+    }
 
     ConfirmationResult {
         should_continue,
         response,
-        redact_body,
     }
 }
-

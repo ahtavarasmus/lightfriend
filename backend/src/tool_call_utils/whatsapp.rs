@@ -208,9 +208,18 @@ pub async fn handle_send_whatsapp_message(
             let best_match = &rooms[0];
             let exact_name = best_match.display_name.trim_end_matches(" (WA)").to_string();
 
-            // Set the confirmation flag
-            if let Err(e) = state.user_core.set_confirm_send_event(user_id, true) {
-                tracing::error!("Failed to set confirm_send_event flag: {}", e);
+            // Set the temporary variable for WhatsApp message
+            if let Err(e) = state.user_core.set_temp_variable(
+                user_id,
+                Some("whatsapp"),
+                Some(&exact_name),
+                None,
+                Some(&args.message),
+                None,
+                None,
+                None
+            ) {
+                tracing::error!("Failed to set temporary variable: {}", e);
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     conversation_sid,
                     twilio_number,
@@ -229,11 +238,11 @@ pub async fn handle_send_whatsapp_message(
                 ));
             }
 
-            tracing::info!("JUST SET successfully the confirm send event flag to true for user");
+            tracing::info!("Successfully set temporary variable for WhatsApp message");
 
             // Format the confirmation message with the found contact name
             let confirmation_msg = format!(
-                "Confirm the sending of WhatsApp message to '{}' with content: '{}' (yes-> send, no -> discard) (free reply)",
+                "Send WhatsApp to '{}' with content: '{}' (yes-> send, no -> discard) (free reply)",
                 exact_name, args.message
             );
 
@@ -242,7 +251,7 @@ pub async fn handle_send_whatsapp_message(
                 conversation_sid,
                 twilio_number,
                 &confirmation_msg,
-                false, // Don't redact since we need to extract info from this message later
+                true, // Don't redact since we need to extract info from this message later
                 user,
             ).await {
                 Ok(_) => {

@@ -232,9 +232,33 @@ pub async fn handle_create_calendar_event(
 ) -> Result<(axum::http::StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<crate::api::twilio_sms::TwilioResponse>), Box<dyn std::error::Error>> {
     let args: CalendarEventArgs = serde_json::from_str(args)?;
 
-    // Set the confirmation flag
-    if let Err(e) = state.user_core.set_confirm_send_event(user_id, true) {
-        eprintln!("Failed to set confirm_send_event flag: {}", e);
+    // Format the confirmation message
+    let confirmation_msg = if let Some(ref desc) = args.description {
+        format!(
+            "Create calendar event: '{}' starting at '{}' for {} minutes with description: '{}' (yes-> send, no -> discard) (free reply)",
+            args.summary, args.start_time, args.duration_minutes, desc
+        )
+    } else {
+        format!(
+            "Create calendar event: '{}' starting at '{}' for {} minutes (yes-> send, no -> discard) (free reply)",
+            args.summary, args.start_time, args.duration_minutes
+        )
+    };
+
+
+    // Set the temporary variable for calendar event
+    if let Err(e) = state.user_core.set_temp_variable(
+        user_id,
+        Some("calendar"),
+
+        None,
+        Some(&args.summary),
+        Some(&args.description.unwrap_or_default()),
+        Some(&args.start_time),
+        Some(&args.duration_minutes.to_string()),
+        None
+    ) {
+        tracing::error!("Failed to set temporary variable: {}", e);
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
             conversation_sid,
             twilio_number,
@@ -242,7 +266,7 @@ pub async fn handle_create_calendar_event(
             true,
             user,
         ).await {
-            eprintln!("Failed to send error message: {}", e);
+            tracing::error!("Failed to send error message: {}", e);
         }
         return Ok((
             axum::http::StatusCode::OK,
@@ -253,18 +277,6 @@ pub async fn handle_create_calendar_event(
         ));
     }
 
-    // Format the confirmation message
-    let confirmation_msg = if let Some(desc) = args.description {
-        format!(
-            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes with description: '{}' (yes-> send, no -> discard) (free reply)",
-            args.summary, args.start_time, args.duration_minutes, desc
-        )
-    } else {
-        format!(
-            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes (yes-> send, no -> discard) (free reply)",
-            args.summary, args.start_time, args.duration_minutes
-        )
-    };
 
     // Send the confirmation message
     match crate::api::twilio_utils::send_conversation_message(

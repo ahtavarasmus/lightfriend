@@ -3,8 +3,8 @@ use diesel::sql_types::Text;
 use diesel::result::Error as DieselError;
 use std::error::Error;
 use crate::{
-    models::user_models::{User, UserSettings, NewUserSettings},
-    schema::{users, user_settings},
+    models::user_models::{User, UserSettings, NewUserSettings, TempVariable, NewTempVariable},
+    schema::{users, user_settings, temp_variables},
     DbPool,
 };
 
@@ -372,14 +372,6 @@ impl UserCore {
         Ok(())
     }
 
-    pub fn set_confirm_send_event(&self, user_id: i32, confirm: bool) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::confirm_send_event.eq(confirm))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
     pub fn set_free_reply(&self, user_id: i32, free_reply: bool) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table.find(user_id))
@@ -387,6 +379,99 @@ impl UserCore {
             .execute(&mut conn)?;
         Ok(())
     }
+
+    pub fn set_temp_variable(&self, user_id: i32, event_type: Option<&str>, recipient: Option<&str>, subject: Option<&str>, 
+        content: Option<&str>, start_time: Option<&str>, duration: Option<&str>, event_id: Option<&str>) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Start a transaction
+        conn.transaction(|conn| {
+            // First set the confirm_send_event flag to true
+            diesel::update(users::table.find(user_id))
+                .set(users::confirm_send_event.eq(event_type))
+                .execute(conn)?;
+
+            // Delete any existing temp variables for this user
+            diesel::delete(temp_variables::table.filter(temp_variables::user_id.eq(user_id)))
+                .execute(conn)?;
+
+            // Create new temp variable
+            let new_temp_var = NewTempVariable {
+                user_id,
+                confirm_send_event_type: event_type.unwrap().to_string(),
+                confirm_send_event_recipient: recipient.map(|s| s.to_string()),
+                confirm_send_event_subject: subject.map(|s| s.to_string()),
+                confirm_send_event_content: content.map(|s| s.to_string()),
+                confirm_send_event_start_time: start_time.map(|s| s.to_string()),
+                confirm_send_event_duration: duration.map(|s| s.to_string()),
+                confirm_send_event_id: event_id.map(|s| s.to_string()),
+            };
+
+            // Insert the new temp variable
+            diesel::insert_into(temp_variables::table)
+                .values(&new_temp_var)
+                .execute(conn)?;
+
+            Ok(())
+        })
+    }
+
+
+    pub fn get_whatsapp_temp_variable(&self, user_id: i32) -> Result<Option<(Option<String>, Option<String>)>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let temp_var = temp_variables::table
+            .filter(temp_variables::user_id.eq(user_id))
+            .filter(temp_variables::confirm_send_event_type.eq("whatsapp"))
+            .first::<TempVariable>(&mut conn)
+            .optional()?;
+            
+        match temp_var {
+            Some(var) => Ok(Some((var.confirm_send_event_recipient, var.confirm_send_event_content))),
+            None => Ok(None)
+        }
+    }
+
+    pub fn get_calendar_temp_variable(&self, user_id: i32) -> Result<Option<(Option<String>, Option<String>, Option<String>, Option<String>)>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let temp_var = temp_variables::table
+            .filter(temp_variables::user_id.eq(user_id))
+            .filter(temp_variables::confirm_send_event_type.eq("calendar"))
+            .first::<TempVariable>(&mut conn)
+            .optional()?;
+            
+        match temp_var {
+            Some(var) => Ok(Some((
+                var.confirm_send_event_subject,
+                var.confirm_send_event_start_time,
+                var.confirm_send_event_duration,
+                var.confirm_send_event_content,
+            ))),
+            None => Ok(None)
+        }
+    }
+
+    pub fn get_email_temp_variable(&self, user_id: i32) -> Result<Option<(Option<String>, Option<String>, Option<String>, Option<String>)>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let temp_var = temp_variables::table
+            .filter(temp_variables::user_id.eq(user_id))
+            .filter(temp_variables::confirm_send_event_type.eq("email"))
+            .first::<TempVariable>(&mut conn)
+            .optional()?;
+            
+        match temp_var {
+            Some(var) => Ok(Some((
+                var.confirm_send_event_recipient,
+                var.confirm_send_event_subject,
+                var.confirm_send_event_content,
+                var.confirm_send_event_id
+            ))),
+            None => Ok(None)
+        }
+    }
+
 
     pub fn update_last_credits_notification(&self, user_id: i32, timestamp: i32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -413,6 +498,24 @@ impl UserCore {
             .execute(&mut conn)?;
             
         Ok(())
+    }
+
+    pub fn clear_confirm_send_event(&self, user_id: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Start a transaction
+        conn.transaction(|conn| {
+            // Clear the confirm_send_event flag
+            diesel::update(users::table.find(user_id))
+                .set(users::confirm_send_event.eq::<Option<String>>(None))
+                .execute(conn)?;
+
+            // Delete any existing temp variables for this user
+            diesel::delete(temp_variables::table.filter(temp_variables::user_id.eq(user_id)))
+                .execute(conn)?;
+
+            Ok(())
+        })
     }
 
 }

@@ -208,60 +208,56 @@ pub async fn process_sms(
     is_test: bool,
 ) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
     let start_time = std::time::Instant::now(); // Track processing time
-
     let user = match state.user_core.find_by_phone_number(&payload.from) {
-        Ok(Some(user)) => {
-            tracing::info!("Found user with ID: {} for phone number: {}", user.id, payload.from);
-            
-            // Print image information if present (for admin only)
-            if let (Some(num_media), Some(media_url), Some(content_type)) = (
-                payload.num_media.as_ref(),
-                payload.media_url0.as_ref(),
-                payload.media_content_type0.as_ref()
-            ) {
-                if user.id == 1 {
-                    tracing::debug!("Media information:");
-                    tracing::debug!("  Number of media items: {}", num_media);
-                    tracing::debug!("  Media URL: {}", media_url);
-                    tracing::debug!("  Content type: {}", content_type);
-                }
-            }
-            
-            user
-        },
+        Ok(Some(user)) => user,
         Ok(None) => {
             tracing::error!("No user found for phone number: {}", payload.from);
-                return (
-                    StatusCode::NOT_FOUND,
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    axum::Json(TwilioResponse {
-                        message: "User not found".to_string(),
-                    })
-                );
+            return (
+                StatusCode::NOT_FOUND,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                axum::Json(TwilioResponse {
+                    message: "User not found".to_string(),
+                })
+            );
         },
         Err(e) => {
             tracing::error!("Database error while finding user for phone number {}: {}", payload.from, e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    axum::Json(TwilioResponse {
-                        message: "Database error".to_string(),
-                    })
-                );
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                axum::Json(TwilioResponse {
+                    message: "Database error".to_string(),
+                })
+            );
         }
     };
+    tracing::info!("Found user with ID: {} for phone number: {}", user.id, payload.from);
+    
+    // Log media information for admin user
+    if user.id == 1 {
+        if let (Some(num_media), Some(media_url), Some(content_type)) = (
+            payload.num_media.as_ref(),
+            payload.media_url0.as_ref(),
+            payload.media_content_type0.as_ref()
+        ) {
+            tracing::debug!("Media information:");
+            tracing::debug!("  Number of media items: {}", num_media);
+            tracing::debug!("  Media URL: {}", media_url);
+            tracing::debug!("  Content type: {}", content_type);
+        }
+    }
 
     let conversation = match state.user_conversations.get_conversation(&user, payload.to).await {
         Ok(conv) => conv,
         Err(e) => {
             tracing::error!("Failed to ensure conversation exists: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    axum::Json(TwilioResponse {
-                        message: "Failed to create conversation".to_string(),
-                    })
-                );
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                axum::Json(TwilioResponse {
+                    message: "Failed to create conversation".to_string(),
+                })
+            );
         }
     };
 
@@ -274,24 +270,19 @@ pub async fn process_sms(
         }
     };
 
-    let last_msg = messages.iter().find(|msg| msg.author == "lightfriend");
 
-    // Handle confirmation logic
-    let mut redact_the_body = true;
-    if let Some(last_ai_message) = last_msg {
-        tracing::info!("last_msg found");
+    if user.confirm_send_event.is_some() {
+        // Handle confirmation logic
         let confirmation_result = crate::tool_call_utils::confirm::handle_confirmation(
             &state,
-            &user,
+            &user.clone(),
             &conversation.conversation_sid,
             &conversation.twilio_number,
+            &user.clone().confirm_send_event.unwrap(),
             &payload.body,
-            Some(last_ai_message)
         ).await;
 
-        tracing::info!("came back from handle_confirmation with should_continue as: {}", confirmation_result.should_continue);
-
-        redact_the_body = confirmation_result.redact_body;
+        tracing::info!("Came back from handle_confirmation with should_continue as: {}", confirmation_result.should_continue);
 
         if !confirmation_result.should_continue {
             if let Some(response) = confirmation_result.response {
@@ -300,12 +291,6 @@ pub async fn process_sms(
         }
     }
     
-    let auth_user = crate::handlers::auth_middleware::AuthUser {
-        user_id: user.id, 
-        is_admin: false,
-    };
-
-
     let user_info = match user.clone().info {
         Some(info) => info,
         None => "".to_string()
@@ -866,6 +851,7 @@ pub async fn process_sms(
     }
 
     tracing::debug!("is_clarifying message: {}", is_clarifying);
+    let mut redact_the_body = true;
     if is_clarifying {
         redact_the_body = false;
     }

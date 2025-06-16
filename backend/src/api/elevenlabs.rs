@@ -1441,15 +1441,39 @@ pub async fn handle_whatsapp_confirm_send(
             // Get the actual room name without the (WA) suffix
             let clean_room_name = room_name.trim_end_matches(" (WA)").to_string();
             
+            // Set the temporary variable for WhatsApp message
+            if let Err(e) = state.user_core.set_temp_variable(
+                user_id,
+                Some("whatsapp"),
+                Some(&clean_room_name),
+                None,
+                Some(&payload.message),
+                None,
+                None,
+                None
+            ) {
+                tracing::error!("Failed to set temporary variable: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": "Failed to prepare WhatsApp message",
+                        "details": e.to_string()
+                    }))
+                ));
+            }
+
             // Create confirmation message
             let confirmation_message = format!(
-                "Confirm the sending of WhatsApp message to '{}' with content: '{}'? (yes-> send, no -> discard)",
+                "Send WhatsApp to '{}' with content: '{}' (yes-> send, no -> discard) (free reply)",
                 clean_room_name,
                 payload.message
             );
 
             // Get conversation for the user
-            let conversation = match state.user_conversations.get_conversation(&user, user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))).await {
+            let conversation = match state.user_conversations.get_conversation(
+                &user, 
+                user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
+            ).await {
                 Ok(conv) => conv,
                 Err(e) => {
                     error!("Failed to get conversation: {}", e);
@@ -1467,19 +1491,19 @@ pub async fn handle_whatsapp_confirm_send(
                 &conversation.conversation_sid,
                 &conversation.twilio_number,
                 &confirmation_message,
-                false, // we should not redact the body right away since we need to extract the message content from this message
+                false, // Don't redact since we need to extract info from this message later
                 &user,
             ).await {
                 Ok(message_sid) => {
-                    // set the confirm event message flag for the user so we know to continue conversation with sms
-                    if let Err(e) = state.user_core.set_confirm_send_event(user_id, true) {
-                        error!("Failed to set confirm send event flag: {}", e);
-                        // Continue execution even if setting flag fails
+                    // Deduct credits for the confirmation message
+                    if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
+                        error!("Failed to deduct user credits: {}", e);
+                        // Continue execution even if credit deduction fails
                     }
                     
                     Ok(Json(json!({
                         "status": "success",
-                        "message": "Confirmation message sent",
+                        "message": "WhatsApp confirmation message sent",
                         "room_name": clean_room_name,
                         "message_sid": message_sid
                     })))
@@ -1550,18 +1574,6 @@ pub async fn handle_calendar_event_confirm(
         }
     };
 
-    // Format the confirmation message
-    let confirmation_message = if let Some(desc) = payload.description {
-        format!(
-            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes with description: '{}' (yes-> send, no -> discard)",
-            payload.summary, payload.start_time, payload.duration_minutes, desc
-        )
-    } else {
-        format!(
-            "Confirm creating calendar event: '{}' starting at '{}' for {} minutes (yes-> send, no -> discard)",
-            payload.summary, payload.start_time, payload.duration_minutes
-        )
-    };
 
     // Get conversation for the user
     let conversation = match state.user_conversations.get_conversation(
@@ -1580,24 +1592,58 @@ pub async fn handle_calendar_event_confirm(
         }
     };
 
+    // Format the confirmation message
+    let confirmation_message = if let Some(ref desc) = payload.description {
+        format!(
+            "Create calendar event: '{}' starting at '{}' for {} minutes with description: '{}' (yes-> send, no -> discard) (free reply)",
+            payload.summary, payload.start_time, payload.duration_minutes, desc
+        )
+    } else {
+        format!(
+            "Create calendar event: '{}' starting at '{}' for {} minutes (yes-> send, no -> discard) (free reply)",
+            payload.summary, payload.start_time, payload.duration_minutes
+        )
+    };
+
+    // Set the temporary variable for calendar event
+    if let Err(e) = state.user_core.set_temp_variable(
+        user_id,
+        Some("calendar"),
+        None,
+        Some(&payload.summary),
+        Some(&payload.description.unwrap_or_default()),
+        Some(&payload.start_time),
+        Some(&payload.duration_minutes.to_string()),
+        None
+    ) {
+        error!("Failed to set temporary variable: {}", e);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": "Failed to prepare calendar event",
+                "details": e.to_string()
+            }))
+        ));
+    }
+
     // Send the confirmation SMS
     match crate::api::twilio_utils::send_conversation_message(
         &conversation.conversation_sid,
         &conversation.twilio_number,
         &confirmation_message,
-        false, // Don't redact the body since we need to extract event details from this message
+        false, // Don't redact since we need to extract info from this message later
         &user,
     ).await {
         Ok(message_sid) => {
-            // Set the confirm event message flag for the user
-            if let Err(e) = state.user_core.set_confirm_send_event(user_id, true) {
-                error!("Failed to set confirm send event flag: {}", e);
-                // Continue execution even if setting flag fails
+            // Deduct credits for the confirmation message
+            if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
+                error!("Failed to deduct user credits: {}", e);
+                // Continue execution even if credit deduction fails
             }
             
             Ok(Json(json!({
                 "status": "success",
-                "message": "Confirmation message sent",
+                "message": "Calendar event confirmation sent",
                 "event_summary": payload.summary,
                 "message_sid": message_sid
             })))
@@ -1870,7 +1916,6 @@ pub struct EmailResponsePayload {
     pub email_id: String,
     pub response_text: String,
 }
-
 // this is not used at the moment since it didn't work and not a priority rn
 pub async fn handle_email_response_tool_call(
     State(state): State<Arc<AppState>>,
@@ -1928,21 +1973,34 @@ pub async fn handle_email_response_tool_call(
     // Fetch the email details to include in confirmation message
     match crate::handlers::imap_handlers::fetch_single_email_imap(&state, user_id, &payload.email_id).await {
         Ok(email) => {
-            let from_email = email.from_email.clone().unwrap();
             let subject = email.subject.unwrap_or_else(|| "No subject".to_string());
 
-            // admins can debug their own data
-            if user_id == 1 {
-                tracing::debug!("from_email e: {}", from_email.clone());
+            // Set the temporary variable for email response
+            if let Err(e) = state.user_core.set_temp_variable(
+                user_id,
+                Some("email"),
+                None,
+                Some(&subject),
+                Some(&payload.response_text),
+                None,
+                None,
+                Some(&payload.email_id)
+            ) {
+                tracing::error!("Failed to set temporary variable: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": "Failed to prepare email response",
+                        "details": e.to_string()
+                    }))
+                ));
             }
 
             // Create confirmation message
             let confirmation_message = format!(
-                "Confirm sending email response to '{}' regarding '{}' with content: '{}' id:({})(yes-> send, no -> discard)",
-                from_email,
-                subject,
+                "Send email response '{}' regarding '{}' (yes-> send, no -> discard) (free reply)",
                 payload.response_text,
-                payload.email_id
+                subject
             );
 
             // Get conversation for the user
@@ -1967,19 +2025,19 @@ pub async fn handle_email_response_tool_call(
                 &conversation.conversation_sid,
                 &conversation.twilio_number,
                 &confirmation_message,
-                false, // Don't redact the body since we need to extract response content from this message
+                false, // Don't redact since we need to extract info from this message later
                 &user,
             ).await {
                 Ok(message_sid) => {
-                    // Set the confirm event message flag for the user
-                    if let Err(e) = state.user_core.set_confirm_send_event(user_id, true) {
-                        error!("Failed to set confirm send event flag: {}", e);
-                        // Continue execution even if setting flag fails
+                    // Deduct credits for the confirmation message
+                    if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
+                        tracing::error!("Failed to deduct user credits: {}", e);
+                        // Continue execution even if credit deduction fails
                     }
                     
                     Ok(Json(json!({
                         "status": "success",
-                        "message": "Confirmation message sent",
+                        "message": "Email response confirmation sent",
                         "email_id": payload.email_id,
                         "message_sid": message_sid
                     })))
