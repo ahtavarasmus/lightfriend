@@ -279,6 +279,7 @@ pub async fn process_sms(
     // Handle confirmation logic
     let mut redact_the_body = true;
     if let Some(last_ai_message) = last_msg {
+        tracing::info!("last_msg found");
         let confirmation_result = crate::tool_call_utils::confirm::handle_confirmation(
             &state,
             &user,
@@ -287,6 +288,8 @@ pub async fn process_sms(
             &payload.body,
             Some(last_ai_message)
         ).await;
+
+        tracing::info!("came back from handle_confirmation with should_continue as: {}", confirmation_result.should_continue);
 
         redact_the_body = confirmation_result.redact_body;
 

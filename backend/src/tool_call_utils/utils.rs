@@ -353,11 +353,6 @@ pub fn create_clarify_tools() -> Vec<chat_completion::Tool> {
 
 // Helper function to check if a tool is accessible based on user's status
 pub fn requires_subscription(tool_name: &str, sub_tier: Option<String>, has_discount: bool) -> bool {
-    println!("\n=== Subscription Check Details ===");
-    println!("Tool name: {}", tool_name);
-    println!("Has subscription: {:#?}", sub_tier);
-    println!("Has discount: {}", has_discount);
-    
     // Tier 2 subscribers get access to everything
     if Some("tier 2".to_string()) == sub_tier || has_discount {
         println!("✅ User has tier 2 subscription - granting full access");

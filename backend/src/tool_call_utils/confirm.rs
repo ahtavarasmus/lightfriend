@@ -27,6 +27,7 @@ pub async fn handle_confirmation(
     let mut response = None;
 
     if !user.confirm_send_event {
+        tracing::info!("RETURNING FROM HANDLE_CONFIRMATION SINCE CONFIRM_SEND_EVENT WAS FALSE");
         return ConfirmationResult {
             should_continue,
             response,
@@ -191,6 +192,8 @@ pub async fn handle_confirmation(
     if let Some(captures) = Regex::new(r"Confirm sending WhatsApp message to '([^']+)' with content: '([^']+)'")
         .ok()
         .and_then(|re| re.captures(&last_ai_message.body)) {
+
+        println!("REGEX captured the confirmation message fromt the last message");
         
         let recipient = captures.get(1).map(|m| m.as_str().to_string()).unwrap_or_default();
         let message_content = captures.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
@@ -221,7 +224,7 @@ pub async fn handle_confirmation(
                         }
 
                         // Send confirmation via Twilio
-                        tracing::debug!("sending messages since user said yes");
+                        tracing::info!("SENDING messages since user said yes");
                         let confirmation_msg = format!("Message sent successfully to {}", recipient);
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                             conversation_sid,

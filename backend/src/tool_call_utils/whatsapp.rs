@@ -2,6 +2,7 @@ use crate::AppState;
 use std::sync::Arc;
 use serde::Deserialize;
 use axum::Json;
+
 pub fn get_send_whatsapp_message_tool() -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
     use std::collections::HashMap;
@@ -174,6 +175,8 @@ pub async fn handle_send_whatsapp_message(
 ) -> Result<(axum::http::StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<crate::api::twilio_sms::TwilioResponse>), Box<dyn std::error::Error>> {
     let args: WhatsAppSendArgs = serde_json::from_str(args)?;
 
+    tracing::info!("IN HANDLE_SEND_WHATSAPP_MESSAGE");
+
     // First search for the chat room
     match crate::utils::whatsapp_utils::search_whatsapp_rooms(
         &state,
@@ -207,7 +210,7 @@ pub async fn handle_send_whatsapp_message(
 
             // Set the confirmation flag
             if let Err(e) = state.user_repository.set_confirm_send_event(user_id, true) {
-                eprintln!("Failed to set confirm_send_event flag: {}", e);
+                tracing::error!("Failed to set confirm_send_event flag: {}", e);
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     conversation_sid,
                     twilio_number,
@@ -215,7 +218,7 @@ pub async fn handle_send_whatsapp_message(
                     true,
                     user,
                 ).await {
-                    eprintln!("Failed to send error message: {}", e);
+                    tracing::error!("Failed to send error message: {}", e);
                 }
                 return Ok((
                     axum::http::StatusCode::OK,
@@ -225,6 +228,8 @@ pub async fn handle_send_whatsapp_message(
                     })
                 ));
             }
+
+            tracing::info!("JUST SET successfully the confirm send event flag to true for user");
 
             // Format the confirmation message with the found contact name
             let confirmation_msg = format!(
@@ -243,7 +248,7 @@ pub async fn handle_send_whatsapp_message(
                 Ok(_) => {
                     // Deduct credits for the confirmation message
                     if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
-                        eprintln!("Failed to deduct user credits: {}", e);
+                        tracing::error!("Failed to deduct user credits: {}", e);
                     }
                     Ok((
                         axum::http::StatusCode::OK,
