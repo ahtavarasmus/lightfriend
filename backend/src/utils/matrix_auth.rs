@@ -644,8 +644,20 @@ pub async fn get_cached_client(
             if client.logged_in() {
                 // Quick validation - try to get user ID
                 if let Some(_user_id) = client.user_id() {
-                    tracing::debug!("Using cached Matrix client for user {}", user_id);
-                    return Ok(client.clone());
+                    // Additional validation - try a quick sync to ensure the client is still active
+                    match client.sync_once(matrix_sdk::config::SyncSettings::new().timeout(std::time::Duration::from_secs(5))).await {
+                        Ok(_) => {
+                            tracing::debug!("Using cached Matrix client for user {} - sync successful", user_id);
+                            return Ok(client.clone());
+                        }
+                        Err(e) => {
+                            tracing::debug!("Cached client for user {} failed sync check: {}", user_id, e);
+                            // Drop the lock before creating new client
+                            drop(cache);
+                            // Clear the invalid client from cache
+                            clear_cached_client(user_id, client_cache).await;
+                        }
+                    }
                 }
             }
             tracing::debug!("Cached client for user {} is invalid, will create new one", user_id);

@@ -947,7 +947,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         false,
                                         &state_clone.matrix_clients
                                     ).await {
-                                        Ok(client) => {
+                                        Ok(mut client) => {
                                             debug!("Starting Matrix sync for user {}", user_id);
                                             
                                             // Always add WhatsApp message handler - it will check proactive status internally
@@ -977,18 +977,33 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                 .full_state(true);
 
                                             tracing::debug!("Starting continuous sync for user {}", user_id);
-                                            match client.sync(sync_settings.clone()).await {
-                                                Ok(_) => {
-                                                    tracing::debug!("Sync completed normally for user {}", user_id);
-                                                },
-                                                Err(e) => {
-                                                    error!("Matrix sync error for user {}: {}", user_id, e);
-                                                    
-                                                    // Try to recover the client
-                                                    if let Ok(new_client) = crate::utils::matrix_auth::get_client(user_id, &state_clone, true).await {
-                                                        tracing::debug!("Successfully recovered client for user {}", user_id);
-                                                        if let Err(e) = new_client.sync(sync_settings).await {
-                                                            error!("Recovered client sync failed for user {}: {}", user_id, e);
+                                            
+                                            // Continuous sync with automatic recovery
+                                            loop {
+                                                match client.sync(sync_settings.clone()).await {
+                                                    Ok(_) => {
+                                                        tracing::debug!("Sync completed normally for user {}", user_id);
+                                                        // Small delay before restarting sync
+                                                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                                                    },
+                                                    Err(e) => {
+                                                        error!("Matrix sync error for user {}: {}", user_id, e);
+                                                        
+                                                        // Clear the cached client
+                                                        crate::utils::matrix_auth::clear_cached_client(user_id, &state_clone.matrix_clients).await;
+                                                        
+                                                        // Try to recover with a new client
+                                                        match crate::utils::matrix_auth::get_client(user_id, &state_clone, true).await {
+                                                            Ok(new_client) => {
+                                                                tracing::debug!("Successfully recovered client for user {}", user_id);
+                                                                // Update our client reference
+                                                                client = new_client;
+                                                            },
+                                                            Err(e) => {
+                                                                error!("Failed to recover client for user {}: {}", user_id, e);
+                                                                // Wait before retry
+                                                                tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                                                            }
                                                         }
                                                     }
                                                 }
