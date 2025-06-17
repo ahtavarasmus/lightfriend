@@ -75,8 +75,6 @@ struct UserCreds {
     #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
     encrypted_matrix_access_token: Option<String>,
     #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
-    matrix_device_id: Option<String>,
-    #[diesel(sql_type = diesel::sql_types::Nullable<diesel::sql_types::Text>)]
     encrypted_matrix_secret_storage_recovery_key: Option<String>,
 }
 
@@ -103,7 +101,7 @@ fn run_migration(conn: &mut SqliteConnection) -> Result<(), Box<dyn std::error::
     let mc = magic_crypt::new_magic_crypt!(&encryption_key, 256);
 
     // Migrate Matrix credentials
-    let users = diesel::sql_query("SELECT id, encrypted_matrix_password, encrypted_matrix_access_token, matrix_device_id, encrypted_matrix_secret_storage_recovery_key FROM users WHERE encrypted_matrix_password IS NOT NULL OR encrypted_matrix_access_token IS NOT NULL")
+    let users = diesel::sql_query("SELECT id, encrypted_matrix_password, encrypted_matrix_access_token, encrypted_matrix_secret_storage_recovery_key FROM users WHERE encrypted_matrix_password IS NOT NULL OR encrypted_matrix_access_token IS NOT NULL")
         .load::<UserCreds>(conn)?;
 
     for user in users {
@@ -125,14 +123,6 @@ fn run_migration(conn: &mut SqliteConnection) -> Result<(), Box<dyn std::error::
                 .execute(conn)?;
         }
 
-        if let Some(device) = user.matrix_device_id {
-            let decrypted = mc.decrypt_base64_to_string(&device)?;
-            let encrypted = encrypt(&decrypted)?;
-            diesel::sql_query("UPDATE users SET matrix_device_id = ? WHERE id = ?")
-                .bind::<diesel::sql_types::Text, _>(&encrypted)
-                .bind::<diesel::sql_types::Integer, _>(user.id)
-                .execute(conn)?;
-        }
 
         if let Some(key) = user.encrypted_matrix_secret_storage_recovery_key {
             let decrypted = mc.decrypt_base64_to_string(&key)?;
@@ -162,30 +152,6 @@ fn run_migration(conn: &mut SqliteConnection) -> Result<(), Box<dyn std::error::
             let decrypted = mc.decrypt_base64_to_string(&refresh_token)?;
             let encrypted = encrypt(&decrypted)?;
             diesel::sql_query("UPDATE google_calendar SET encrypted_refresh_token = ? WHERE user_id = ?")
-                .bind::<diesel::sql_types::Text, _>(&encrypted)
-                .bind::<diesel::sql_types::Integer, _>(token.user_id)
-                .execute(conn)?;
-        }
-    }
-
-    // Migrate Gmail tokens
-    let gmail_tokens = diesel::sql_query("SELECT user_id, encrypted_access_token, encrypted_refresh_token FROM gmail WHERE encrypted_access_token IS NOT NULL OR encrypted_refresh_token IS NOT NULL")
-        .load::<GoogleTokens>(conn)?;
-
-    for token in gmail_tokens {
-        if let Some(access_token) = token.encrypted_access_token {
-            let decrypted = mc.decrypt_base64_to_string(&access_token)?;
-            let encrypted = encrypt(&decrypted)?;
-            diesel::sql_query("UPDATE gmail SET encrypted_access_token = ? WHERE user_id = ?")
-                .bind::<diesel::sql_types::Text, _>(&encrypted)
-                .bind::<diesel::sql_types::Integer, _>(token.user_id)
-                .execute(conn)?;
-        }
-
-        if let Some(refresh_token) = token.encrypted_refresh_token {
-            let decrypted = mc.decrypt_base64_to_string(&refresh_token)?;
-            let encrypted = encrypt(&decrypted)?;
-            diesel::sql_query("UPDATE gmail SET encrypted_refresh_token = ? WHERE user_id = ?")
                 .bind::<diesel::sql_types::Text, _>(&encrypted)
                 .bind::<diesel::sql_types::Integer, _>(token.user_id)
                 .execute(conn)?;
@@ -235,7 +201,7 @@ fn run_migration(conn: &mut SqliteConnection) -> Result<(), Box<dyn std::error::
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
 
-    let manager = ConnectionManager::<SqliteConnection>::new("database.db");
+    let manager = ConnectionManager::<SqliteConnection>::new("/Users/ahtavarasmus/Developer/sites/lightfriend/backend/database.db");
     let pool = r2d2::Pool::builder()
         .build(manager)
         .expect("Failed to create pool");
