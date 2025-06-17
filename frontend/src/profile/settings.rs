@@ -182,6 +182,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     credits_left: (*user_profile).credits_left,
                                     discount: (*user_profile).discount,
                                     notify: (*user_profile).notify,
+                                    sub_country: (*user_profile).sub_country.clone(),
                                 };
 
                                 // Notify parent component

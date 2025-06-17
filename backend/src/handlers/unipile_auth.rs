@@ -172,7 +172,7 @@ pub async fn handle_connection_webhook(
     ))?;
 
     // Verify the user exists
-    let user = state.user_repository.find_by_id(user_id).map_err(|e| (
+    let user = state.user_core.find_by_id(user_id).map_err(|e| (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": format!("Database error: {}", e)}))
     ))?.ok_or_else(|| (

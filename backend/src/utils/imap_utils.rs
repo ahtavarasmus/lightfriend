@@ -308,34 +308,49 @@ pub async fn judge_email_importance(
         match client.chat_completion(req.clone()).await {
             Ok(response) => {
                 info!("Received LLM response: {:?}", response);
-                if let Some(tool_calls) = response.choices[0].message.tool_calls.as_ref() {
+                if let Some(tool_calls) = response.choices.first().and_then(|choice| choice.message.tool_calls.as_ref()) {
                     for tool_call in tool_calls {
-                        if let Some(name) = &tool_call.function.name {
-                            if name == "evaluate_email" {
-                                if let Some(arguments) = &tool_call.function.arguments {
-                                    info!("Processing tool call arguments");
-                                    match serde_json::from_str::<serde_json::Value>(arguments) {
-                                        Ok(evaluation) => {
-                                            if evaluation["should_notify"].as_bool().unwrap_or(false) {
-                                                let mut eval_with_timestamp = evaluation.clone();
-                                                eval_with_timestamp["email_timestamp"] = serde_json::json!(email_timestamp as i32);
-                                                important_emails.push((email.clone(), eval_with_timestamp));
+                        if tool_call.function.name.as_deref() == Some("evaluate_email") {
+                            if let Some(arguments) = &tool_call.function.arguments {
+                                info!("Processing tool call arguments");
+                                match serde_json::from_str::<serde_json::Value>(arguments) {
+                                    Ok(mut evaluation) => {
+                                        if evaluation["should_notify"].as_bool().unwrap_or(false) {
+                                            // Add email timestamp to evaluation
+                                            evaluation["email_timestamp"] = serde_json::json!(email_timestamp as i32);
+                                            
+                                            // Ensure all required fields are present with defaults if needed
+                                            if evaluation.get("score").is_none() {
+                                                evaluation["score"] = serde_json::json!(10); // Default score
                                             }
+                                            if evaluation.get("matched_waiting_check").is_none() {
+                                                evaluation["matched_waiting_check"] = serde_json::json!(null);
+                                            }
+                                            if evaluation.get("reason").is_none() {
+                                                evaluation["reason"] = serde_json::json!("Email deemed important by AI evaluation");
+                                            }
+                                            
+                                            important_emails.push((email.clone(), evaluation));
                                         }
-                                        Err(e) => {
-                                            error!("Failed to parse tool call arguments: {}", e);
-                                            error!("Raw arguments that failed to parse: {}", arguments);
-                                        }
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to parse tool call arguments: {}", e);
+                                        error!("Raw arguments that failed to parse: {}", arguments);
+                                        // Continue processing other tool calls
+                                        continue;
                                     }
                                 }
                             }
                         }
                     }
+                } else {
+                    error!("No valid tool calls found in LLM response");
                 }
             }
             Err(e) => {
                 error!("Failed to get LLM response: {}", e);
-                error!("Request details: {:?}", req);
+                // Continue with next email
+                continue;
             }
         }
     }

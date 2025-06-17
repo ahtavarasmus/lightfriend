@@ -8,6 +8,7 @@ use crate::Route;
 use yew_router::components::Link;
 use crate::config;
 use web_sys::{window, HtmlInputElement};
+use web_sys::js_sys;
 use gloo_net::http::Request;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -240,31 +241,143 @@ pub fn Home() -> Html {
                         <div class="credits-info">
                             {
                                 if let Some(profile) = (*profile_data).as_ref() {
-                                    html! {
-                                        <div class="credits-grid">
-                                            if let Some(ref tier) = profile.sub_tier {
-                                                if profile.credits_left > 0.0 {
-                                                    <div class="credit-item" tabindex="0">
-                                                        <span class="credit-label">{"Messages"}</span>
-                                                        <span class="credit-value">{profile.credits_left as i32}</span>
-                                                        <div class="credit-tooltip">
-                                                            {"Part of your fixed monthly quota. Used for both messages and voice calls. Resets monthly with your subscription."}
-                                                        </div>
+                                    if profile.sub_tier.is_some() && profile.sub_country.is_none() {
+                                        html! {
+                                            <div class="migration-info">
+                                                <button 
+                                                    class="migrate-small-button"
+                                                    onclick={{
+                                                        let user_id = profile.id;
+                                                        Callback::from(move |_| {
+                                                            if let Some(token) = window()
+                                                                .and_then(|w| w.local_storage().ok())
+                                                                .flatten()
+                                                                .and_then(|storage| storage.get_item("token").ok())
+                                                                .flatten()
+                                                            {
+                                                                spawn_local(async move {
+                                                                    let _ = Request::post(&format!("{}/api/profile/migrate-to-daily/{}", config::get_backend_url(), user_id))
+                                                                        .header("Authorization", &format!("Bearer {}", token))
+                                                                        .send()
+                                                                        .await;
+                                                                    if let Some(window) = window() {
+                                                                        let _ = window.location().reload();
+                                                                    }
+                                                                });
+                                                            }
+                                                        })
+                                                    }}
+                                                >
+                                                    {"Switch to Daily Reset Plan"}
+                                                    <div class="migrate-tooltip">
+                                                        {"Your subscription will automatically upgrade to our new daily reset plan on your next renewal. You can switch now to get the benefits immediately at no extra cost. The new plan includes daily message quotas that reset every 24 hours, giving you more messages overall and a peace of mind that you will always start with fresh credits to the day."}
                                                     </div>
-                                                    <div class="credit-item" tabindex="0">
-                                                        <span class="credit-label">{"Voice Time"}</span>
-                                                <span class="credit-value">
-                                                    {
-                                                        if profile.credits_left as i32 >= 1 {
-                                                            format!("{}m {}s", profile.credits_left as i32, ((profile.credits_left % 1.0) * 60.0) as i32)
-                                                        } else {
-                                                            format!("{}s", (profile.credits_left * 60.0) as i32)
+                                                </button>
+                                                <style>
+                                                    {r#"
+                                                    .migration-info {
+                                                        margin-bottom: 1rem;
+                                                    }
+                                                    
+                                                    .migrate-small-button {
+                                                        background: rgba(30, 144, 255, 0.1);
+                                                        color: green;
+                                                        border: 1px solid rgba(30, 144, 255, 0.2);
+                                                        padding: 0.5rem 1rem;
+                                                        border-radius: 6px;
+                                                        font-size: 0.9rem;
+                                                        cursor: pointer;
+                                                        transition: all 0.3s ease;
+                                                        position: relative;
+                                                    }
+
+                                                    .migrate-small-button:hover {
+                                                        background: rgba(30, 144, 255, 0.15);
+                                                        border-color: rgba(30, 144, 255, 0.3);
+                                                    }
+
+                                                    .migrate-tooltip {
+                                                        position: absolute;
+                                                        bottom: calc(100% + 10px);
+                                                        left: 50%;
+                                                        transform: translateX(-50%);
+                                                        background: rgba(0, 0, 0, 0.9);
+                                                        color: #fff;
+                                                        padding: 1rem;
+                                                        border-radius: 8px;
+                                                        font-size: 0.85rem;
+                                                        width: max-content;
+                                                        max-width: 300px;
+                                                        z-index: 1000;
+                                                        opacity: 0;
+                                                        visibility: hidden;
+                                                        transition: all 0.3s ease;
+                                                        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+                                                        border: 1px solid rgba(30, 144, 255, 0.2);
+                                                        text-align: center;
+                                                        line-height: 1.4;
+                                                    }
+
+                                                    .migrate-tooltip::after {
+                                                        content: '';
+                                                        position: absolute;
+                                                        top: 100%;
+                                                        left: 50%;
+                                                        transform: translateX(-50%);
+                                                        border-width: 8px;
+                                                        border-style: solid;
+                                                        border-color: rgba(0, 0, 0, 0.9) transparent transparent transparent;
+                                                    }
+
+                                                    .migrate-small-button:hover .migrate-tooltip {
+                                                        opacity: 1;
+                                                        visibility: visible;
+                                                    }
+
+                                                    @media (max-width: 768px) {
+                                                        .migrate-tooltip {
+                                                            position: fixed;
+                                                            bottom: 20px;
+                                                            left: 50%;
+                                                            transform: translateX(-50%);
+                                                            width: 90%;
+                                                            max-width: 300px;
+                                                        }
+
+                                                        .migrate-tooltip::after {
+                                                            display: none;
                                                         }
                                                     }
-                                                </span>
+                                                    "#}
+                                                </style>
+                                            </div>
+                                        }
+                                    } else {
+                                        html! {
+                                            <div class="credits-grid">
+                                                if let Some(ref tier) = profile.sub_tier {
+                                                if profile.credits_left > 0.0 {
+                                                    <div class="credit-item" tabindex="0">
+                                                        <span class="credit-label">{"Today's Quota"}</span>
+                                                        <span class="credit-value">{profile.credits_left as i32}{" messages"}</span>
+                                                        <span class="credit-value">
+                                                            {
+                                                                if profile.credits_left as i32 >= 1 {
+                                                                    format!("{}m {}s", profile.credits_left as i32, ((profile.credits_left % 1.0) * 60.0) as i32)
+                                                                } else {
+                                                                    format!("{}s", (profile.credits_left * 60.0) as i32)
+                                                                }
+                                                            }
+                                                        </span>
                                                         <div class="credit-tooltip">
-                                                            {"Calculated from your monthly message quota (1 credit = 1 minute of voice time). Shared with message credits and resets monthly."}
+                                                            {"Your daily quota for messages and voice calls. Each credit can be used as either one message or one minute of voice time. Resets at midnight UTC."}
                                                         </div>
+                                                        <span class="reset-timer" id="reset-timer">
+                                                        {
+                                                            format!("Resets in {}h {}m", 23 - js_sys::Date::new_0().get_utc_hours() as i32, 59 - js_sys::Date::new_0().get_utc_minutes() as i32)
+                                                        }
+                                                        </span>
+
                                                     </div>
                                                 }
                                                 if tier == "tier 2" {
@@ -294,9 +407,9 @@ pub fn Home() -> Html {
                                                         {"Additional credits you can purchase and use when monthly quota is depleted. Can be bought in advance."}
                                                     </div>
                                                 </div>
-                                            }
-
-                                        </div>
+                                                }
+                                            </div>
+                                        }
                                     }
                                 } else {
                                     html! {}
@@ -574,8 +687,10 @@ pub fn Home() -> Html {
                                                                     transform: translateY(-2px);
                                                                     box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
                                                                 }
-                                                                "#}
-                                                            </style>
+
+
+                                                            "#}
+                                                        </style>
                                                         </div>
                                                     }
                                                 }
@@ -1997,6 +2112,19 @@ pub fn Home() -> Html {
                         color: #7EB2FF;
                         font-size: 1.1rem;
                         font-weight: 500;
+                    }
+
+                    .credit-voice-time {
+                        color: #999;
+                        font-size: 0.85rem;
+                        margin-top: -0.2rem;
+                    }
+
+                    .reset-timer {
+                        display: block;
+                        color: #999;
+                        font-size: 0.8rem;
+                        margin-top: 0.3rem;
                     }
 
                     .credit-warning {

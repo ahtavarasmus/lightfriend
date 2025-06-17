@@ -69,38 +69,6 @@ fn faq_item(props: &FaqItemProps) -> Html {
             is_open.set(!*is_open);
         })
     };
-    /*
-
-    let copy_link = {
-        let id = props.id.clone();
-        Callback::from(move |e: MouseEvent| {
-            e.stop_propagation();
-                if let Some(window) = web_sys::window() {
-                    if let Ok(location) = window.location().href() {
-                        let base_url = location.split('#').next().unwrap_or(&location);
-                        let full_url = format!("{}#{}", base_url, id);
-                        
-                        // Copy to clipboard using the correct web-sys API
-                        if let Some(clipboard) = window.navigator().clipboard() {
-                            let _ = clipboard.write_text(&full_url);
-                            
-                            // Optional: Show a temporary tooltip or notification
-                            if let Some(element) = window.document().and_then(|doc| doc.get_element_by_id(&id)) {
-                                let _ = element.set_attribute("title", "Link copied!");
-                                // Reset title after 2 seconds
-                                let element_weak = web_sys::Element::from(element);
-                                let timeout = gloo_timers::callback::Timeout::new(2_000, move || {
-                                    let _ = element_weak.set_attribute("title", "Copy link to this question");
-                                });
-                                timeout.forget();
-                            }
-                        }
-                    }
-                }
-        })
-    };
-    */
-
     html! {
         <div id={props.id.clone()} class={classes!("faq-item", if *is_open { "open" } else { "" })}>
             <div class="faq-question-container">
@@ -188,11 +156,79 @@ pub fn faq() -> Html {
             <div class="faq-background"></div>
             <section class="faq-hero">
                 <h1>{"Frequently Asked Questions"}</h1>
-                <p>{"Everything you need to know about going light with LightFriend"}</p>
+                <p>{"Everything you need to know about going light with lightfriend"}</p>
             </section>
 
             <section class="faq-section">
 
+                <h2>{"Getting Started"}</h2>
+
+                <FaqItem 
+                    question="What problem does lightfriend solve?"
+                    id="lightfriend-solution"
+                >
+                    <div class="phone-comparison">
+                        <div class="comparison-column">
+                            <h3>{"Phones with App Store"}</h3>
+                            <div class="pros-cons-container">
+                                <div class="pros">
+                                    <h4>{"Pros"}</h4>
+                                    <ul>
+                                        <li>{"Messaging apps"}</li>
+                                        <li>{"Calendar"}</li>
+                                        <li>{"Email"}</li>
+                                    </ul>
+                                </div>
+                                <div class="cons">
+                                    <h4>{"Cons"}</h4>
+                                    <ul>
+                                        <li>{"Highly addictive"}</li>
+                                        <li>{"Mental health impact"}</li>
+                                        <li>{"Time waste"}</li>
+                                        <li>{"Constant distractions"}</li>
+                                        <li>{"Sleep disruption"}</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="comparison-column">
+                            <h3>{"Phones without App Store"}</h3>
+                            <div class="pros-cons-container">
+                                <div class="pros">
+                                    <h4>{"Pros"}</h4>
+                                    <ul>
+                                        <li>{"No addiction"}</li>
+                                        <li>{"More presence"}</li>
+                                        <li>{"Better sleep"}</li>
+                                    </ul>
+                                </div>
+                                <div class="cons">
+                                    <h4>{"Cons"}</h4>
+                                    <ul>
+                                        <li>{"No messaging apps"}</li>
+                                        <li>{"No email"}</li>
+                                        <li>{"No Qr code reader"}</li>
+                                        <li>{"Usually no calendar"}</li>
+                                        <li>{"Can feel disconnected"}</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="solution-column">
+                            <h3>{"Phone without App Store + LightFriend"}</h3>
+                            <div class="solution-benefits">
+                                <ul>
+                                    <li>{"✨ Access essential communication channels through voice and text"}</li>
+                                    <li>{"✨ Internet search without scrolling"}</li>
+                                    <li>{"✨ Better focus and mental health"}</li>
+                                    <li>{"✨ Stay connected on your terms"}</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </FaqItem>
 
                 <FaqItem 
                     question="Can I try the service before signing up?"
@@ -271,7 +307,8 @@ pub fn faq() -> Html {
                 </FaqItem>
 
                 <h2>{"Why Go Light?"}</h2>
-                
+
+
                 <FaqItem 
                     question="Why choose a dumbphone?"
                     id="why-dumbphone"
@@ -312,6 +349,31 @@ pub fn faq() -> Html {
                 </FaqItem>
 
                 <h2>{"Practical Solutions"}</h2>
+
+                <FaqItem 
+                    question="Where can I buy a dumbphone?"
+                    id="buy-dumbphone"
+                >
+                    <h3>{"Start with what you have"}</h3>
+                    <p>
+                        {"Lightfriend service is phone-agnostic - it works with any basic phone capable of calling and texting. We strongly recommend starting with whatever simple phone you already have, even if it's an old flip phone in your drawer."}
+                    </p>
+                    
+                    <h3>{"Ready to commit?"}</h3>
+                    <p>
+                        {"If you've tried the minimalist phone life and want to continue, "}<a href="https://dumbphones.org">{"dumbphones.org"}</a>{" is an excellent resource for comparing different models based on your needs."}
+                    </p>
+                    
+                    <h3>{"The Light Phone Option"}</h3>
+                    <p>
+                        {"While not necessary for using LightFriend, the "}<a href="https://www.thelightphone.com">{"Light Phone 2 and 3"}</a>{" are popular choices among our users. They offer features like:"}
+                    </p>
+                    <ul>
+                        <li>{"Hotspot capability for sharing internet to your computer"}</li>
+                        <li>{"Built-in navigation maps"}</li>
+                        <li>{"Camera (Light Phone 3 only) for QR codes and translations"}</li>
+                    </ul>
+                </FaqItem>
 
                 <FaqItem 
                     question="How do I handle 2FA authentication?"
@@ -535,7 +597,7 @@ pub fn faq() -> Html {
                 }
 
                 .faq-item.open .faq-answer {
-                    max-height: 2000px;
+                    max-height: 3000px;
                     padding: 0 1.5rem 1.5rem;
                 }
 
@@ -808,6 +870,115 @@ pub fn faq() -> Html {
                 .demo-question:hover {
                     background: rgba(30, 144, 255, 0.2);
                     border-color: rgba(30, 144, 255, 0.5);
+                }
+
+                /* Phone Comparison Styling */
+                .phone-comparison {
+                    display: grid;
+                    grid-template-columns: 1fr;
+                    gap: 2rem;
+                    margin: 2rem 0;
+                    width: 100%;
+                }
+
+                .comparison-column {
+                    background: rgba(0, 0, 0, 0.3);
+                    border-radius: 12px;
+                    padding: 1.5rem;
+                    border: 1px solid rgba(30, 144, 255, 0.2);
+                }
+
+                .comparison-column h3 {
+                    text-align: center;
+                    margin-bottom: 1.5rem;
+                    color: #fff;
+                }
+
+                .pros-cons-container {
+                    display: grid;
+                    gap: 1.5rem;
+                }
+
+                .pros, .cons {
+                    padding: 1rem;
+                    border-radius: 8px;
+                }
+
+                .pros h4 {
+                    color: #4CAF50;
+                    margin-bottom: 0.5rem;
+                }
+
+                .cons h4 {
+                    color: #f44336;
+                    margin-bottom: 0.5rem;
+                }
+
+                .pros ul, .cons ul {
+                    list-style: none;
+                    padding: 0;
+                    margin: 0;
+                }
+
+                .pros li, .cons li {
+                    padding: 0.5rem 0;
+                    color: #999;
+                    position: relative;
+                    padding-left: 1.5rem;
+                }
+
+                .pros li::before {
+                    content: '✓';
+                    color: #4CAF50;
+                    position: absolute;
+                    left: 0;
+                }
+
+                .cons li::before {
+                    content: '×';
+                    color: #f44336;
+                    position: absolute;
+                    left: 0;
+                }
+
+                .solution-column {
+                    background: linear-gradient(145deg, rgba(30, 144, 255, 0.1), rgba(30, 144, 255, 0.2));
+                    border-radius: 12px;
+                    padding: 1.5rem;
+                    border: 1px solid rgba(30, 144, 255, 0.3);
+                    justify-self: center;
+                    width: 100%;
+                    max-width: 600px;
+                }
+
+                .solution-column h3 {
+                    text-align: center;
+                    margin-bottom: 1.5rem;
+                    color: #7EB2FF;
+                }
+
+                .solution-benefits ul {
+                    list-style: none !important;
+                    padding: 0;
+                    margin: 0;
+                }
+
+                .solution-benefits li {
+                    padding: 0.75rem 0;
+                    list-style: none !important;
+                    color: #fff;
+                    text-align: left;
+                }
+
+                @media (min-width: 768px) {
+                    .phone-comparison {
+                        grid-template-columns: 1fr 1fr;
+                    }
+
+                    .solution-column {
+                        grid-column: 1 / -1;
+                        margin-top: 1rem;
+                    }
                 }
 
                 @media (max-width: 768px) {

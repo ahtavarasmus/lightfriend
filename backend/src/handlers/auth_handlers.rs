@@ -54,18 +54,28 @@ pub async fn get_users(
     _auth_user: AuthUser,
 ) -> Result<Json<Vec<UserResponse>>, (StatusCode, Json<serde_json::Value>)> {
     println!("Attempting to get all users");
-    let users_list = state.user_repository.get_all_users().map_err(|e| {
-        println!("Database error while fetching users: {}", e);
+    let users_list = state.user_core.get_all_users().map_err(|e| {
+        tracing::error!("Database error while fetching users: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error")}))
+            Json(json!({"error": "Database error"}))
         )
     })?;
     
     println!("Converting users to response format");
-    let users_response: Vec<UserResponse> = users_list
-        .into_iter()
-        .map(|user| UserResponse {
+    let mut users_response = Vec::with_capacity(users_list.len());
+    
+    for user in users_list {
+        // Get user settings, providing defaults if not found
+        let settings = state.user_core.get_user_settings(user.id).map_err(|e| {
+            tracing::error!("Database error while fetching user settings: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Database error"}))
+            )
+        })?;
+
+        users_response.push(UserResponse {
             id: user.id,
             email: user.email,
             phone_number: user.phone_number,
@@ -73,15 +83,15 @@ pub async fn get_users(
             time_to_live: user.time_to_live,
             verified: user.verified,
             credits: user.credits,
-            notify: user.notify,
+            notify: settings.notify,
             preferred_number: user.preferred_number,
             sub_tier: user.sub_tier,
             msgs_left: user.msgs_left,
             credits_left: user.credits_left,
             discount: user.discount,
             discount_tier: user.discount_tier,
-        })
-        .collect();
+        });
+    }
 
     println!("Successfully retrieved {} users", users_response.len());
     Ok(Json(users_response))
@@ -114,7 +124,7 @@ pub async fn login(
     }
     
 
-    let user = match state.user_repository.find_by_email(&login_req.email) {
+    let user = match state.user_core.find_by_email(&login_req.email) {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((
@@ -245,7 +255,7 @@ pub async fn request_password_reset(
         ));
     }
     // Find user by email
-    let user = match state.user_repository.find_by_email(&reset_req.email) {
+    let user = match state.user_core.find_by_email(&reset_req.email) {
         Ok(Some(user)) => user,
         Ok(None) => {
             return Err((
@@ -389,7 +399,7 @@ pub async fn verify_password_reset(
         })?;
 
     // Update password in database
-    if let Err(e) = state.user_repository.update_password(&verify_req.email, &password_hash) {
+    if let Err(e) = state.user_core.update_password(&verify_req.email, &password_hash) {
         println!("Failed to update password: {}", e);
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -430,7 +440,7 @@ pub async fn register(
 
     // Check if email exists
     println!("Checking if email exists...");
-    if state.user_repository.email_exists(&reg_req.email).map_err(|e| {
+    if state.user_core.email_exists(&reg_req.email).map_err(|e| {
         println!("Database error while checking email: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR, 
@@ -462,7 +472,7 @@ pub async fn register(
     }
     // Check if phone number exists
     println!("Checking if phone number exists...");
-    if state.user_repository.phone_number_exists(&reg_req.phone_number).map_err(|e| {
+    if state.user_core.phone_number_exists(&reg_req.phone_number).map_err(|e| {
         println!("Database error while checking phone number: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR, 
@@ -505,13 +515,12 @@ pub async fn register(
         password_hash,
         phone_number: reg_r.phone_number,
         time_to_live: five_minutes_from_now,
-        notify: true,
         verified: false,
         credits: 0.00,
         charge_when_under: false,
     };
 
-    state.user_repository.create_user(new_user).map_err(|e| {
+    state.user_core.create_user(new_user).map_err(|e| {
         println!("User creation failed: {}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -522,7 +531,7 @@ pub async fn register(
     println!("User registered successfully, setting preferred number");
     
     // Get the newly created user to get their ID
-    let user = state.user_repository.find_by_email(&reg_req.email)
+    let user = state.user_core.find_by_email(&reg_req.email)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to retrieve user")}))
@@ -533,7 +542,7 @@ pub async fn register(
         ))?;
 
     // Set preferred number
-    state.user_repository.set_preferred_number_to_default(user.id, &reg_req.phone_number)
+    state.user_core.set_preferred_number_to_default(user.id, &reg_req.phone_number)
         .map_err(|e| {
             println!("Failed to set preferred number: {}", e);
             (
@@ -543,7 +552,7 @@ pub async fn register(
         })?;
 
     println!("Preferred number set successfully, generating tokens");
-    let user = state.user_repository.find_by_email(&reg_req.email)
+    let user = state.user_core.find_by_email(&reg_req.email)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to retrieve user")}))

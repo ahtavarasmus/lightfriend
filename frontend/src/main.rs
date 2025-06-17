@@ -43,6 +43,13 @@ mod connections {
     pub mod telegram;
     pub mod tasks;
 }
+
+/*
+mod components {
+    pub mod idea_widget;
+}
+*/
+
 mod auth {
     pub mod connect;
     pub mod verify;
@@ -70,6 +77,9 @@ use auth::{
 
 use profile::profile::Billing;
 use admin::dashboard::AdminDashboard;
+/*
+use crate::components::idea_widget::IdeaWidget;
+*/
 
 
 
@@ -362,11 +372,16 @@ fn App() -> Html {
 
 
     html! {
-        <BrowserRouter>
-            <Nav logged_in={*logged_in} on_logout={handle_logout} />
-            <Switch<Route> render={switch} />
-        </BrowserRouter>
-        }
+        <>
+            <BrowserRouter>
+                <Nav logged_in={*logged_in} on_logout={handle_logout} />
+                <Switch<Route> render={switch} />
+            </BrowserRouter>
+            /*
+            <IdeaWidget />
+            */
+        </>
+    }
 }
 
 

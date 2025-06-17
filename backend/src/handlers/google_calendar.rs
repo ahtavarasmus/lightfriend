@@ -9,7 +9,8 @@ use serde_json::json;
 use serde::{Deserialize, Serialize};
 use oauth2::TokenResponse;
 use reqwest::header::{AUTHORIZATION, ACCEPT, CONTENT_TYPE};
-use chrono::{DateTime, Utc, Duration};
+use chrono::{DateTime, Utc, Duration, TimeZone};
+use chrono_tz::Tz;
 
 use crate::AppState;
 
@@ -415,6 +416,25 @@ pub async fn handle_calendar_fetching(
     start: &str,
     end: &str,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Get user's timezone from settings
+    let user_timezone = match state.user_core.get_user_settings(user_id) {
+        Ok(settings) => {
+            match settings.timezone {
+                Some(tz) => match tz.parse::<Tz>() {
+                    Ok(parsed_tz) => Some(parsed_tz),
+                    Err(_) => {
+                        tracing::warn!("Invalid timezone format for user {}: {}", user_id, tz);
+                        None
+                    }
+                },
+                None => None
+            }
+        },
+        Err(e) => {
+            tracing::error!("Failed to get user settings: {}", e);
+            None
+        }
+    };
     tracing::debug!("Starting calendar tool call for user: {}", user_id);
     
     // Parse start and end times
@@ -498,26 +518,45 @@ pub async fn handle_calendar_fetching(
             let formatted_events: Vec<serde_json::Value> = events.into_iter()
                 .map(|event| {
                     let start_time = event.start.date_time
-                        .map(|dt| dt.to_rfc3339())
+                        .map(|dt| {
+                            if let Some(tz) = user_timezone {
+                                dt.with_timezone(&tz).to_rfc3339()
+                            } else {
+                                dt.to_rfc3339()
+                            }
+                        })
                         .or(event.start.date);
                     
                     let end_time = event.end.date_time
-                        .map(|dt| dt.to_rfc3339())
+                        .map(|dt| {
+                            if let Some(tz) = user_timezone {
+                                dt.with_timezone(&tz).to_rfc3339()
+                            } else {
+                                dt.to_rfc3339()
+                            }
+                        })
                         .or(event.end.date);
 
+                    // Calculate duration in minutes
+                    let duration_minutes = match (event.start.date_time, event.end.date_time) {
+                        (Some(start), Some(end)) => {
+                            let duration = end.signed_duration_since(start);
+                            duration.num_minutes()
+                        },
+                        _ => 0 // Default to 0 for all-day events or invalid times
+                    };
+
                     let summary = event.summary.unwrap_or_else(|| "No title".to_string());
-                    println!("Formatting event: {}", summary);
 
                     json!({
                         "summary": summary,
                         "start": start_time,
                         "end": end_time,
-                        "status": event.status.unwrap_or_else(|| "confirmed".to_string())
+                        "duration_minutes": duration_minutes
                     })
                 })
                 .collect();
 
-            println!("Returning {} formatted events", formatted_events.len());
             Ok(Json(json!({
                 "events": formatted_events
             })))
@@ -551,6 +590,8 @@ pub async fn handle_calendar_fetching(
         }
     }
 }
+
+
 async fn fetch_calendar_list(
     client: &reqwest::Client,
     access_token: &str,
@@ -673,8 +714,6 @@ pub async fn fetch_calendar_events(
     user_id: i32,
     timeframe: TimeframeQuery,
 ) -> Result<Vec<CalendarEvent>, CalendarError> {
-    tracing::info!("Fetching calendar events for timeframe: {:?} to {:?} for user: {}", timeframe.start, timeframe.end, user_id);
-
     // Get Google Calendar tokens
     tracing::debug!("Getting Google Calendar tokens for user_id: {}", user_id);
     let (access_token, refresh_token) = match state.user_repository.get_google_calendar_tokens(user_id) {
@@ -703,6 +742,40 @@ pub async fn fetch_calendar_events(
     let end_time = timeframe.end.format("%Y-%m-%dT%H:%M:%SZ").to_string();
     println!("Formatted time range: {} to {}", start_time, end_time);
 
+    async fn refresh_access_token(
+        state: &AppState,
+        user_id: i32,
+        refresh_token: String,
+    ) -> Result<String, CalendarError> {
+        let http_client = reqwest::ClientBuilder::new()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("Client should build");
+
+        tracing::info!("Attempting to refresh token");
+        
+        let token_result = state
+            .google_calendar_oauth_client
+            .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token))
+            .request_async(&http_client)
+            .await
+            .map_err(|e| CalendarError::TokenError(e.to_string()))?;
+
+        let new_access_token = token_result.access_token().secret().to_string();
+        let expires_in = token_result.expires_in()
+            .unwrap_or_default()
+            .as_secs() as i32;
+
+        // Update the access token in the database
+        state.user_repository.update_google_calendar_access_token(
+            user_id,
+            &new_access_token,
+            expires_in,
+        ).map_err(|e| CalendarError::TokenError(e.to_string()))?;
+
+        Ok(new_access_token)
+    }
+
     async fn fetch_with_token(
         client: &reqwest::Client,
         state: &AppState,
@@ -712,43 +785,86 @@ pub async fn fetch_calendar_events(
         start_time: &str,
         end_time: &str
     ) -> Result<Vec<CalendarEvent>, CalendarError> {
-        // First try to fetch calendar list to check permissions
-        tracing::info!("first try fetch calendar list to check permissions for user: {}", user_id);
-        match fetch_calendar_list(client, access_token).await {
-            Ok(calendars) => {
-                let mut all_events = Vec::new();
-                
-                for calendar in calendars {
-                    if calendar.selected {
-                        match fetch_events_from_calendar(
-                            client,
-                            access_token,
-                            &calendar.id,
-                            start_time,
-                            end_time
-                        ).await {
-                            Ok(mut events) => {
-                                all_events.append(&mut events);
-                            },
-                            Err(e) => {
-                                tracing::error!("Error fetching events from calendar {}: {}", calendar.id, e);
-                                continue;
+        async fn attempt_fetch(
+            client: &reqwest::Client,
+
+            access_token: &str,
+
+            start_time: &str,
+            end_time: &str,
+        ) -> Result<Vec<CalendarEvent>, CalendarError> {
+            // First try to fetch calendar list to check permissions
+
+            match fetch_calendar_list(client, access_token).await {
+                Ok(calendars) => {
+                    let mut all_events = Vec::new();
+                    
+                    for calendar in calendars {
+                        if calendar.selected {
+                            match fetch_events_from_calendar(
+                                client,
+                                access_token,
+                                &calendar.id,
+                                start_time,
+                                end_time
+                            ).await {
+                                Ok(mut events) => {
+                                    all_events.append(&mut events);
+                                },
+                                Err(e) => {
+                                    if let CalendarError::ApiError(err) = &e {
+                                        if err.contains("401") {
+                                            return Err(e);  // Propagate 401 error for token refresh
+                                        }
+                                    }
+                                    tracing::error!("Error fetching events from calendar {}: {}", calendar.id, e);
+                                    continue;
+                                }
                             }
                         }
                     }
+                    Ok(all_events)
+                },
+                Err(e) => {
+                    if let CalendarError::ApiError(err) = &e {
+                        if err.contains("401") {
+                            return Err(e);  // Propagate 401 error for token refresh
+                        }
+                    }
+                    tracing::debug!("Failed to fetch calendar list (possibly due to permissions), falling back to primary calendar: {}", e);
+                    // Fall back to fetching just the primary calendar
+                    fetch_events_from_calendar(
+                        client,
+                        access_token,
+                        "primary",
+                        start_time,
+                        end_time
+                    ).await
                 }
-                Ok(all_events)
-            },
+            }
+        }
+
+        // First attempt with current token
+        match attempt_fetch(client, access_token, start_time, end_time).await {
+            Ok(events) => Ok(events),
             Err(e) => {
-                tracing::debug!("Failed to fetch calendar list (possibly due to permissions), falling back to primary calendar: {}", e);
-                // Fall back to fetching just the primary calendar
-                fetch_events_from_calendar(
-                    client,
-                    access_token,
-                    "primary",
-                    start_time,
-                    end_time
-                ).await
+                if let CalendarError::ApiError(err) = &e {
+                    if err.contains("401") {
+                        // Token expired, refresh and retry
+                        tracing::info!("Access token expired, refreshing...");
+                        match refresh_access_token(state, user_id, refresh_token.to_string()).await {
+                            Ok(new_token) => {
+                                tracing::info!("Token refreshed successfully, retrying fetch");
+                                attempt_fetch(client, &new_token, start_time, end_time).await
+                            },
+                            Err(e) => Err(e),
+                        }
+                    } else {
+                        Err(e)
+                    }
+                } else {
+                    Err(e)
+                }
             }
         }
     }
@@ -779,7 +895,7 @@ pub async fn fetch_calendar_events(
             println!("Exchanging refresh token...");
             let token_result = state
                 .google_calendar_oauth_client
-                .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token.clone()))
+                .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token.to_string()))
                 .request_async(&http_client)
                 .await
                 .map_err(|e| CalendarError::TokenError(e.to_string()))?;

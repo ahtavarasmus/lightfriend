@@ -8,15 +8,11 @@ use quircs;
 use url::Url;
 use mime_guess::from_path;
 use regex::Regex;
+use openai_api_rs::v1::{chat_completion, types};
+use std::collections::HashMap;
+use crate::tool_call_utils::internet::MenuContent;
 
-#[derive(Debug)]
-pub enum MenuContent {
-    Text(String),
-    ImageUrl(String),
-    PdfUrl(String),
-    WebpageUrl(String),
-    Unknown(String)
-}
+
 
 pub async fn scan_qr_code(image_url: &str) -> Result<MenuContent, Box<dyn Error>> {
     tracing::info!("Starting QR code scan for URL: {}", image_url);

@@ -5,6 +5,7 @@ use crate::repositories::user_repository::UserRepository;
 use serde_json::json;
 use sha1::Sha1;
 use uuid::Uuid;
+use crate::AppState;
 use matrix_sdk::{
     Client as MatrixClient,
     ruma::OwnedUserId,
@@ -234,28 +235,6 @@ async fn try_bootstrap_cross_signing(
         }
     }
 }
-
-pub async fn initialize_matrix_user_clients(
-    user_repository: Arc<UserRepository>,
-) -> Arc<Mutex<HashMap<i32, matrix_sdk::Client>>> {
-    let user_ids = user_repository.get_users_with_matrix_bridge_connections().unwrap_or_default();
-    let mut clients = HashMap::new();
-
-    for user_id in user_ids {
-    match crate::utils::matrix_auth::get_client(user_id, &user_repository, true).await {
-            Ok(client) => {
-                clients.insert(user_id, client);
-                tracing::info!("Initialized Matrix client for user {}", user_id);
-            },
-            Err(e) => {
-                tracing::error!("Failed to initialize Matrix client for user {}: {}", user_id, e);
-            }
-        }
-    }
-
-    Arc::new(Mutex::new(clients))
-}
-
 /// Checks for and joins any rooms the user has been invited to
 /// 
 /// # Arguments
@@ -381,7 +360,7 @@ pub async fn register_user(homeserver: &str, shared_secret: &str) -> Result<(Str
 
 // create client with the client sqlite store(that stores both state and encryption keys)
 
-pub async fn login_with_password(client: &MatrixClient, user_repository: &UserRepository, username: &str, password: &str, device_id: Option<&str>, user_id: i32) ->Result<()> {
+pub async fn login_with_password(client: &MatrixClient, state: &Arc<AppState>, username: &str, password: &str, device_id: Option<&str>, user_id: i32) ->Result<()> {
     println!("🔑 Attempting to login with username and password and existing device");
     let res;
     if let Some(device_id) = device_id {
@@ -404,7 +383,7 @@ pub async fn login_with_password(client: &MatrixClient, user_repository: &UserRe
         
         // Store the new device_id and access_token
         println!("💾 Saving new device ID and access token to database");
-        user_repository.set_matrix_device_id_and_access_token(user_id, &response.access_token, &response.device_id.as_str())?;
+        state.user_repository.set_matrix_device_id_and_access_token(user_id, &response.access_token, &response.device_id.as_str())?;
         println!("✅ Successfully saved credentials");
         
     } else {
@@ -416,11 +395,11 @@ pub async fn login_with_password(client: &MatrixClient, user_repository: &UserRe
 }
 
 
-pub async fn get_client(user_id: i32, user_repository: &UserRepository, setup_encryption: bool) -> Result<MatrixClient> {
+pub async fn get_client(user_id: i32, state: &Arc<AppState>, setup_encryption: bool) -> Result<MatrixClient> {
     println!("🔄 Starting get_client for user_id: {}", user_id);
 
     // Get user profile from database
-    let user = user_repository.find_by_id(user_id).unwrap().unwrap();
+    let user = state.user_core.find_by_id(user_id).unwrap().unwrap();
     println!("👤 Found user: id={}", user.id);
 
     // Initialize the Matrix client
@@ -433,7 +412,7 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository, setup_en
     let (username, password, device_id, access_token) = if user.matrix_username.is_none() {
         println!("🆕 Registering new Matrix user");
         let (username, access_token, device_id, password) = register_user(&homeserver_url, &shared_secret).await?;
-        user_repository.set_matrix_credentials(user.id, &username, &access_token, &device_id, &password)?;
+        state.user_repository.set_matrix_credentials(user.id, &username, &access_token, &device_id, &password)?;
         (username, password, Some(device_id), Some(access_token))
     } else {
         println!("✓ Existing Matrix credentials found");
@@ -484,7 +463,7 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository, setup_en
             if let Ok(response) = client.whoami().await {
                 println!("🔍 Server reports user_id: {}", response.user_id);
                 // Update database if credentials changed
-                user_repository.set_matrix_credentials(
+                state.user_repository.set_matrix_credentials(
                     user.id,
                     &username,
                     &stored_session.tokens.access_token,
@@ -518,7 +497,7 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository, setup_en
                 println!("✅ Token-based session restored");
                 // Verify session
                 if let Ok(response) = client.whoami().await {
-                    user_repository.set_matrix_credentials(
+                    state.user_repository.set_matrix_credentials(
                         user.id,
                         &username,
                         &access_token.as_str(),
@@ -533,7 +512,7 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository, setup_en
         // Fallback to password login if token-based login fails
         if !session_restored {
             println!("🔄 Attempting password-based login");
-            login_with_password(&client, user_repository, &username, &password, device_id.as_deref(), user.id).await?;
+            login_with_password(&client, &state, &username, &password, device_id.as_deref(), user.id).await?;
         }
     }
     println!("✅ Authentication complete - client is logged already in");
@@ -544,20 +523,16 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository, setup_en
         println!("🔐 Setting up encryption keys and secret storage");
         let mut redo_secret_storage = false;
 
-        // Get bridge bot username from environment variable or use default pattern
-        let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
-            .unwrap_or_else(|_| "@whatsappbot:".to_string());
-            
-            // Handle cross-signing setup
-            match setup_cross_signing(&client, &username, &password, user.encrypted_matrix_secret_storage_recovery_key.as_ref()).await {
-                Ok(should_update_storage) => {
-                    if should_update_storage {
-                        redo_secret_storage = true;
-                        println!("🚩 Marked for secret storage update");
-                    }
-                },
-                Err(e) => return Err(e),
-            }
+        // Handle cross-signing setup
+        match setup_cross_signing(&client, &username, &password, user.encrypted_matrix_secret_storage_recovery_key.as_ref()).await {
+            Ok(should_update_storage) => {
+                if should_update_storage {
+                    redo_secret_storage = true;
+                    println!("🚩 Marked for secret storage update");
+                }
+            },
+            Err(e) => return Err(e),
+        }
 
         println!("🔄 Setting up encryption backups");
         match setup_backups(&client, user.encrypted_matrix_secret_storage_recovery_key.as_ref()).await {
@@ -593,7 +568,7 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository, setup_en
                 let recovery_key = enable.await?;
                 println!("✅ Successfully created new recovery key");
                 println!("💾 Saving recovery key to database");
-                user_repository.set_matrix_secret_storage_recovery_key(user.id, &recovery_key)?;
+                state.user_repository.set_matrix_secret_storage_recovery_key(user.id, &recovery_key)?;
                 println!("✅ Successfully saved recovery key");
             }
         }
@@ -616,7 +591,7 @@ pub async fn get_client(user_id: i32, user_repository: &UserRepository, setup_en
 /// Get a cached Matrix client or create a new one if not cached/invalid
 pub async fn get_cached_client(
     user_id: i32,
-    user_repository: &UserRepository,
+    state: &Arc<AppState>,
     setup_encryption: bool,
     client_cache: &Arc<tokio::sync::Mutex<HashMap<i32, MatrixClient>>>,
 ) -> Result<MatrixClient> {
@@ -628,8 +603,20 @@ pub async fn get_cached_client(
             if client.logged_in() {
                 // Quick validation - try to get user ID
                 if let Some(_user_id) = client.user_id() {
-                    tracing::debug!("Using cached Matrix client for user {}", user_id);
-                    return Ok(client.clone());
+                    // Additional validation - try a quick sync to ensure the client is still active
+                    match client.sync_once(matrix_sdk::config::SyncSettings::new().timeout(std::time::Duration::from_secs(5))).await {
+                        Ok(_) => {
+                            tracing::debug!("Using cached Matrix client for user {} - sync successful", user_id);
+                            return Ok(client.clone());
+                        }
+                        Err(e) => {
+                            tracing::debug!("Cached client for user {} failed sync check: {}", user_id, e);
+                            // Drop the lock before creating new client
+                            drop(cache);
+                            // Clear the invalid client from cache
+                            clear_cached_client(user_id, client_cache).await;
+                        }
+                    }
                 }
             }
             tracing::debug!("Cached client for user {} is invalid, will create new one", user_id);
@@ -638,7 +625,7 @@ pub async fn get_cached_client(
 
     // No valid cached client, create a new one
     tracing::debug!("Creating new Matrix client for user {}", user_id);
-    let client = get_client(user_id, user_repository, setup_encryption).await?;
+    let client = get_client(user_id, &state, setup_encryption).await?;
     
     // Cache the new client
     {

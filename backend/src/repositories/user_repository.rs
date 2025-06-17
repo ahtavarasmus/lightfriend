@@ -33,7 +33,7 @@ use crate::{
 use crate::utils::encryption::{encrypt, decrypt};
 
 pub struct UserRepository {
-    pool: DbPool
+    pub pool: DbPool
 }
 
 impl UserRepository {
@@ -77,17 +77,6 @@ impl UserRepository {
             .values(&new_settings)
             .execute(&mut conn)?;
 
-        Ok(())
-    }
-
-    pub fn update_password(&self, email: &str, password_hash: &str) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        diesel::update(users::table)
-            .filter(users::email.eq(email))
-            .set(users::password_hash.eq(password_hash))
-            .execute(&mut conn)?;
-            
         Ok(())
     }
 
@@ -218,278 +207,6 @@ impl UserRepository {
         
         Ok(())
     }
-    
-
-    pub fn set_preferred_number_to_default(&self, user_id: i32, phone_number: &str) -> Result<String, Box<dyn Error>> {
-        // Get all Twilio phone numbers from environment
-        let phone_numbers = [
-            ("FIN_PHONE", "+358"),
-            ("USA_PHONE", "+1"),
-            ("AUS_PHONE", "+61"),
-            ("GB_PHONE", "+44"),
-            ("ISR_PHONE", "+972"),
-        ];
-
-        // Collect phone numbers into a HashMap for easier matching
-        let mut number_map = std::collections::HashMap::new();
-        for (env_key, prefix) in phone_numbers {
-            if let Ok(number) = std::env::var(env_key) {
-                number_map.insert(prefix, number);
-            }
-        }
-
-        // Validate phone number format
-        if !phone_number.starts_with('+') {
-            return Err("Invalid phone number format".into());
-        }
-
-        // Find the matching Twilio number based on the country code prefix
-        let preferred_number = phone_numbers.iter()
-            .find(|(_, prefix)| phone_number.starts_with(prefix))
-            .and_then(|(env_key, _)| std::env::var(env_key).ok())
-            .unwrap_or_else(|| {
-                // If no match is found, use the country code from the phone number to find a match
-                number_map
-                    .get("+358") // Default to Finnish number if no match
-                    .expect("FIN_PHONE not set")
-                    .clone()
-            });
-
-        // Update the user's preferred number in the database
-        self.update_preferred_number(user_id, &preferred_number)?;
-
-        Ok(preferred_number)
-    }
-
-    // Check if a email exists
-    pub fn email_exists(&self, search_email: &str) -> Result<bool, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let existing_user: Option<User> = users::table
-            .filter(lower(users::email).eq(lower(search_email)))
-            .first::<User>(&mut conn)
-            .optional()?;
-        Ok(existing_user.is_some())
-    }
-
-    // Check if a phone number exists
-    pub fn phone_number_exists(&self, search_phone: &str) -> Result<bool, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let existing_user: Option<User> = users::table
-            .filter(users::phone_number.eq(search_phone))
-            .first::<User>(&mut conn)
-            .optional()?;
-        Ok(existing_user.is_some())
-    }
-
-    pub fn update_preferred_number(&self, user_id: i32, preferred_number: &str) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::preferred_number.eq(preferred_number))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    pub fn update_agent_language(&self, user_id: i32, language: &str) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::agent_language.eq(language))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-
-    // Create and insert a new user
-    pub fn create_user(&self, new_user: NewUser) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::insert_into(users::table)
-            .values(&new_user)
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    // Find a user by email
-    pub fn find_by_email(&self, search_email: &str) -> Result<Option<User>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let user = users::table
-            .filter(lower(users::email).eq(lower(search_email)))
-            .first::<User>(&mut conn)
-            .optional()?;
-        Ok(user)
-    }
-
-    // Get all users
-    pub fn get_all_users(&self) -> Result<Vec<User>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let users_list = users::table
-            .load::<User>(&mut conn)?;
-        Ok(users_list)
-    }
-
-
-    // Check if a user is an admin (email is 'rasmus')
-    pub fn is_admin(&self, user_id: i32) -> Result<bool, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let user = users::table
-            .find(user_id)
-            .first::<User>(&mut conn)?;
-
-        Ok(user.email == "rasmus@ahtava.com" && user.id == 1)
-     }
-
-    
-    // Find a user by ID
-    pub fn find_by_id(&self, user_id: i32) -> Result<Option<User>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let user = users::table
-            .find(user_id)
-            .first::<User>(&mut conn)
-            .optional()?;
-        Ok(user)
-    }
-
-    // Update user's profile
-    pub fn update_profile(&self, user_id: i32, email: &str, phone_number: &str, nickname: &str, info: &str, timezone: &str, timezone_auto: &bool, notification_type: Option<&str>) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        println!("Repository: Updating user {} with notification type: {:?}", user_id, notification_type);
-        
-        // Check if phone number exists for a different user
-        let existing_phone = users::table
-            .filter(users::phone_number.eq(phone_number))
-            .filter(users::id.ne(user_id))
-            .first::<User>(&mut conn)
-            .optional()?;
-            
-        if existing_phone.is_some() {
-            return Err(DieselError::RollbackTransaction);
-        }
-
-        // Check if email exists for a different user
-        let existing_email = users::table
-            .filter(users::email.eq(email.to_lowercase()))
-            .filter(users::id.ne(user_id))
-            .first::<User>(&mut conn)
-            .optional()?;
-            
-        if existing_email.is_some() {
-            return Err(DieselError::NotFound);
-        }
-
-        // Get current user to check if phone number is changing
-        let current_user = users::table
-            .find(user_id)
-            .first::<User>(&mut conn)?;
-
-        // If phone number is changing, set verified to false
-        let should_unverify = current_user.phone_number != phone_number;
-
-        let result = diesel::update(users::table.find(user_id))
-            .set((
-                users::email.eq(email),
-                users::phone_number.eq(phone_number),
-                users::nickname.eq(nickname),
-                users::info.eq(info),
-                users::timezone.eq(timezone),
-                users::timezone_auto.eq(timezone_auto),
-                users::verified.eq(!should_unverify && current_user.verified), // Only keep verified true if phone number hasn't changed
-                users::notification_type.eq(notification_type),
-            ))
-            .execute(&mut conn);
-            
-        match &result {
-            Ok(_) => println!("Successfully updated user profile with notification type: {:?}", notification_type),
-            Err(e) => println!("Failed to update user profile: {:?}", e),
-        }
-        
-        result?;
-        Ok(())
-    }
-
-    pub fn find_by_phone_number(&self, phone_number: &str) -> Result<Option<User>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let cleaned_phone = phone_number
-            .chars()
-            .filter(|c| c.is_digit(10) || *c == '+')
-            .collect::<String>();
-        println!("cleaned_phone: {}", cleaned_phone);
-        let user = users::table
-            .filter(users::phone_number.eq(cleaned_phone))
-            .first::<User>(&mut conn)
-            .optional()?;
-        Ok(user)
-    }
-
-    // Set user as verified
-    pub fn verify_user(&self, user_id: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::verified.eq(true))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    // Delete a user
-    pub fn delete_user(&self, user_id: i32) -> Result<(), DieselError> {
-        use crate::schema::{usage_logs, conversations, google_calendar, gmail, unipile_connection};
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Start transaction
-        conn.transaction(|conn| {
-            // Delete related records first
-            diesel::delete(usage_logs::table.filter(usage_logs::user_id.eq(user_id)))
-                .execute(conn)?;
-            
-            diesel::delete(conversations::table.filter(conversations::user_id.eq(user_id)))
-                .execute(conn)?;
-            
-            diesel::delete(google_calendar::table.filter(google_calendar::user_id.eq(user_id)))
-                .execute(conn)?;
-            
-            diesel::delete(gmail::table.filter(gmail::user_id.eq(user_id)))
-                .execute(conn)?;
-            
-            diesel::delete(unipile_connection::table.filter(unipile_connection::user_id.eq(user_id)))
-                .execute(conn)?;
-
-            // Finally delete the user
-            diesel::delete(users::table.find(user_id))
-                .execute(conn)?;
-            
-            Ok(())
-        })
-    }
-
-    // Update user's (credits)
-    pub fn update_user_credits(&self, user_id: i32, new_credits: f32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::credits.eq(new_credits))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-
-    pub fn update_user_credits_left(&self, user_id: i32, new_credits_left: f32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::credits_left.eq(new_credits_left))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    // Decrease user's credits by a specified amount
-    pub fn decrease_credits(&self, user_id: i32, amount: f32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let user = users::table
-            .find(user_id)
-            .first::<User>(&mut conn)?;
-        
-        let new_credits = user.credits - amount;
-        
-        diesel::update(users::table.find(user_id))
-            .set(users::credits.eq(new_credits))
-            .execute(&mut conn)?;
-        Ok(())
-    }
 
     // log the usage. activity_type either 'call' or 'sms'
     pub fn log_usage(&self, user_id: i32, sid: Option<String>, activity_type: String, credits: Option<f32>, time_consumed: Option<i32>, success: Option<bool>, reason: Option<String>, status: Option<String>, recharge_threshold_timestamp: Option<i32>, zero_credits_timestamp: Option<i32>) -> Result<(), DieselError> {
@@ -524,67 +241,6 @@ impl UserRepository {
         Ok(())
     }
 
-    // Increase user's credits by a specified amount
-    pub fn increase_credits(&self, user_id: i32, amount: f32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let user = users::table
-            .find(user_id)
-            .first::<User>(&mut conn)?;
-        
-
-        let new_credits = user.credits + amount;
-        
-        diesel::update(users::table.find(user_id))
-            .set(users::credits.eq(new_credits))
-            .execute(&mut conn)?;
-
-        // get the user again with updated credits
-        let user = users::table
-            .find(user_id)
-            .first::<User>(&mut conn)?;
-
-
-        // get any ongoing usage log for this user
-        let ongoing_log = usage_logs::table
-            .filter(usage_logs::user_id.eq(user_id))
-            .filter(usage_logs::status.eq("ongoing"))
-            .first::<crate::models::user_models::UsageLog>(&mut conn)
-            .optional()?;
-        
-        // If there's an ongoing log, update its timestamps
-        if let Some(log) = ongoing_log {
-            if let Some(sid) = log.sid {
-
-                let charge_back_threshold= std::env::var("CHARGE_BACK_THRESHOLD")
-                    .expect("CHARGE_BACK_THRESHOLD not set")
-                    .parse::<f32>()
-                    .unwrap_or(2.00);
-                let voice_second_cost = std::env::var("VOICE_SECOND_COST")
-                    .expect("VOICE_SECOND_COST not set")
-                    .parse::<f32>()
-                    .unwrap_or(0.0033);
-
-                let user_current_credits_to_threshold = user.credits - charge_back_threshold;
-
-                let seconds_to_threshold = (user_current_credits_to_threshold / voice_second_cost) as i32;
-                let recharge_threshold_timestamp: i32 = (chrono::Utc::now().timestamp() as i32) + seconds_to_threshold as i32;
-
-                let seconds_to_zero_credits= (user.credits / voice_second_cost) as i32;
-                let zero_credits_timestamp: i32 = (chrono::Utc::now().timestamp() as i32) + seconds_to_zero_credits as i32;
-
-                diesel::update(usage_logs::table)
-                    .filter(usage_logs::sid.eq(sid))
-                    .set((
-                        usage_logs::recharge_threshold_timestamp.eq(recharge_threshold_timestamp),
-                        usage_logs::zero_credits_timestamp.eq(zero_credits_timestamp), 
-                    ))
-                    .execute(&mut conn)?;
-            }
-        }
-
-        Ok(())
-    }
 
     pub fn is_credits_under_threshold(&self, user_id: i32) -> Result<bool, DieselError> {
 
@@ -599,40 +255,6 @@ impl UserRepository {
             .first::<User>(&mut conn)?;
         
         Ok(user.credits < charge_back_threshold)
-    }
-
-    // 
-
-    // Update user's notify preference
-    pub fn update_notify(&self, user_id: i32, notify: bool) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::notify.eq(notify))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    pub fn update_timezone(&self, user_id: i32, timezone: &str) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // First fetch the user to check timezone_auto
-        let user = users::table
-            .find(user_id)
-            .first::<User>(&mut conn)?;
-            
-        // Only update if timezone_auto is true
-        match user.timezone_auto {
-            Some(maybe) => {
-                if maybe {
-                    diesel::update(users::table.find(user_id))
-                        .set(users::timezone.eq(timezone.to_string()))
-                        .execute(&mut conn)?;
-                }
-            },
-            None => {},
-        }
-        
-        Ok(())
     }
 
     pub fn get_usage_data(&self, user_id: i32, from_timestamp: i32) -> Result<Vec<UsageDataPoint>, DieselError> {
@@ -697,64 +319,6 @@ impl UserRepository {
         Ok(usage_data)
     }
 
-    // Update user's auto top-up settings
-    pub fn update_auto_topup(&self, user_id: i32, active: bool, amount: Option<f32>) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        // Update the user's auto top-up settings
-        diesel::update(users::table.find(user_id))
-            .set((
-                users::charge_when_under.eq(active),
-                users::charge_back_to.eq(amount),
-            ))
-            .execute(&mut conn)?;
-            
-        Ok(())
-    }
-
-    pub fn get_stripe_customer_id(&self, user_id: i32) -> Result<Option<String>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let stripe_id = users::table
-            .find(user_id)
-            .select(users::stripe_customer_id)
-            .first::<Option<String>>(&mut conn)?;
-        Ok(stripe_id)
-    }
-
-    pub fn set_stripe_customer_id(&self, user_id: i32, customer_id: &str) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::stripe_customer_id.eq(customer_id))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    pub fn get_stripe_payment_method_id(&self, user_id: i32) -> Result<Option<String>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let payment_method_id = users::table
-            .find(user_id)
-            .select(users::stripe_payment_method_id)
-            .first::<Option<String>>(&mut conn)?;
-        Ok(payment_method_id)
-    }
-    
-    pub fn set_stripe_payment_method_id(&self, user_id: i32, payment_method_id: &str) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::stripe_payment_method_id.eq(payment_method_id))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    pub fn find_by_stripe_customer_id(&self, customer_id: &str) -> Result<Option<User>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let user = users::table
-            .filter(users::stripe_customer_id.eq(customer_id))
-            .first::<User>(&mut conn)
-            .optional()?;
-        Ok(user)
-    }
-
     // Fetch the ongoing usage log for a user
     pub fn get_ongoing_usage(&self, user_id: i32) -> Result<Option<crate::models::user_models::UsageLog>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -781,23 +345,6 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn set_stripe_checkout_session_id(&self, user_id: i32, session_id: &str) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::stripe_checkout_session_id.eq(session_id))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-    
-    pub fn get_stripe_checkout_session_id(&self, user_id: i32) -> Result<Option<String>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let session_id = users::table
-            .find(user_id)
-            .select(users::stripe_checkout_session_id)
-            .first::<Option<String>>(&mut conn)?;
-        Ok(session_id)
-    }
-
     pub fn get_all_ongoing_usage(&self) -> Result<Vec<crate::models::user_models::UsageLog>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let ongoing_logs = usage_logs::table
@@ -817,15 +364,7 @@ impl UserRepository {
         Ok(logs)
     }
 
-    pub fn set_confirm_send_event(&self, user_id: i32, confirm: bool) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::confirm_send_event.eq(confirm))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    pub fn update_usage_log_timestamps(&self, sid: &str, recharge_threshold_timestamp: Option<i32>, zero_credits_timestamp: Option<i32>) -> Result<(), DieselError> {
+        pub fn update_usage_log_timestamps(&self, sid: &str, recharge_threshold_timestamp: Option<i32>, zero_credits_timestamp: Option<i32>) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(usage_logs::table)
             .filter(usage_logs::sid.eq(sid))
@@ -835,24 +374,6 @@ impl UserRepository {
             ))
             .execute(&mut conn)?;
         Ok(())
-    }
-
-
-    pub fn update_last_credits_notification(&self, user_id: i32, timestamp: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::last_credits_notification.eq(timestamp))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    pub fn has_auto_topup_enabled(&self, user_id: i32) -> Result<bool, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let charge_when_under = users::table
-            .find(user_id)
-            .select(users::charge_when_under)
-            .first::<bool>(&mut conn)?;
-        Ok(charge_when_under)
     }
 
     // Waiting Checks methods
@@ -1028,40 +549,6 @@ impl UserRepository {
             .optional()?;
 
         Ok(settings.map_or((false, 0), |s| (s.imap_proactive, s.proactive_email_last_activated)))
-    }
-
-    // Get the user's subscription tier
-    pub fn get_subscription_tier(&self, user_id: i32) -> Result<Option<String>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let sub_tier = users::table
-            .find(user_id)
-            .select(users::sub_tier)
-            .first::<Option<String>>(&mut conn)?;
-        Ok(sub_tier)
-    }
-
-    // Set the user's subscription tier
-    pub fn update_proactive_messages_left(&self, user_id: i32, new_count: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::msgs_left.eq(new_count))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-    pub fn update_sub_credits(&self, user_id: i32, new_credits: f32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::credits_left.eq(new_credits))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    pub fn set_subscription_tier(&self, user_id: i32, tier: Option<&str>) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::sub_tier.eq(tier))
-            .execute(&mut conn)?;
-        Ok(())
     }
 
 
@@ -1587,71 +1074,6 @@ impl UserRepository {
         }))
     }
 
-    // Check if user has a specific subscription tier and has messages left
-    pub fn has_valid_subscription_tier_with_messages(&self, user_id: i32, tier: &str) -> Result<bool, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let user = users::table
-            .find(user_id)
-            .select((users::sub_tier, users::msgs_left, users::discount_tier))
-            .first::<(Option<String>, i32, Option<String>)>(&mut conn)?;
-        
-        // If user has msg discount tier, they always have messages available
-        if user.2.as_deref() == Some("msg") {
-            // ensure msg tier users have messages
-            self.ensure_msg_tier_messages(user_id)?;
-        
-            return Ok(user.0.map_or(false, |t| t == tier));
-        }
-        
-        // Check both subscription tier and remaining messages
-        Ok(user.0.map_or(false, |t| t == tier) && user.1 > 0)
-    }
-
-    // Helper method to ensure msg discount tier users always have messages
-    fn ensure_msg_tier_messages(&self, user_id: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        let (current_msgs, discount_tier) = users::table
-            .find(user_id)
-            .select((users::msgs_left, users::discount_tier))
-            .first::<(i32, Option<String>)>(&mut conn)?;
-            
-        if discount_tier.as_deref() == Some("msg") && current_msgs < 100 {
-            diesel::update(users::table.find(user_id))
-                .set(users::msgs_left.eq(100))
-                .execute(&mut conn)?;
-        }
-        
-        Ok(())
-    }
-
-    pub fn decrease_messages_left(&self, user_id: i32) -> Result<i32, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-                // Get current messages left and discount tier
-        let (current_msgs, discount_tier) = users::table
-            .find(user_id)
-            .select((users::msgs_left, users::discount_tier))
-            .first::<(i32, Option<String>)>(&mut conn)?;
-            
-        // If user has "msg" discount tier, return current messages without decreasing
-        if discount_tier.as_deref() == Some("msg") {
-            // ensure msg tier users have messages
-            self.ensure_msg_tier_messages(user_id)?;
-            return Ok(current_msgs);
-        }
-            
-        // Only decrease if greater than 0
-        if current_msgs > 0 {
-            let new_msgs = current_msgs - 1;
-            diesel::update(users::table.find(user_id))
-                .set(users::msgs_left.eq(new_msgs))
-                .execute(&mut conn)?;
-            Ok(new_msgs)
-        } else {
-            Ok(0)
-        }
-    }
 
     pub fn create_unipile_connection(&self, new_connection: &NewUnipileConnection) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1758,31 +1180,6 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn has_active_gmail(&self, user_id: i32) -> Result<bool, DieselError> {
-        use crate::schema::gmail;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let connection = gmail::table
-            .filter(gmail::user_id.eq(user_id))
-            .filter(gmail::status.eq("active"))
-            .first::<crate::models::user_models::Gmail>(&mut conn)
-            .optional()?;
-
-        Ok(connection.is_some())
-    }
-
-    pub fn get_active_gmail_connection_users(&self) -> Result<Vec<i32>, DieselError> {
-        use crate::schema::gmail;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let user_ids = gmail::table
-            .filter(gmail::status.eq("active"))
-            .select(gmail::user_id)
-            .load::<i32>(&mut conn)?;
-
-        Ok(user_ids)
-    }
-
     pub fn get_active_imap_connection_users(&self) -> Result<Vec<i32>, DieselError> {
         use crate::schema::imap_connection;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1794,81 +1191,7 @@ impl UserRepository {
 
         Ok(user_ids)
     }
-
-    pub fn get_gmail_tokens(&self, user_id: i32) -> Result<Option<(String, String)>, DieselError> {
-        use crate::schema::gmail;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let connection = gmail::table
-            .filter(gmail::user_id.eq(user_id))
-            .filter(gmail::status.eq("active"))
-            .first::<crate::models::user_models::Gmail>(&mut conn)
-            .optional()?;
-
-        if let Some(connection) = connection {
-            let access_token = match decrypt(&connection.encrypted_access_token) {
-                Ok(token) => token,
-                Err(e) => {
-                    tracing::error!("Failed to decrypt access token: {:?}", e);
-                    return Err(DieselError::RollbackTransaction);
-                }
-            };
-
-            let refresh_token = match decrypt(&connection.encrypted_refresh_token) {
-                Ok(token) => token,
-                Err(e) => {
-                    tracing::error!("Failed to decrypt refresh token: {:?}", e);
-                    return Err(DieselError::RollbackTransaction);
-                }
-            };
-
-            Ok(Some((access_token, refresh_token)))
-        } else {
-            Ok(None)
-        }
-    }
-
-    pub fn update_gmail_access_token(
-        &self,
-        user_id: i32,
-        new_access_token: &str,
-        expires_in: i32,
-    ) -> Result<(), DieselError> {
-        use crate::schema::gmail;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let encrypted_access_token = encrypt(new_access_token)
-            .map_err(|_| DieselError::RollbackTransaction)?;
-
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-
-        diesel::update(gmail::table)
-            .filter(gmail::user_id.eq(user_id))
-            .filter(gmail::status.eq("active"))
-            .set((
-                gmail::encrypted_access_token.eq(encrypted_access_token),
-                gmail::expires_in.eq(expires_in),
-                gmail::last_update.eq(current_time),
-            ))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    pub fn delete_gmail_connection(&self, user_id: i32) -> Result<(), DieselError> {
-        use crate::schema::gmail;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        diesel::delete(gmail::table)
-            .filter(gmail::user_id.eq(user_id))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
+  
     pub fn has_active_google_tasks(&self, user_id: i32) -> Result<bool, DieselError> {
         use crate::schema::google_tasks;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -2365,64 +1688,6 @@ impl UserRepository {
             .get_result::<i64>(&mut conn)?;
 
         Ok(count > 0)
-    }
-
-    pub fn create_gmail_connection(
-        &self,
-        user_id: i32,
-        access_token: &str,
-        refresh_token: Option<&str>,
-        expires_in: i32,
-    ) -> Result<(), DieselError> {
-        use crate::schema::gmail;
-        use crate::models::user_models::NewGmail;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let encrypted_access_token = encrypt(access_token)
-            .map_err(|_| DieselError::RollbackTransaction)?;
-        let encrypted_refresh_token = refresh_token
-            .map(|token| encrypt(token))
-            .transpose()
-            .map_err(|_| DieselError::RollbackTransaction)?
-            .unwrap_or_default();
-
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-
-        let new_connection = NewGmail {
-            user_id,
-            encrypted_access_token,
-            encrypted_refresh_token,
-            expires_in,
-            status: "active".to_string(),
-            last_update: current_time,
-            created_on: current_time,
-            description: "Gmail Connection".to_string(),
-        };
-
-        // First, delete any existing connections for this user
-        diesel::delete(gmail::table)
-            .filter(gmail::user_id.eq(user_id))
-            .execute(&mut conn)?;
-
-        // Then insert the new connection
-        diesel::insert_into(gmail::table)
-            .values(&new_connection)
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
-    pub fn update_discount_tier(&self, user_id: i32, discount_tier: Option<&str>) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        diesel::update(users::table.find(user_id))
-            .set(users::discount_tier.eq(discount_tier))
-            .execute(&mut conn)?;
-            
-        Ok(())
     }
 
     pub fn create_google_calendar_connection(

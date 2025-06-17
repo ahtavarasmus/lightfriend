@@ -151,7 +151,7 @@ pub async fn delete_bot_conversations(user_phone: &str, user: &User) -> Result<(
                 match delete_twilio_conversation(&conversation.sid, &user).await {
                     Ok(_) => {
                         deleted_count += 1;
-                        println!("Deleted conversation: {}", conversation.sid);
+                        tracing::debug!("Deleted conversation: {}", conversation.sid);
                     }
                     Err(e) => {
                         eprintln!("Failed to delete conversation {}: {}", conversation.sid, e);
@@ -161,7 +161,7 @@ pub async fn delete_bot_conversations(user_phone: &str, user: &User) -> Result<(
         }
     }
 
-    println!("Successfully deleted {} conversations for user {}", deleted_count, user_phone);
+    tracing::debug!("Successfully deleted {} conversations for user {}", deleted_count, user_phone);
     Ok(())
 }
 
@@ -196,12 +196,21 @@ pub async fn delete_twilio_conversation(conversation_sid: &str, user: &User) -> 
         return Err(error_text.into());
     }
 
-    println!("Successfully deleted conversation: {}", conversation_sid);
+    tracing::debug!("Successfully deleted conversation: {}", conversation_sid);
     Ok(())
 }
 
 
 pub async fn create_twilio_conversation_for_participant(user: &User, proxy_address: String) -> Result<(String, String), Box<dyn Error>> {
+    // Validate phone numbers
+    if !user.phone_number.starts_with("+") {
+        return Err("Invalid user phone number format - must start with +".into());
+    }
+
+    if !proxy_address.starts_with("+") {
+        return Err("Invalid proxy address format - must start with +".into());
+    }
+
     // Check if user has SMS discount tier and use their credentials if they do
     let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
         (
@@ -228,9 +237,6 @@ pub async fn create_twilio_conversation_for_participant(user: &User, proxy_addre
         .json()
         .await?;
 
-    println!("conversation.conversation_sid: {}",conversation.sid);
-
-    // Add the user as participant
     let participant_response = client
         .post(format!(
             "https://conversations.twilio.com/v1/Conversations/{}/Participants",
@@ -244,40 +250,54 @@ pub async fn create_twilio_conversation_for_participant(user: &User, proxy_addre
         .send()
         .await?;
 
-
     let status = participant_response.status();
     if !status.is_success() {
         let error_text = participant_response.text().await?;
-        println!("Participant addition response: {}", error_text);
+        tracing::error!(
+            "Failed to add participant. Status: {}, Error: {}",
+            status,
+            error_text
+        );
         
-        // Check if this is the "participant already exists" error
-        if status.as_u16() == 409 {
-            // Extract the existing conversation SID from the error message
-            if let Some(conv_sid) = error_text.find("Conversation ").and_then(|i| {
-                let start = i + "Conversation ".len();
-                error_text[start..].find('"').map(|end| error_text[start..start+end].to_string())
-            }) {
-                // Fetch the conversation details to get the service_sid
-                let conversation: ConversationResponse = client
-                    .get(format!(
-                        "https://conversations.twilio.com/v1/Conversations/{}",
-                        conv_sid
-                    ))
-                    .basic_auth(&account_sid, Some(&auth_token))
-                    .send()
-                    .await?
-                    .json()
-                    .await?;
-                
-                println!("Found existing conversation: {}", conv_sid);
-                return Ok((conv_sid, conversation.chat_service_sid));
+        // Handle specific error cases
+        match status.as_u16() {
+            409 => {
+                tracing::debug!("Participant already exists in a conversation");
+                // Extract the existing conversation SID from the error message
+                if let Some(conv_sid) = error_text.find("Conversation ").and_then(|i| {
+                    let start = i + "Conversation ".len();
+                    error_text[start..].find('"').map(|end| error_text[start..start+end].to_string())
+                }) {
+                    // Fetch the conversation details to get the service_sid
+                    let conversation: ConversationResponse = client
+                        .get(format!(
+                            "https://conversations.twilio.com/v1/Conversations/{}",
+                            conv_sid
+                        ))
+                        .basic_auth(&account_sid, Some(&auth_token))
+                        .send()
+                        .await?
+                        .json()
+                        .await?;
+                    
+                    tracing::debug!("Found existing conversation: {}", conv_sid);
+                    return Ok((conv_sid, conversation.chat_service_sid));
+                }
             }
+            400 => {
+                if error_text.contains("Invalid messaging binding address") {
+                    return Err("Invalid phone number format. Please ensure both numbers are in E.164 format (+1234567890)".into());
+                }
+            }
+            401 => return Err("Authentication failed with Twilio. Please check your credentials.".into()),
+            403 => return Err("Permission denied. Please check your Twilio account permissions.".into()),
+            _ => {}
         }
         
-        return Err(error_text.into());
+        return Err(format!("Failed to add participant: {}", error_text).into());
     }
 
-    println!("Successfully added participant to conversation");
+    tracing::debug!("Successfully added participant to conversation");
 
     Ok((conversation.sid, conversation.chat_service_sid))
 }
@@ -298,12 +318,12 @@ pub async fn validate_user_twilio_signature(
                 id
             },
             Err(e) => {
-                tracing::info!("❌ Failed to parse user_id: {}", e);
+                tracing::error!("❌ Failed to parse user_id: {}", e);
                 return Err(StatusCode::BAD_REQUEST);
             }
         },
         None => {
-            tracing::info!("❌ No user_id found in path");
+            tracing::error!("❌ No user_id found in path");
             return Err(StatusCode::BAD_REQUEST);
         }
     };
@@ -316,12 +336,12 @@ pub async fn validate_user_twilio_signature(
                 s.to_string()
             },
             Err(e) => {
-                tracing::info!("❌ Error converting X-Twilio-Signature to string: {}", e);
+                tracing::error!("❌ Error converting X-Twilio-Signature to string: {}", e);
                 return Err(StatusCode::UNAUTHORIZED);
             }
         },
         None => {
-            tracing::info!("❌ No X-Twilio-Signature header found");
+            tracing::error!("❌ No X-Twilio-Signature header found");
             return Err(StatusCode::UNAUTHORIZED);
         }
     };
@@ -333,7 +353,7 @@ pub async fn validate_user_twilio_signature(
             token
         },
         Err(e) => {
-            tracing::info!("❌ Failed to get user-specific TWILIO_AUTH_TOKEN: {}", e);
+            tracing::error!("❌ Failed to get user-specific TWILIO_AUTH_TOKEN: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -345,7 +365,7 @@ pub async fn validate_user_twilio_signature(
             format!("{}/api/sms/server/{}", url, user_id)
         },
         Err(e) => {
-            tracing::info!("❌ Failed to get SERVER_URL: {}", e);
+            tracing::error!("❌ Failed to get SERVER_URL: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -358,7 +378,7 @@ pub async fn validate_user_twilio_signature(
             bytes
         },
         Err(e) => {
-            tracing::info!("❌ Failed to read request body: {}", e);
+            tracing::error!("❌ Failed to read request body: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -367,7 +387,7 @@ pub async fn validate_user_twilio_signature(
     let params_str = match String::from_utf8(body_bytes.to_vec()) {
         Ok(s) => s,
         Err(e) => {
-            tracing::info!("❌ Failed to convert body to UTF-8: {}", e);
+            tracing::error!("❌ Failed to convert body to UTF-8: {}", e);
             return Err(StatusCode::BAD_REQUEST);
         }
     };
@@ -384,13 +404,11 @@ pub async fn validate_user_twilio_signature(
         string_to_sign.push_str(value);
     }
 
-    tracing::info!("Built string to sign");
-
     // Create HMAC-SHA1
     let mut mac = match Hmac::<Sha1>::new_from_slice(auth_token.as_bytes()) {
         Ok(mac) => mac,
         Err(e) => {
-            tracing::info!("❌ Failed to create HMAC: {}", e);
+            tracing::error!("❌ Failed to create HMAC: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -402,7 +420,7 @@ pub async fn validate_user_twilio_signature(
 
     // Compare signatures
     if result != signature {
-        tracing::info!("❌ Signature validation failed");
+        tracing::error!("❌ Signature validation failed");
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -428,12 +446,12 @@ pub async fn validate_twilio_signature(
                 s.to_string()
             },
             Err(e) => {
-                tracing::info!("❌ Error converting X-Twilio-Signature to string: {}", e);
+                tracing::error!("❌ Error converting X-Twilio-Signature to string: {}", e);
                 return Err(StatusCode::UNAUTHORIZED);
             }
         },
         None => {
-            tracing::info!("❌ No X-Twilio-Signature header found");
+            tracing::error!("❌ No X-Twilio-Signature header found");
             return Err(StatusCode::UNAUTHORIZED);
         }
     };
@@ -445,7 +463,7 @@ pub async fn validate_twilio_signature(
             token
         },
         Err(e) => {
-            tracing::info!("❌ Failed to get TWILIO_AUTH_TOKEN: {}", e);
+            tracing::error!("❌ Failed to get TWILIO_AUTH_TOKEN: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -457,7 +475,7 @@ pub async fn validate_twilio_signature(
             url + "/api/sms/server"
         },
         Err(e) => {
-            tracing::info!("❌ Failed to get SERVER_URL: {}", e);
+            tracing::error!("❌ Failed to get SERVER_URL: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -470,7 +488,7 @@ pub async fn validate_twilio_signature(
             bytes
         },
         Err(e) => {
-            tracing::info!("❌ Failed to read request body: {}", e);
+            tracing::error!("❌ Failed to read request body: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -479,7 +497,7 @@ pub async fn validate_twilio_signature(
     let params_str = match String::from_utf8(body_bytes.to_vec()) {
         Ok(s) => s,
         Err(e) => {
-            tracing::info!("❌ Failed to convert body to UTF-8: {}", e);
+            tracing::error!("❌ Failed to convert body to UTF-8: {}", e);
             return Err(StatusCode::BAD_REQUEST);
         }
     };
@@ -496,13 +514,11 @@ pub async fn validate_twilio_signature(
         string_to_sign.push_str(value);
     }
 
-    tracing::info!("Built string to sign");
-
     // Create HMAC-SHA1
     let mut mac = match Hmac::<Sha1>::new_from_slice(auth_token.as_bytes()) {
         Ok(mac) => mac,
         Err(e) => {
-            tracing::info!("❌ Failed to create HMAC: {}", e);
+            tracing::error!("❌ Failed to create HMAC: {}", e);
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
         }
     };
@@ -514,7 +530,7 @@ pub async fn validate_twilio_signature(
 
     // Compare signatures
     if result != signature {
-        tracing::info!("❌ Signature validation failed");
+        tracing::error!("❌ Signature validation failed");
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -661,11 +677,11 @@ pub async fn redact_message(
         .await?;
 
     if !response.status().is_success() {
-        println!("Failed to update conversation message {}: {}", message_sid, response.status());
+        tracing::error!("Failed to update conversation message {}: {}", message_sid, response.status());
         return Err(format!("Failed to update conversation message: {}", response.status()).into());
     }
 
-    println!("Message {} fully redacted (both conversation and logs)", message_sid);
+    tracing::debug!("Message {} fully redacted (both conversation and logs)", message_sid);
     Ok(())
 }
 
@@ -716,7 +732,7 @@ pub async fn upload_media_to_twilio(
     }
 
     let media_response: MediaResponse = response.json().await?;
-    println!("Successfully uploaded media to Twilio with SID: {}", media_response.sid);
+    tracing::debug!("Successfully uploaded media to Twilio with SID: {}", media_response.sid);
     
     Ok(media_response.sid)
 }
@@ -798,7 +814,7 @@ pub async fn delete_twilio_message_media(
             response.status(), response.text().await?).into());
     }
 
-    println!("Successfully deleted message media: {}", media_sid);
+    tracing::debug!("Successfully deleted message media: {}", media_sid);
     Ok(())
 }
 
@@ -836,7 +852,7 @@ pub async fn delete_media_from_twilio(
         return Err(format!("Failed to delete media from Twilio: {} - {}", response.status(), response.text().await?).into());
     }
 
-    println!("Successfully deleted media from Twilio: {}", media_sid);
+    tracing::debug!("Successfully deleted media from Twilio: {}", media_sid);
     Ok(())
 }
 
@@ -913,8 +929,7 @@ pub async fn send_conversation_message_with_media(
         .json()
         .await?;
 
-    println!("Successfully sent conversation message with media, SID: {}", response.sid);
-    tracing::info!("Message with media sent to conversation {} with message SID: {}", conversation_sid, response.sid);
+    tracing::debug!("Successfully sent conversation message with media, SID: {}", response.sid);
 
     // Only redact the current message if it's not a free reply message
     if redact && !body.contains("(free reply)") {
@@ -995,8 +1010,7 @@ pub async fn send_conversation_message(
         .await?
         .json()
         .await?;
-    println!("successfully sent the conversation message with SID: {}", response.sid);
-    tracing::info!("Message sent successfully to conversation {} with message SID: {}", conversation_sid, response.sid);
+    tracing::debug!("successfully sent the conversation message with SID: {}", response.sid);
 
 
     
