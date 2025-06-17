@@ -23,6 +23,7 @@ struct UpdateProfileRequest {
     timezone_auto: bool,
     agent_language: String,
     notification_type: Option<String>,
+    save_context: Option<i32>,
 }
 
 #[derive(Properties, PartialEq, Clone)]
@@ -47,6 +48,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         info!("Initial notification type from props: {:?}", initial_value);
         use_state(|| initial_value.or(Some("sms".to_string())))
     };
+    let save_context = use_state(|| (*user_profile).save_context.unwrap_or(0));
     let error = use_state(|| None::<String>);
     let success = use_state(|| None::<String>);
     let is_editing = use_state(|| false);
@@ -63,6 +65,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let agent_language = agent_language.clone();
         let user_profile_state = user_profile.clone();
         let notification_type = notification_type.clone();
+        let save_context = save_context.clone();
 
         use_effect_with_deps(move |props_profile| {
             info!("{}", &format!("Props notification type: {:?}", props_profile.notification_type));
@@ -92,6 +95,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let agent_language = agent_language.clone();
         let notification_type = notification_type.clone();
         let user_profile = user_profile.clone();
+        let save_context = save_context.clone();
         let props = props.clone();
 
         Callback::from(move |_e: MouseEvent| {
@@ -108,6 +112,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             let navigator = navigator.clone();
             let user_profile = user_profile.clone();
             let notification_type = notification_type.clone();
+            let save_context = save_context.clone();
 
             // Check authentication first
             let is_authenticated = window()
@@ -142,6 +147,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                             timezone_auto: *timezone_auto.clone(),
                             agent_language: (*agent_language).clone(),
                             notification_type: (*notification_type).clone(),
+                            save_context: Some(*save_context),
                         })
                         .expect("Failed to build request")
                         .send()
@@ -170,6 +176,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     timezone_auto: Some(*timezone_auto),
                                     agent_language: (*agent_language).clone(),
                                     notification_type: (*notification_type).clone(),
+                                    save_context: Some(*save_context),
                                     verified: (*user_profile).verified,
                                     time_to_live: (*user_profile).time_to_live,
                                     time_to_delete: (*user_profile).time_to_delete,
@@ -570,9 +577,58 @@ let on_timezone_update = {
                     }
                 }
             </div>
-            
 
-            
+
+            <div class="profile-field">
+                <div class="field-label-group">
+                    <span class="field-label">{"Conversation History"}</span>
+                    <div class="tooltip">
+                        <span class="tooltip-icon">{"?"}</span>
+                        <span class="tooltip-text">
+                            {"Choose how many back-and-forth messages Lightfriend remembers in SMS conversations. A value of 0 means no history is kept. The conversation history is securely encrypted when not in use, and only the specified number of recent exchanges is retained. More history means better context and no history means lightfriend responds to every query like it was the first one. One exception to this is when making outbound event like creating/sending something, lightfriend will retain the proposed content to be confirmed by you until the next confirmation message."}
+                        </span>
+                    </div>
+                </div>
+                {
+                    if *is_editing {
+                        html! {
+                            <select
+                                class="profile-input"
+                                value={(*save_context).to_string()}
+                                onchange={let save_context = save_context.clone(); move |e: Event| {
+                                    let select: HtmlInputElement = e.target_unchecked_into();
+                                    if let Ok(value) = select.value().parse::<i32>() {
+                                        save_context.set(value);
+                                    }
+                                }}
+                            >
+                                <option value="0">{"No history"}</option>
+                                {
+                                    (1..=10).map(|i| {
+                                        html! {
+                                            <option value={i.to_string()} selected={*save_context == i}>
+                                                {format!("{} messages", i)}
+                                            </option>
+                                        }
+                                    }).collect::<Html>()
+                                }
+                            </select>
+                        }
+                    } else {
+                        html! {
+                            <span class="field-value">
+                                {
+                                    match (*user_profile).save_context {
+                                        Some(0) | None => "No history".to_string(),
+                                        Some(n) => format!("{} messages", n).to_string()
+                                    }
+                                }
+                            </span>
+                        }
+                    }
+                }
+            </div>
+
             <button 
                 onclick={
                     let is_editing = is_editing.clone();

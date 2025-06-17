@@ -999,6 +999,15 @@ pub async fn process_sms(
                     tracing::error!("Failed to store tool response in history: {}", e);
                 }
             }
+            // Clean up old message history based on save_context setting
+            let save_context = user_settings.save_context.unwrap_or(0);
+            if let Err(e) = state.user_repository.delete_old_message_history(
+                user.id,
+                Some(&conversation.conversation_sid),
+                save_context as i64
+            ) {
+                tracing::error!("Failed to clean up old message history: {}", e);
+            }
 
             if should_charge {
                 // Only deduct credits if we should charge

@@ -43,6 +43,7 @@ pub struct UserProfile {
     pub agent_language: String,
     pub notification_type: Option<String>,
     pub sub_country: Option<String>,
+    pub save_context: Option<i32>,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]

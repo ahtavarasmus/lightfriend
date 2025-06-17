@@ -104,6 +104,7 @@ pub struct UpdateProfileRequest {
     timezone_auto: bool,
     agent_language: String,
     notification_type: Option<String>,
+    save_context: Option<i32>,
 }
 
 #[derive(Serialize)]
@@ -358,6 +359,7 @@ pub async fn update_profile(
         &update_req.timezone,
         &update_req.timezone_auto,
         update_req.notification_type.as_deref(),
+        update_req.save_context,
     ) {
         Ok(_) => {
             // Update agent language separately // TODO put to same down the line
