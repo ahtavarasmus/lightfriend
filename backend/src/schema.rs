@@ -150,6 +150,19 @@ diesel::table! {
 }
 
 diesel::table! {
+    message_history (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        role -> Text,
+        encrypted_content -> Text,
+        tool_name -> Nullable<Text>,
+        tool_call_id -> Nullable<Text>,
+        created_at -> Integer,
+        conversation_id -> Text,
+    }
+}
+
+diesel::table! {
     priority_senders (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -268,6 +281,8 @@ diesel::table! {
         timezone_auto -> Nullable<Bool>,
         agent_language -> Text,
         sub_country -> Nullable<Text>,
+        save_context -> Nullable<Integer>,
+        info -> Nullable<Text>,
     }
 }
 
@@ -281,7 +296,6 @@ diesel::table! {
         time_to_live -> Nullable<Integer>,
         verified -> Bool,
         credits -> Float,
-        info -> Nullable<Text>,
         preferred_number -> Nullable<Text>,
         charge_when_under -> Bool,
         charge_back_to -> Nullable<Float>,
@@ -324,6 +338,7 @@ diesel::joinable!(idea_upvotes -> ideas (idea_id));
 diesel::joinable!(imap_connection -> users (user_id));
 diesel::joinable!(importance_priorities -> users (user_id));
 diesel::joinable!(keywords -> users (user_id));
+diesel::joinable!(message_history -> users (user_id));
 diesel::joinable!(priority_senders -> users (user_id));
 diesel::joinable!(proactive_settings -> users (user_id));
 diesel::joinable!(processed_emails -> users (user_id));
@@ -346,6 +361,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     imap_connection,
     importance_priorities,
     keywords,
+    message_history,
     priority_senders,
     proactive_settings,
     processed_emails,

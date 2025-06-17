@@ -182,7 +182,7 @@ pub async fn get_profile(
                 time_to_delete: time_to_delete,
                 credits: user.credits,
                 notify: user_settings.notify,
-                info: user.info,
+                info: user_settings.info,
                 preferred_number: user.preferred_number,
                 charge_when_under: user.charge_when_under,
                 charge_back_to: user.charge_back_to,

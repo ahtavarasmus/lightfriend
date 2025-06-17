@@ -291,12 +291,7 @@ pub async fn process_sms(
         }
     }
     
-    let user_info = match user.clone().info {
-        Some(info) => info,
-        None => "".to_string()
-    };
-
-    // Get timezone from user info or default to UTC
+        // Get timezone from user info or default to UTC
     // Get user settings to access timezone
     let user_settings = match state.user_core.get_user_settings(user.id) {
         Ok(settings) => settings,
@@ -310,6 +305,11 @@ pub async fn process_sms(
                 })
             );
         }
+    };
+
+    let user_info = match user_settings.clone().info {
+        Some(info) => info,
+        None => "".to_string()
     };
 
     let timezone_str = match user_settings.timezone {
@@ -374,18 +374,45 @@ pub async fn process_sms(
         }
     }
 
-    // Only include conversation history if message starts with "forget"
+    // Only include conversation history if message doesn't start with "forget"
     if !payload.body.to_lowercase().starts_with("forget") {
-    let mut history: Vec<ChatMessage> = messages.clone().into_iter().map(|msg| {
-        ChatMessage {
-            role: if msg.author == "lightfriend" { "assistant" } else { "user" }.to_string(),
-            content: chat_completion::Content::Text(msg.body.clone()),
-        }
-    }).collect();
-        history.reverse();
+
+        // Get user's save_context setting
+        let save_context = user_settings.save_context.unwrap_or(0);
         
-        // Combine system message with conversation history
-        chat_messages.extend(history);
+        if save_context > 0 {
+            // Get the last N back-and-forth exchanges based on save_context
+            let history = state.user_repository
+                .get_conversation_history(
+                    user.id,
+                    &conversation.conversation_sid,
+                    save_context as i64,
+                )
+                .unwrap_or_default();
+
+            let mut context_messages: Vec<ChatMessage> = Vec::new();
+            
+            // Process messages in chronological order
+            for msg in history.into_iter().rev() {
+                let content = chat_completion::Content::Text(msg.encrypted_content);
+                let role = match msg.role.as_str() {
+                    "user" => "user",
+                    "assistant" => "assistant",
+                    "tool" => "tool",
+                    _ => continue,
+                };
+                
+                let mut chat_msg = ChatMessage {
+                    role: role.to_string(),
+                    content,
+                };
+                
+                context_messages.push(chat_msg);
+            }
+            
+            // Combine system message with conversation history
+            chat_messages.extend(context_messages);
+        }
     }
 
     // Handle image if present
@@ -902,22 +929,75 @@ pub async fn process_sms(
     // Send the actual message if not in test mode
     match crate::api::twilio_utils::send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number, &final_response_with_notice, redact_the_body, &user).await {
         Ok(message_sid) => {
-            // Always log the SMS usage metadata and eval(no content!)
+            // Log the SMS usage metadata and store message history
             tracing::debug!("status of the message: {}", status);
+            
+            let current_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+
+            // Log usage
             if let Err(e) = state.user_repository.log_usage(
                 user.id,
-                Some(message_sid),
+                Some(message_sid.clone()),
                 "sms".to_string(),
                 None,
                 Some(processing_time_secs as i32),
                 Some(eval_result),
-                Some(final_eval),
-                Some(status),
+                Some(final_eval.clone()),
+                Some(status.clone()),
                 None,
                 None,
             ) {
                 tracing::error!("Failed to log SMS usage: {}", e);
-                // Continue execution even if logging fails
+            }
+
+            // Store user's message in history
+            let user_message = crate::models::user_models::NewMessageHistory {
+                user_id: user.id,
+                role: "user".to_string(),
+                encrypted_content: payload.body.clone(),
+                tool_name: None,
+                tool_call_id: None,
+                created_at: current_time,
+                conversation_id: conversation.conversation_sid.clone(),
+            };
+
+            // Store assistant's response in history
+            let assistant_message = crate::models::user_models::NewMessageHistory {
+                user_id: user.id,
+                role: "assistant".to_string(),
+                encrypted_content: final_response_with_notice.clone(),
+                tool_name: None,
+                tool_call_id: None,
+                created_at: current_time,
+                conversation_id: conversation.conversation_sid.clone(),
+            };
+
+            // Store messages in history
+            if let Err(e) = state.user_repository.create_message_history(&user_message) {
+                tracing::error!("Failed to store user message in history: {}", e);
+            }
+            if let Err(e) = state.user_repository.create_message_history(&assistant_message) {
+                tracing::error!("Failed to store assistant message in history: {}", e);
+            }
+
+            // Store tool responses in history
+            for (tool_call_id, tool_response) in tool_answers.iter() {
+                let tool_message = crate::models::user_models::NewMessageHistory {
+                    user_id: user.id,
+                    role: "tool".to_string(),
+                    encrypted_content: tool_response.clone(),
+                    tool_name: None, // We could store this if needed
+                    tool_call_id: Some(tool_call_id.clone()),
+                    created_at: current_time,
+                    conversation_id: conversation.conversation_sid.clone(),
+                };
+
+                if let Err(e) = state.user_repository.create_message_history(&tool_message) {
+                    tracing::error!("Failed to store tool response in history: {}", e);
+                }
             }
 
             if should_charge {

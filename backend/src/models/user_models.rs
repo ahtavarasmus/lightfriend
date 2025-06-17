@@ -24,6 +24,7 @@ use crate::schema::ideas;
 use crate::schema::idea_upvotes;
 use crate::schema::idea_email_subscriptions;
 use crate::schema::temp_variables;
+use crate::schema::message_history;
 
 
 
@@ -39,7 +40,6 @@ pub struct User {
     pub time_to_live: Option<i32>, // if user has not verified their account in some time it will be deleted
     pub verified: bool, 
     pub credits: f32, // user purchased credits, will not expire, can be bought if has subscribtion or is a early user(discount = true)
-    pub info: Option<String>, // extra info about the user for the ai
     pub preferred_number: Option<String>, // number the user prefers lightfriend texting/calling them from
     pub charge_when_under: bool, // flag for if user wants to automatically buy more overage credits
     pub charge_back_to: Option<f32>, // the credit amount to charge 
@@ -540,6 +540,8 @@ pub struct UserSettings {
     pub timezone_auto: Option<bool>,
     pub agent_language: String, // language the agent will use to answer, default 'en'. 
     pub sub_country: Option<String>, // "US", "FI", "UK", "AU", "IL"
+    pub save_context: Option<i32>, // how many messages to save in context or None if nothing is saved
+    pub info: Option<String>, // extra info about the user for the ai
 }
 
 #[derive(Insertable)]
@@ -552,6 +554,8 @@ pub struct NewUserSettings {
     pub timezone_auto: Option<bool>,
     pub agent_language: String,
     pub sub_country: Option<String>,
+    pub save_context: Option<i32>,
+    pub info: Option<String>,
 }
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -606,4 +610,30 @@ pub struct NewIdeaEmailSubscription {
     pub idea_id: i32,
     pub email: String,
     pub created_at: i32,
+}
+
+#[derive(Queryable, Selectable, Insertable, Debug)]
+#[diesel(table_name = message_history)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct MessageHistory {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub role: String,  // 'user', 'assistant', 'tool', or 'system'
+    pub encrypted_content: String,
+    pub tool_name: Option<String>,  // Name of the tool if it's a tool response
+    pub tool_call_id: Option<String>,  // ID of the tool call if it's a tool response
+    pub created_at: i32,  // Unix timestamp
+    pub conversation_id: String,  // To group messages in the same conversation
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = message_history)]
+pub struct NewMessageHistory {
+    pub user_id: i32,
+    pub role: String,
+    pub encrypted_content: String,
+    pub tool_name: Option<String>,
+    pub tool_call_id: Option<String>,
+    pub created_at: i32,
+    pub conversation_id: String,
 }

@@ -112,6 +112,8 @@ impl UserCore {
                     timezone_auto: None,
                     agent_language: "en".to_string(),
                     sub_country: None,
+                    info: None,
+                    save_context: Some(5),
                 };
                 
                 diesel::insert_into(user_settings::table)
@@ -147,6 +149,8 @@ impl UserCore {
                 timezone_auto: None,
                 agent_language: "en".to_string(),
                 sub_country: None,
+                info: None,
+                save_context: Some(5),
             };
             
             diesel::insert_into(user_settings::table)
@@ -302,7 +306,6 @@ impl UserCore {
                     users::email.eq(email),
                     users::phone_number.eq(phone_number),
                     users::nickname.eq(nickname),
-                    users::info.eq(info),
                     users::verified.eq(!should_unverify && current_user.verified), // Only keep verified true if phone number hasn't changed
                 ))
                 .execute(conn)?;
@@ -316,6 +319,7 @@ impl UserCore {
                     user_settings::timezone.eq(timezone.to_string()),
                     user_settings::timezone_auto.eq(timezone_auto),
                     user_settings::notification_type.eq(notification_type.map(|s| s.to_string())),
+                    user_settings::info.eq(info),
                 ))
                 .execute(conn)?;
 

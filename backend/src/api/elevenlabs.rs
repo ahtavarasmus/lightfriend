@@ -252,7 +252,7 @@ pub async fn fetch_assistant(
                 Some(nickname) => nickname,
                 None => "".to_string()
             };
-            let user_info = match user.info {
+            let user_info = match user_settings.info {
                 Some(info) => info,
                 None => "".to_string()
             };
