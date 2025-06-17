@@ -5,7 +5,6 @@ use crate::repositories::user_repository::UserRepository;
 use serde_json::json;
 use sha1::Sha1;
 use uuid::Uuid;
-use magic_crypt::MagicCryptTrait;
 use crate::AppState;
 use matrix_sdk::{
     Client as MatrixClient,
@@ -15,11 +14,10 @@ use std::sync::Arc;
 use reqwest;
 use tokio::time::{sleep, Duration};
 use url::Url;
-
 use sha2::Digest;
-
 use tokio::sync::Mutex;
 use std::collections::HashMap;
+use crate::utils::encryption::{encrypt, decrypt};
 
 /// Sets up encryption backups for a Matrix client
 /// 
@@ -46,7 +44,7 @@ async fn setup_backups(
             println!("🔑 Found encrypted recovery key in database");
             if client.encryption().secret_storage().is_enabled().await? {
                 println!("✅ Secret storage is enabled, importing secrets for backups");
-                let passphrase = decrypt_token(key)?;
+                let passphrase = decrypt(key)?;
                 println!("🔑 Decrypted recovery key (length: {})", passphrase.len());
                 let secret_store = client.encryption().secret_storage().open_secret_store(&passphrase).await?;
                 println!("🔓 Opened secret store, importing secrets");
@@ -101,7 +99,7 @@ async fn setup_cross_signing(
                 println!("🔑 Found encrypted secret storage recovery key in database");
                 if client.encryption().secret_storage().is_enabled().await? {
                     println!("✅ Secret storage is enabled, importing secrets");
-                    let passphrase = decrypt_token(encrypted_key)?;
+                    let passphrase = decrypt(encrypted_key)?;
                     println!("🔑 Decrypted recovery key (length: {})", passphrase.len());
                     let secret_store = client.encryption().secret_storage().open_secret_store(&passphrase).await?;
                     println!("🔓 Opened secret store, importing secrets");
@@ -360,41 +358,6 @@ pub async fn register_user(homeserver: &str, shared_secret: &str) -> Result<(Str
     }
 }
 
-
-/// Encrypts a token for secure storage
-/// 
-/// # Arguments
-/// * `token` - The token to encrypt
-/// 
-/// # Returns
-/// The encrypted token as a base64 string
-pub fn encrypt_token(token: &str) -> Result<String> {
-    println!("🔒 Encrypting token...");
-    let encryption_key = std::env::var("ENCRYPTION_KEY")
-        .map_err(|_| anyhow!("ENCRYPTION_KEY not set"))?;
-    
-    let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
-    Ok(cipher.encrypt_str_to_base64(token))
-}
-
-/// Decrypts a previously encrypted token
-/// 
-/// # Arguments
-/// * `encrypted_token` - The encrypted token in base64 format
-/// 
-/// # Returns
-/// The decrypted token as a string
-pub fn decrypt_token(encrypted_token: &str) -> Result<String> {
-    println!("🔓 Decrypting token...");
-    let encryption_key = std::env::var("ENCRYPTION_KEY")
-        .map_err(|_| anyhow!("ENCRYPTION_KEY not set"))?;
-    
-    let cipher = magic_crypt::new_magic_crypt!(encryption_key, 256);
-    cipher.decrypt_base64_to_string(encrypted_token)
-        .map_err(|e| anyhow!("Failed to decrypt token: {}", e))
-}
-
-
 // create client with the client sqlite store(that stores both state and encryption keys)
 
 pub async fn login_with_password(client: &MatrixClient, state: &Arc<AppState>, username: &str, password: &str, device_id: Option<&str>, user_id: i32) ->Result<()> {
@@ -453,8 +416,8 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>, setup_encryption: b
         (username, password, Some(device_id), Some(access_token))
     } else {
         println!("✓ Existing Matrix credentials found");
-        let access_token = user.encrypted_matrix_access_token.as_ref().map(|t| decrypt_token(t)).transpose()?;
-        (user.matrix_username.unwrap(), decrypt_token(user.encrypted_matrix_password.as_ref().unwrap())?, user.matrix_device_id, access_token)
+        let access_token = user.encrypted_matrix_access_token.as_ref().map(|t| decrypt(t)).transpose()?;
+        (user.matrix_username.unwrap(), decrypt(user.encrypted_matrix_password.as_ref().unwrap())?, user.matrix_device_id, access_token)
     };
  
     let store_path = format!(
@@ -587,7 +550,7 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>, setup_encryption: b
             // run secret storage create and cross signing keys + backup key will go there automatically.
             if let Some(encrypted_key) = user.encrypted_matrix_secret_storage_recovery_key.clone() {
                 println!("🔑 Using existing recovery key");
-                let passphrase = decrypt_token(&encrypted_key.as_str()).unwrap();
+                let passphrase = decrypt(&encrypted_key.as_str()).unwrap();
                 println!("🔑 Decrypted recovery key");
                 // recovery enable will create a new secret store and make sure backups enabled
                 println!("🔄 Enabling recovery with existing passphrase");
@@ -828,7 +791,7 @@ if client.encryption().backups().are_enabled() { // check if we have active back
     if redo_secret_storage {
         // run secret storage create and cross signing keys + backup key will go there automatically.
         if user.secret_store_key {
-            let passphrase = decrypt_token(user.encrypted_matrix_secret_storage_recovery_key.unwrap()).unwrap();
+            let passphrase = decrypt(user.encrypted_matrix_secret_storage_recovery_key.unwrap()).unwrap();
             // recovery enable will create a new secret store and make sure backups enabled
             client.encryption().recovery().enable().with_passphrase(passphrase).await;
         } else {
