@@ -588,65 +588,40 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>, setup_encryption: b
     Ok(client)
 }
 
-/// Get a cached Matrix client or create a new one if not cached/invalid
+/// Get a cached Matrix client from AppState, with fallback to creating a new client
+/// Note: The fallback client is not stored in the cache - that's managed by the scheduler
 pub async fn get_cached_client(
     user_id: i32,
     state: &Arc<AppState>,
-    setup_encryption: bool,
-    client_cache: &Arc<tokio::sync::Mutex<HashMap<i32, MatrixClient>>>,
-) -> Result<MatrixClient> {
-    // First check if we have a cached client
-    {
-        let cache = client_cache.lock().await;
-        if let Some(client) = cache.get(&user_id) {
-            // Validate the cached client by checking if it's still logged in
-            if client.logged_in() {
-                // Quick validation - try to get user ID
-                if let Some(_user_id) = client.user_id() {
-                    // Additional validation - try a quick sync to ensure the client is still active
-                    match client.sync_once(matrix_sdk::config::SyncSettings::new().timeout(std::time::Duration::from_secs(5))).await {
-                        Ok(_) => {
-                            tracing::debug!("Using cached Matrix client for user {} - sync successful", user_id);
-                            return Ok(client.clone());
-                        }
-                        Err(e) => {
-                            tracing::debug!("Cached client for user {} failed sync check: {}", user_id, e);
-                            // Drop the lock before creating new client
-                            drop(cache);
-                            // Clear the invalid client from cache
-                            clear_cached_client(user_id, client_cache).await;
-                        }
-                    }
-                }
+) -> Result<Arc<MatrixClient>> {
+    // Get the matrix clients map from AppState
+    let matrix_clients = state.matrix_clients.lock().await;
+    
+    // Try to get the client for this user
+    if let Some(client) = matrix_clients.get(&user_id) {
+        tracing::debug!("Found cached Matrix client for user {}", user_id);
+        Ok(client.clone())
+    } else {
+        tracing::debug!("No cached Matrix client found for user {}, creating temporary client", user_id);
+        // Drop the lock before the potentially long-running get_client operation
+        drop(matrix_clients);
+        
+        // Create a new client as fallback
+        match get_client(user_id, state, true).await {
+            Ok(client) => {
+                tracing::debug!("Successfully created temporary Matrix client for user {}", user_id);
+                Ok(Arc::new(client))
+            },
+            Err(e) => {
+                tracing::error!("Failed to create temporary Matrix client for user {}: {}", user_id, e);
+                Err(anyhow!("Failed to create Matrix client: {}", e))
             }
-            tracing::debug!("Cached client for user {} is invalid, will create new one", user_id);
         }
     }
 
-    // No valid cached client, create a new one
-    tracing::debug!("Creating new Matrix client for user {}", user_id);
-    let client = get_client(user_id, &state, setup_encryption).await?;
-    
-    // Cache the new client
-    {
-        let mut cache = client_cache.lock().await;
-        cache.insert(user_id, client.clone());
-        tracing::debug!("Cached new Matrix client for user {}", user_id);
-    }
-
-    Ok(client)
 }
 
-/// Remove a Matrix client from the cache
-pub async fn clear_cached_client(
-    user_id: i32,
-    client_cache: &Arc<tokio::sync::Mutex<HashMap<i32, MatrixClient>>>
-) {
-    let mut cache = client_cache.lock().await;
-    if cache.remove(&user_id).is_some() {
-        tracing::debug!("Removed cached Matrix client for user {}", user_id);
-    }
-}
+// Removing clear_cached_client as it's no longer needed - client management is handled by the scheduler
 
 /*
 

@@ -155,7 +155,7 @@ pub struct AppState {
     password_reset_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     matrix_sync_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
     matrix_invitation_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
-    matrix_clients: Arc<Mutex<HashMap<i32, matrix_sdk::Client>>>,
+    matrix_clients: Arc<Mutex<HashMap<i32, Arc<matrix_sdk::Client>>>>,
     password_reset_otps: DashMap<String, (String, u64)>, // (email, (otp, expiration))
 }
 

@@ -74,7 +74,7 @@ pub async fn fetch_whatsapp_messages(
     let user_settings = state.user_core.get_user_settings(user_id)?;
 
     // Get Matrix client and check bridge status (use cached version for better performance)
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state, false, &state.matrix_clients).await?;
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
 
     let bridge = state.user_repository.get_whatsapp_bridge(user_id)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
@@ -297,7 +297,7 @@ pub async fn send_whatsapp_message(
     // Normalize phone number format
     
     tracing::debug!("Attempting to get Matrix client for user {}", user_id);
-    let client = match crate::utils::matrix_auth::get_cached_client(user_id, &state, false, &state.matrix_clients).await {
+    let client = match crate::utils::matrix_auth::get_cached_client(user_id, &state).await {
         Ok(client) => {
             tracing::debug!("Successfully obtained cached Matrix client");
             client
@@ -632,7 +632,11 @@ pub async fn handle_whatsapp_message(
     state: Arc<AppState>,
 ) {
     tracing::info!("Entering WhatsApp message handler");
-    tracing::debug!("Event details: sender={}, event_id={}", event.sender, event.event_id);
+    tracing::debug!(
+        "Event details: sender={}, event_id={}",
+        event.sender,
+        event.event_id,
+    );
     // Get room name
     let room_name = match room.display_name().await {
         Ok(name) => name.to_string(),
@@ -647,15 +651,26 @@ pub async fn handle_whatsapp_message(
         tracing::debug!("Skipping non-WhatsApp room: {}", room_name);
         return;
     }
-    tracing::info!("Processing WhatsApp room: {}", room_name);
+    tracing::info!(
+        "Processing WhatsApp room: {} (room_id: {})",
+        room_name,
+        room.room_id()
+    );
 
     // Only process messages from WhatsApp users
     if !event.sender.localpart().starts_with("whatsapp_") {
+        tracing::debug!(
+            "Skipping non-WhatsApp sender: {} in room: {}",
+            event.sender.localpart(),
+            room_name
+        );
         return;
     }
+    tracing::debug!("Processing WhatsApp message from: {}", event.sender.localpart());
 
     // Find the user ID for this Matrix client
     let client_user_id = client.user_id().unwrap().to_string();
+    tracing::debug!("Looking up user for Matrix ID: {}", client_user_id);
 
     // Get user for additional info
     let user = match state.user_repository.get_user_by_matrix_user_id(&client_user_id) {
@@ -672,18 +687,28 @@ pub async fn handle_whatsapp_message(
 
     // TODO remove before live
     if user.id != 1 {
+        tracing::debug!("Skipping message processing for non-test user: {}", user.id);
         return;
     }
+    tracing::debug!("Processing message for test user ID: {}", user.id);
 
     let user_id = user.id;
 
     // Check if user has proactive WhatsApp enabled
     match state.user_repository.get_proactive_whatsapp(user_id) {
         Ok(true) => {
-            tracing::debug!("User {} has proactive WhatsApp enabled, processing message", user_id);
+            tracing::info!(
+                "User {} has proactive WhatsApp enabled, processing message from room: {}",
+                user_id,
+                room_name
+            );
         },
         Ok(false) => {
-            tracing::debug!("User {} has proactive WhatsApp disabled, skipping message", user_id);
+            tracing::info!(
+                "User {} has proactive WhatsApp disabled, skipping message from room: {}",
+                user_id,
+                room_name
+            );
             return;
         },
         Err(e) => {
@@ -695,9 +720,17 @@ pub async fn handle_whatsapp_message(
 
     // Check if user has valid subscription and messages left
     match state.user_repository.has_valid_subscription_tier_with_messages(user_id, "tier 2") {
-        Ok(true) => (),
+        Ok(true) => {
+            tracing::debug!(
+                "User {} has valid subscription and messages for WhatsApp monitoring",
+                user_id
+            );
+        },
         Ok(false) => {
-            tracing::debug!("User {} does not have valid subscription or messages left for WhatsApp monitoring", user_id);
+            tracing::info!(
+                "User {} does not have valid subscription or messages left for WhatsApp monitoring",
+                user_id
+            );
             return;
         },
         Err(e) => {
@@ -708,9 +741,18 @@ pub async fn handle_whatsapp_message(
 
     // Check if we should process this notification based on messages left
     if user.msgs_left <= 0 {
-        tracing::info!("User has no notification messages left");
+        tracing::info!(
+            "User {} has no notification messages left (room: {})",
+            user_id,
+            room_name
+        );
         return;
     }
+    tracing::debug!(
+        "User {} has {} messages left for notifications",
+        user_id,
+        user.msgs_left
+    );
 
 
     // Extract message content
@@ -731,8 +773,16 @@ pub async fn handle_whatsapp_message(
        content.contains("media no longer available") ||
        content.contains("Decrypting message from WhatsApp failed") ||
        content.starts_with("* Failed to") {
+        tracing::debug!(
+            "Skipping error message in room {}",
+            room_name,
+        );
         return;
     }
+    tracing::debug!(
+        "Message passed error check filters for room {}",
+        room_name,
+    );
 
     // Extract clean chat name from room name
     let chat_name = room_name
@@ -1216,7 +1266,7 @@ pub async fn search_whatsapp_rooms(
     tracing::info!("Searching WhatsApp rooms for user {} ", user_id);
 
     // Get Matrix client using cached version for better performance
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state, false, &state.matrix_clients).await?;
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
 
     // Check if we're logged in first
     let bridge = state.user_repository.get_whatsapp_bridge(user_id)?;

@@ -909,121 +909,92 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                 sched.add(calendar_notification_job).await.expect("Failed to add calendar notification job to scheduler");
 
-                // Create a job that runs daily to manage Matrix sync tasks
+
                 let state_clone = Arc::clone(&state);
-                let matrix_sync_job = Job::new_async("0 * * * * *", move |_, _| {  // Runs at midnight every day
+                let matrix_sync_job = Job::new_async("0 * * * * *", move |_, _| {
                     let state = state_clone.clone();
                     Box::pin(async move {
-                        tracing::debug!("Managing Matrix sync tasks...");
+                        tracing::debug!("Managing Matrix clients and sync tasks...");
                         
                         // Get all users with active WhatsApp connection
                         match state.user_repository.get_users_with_matrix_bridge_connections() {
                             Ok(users) => {
+                                let mut matrix_clients = state.matrix_clients.lock().await;
                                 let mut sync_tasks = state.matrix_sync_tasks.lock().await;
                                 
-                                // Remove any sync tasks for users who are no longer active
-                                sync_tasks.retain(|user_id, task| {
-                                    if !users.contains(user_id) {
-                                        tracing::debug!("Removing sync task for inactive user {}", user_id);
+                                // Remove clients and sync tasks for inactive users
+                                let inactive_users: Vec<i32> = matrix_clients.keys()
+                                    .filter(|&user_id| !users.contains(user_id))
+                                    .copied()
+                                    .collect();
+
+                                for user_id in inactive_users {
+                                    tracing::debug!("Removing client and sync task for inactive user {}", user_id);
+                                    if let Some(task) = sync_tasks.remove(&user_id) {
                                         task.abort();
-                                        false
-                                    } else {
-                                        true
+
                                     }
-                                });
+                                    matrix_clients.remove(&user_id);
+                                }
 
-                            // Start sync tasks for new active users
-                            for user_id in users {
-                                if !sync_tasks.contains_key(&user_id) {
-                                    tracing::debug!("Starting new sync task for user {}", user_id);
-                                    
-                                    // Create a new sync task
-                                    let state_clone = Arc::clone(&state);
-                                    let handle = tokio::spawn(async move {
-                                    // Try to get cached client first
-                                    match crate::utils::matrix_auth::get_cached_client(
-                                        user_id,
-                                        &state_clone,
-                                        false,
-                                        &state_clone.matrix_clients
-                                    ).await {
-                                        Ok(mut client) => {
-                                            debug!("Starting Matrix sync for user {}", user_id);
-                                            
-                                            // Always add WhatsApp message handler - it will check proactive status internally
-                                            println!("Adding WhatsApp message handler for user {}", user_id);
-                                            use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
-                                            use matrix_sdk::room::Room;
-                                            use matrix_sdk::Client as MatrixClient;
-                                            
-                                            // First ensure the client is logged in and ready
-                                            if let Err(e) = client.sync_once(matrix_sdk::config::SyncSettings::default()).await {
-                                                error!("Initial sync failed for user {}: {}", user_id, e);
-                                                return;
-                                            }
+                                // Setup clients and sync tasks for active users
+                                for user_id in users {
+                                    if !matrix_clients.contains_key(&user_id) {
+                                        tracing::debug!("Setting up new Matrix client for user {}", user_id);
+                                        
+                                        // Create and initialize client
+                                        match crate::utils::matrix_auth::get_client(user_id, &state, true).await {
+                                            Ok(client) => {
+                                                // Add event handlers before storing/cloning the client
+                                                use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
+                                                use matrix_sdk::room::Room;
+                                                
+                                                let state_for_handler = Arc::clone(&state);
+                                                client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
+                                                    let state = Arc::clone(&state_for_handler);
+                                                    async move {
+                                                        tracing::debug!("📨 Received message in room {}: {:?}", room.room_id(), ev);
+                                                        crate::utils::whatsapp_utils::handle_whatsapp_message(ev, room, client, state).await;
+                                                    }
+                                                });
 
-                                            let state_for_handler = Arc::clone(&state_clone);
-                                            client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room, client: MatrixClient| {
-                                                let state = Arc::clone(&state_for_handler);
-                                                async move {
-                                                    tracing::debug!("📨 Received message in room {}: {:?}", room.room_id(), ev);
-                                                    crate::utils::whatsapp_utils::handle_whatsapp_message(ev, room, client, state).await;
-                                                }
-                                            });
+                                                // Store the client
+                                                let client = Arc::new(client);
+                                                matrix_clients.insert(user_id, client.clone());
 
-                                            // Configure sync settings with appropriate timeouts and full state
-                                            let sync_settings = matrix_sdk::config::SyncSettings::default()
-                                                .timeout(std::time::Duration::from_secs(30))
-                                                .full_state(true);
+                                                // Create sync task
+                                                let sync_settings = matrix_sdk::config::SyncSettings::default()
+                                                    .timeout(std::time::Duration::from_secs(30))
+                                                    .full_state(true);
 
-                                            tracing::debug!("Starting continuous sync for user {}", user_id);
-                                            
-                                            // Continuous sync with automatic recovery
-                                            loop {
-                                                match client.sync(sync_settings.clone()).await {
-                                                    Ok(_) => {
-                                                        tracing::debug!("Sync completed normally for user {}", user_id);
-                                                        // Small delay before restarting sync
-                                                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                                                    },
-                                                    Err(e) => {
-                                                        error!("Matrix sync error for user {}: {}", user_id, e);
-                                                        
-                                                        // Clear the cached client
-                                                        crate::utils::matrix_auth::clear_cached_client(user_id, &state_clone.matrix_clients).await;
-                                                        
-                                                        // Try to recover with a new client
-                                                        match crate::utils::matrix_auth::get_client(user_id, &state_clone, true).await {
-                                                            Ok(new_client) => {
-                                                                tracing::debug!("Successfully recovered client for user {}", user_id);
-                                                                // Update our client reference
-                                                                client = new_client;
+                                                let handle = tokio::spawn(async move {
+                                                    loop {
+                                                        match client.sync(sync_settings.clone()).await {
+                                                            Ok(_) => {
+                                                                tracing::debug!("Sync completed normally for user {}", user_id);
+                                                                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                                                             },
                                                             Err(e) => {
-                                                                error!("Failed to recover client for user {}: {}", user_id, e);
-                                                                // Wait before retry
+                                                                error!("Matrix sync error for user {}: {}", user_id, e);
                                                                 tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
                                                             }
                                                         }
                                                     }
-                                                }
-                                            }
-                                        },
-                                        Err(e) => {
-                                            error!("Failed to get Matrix client for user {}: {}", user_id, e);
-                                        }
+                                                });
 
+                                                sync_tasks.insert(user_id, handle);
+                                            },
+                                            Err(e) => {
+                                                error!("Failed to create Matrix client for user {}: {}", user_id, e);
+                                            }
+                                        }
                                     }
-                                });
-                                
-                                sync_tasks.insert(user_id, handle);
-                            }
+                                }
+                            },
+                            Err(e) => error!("Failed to get active WhatsApp users: {}", e),
                         }
-                },
-                Err(e) => error!("Failed to get active WhatsApp users: {}", e),
-            }
-        })
-    }).expect("Failed to create matrix sync job");
+                    })
+                }).expect("Failed to create matrix sync job");
 
     sched.add(matrix_sync_job).await.expect("Failed to add matrix sync job to scheduler");
        
