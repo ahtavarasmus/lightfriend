@@ -1226,7 +1226,6 @@ async fn send_whatsapp_notification(
     } else {
         notification
     };
-
     // Send SMS notification
     match crate::api::twilio_utils::send_conversation_message(
         &conversation.conversation_sid,
@@ -1237,17 +1236,23 @@ async fn send_whatsapp_notification(
     ).await {
         Ok(_) => {
             tracing::info!("Successfully sent WhatsApp notification to user {} (reason: {})", user_id, reason);
+            println!("SMS notification sent successfully for user {}", user_id);
             // Decrease messages here, we have already checked before that they should have at least one left
             match state.user_repository.decrease_messages_left(user_id) {
                 Ok(msgs_left) => {
                     tracing::info!("User {} has {} messages left after decrease", user_id, msgs_left);
+                    println!("Messages left after decrease: {}", msgs_left);
                 },
                 Err(e) => {
                     tracing::error!("Failed to decrease messages left for user {}: {}", user_id, e);
+                    println!("Error decreasing messages left for user {}", user_id);
                 }
             };
         },
-        Err(e) => tracing::error!("Failed to send WhatsApp notification: {}", e),
+        Err(e) => {
+            tracing::error!("Failed to send WhatsApp notification: {}", e);
+            println!("Failed to send SMS notification for user {}", user_id);
+        },
     }
 }
 
@@ -1261,22 +1266,28 @@ pub async fn search_whatsapp_rooms(
     let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
         .unwrap_or_else(|_| "@whatsappbot:".to_string());
     tracing::info!("Searching WhatsApp rooms for user {} ", user_id);
+    println!("Starting WhatsApp room search for user {}", user_id);
 
     // Get Matrix client using cached version for better performance
     let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
+    println!("Matrix client obtained successfully");
 
     // Check if we're logged in first
     let bridge = state.user_repository.get_whatsapp_bridge(user_id)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
+        println!("WhatsApp bridge not connected for user {}", user_id);
         return Err(anyhow!("WhatsApp bridge is not connected. Please log in first."));
     }
+    println!("WhatsApp bridge connection verified");
 
     // Get all joined rooms
     let joined_rooms = client.joined_rooms();
     tracing::info!("Found {} total joined rooms", joined_rooms.len());
+    println!("Found {} total joined rooms", joined_rooms.len());
 
     let mut all_whatsapp_rooms = Vec::new();
     let search_term_lower = search_term.trim().to_lowercase();
+    println!("Processing rooms to find WhatsApp rooms...");
 
     // First pass: collect all WhatsApp rooms with their details
     for room in joined_rooms {
@@ -1333,6 +1344,7 @@ pub async fn search_whatsapp_rooms(
         }));
     }
 
+    println!("Found {} WhatsApp rooms total", all_whatsapp_rooms.len());
     let mut matching_rooms = Vec::new();
 
     // Exact matches (case insensitive)
@@ -1340,6 +1352,7 @@ pub async fn search_whatsapp_rooms(
         .filter(|(name, _)| name.to_lowercase() == search_term_lower)
         .map(|(_, room)| room.clone())
         .collect();
+    println!("Found {} exact matches", exact_matches.len());
     matching_rooms.extend(exact_matches);
 
     // Substring matches
@@ -1348,10 +1361,12 @@ pub async fn search_whatsapp_rooms(
         .filter(|(name, _)| name.to_lowercase() != search_term_lower) // Exclude exact matches
         .map(|(_, room)| room.clone())
         .collect();
+    println!("Found {} substring matches", substring_matches.len());
     matching_rooms.extend(substring_matches);
 
     // Similarity matches (if no exact or substring matches found)
     if matching_rooms.is_empty() {
+        println!("No exact or substring matches found, trying similarity matching...");
         let mut similarity_matches: Vec<(f64, WhatsAppRoom)> = all_whatsapp_rooms.iter()
             .map(|(name, room)| {
                 let similarity = strsim::jaro_winkler(&name.to_lowercase(), &search_term_lower);
@@ -1363,6 +1378,7 @@ pub async fn search_whatsapp_rooms(
         // Sort by similarity score (highest first)
         similarity_matches.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
         
+        println!("Found {} similarity matches", similarity_matches.len());
         // Add similar rooms to results
         matching_rooms.extend(similarity_matches.into_iter().map(|(_, room)| room));
     }
@@ -1374,8 +1390,7 @@ pub async fn search_whatsapp_rooms(
         "Found {} matching WhatsApp rooms (including similar matches)",
         matching_rooms.len()
     );
+    println!("Returning {} total matching rooms", matching_rooms.len());
 
     Ok(matching_rooms)
 }
-
-

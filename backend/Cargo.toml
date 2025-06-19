@@ -58,7 +58,6 @@ uuid = { version = "1.4", features = ["v4"] }  # For generating unique IDs if ne
 async-stripe = { version = "0.36", features = ["runtime-tokio-hyper"] }
 ring = "0.17" # For encryption
 aes-gcm = "0.10.3" # for encryption
-magic-crypt = "4.0" # for encryption
 urlencoding = "2.1.0"
 oauth2 = { version = "5.0", features = ["reqwest"] }
 tower-sessions = { version = "0.12.0", features = ["axum-core"] }

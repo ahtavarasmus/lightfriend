@@ -33,6 +33,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
     let error = use_state(|| None::<String>);
     let is_connecting = use_state(|| false);
     let show_disconnect_modal = use_state(|| false);
+    let is_disconnecting = use_state(|| false);
 
     // Function to fetch WhatsApp status
     let fetch_status = {
@@ -203,10 +204,14 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
     let disconnect = {
         let connection_status = connection_status.clone();
         let error = error.clone();
+        let is_disconnecting = is_disconnecting.clone(); // Clone the new state
+        let show_disconnect_modal = show_disconnect_modal.clone(); // Clone to close modal later
 
         Callback::from(move |_| {
             let connection_status = connection_status.clone();
             let error = error.clone();
+            let is_disconnecting = is_disconnecting.clone();
+            let show_disconnect_modal = show_disconnect_modal.clone();
 
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
@@ -214,6 +219,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                 .and_then(|storage| storage.get_item("token").ok())
                 .flatten()
             {
+                is_disconnecting.set(true); // Indicate disconnection is starting
                 spawn_local(async move {
                     match Request::delete(&format!("{}/api/auth/whatsapp/disconnect", config::get_backend_url()))
                         .header("Authorization", &format!("Bearer {}", token))
@@ -232,7 +238,11 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                             error.set(Some("Failed to disconnect WhatsApp".to_string()));
                         }
                     }
+                    is_disconnecting.set(false); // Disconnection complete
+                    show_disconnect_modal.set(false); // Close the modal
                 });
+            } else {
+                show_disconnect_modal.set(false); // Close modal if no token
             }
         })
     };
@@ -329,22 +339,27 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                                                 <li>{"Delete all your WhatsApp data from our servers"}</li>
                                                 <li>{"Require reconnection to use WhatsApp features again"}</li>
                                             </ul>
+                                            if *is_disconnecting {
+                                                <p class="disconnecting-message">{"Disconnecting WhatsApp... Please wait."}</p>
+                                            }
                                             <div class="modal-buttons">
                                                 <button onclick={
                                                     let show_disconnect_modal = show_disconnect_modal.clone();
                                                     Callback::from(move |_| show_disconnect_modal.set(false))
-                                                } class="cancel-button">
+                                                } class="cancel-button" disabled={*is_disconnecting}>
                                                     {"Cancel"}
                                                 </button>
                                                 <button onclick={
                                                     let disconnect = disconnect.clone();
-                                                    let show_disconnect_modal = show_disconnect_modal.clone();
                                                     Callback::from(move |_| {
                                                         disconnect.emit(());
-                                                        show_disconnect_modal.set(false);
                                                     })
-                                                } class="confirm-disconnect-button">
-                                                    {"Yes, Disconnect"}
+                                                } class="confirm-disconnect-button" disabled={*is_disconnecting}>
+                                                    if *is_disconnecting {
+                                                        <span class="button-spinner"></span> {"Disconnecting..."}
+                                                    } else {
+                                                        {"Yes, Disconnect"}
+                                                    }
                                                 </button>
                                             </div>
                                         </div>
@@ -583,6 +598,24 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
 
             <style>
                 {r#"
+
+                    .button-spinner {
+                        display: inline-block;
+                        width: 16px;
+                        height: 16px;
+                        border: 2px solid rgba(255, 255, 255, 0.3);
+                        border-radius: 50%;
+                        border-top-color: #fff;
+                        animation: spin 1s ease-in-out infinite;
+                        margin-right: 8px;
+                        vertical-align: middle;
+                    }
+
+                    .disconnecting-message {
+                        color: #1E90FF;
+                        margin: 1rem 0;
+                        font-weight: bold;
+                    }
                     .action-button:hover {
                         transform: translateY(-2px);
                         box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
