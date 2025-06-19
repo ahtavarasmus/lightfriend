@@ -1177,7 +1177,12 @@ async fn evaluate_message_with_llm(
                     let should_notify = evaluation["should_notify"].as_bool().unwrap_or(false);
                     let reason = evaluation["reason"].as_str().unwrap_or("No reason provided").to_string();
                     let score = evaluation["score"].as_i64().unwrap_or(0) as i32;
-                    let matched_waiting_check = evaluation["matched_waiting_check"].as_i64().map(|id| id as i32);
+                    let matched_waiting_check = if evaluation["matched_waiting_check"].is_null() {
+                        None
+                    } else {
+                        evaluation["matched_waiting_check"].as_i64()
+                            .and_then(|id| if id >= 0 { Some(id as i32) } else { None })
+                    };
 
                     return Ok((should_notify, reason, score, matched_waiting_check));
                 }
