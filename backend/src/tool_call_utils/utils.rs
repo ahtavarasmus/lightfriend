@@ -107,9 +107,22 @@ pub struct EvalResponse {
     pub reason: Option<String>,
 }
 
+fn extract_text_from_content(content: &chat_completion::Content) -> String {
+    match content {
+        chat_completion::Content::Text(text) => text.clone(),
+        chat_completion::Content::ImageUrl(urls) => {
+            urls.iter()
+                .filter_map(|url| url.text.as_ref().map(|t| t.clone()))
+                .collect::<Vec<String>>()
+                .join(" ")
+        },
+        _ => "Unsupported content type".to_string(),
+    }
+}
+
 pub async fn perform_clarification_check(
     client: &OpenAIClient,
-    messages: &[TwilioMessageResponse],
+    messages: &[ChatMessage],
     user_message: &str,
     ai_response: &str,
 ) -> (bool, Option<String>) {
@@ -138,8 +151,10 @@ pub async fn perform_clarification_check(
         },
     ];
 
-    // Add up to 3 previous message pairs for context
-    let context_messages: Vec<_> = messages.iter()
+    // Add up to 3 previous message pairs for context (only user and assistant messages)
+    let context_messages: Vec<_> = messages
+        .iter()
+        .filter(|msg| msg.role == "user" || msg.role == "assistant")
         .rev()
         .take(6) // Take 6 messages (3 pairs of user-assistant exchanges)
         .collect();
@@ -150,12 +165,18 @@ pub async fn perform_clarification_check(
             content: chat_completion::Content::Text(
                 format!(
                     "Previous conversation:\n{}",
-                    context_messages.iter()
+                    context_messages
+                        .iter()
                         .rev() // Reverse back to chronological order
-                        .map(|msg| format!("[{}]: {}", 
-                            if msg.author == "lightfriend" { "AI" } else { "User" },
-                            msg.body
-                        ))
+                        .map(|msg| {
+                            let role = match msg.role.as_str() {
+                                "user" => "User",
+                                "assistant" => "AI",
+                                _ => "Unknown", // Shouldn't happen due to filter
+                            };
+                            let text = extract_text_from_content(&msg.content);
+                            format!("[{}]: {}", role, text)
+                        })
                         .collect::<Vec<String>>()
                         .join("\n")
                 )
@@ -194,14 +215,17 @@ pub async fn perform_clarification_check(
                     if let Some(args) = &first_call.function.arguments {
                         match serde_json::from_str::<ClarifyResponse>(args) {
                             Ok(clarify) => {
-                                tracing::debug!("Clarification check result: is_clarifying={}, explanation={:?}", 
-                                    clarify.is_clarifying, clarify.explanation);
+                                tracing::debug!(
+                                    "Clarification check result: is_clarifying={}, explanation={:?}",
+                                    clarify.is_clarifying,
+                                    clarify.explanation
+                                );
                                 (clarify.is_clarifying, clarify.explanation)
-                            },
+                            }
                             Err(e) => {
                                 tracing::error!("Failed to parse clarification response: {}", e);
                                 (false, Some("Failed to parse clarification check".to_string()))
-                            },
+                            }
                         }
                     } else {
                         tracing::error!("No arguments found in clarification tool call");
@@ -225,7 +249,7 @@ pub async fn perform_clarification_check(
 
 pub async fn perform_evaluation(
     client: &OpenAIClient,
-    messages: &[TwilioMessageResponse],
+    messages: &[ChatMessage],
     user_message: &str,
     ai_response: &str,
     fail: bool,
@@ -246,15 +270,23 @@ pub async fn perform_evaluation(
             role: chat_completion::MessageRole::user,
             content: chat_completion::Content::Text(format!(
                 "Conversation history: {}\nLatest user message: {}\nAI response: {}",
-                messages.iter()
-                    .map(|msg| format!("[{}]: {}", 
-                        if msg.author == "lightfriend" { "AI" } else { "User" },
-                        if msg.body.chars().count() > 50 {
-                            format!("{}...", msg.body.chars().take(50).collect::<String>())
+                messages
+                    .iter()
+                    .filter(|msg| msg.role == "user" || msg.role == "assistant")
+                    .map(|msg| {
+                        let role = match msg.role.as_str() {
+                            "user" => "User",
+                            "assistant" => "AI",
+                            _ => "Unknown", // Shouldn't happen due to filter
+                        };
+                        let text = extract_text_from_content(&msg.content);
+                        let display_text = if text.chars().count() > 50 {
+                            format!("{}...", text.chars().take(50).collect::<String>())
                         } else {
-                            msg.body.clone()
-                        }
-                    ))
+                            text
+                        };
+                        format!("[{}]: {}", role, display_text)
+                    })
                     .collect::<Vec<String>>()
                     .join("\n"),
                 user_message,
@@ -282,14 +314,20 @@ pub async fn perform_evaluation(
                         tracing::debug!("Tool call arguments: {}", args);
                         match serde_json::from_str::<EvalResponse>(args) {
                             Ok(eval) => {
-                                tracing::debug!("Successfully parsed evaluation response: success={}, reason={:?}", 
-                                    eval.success, eval.reason);
+                                tracing::debug!(
+                                    "Successfully parsed evaluation response: success={}, reason={:?}",
+                                    eval.success,
+                                    eval.reason
+                                );
                                 (eval.success, eval.reason)
-                            },
+                            }
                             Err(e) => {
-                                tracing::error!("Failed to parse evaluation response: {}, falling back to default", e);
+                                tracing::error!(
+                                    "Failed to parse evaluation response: {}, falling back to default",
+                                    e
+                                );
                                 (!fail, Some("Failed to parse evaluation response".to_string()))
-                            },
+                            }
                         }
                     } else {
                         tracing::error!("No arguments found in tool call");
@@ -311,25 +349,6 @@ pub async fn perform_evaluation(
     }
 }
 
-// Function to create evaluation tools
-pub fn create_eval_tools() -> Vec<chat_completion::Tool> {
-    vec![
-        chat_completion::Tool {
-            r#type: chat_completion::ToolType::Function,
-            function: types::Function {
-                name: String::from("evaluate_response"),
-                description: Some(String::from(
-                    "Evaluates the AI response based on success."
-                )),
-                parameters: types::FunctionParameters {
-                    schema_type: types::JSONSchemaType::Object,
-                    properties: Some(create_eval_properties()),
-                    required: Some(vec![String::from("success")]),
-                },
-            },
-        },
-    ]
-}
 
 // Function to create clarification tools
 pub fn create_clarify_tools() -> Vec<chat_completion::Tool> {
@@ -369,3 +388,23 @@ pub fn requires_subscription(tool_name: &str, sub_tier: Option<String>, has_disc
     return true;
 }
 
+
+// Function to create evaluation tools
+pub fn create_eval_tools() -> Vec<chat_completion::Tool> {
+    vec![
+        chat_completion::Tool {
+            r#type: chat_completion::ToolType::Function,
+            function: types::Function {
+                name: String::from("evaluate_response"),
+                description: Some(String::from(
+                    "Evaluates the AI response based on success."
+                )),
+                parameters: types::FunctionParameters {
+                    schema_type: types::JSONSchemaType::Object,
+                    properties: Some(create_eval_properties()),
+                    required: Some(vec![String::from("success")]),
+                },
+            },
+        },
+    ]
+}

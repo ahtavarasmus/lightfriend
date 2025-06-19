@@ -201,7 +201,6 @@ pub async fn handle_incoming_sms(
 }
 
 
-
 pub async fn process_sms(
     state: &Arc<AppState>,
     payload: TwilioWebhookPayload,
@@ -260,16 +259,6 @@ pub async fn process_sms(
             );
         }
     };
-
-    // Handle WhatsApp message confirmation flow
-    let messages = match fetch_conversation_messages(&conversation.conversation_sid).await {
-        Ok(msgs) => msgs,
-        Err(e) => {
-            tracing::error!("Failed to fetch conversation messages: {}", e);
-            Vec::new()
-        }
-    };
-
 
     if user.confirm_send_event.is_some() {
         // Handle confirmation logic
@@ -498,7 +487,7 @@ pub async fn process_sms(
     };
 
     // Convert ChatMessage vec into ChatCompletionMessage vec
-    let completion_messages: Vec<chat_completion::ChatCompletionMessage> = chat_messages
+    let completion_messages: Vec<chat_completion::ChatCompletionMessage> = chat_messages.clone()
         .into_iter()
         .map(|msg| chat_completion::ChatCompletionMessage {
             role: match msg.role.as_str() {
@@ -855,7 +844,7 @@ pub async fn process_sms(
     // Perform clarification check
     let (is_clarifying, clarify_explanation) = crate::tool_call_utils::utils::perform_clarification_check(
         &client,
-        &messages,
+        &chat_messages,
         &payload.body,
         &final_response
     ).await;
@@ -863,7 +852,7 @@ pub async fn process_sms(
     // Perform evaluation
     let (eval_result, eval_reason) = crate::tool_call_utils::utils::perform_evaluation(
         &client,
-        &messages,
+        &chat_messages,
         &payload.body,
         &final_response,
         fail
