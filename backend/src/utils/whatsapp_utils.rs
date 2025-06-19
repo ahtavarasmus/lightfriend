@@ -629,7 +629,7 @@ pub async fn handle_whatsapp_message(
     state: Arc<AppState>,
 ) {
     tracing::info!("Entering WhatsApp message handler");
-    tracing::debug!(
+    tracing::info!(
         "Event details: sender={}, event_id={}",
         event.sender,
         event.event_id,
@@ -645,7 +645,7 @@ pub async fn handle_whatsapp_message(
 
     // Only process WhatsApp rooms
     if !room_name.contains("(WA)") {
-        tracing::debug!("Skipping non-WhatsApp room: {}", room_name);
+        tracing::info!("Skipping non-WhatsApp room: {}", room_name);
         return;
     }
     tracing::info!(
@@ -663,31 +663,39 @@ pub async fn handle_whatsapp_message(
         );
         return;
     }
-    tracing::debug!("Processing WhatsApp message from: {}", event.sender.localpart());
+    tracing::info!("Processing WhatsApp message from: {}", event.sender.localpart());
 
     // Find the user ID for this Matrix client
     let client_user_id = client.user_id().unwrap().to_string();
-    tracing::debug!("Looking up user for Matrix ID: {}", client_user_id);
+    tracing::info!("Looking up user for Matrix ID: {}", client_user_id);
+
+    // Extract the local part of the Matrix user ID (before the domain)
+    let local_user_id = client_user_id
+        .split(':')
+        .next()
+        .map(|s| s.trim_start_matches('@')) // Remove leading '@'
+        .unwrap_or(&client_user_id); // Fallback to original if parsing fails
+    tracing::info!("Extracted local user ID: {}", local_user_id);
 
     // Get user for additional info
-    let user = match state.user_repository.get_user_by_matrix_user_id(&client_user_id) {
+    let user = match state.user_repository.get_user_by_matrix_user_id(local_user_id) {
         Ok(Some(user)) => user,
         Ok(None) => {
-            tracing::error!("User {} not found", client_user_id);
+            tracing::error!("User {} not found", local_user_id);
             return;
         },
         Err(e) => {
-            tracing::error!("Failed to get user {}: {}", client_user_id, e);
+            tracing::error!("Failed to get user {}: {}", local_user_id, e);
             return;
         }
     };
 
     // TODO remove before live
     if user.id != 1 {
-        tracing::debug!("Skipping message processing for non-test user: {}", user.id);
+        tracing::info!("Skipping message processing for non-test user: {}", user.id);
         return;
     }
-    tracing::debug!("Processing message for test user ID: {}", user.id);
+    tracing::info!("Processing message for test user ID: {}", user.id);
 
     let user_id = user.id;
 
@@ -718,7 +726,7 @@ pub async fn handle_whatsapp_message(
     // Check if user has valid subscription and messages left
     match state.user_repository.has_valid_subscription_tier_with_messages(user_id, "tier 2") {
         Ok(true) => {
-            tracing::debug!(
+            tracing::info!(
                 "User {} has valid subscription and messages for WhatsApp monitoring",
                 user_id
             );
@@ -745,7 +753,7 @@ pub async fn handle_whatsapp_message(
         );
         return;
     }
-    tracing::debug!(
+    tracing::info!(
         "User {} has {} messages left for notifications",
         user_id,
         user.msgs_left
@@ -770,13 +778,13 @@ pub async fn handle_whatsapp_message(
        content.contains("media no longer available") ||
        content.contains("Decrypting message from WhatsApp failed") ||
        content.starts_with("* Failed to") {
-        tracing::debug!(
+        tracing::info!(
             "Skipping error message in room {}",
             room_name,
         );
         return;
     }
-    tracing::debug!(
+    tracing::info!(
         "Message passed error check filters for room {}",
         room_name,
     );
@@ -920,10 +928,10 @@ pub async fn handle_whatsapp_message(
 
     // FALLBACK TO LLM - Only if no fast checks matched and general importance is active
     if !general_importance_active {
-        tracing::debug!("General importance check is disabled for user {}, skipping LLM evaluation", user_id);
+        tracing::info!("General importance check is disabled for user {}, skipping LLM evaluation", user_id);
         return;
     }
-    tracing::debug!("No fast checks matched, falling back to LLM evaluation for user {}", user_id);
+    tracing::info!("No fast checks matched, falling back to LLM evaluation for user {}", user_id);
 
     let importance_priority = match state.user_repository.get_importance_priority(user_id, "whatsapp") {
         Ok(Some(priority)) => priority.threshold,
@@ -937,7 +945,7 @@ pub async fn handle_whatsapp_message(
     // Get user's custom general checks prompt or use default
     let general_checks_prompt = match state.user_repository.get_whatsapp_general_checks(user_id) {
         Ok(prompt) => {
-            tracing::debug!("Using WhatsApp general checks prompt for user {}", user_id);
+            tracing::info!("Using WhatsApp general checks prompt for user {}", user_id);
             prompt
         },
         Err(e) => {
@@ -990,7 +998,7 @@ pub async fn handle_whatsapp_message(
                     &reason
                 ).await;
             } else {
-                tracing::debug!("LLM determined message not important enough for notification");
+                tracing::info!("LLM determined message not important enough for notification");
             }
         },
         Err(e) => {
@@ -1111,6 +1119,7 @@ async fn evaluate_message_with_llm(
                         String::from("should_notify"),
                         String::from("reason"),
                         String::from("score"),
+                        String::from("matched_waiting_check"),
                     ]),
                 },
             },
@@ -1135,7 +1144,7 @@ async fn evaluate_message_with_llm(
     ];
 
     let req = openai_api_rs::v1::chat_completion::ChatCompletionRequest::new(
-        "meta-llama/llama-4-scout".to_string(),
+        "meta-llama/llama-4-maverick".to_string(),
         messages,
     )
     .tools(tools)
@@ -1147,19 +1156,17 @@ async fn evaluate_message_with_llm(
 
     if let Some(tool_calls) = response.choices[0].message.tool_calls.as_ref() {
         for tool_call in tool_calls {
-            if let Some(name) = &tool_call.function.name {
-                if name == "evaluate_whatsapp_message" {
-                    if let Some(arguments) = &tool_call.function.arguments {
-                        let evaluation: serde_json::Value = serde_json::from_str(arguments)
-                            .map_err(|e| anyhow!("Failed to parse LLM response: {}", e))?;
-                        
-                        let should_notify = evaluation["should_notify"].as_bool().unwrap_or(false);
-                        let reason = evaluation["reason"].as_str().unwrap_or("No reason provided").to_string();
-                        let score = evaluation["score"].as_i64().unwrap_or(0) as i32;
-                        let matched_waiting_check = evaluation["matched_waiting_check"].as_i64().map(|id| id as i32);
+            if tool_call.function.name.as_deref() == Some("evaluate_whatsapp_message") {
+                if let Some(arguments) = &tool_call.function.arguments {
+                    let evaluation: serde_json::Value = serde_json::from_str(arguments)
+                        .map_err(|e| anyhow!("Failed to parse LLM response: {}", e))?;
+                    
+                    let should_notify = evaluation["should_notify"].as_bool().unwrap_or(false);
+                    let reason = evaluation["reason"].as_str().unwrap_or("No reason provided").to_string();
+                    let score = evaluation["score"].as_i64().unwrap_or(0) as i32;
+                    let matched_waiting_check = evaluation["matched_waiting_check"].as_i64().map(|id| id as i32);
 
-                        return Ok((should_notify, reason, score, matched_waiting_check));
-                    }
+                    return Ok((should_notify, reason, score, matched_waiting_check));
                 }
             }
         }
