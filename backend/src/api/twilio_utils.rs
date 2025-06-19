@@ -737,48 +737,6 @@ pub async fn upload_media_to_twilio(
     Ok(media_response.sid)
 }
 
-// Function to delete media from Twilio Media Content Service
-pub async fn get_call_status(conversation_id: &str) -> Result<String, String> {
-    let api_key = env::var("ELEVENLABS_API_KEY")
-        .map_err(|e| format!("Failed to get ELEVENLABS_API_KEY: {}", e))?;
-    
-    let client = Client::new();
-
-    let response = client
-        .get(format!(
-            "https://api.elevenlabs.io/v1/convai/conversations/{}",
-            conversation_id
-        ))
-        .header("xi-api-key", api_key)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to send request: {}", e))?;
-
-    if !response.status().is_success() {
-        let error_text = response.text().await
-            .map_err(|e| format!("Failed to get error response text: {}", e))?;
-        return Err(format!("Failed to get conversation status: {}", error_text));
-    }
-
-    let conversation_data: serde_json::Value = response.json().await
-        .map_err(|e| format!("Failed to parse response JSON: {}", e))?;
-    
-    // Get the status from the response
-    let status = conversation_data["body"]["status"]
-        .as_str()
-        .unwrap_or("unknown");
-
-    // Map ElevenLabs status to call status
-    let call_status = match status {
-        "done" => "completed",
-        "failed" => "failed",
-        "initiated" => "no-answer", // If still in initiated state after 30s, consider it no-answer
-        "in-progress" | "processing" => "in-progress",
-        _ => "unknown"
-    };
-
-    Ok(call_status.to_string())
-}
 
 pub async fn delete_twilio_message_media(
     media_sid: &str,

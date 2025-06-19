@@ -16,6 +16,7 @@ use mail_parser::{self, MimeHeaders};
 use crate::{
     AppState,
     handlers::auth_middleware::AuthUser,
+    utils::imap_utils::upload_media_to_twilio,
 };
 
 fn format_timestamp(timestamp: i64, timezone: Option<String>) -> String {
@@ -59,7 +60,7 @@ pub struct ImapEmailPreview {
 pub struct EmailAttachment {
     pub filename: Option<String>,
     pub content_type: String,
-    pub data: String, // base64 encoded
+    pub url: String,
     pub size: usize,
 }
 
@@ -74,7 +75,7 @@ pub struct ImapEmail {
     pub snippet: Option<String>,
     pub body: Option<String>,
     pub is_read: bool,
-    pub attachments: Vec<EmailAttachment>,
+    pub attachments: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -701,7 +702,6 @@ pub async fn fetch_emails_imap(
 
     Ok(email_previews)
 }
-
 pub async fn fetch_single_email_imap(
     state: &AppState,
     user_id: i32,
@@ -841,32 +841,34 @@ pub async fn fetch_single_email_imap(
 
     let body_content = full_body.or(text_body);
 
-    let (body, snippet, attachments) = body_content.as_ref().map(|content| {
-        // Create a parser and parse the content into an Option<Message>
-        let parser = MessageParser::default();
-        let parsed = parser.parse(content.as_bytes());
+    let (body, snippet, attachments) = match body_content.as_ref() {
+        Some(content) => {
+            // Create a parser and parse the content into an Option<Message>
+            let parser = MessageParser::default();
+            let parsed = parser.parse(content.as_bytes());
 
-        // Get the best available body content, if parsing succeeded
-        let clean_content = parsed.as_ref().map(|msg| {
-            let body_text = msg.body_text(0).or_else(|| msg.body_html(0));
-            body_text
-                .map(|text| {
-                    text.lines()
-                        .map(str::trim)
-                        .filter(|line| !line.is_empty())
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                })
-                .unwrap_or_else(|| String::from("[No readable body found]"))
-        }).unwrap_or_else(|| String::from("[Failed to parse email body]"));
+            // Get the best available body content, if parsing succeeded
+            let clean_content = parsed.as_ref().map(|msg| {
+                let body_text = msg.body_text(0).or_else(|| msg.body_html(0));
+                body_text
+                    .map(|text| {
+                        text.lines()
+                            .map(str::trim)
+                            .filter(|line| !line.is_empty())
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                    .unwrap_or_else(|| String::from("[No readable body found]"))
+            }).unwrap_or_else(|| String::from("[Failed to parse email body]"));
 
-        // Generate a snippet from the clean body
-        let snippet = clean_content.chars().take(200).collect::<String>();
+            // Generate a snippet from the clean body
+            let snippet = clean_content.chars().take(200).collect::<String>();
 
-        // Extract image attachments (PNG and JPEG only)
-        let attachments = parsed.map(|msg| {
-            msg.attachments()
-                .filter_map(|attachment| {
+            // Extract image attachments (PNG and JPEG only) and upload to Twilio
+            let attachments = if let Some(msg) = parsed.as_ref() {
+                let mut attachment_futures = Vec::new();
+                
+                for attachment in msg.attachments() {
                     if let Some(content_type) = attachment.content_type() {
                         let ctype = content_type.ctype();
                         if let Some(subtype) = content_type.subtype() {
@@ -875,28 +877,49 @@ pub async fn fetch_single_email_imap(
                                content_type_str == "image/jpeg" ||
                                content_type_str == "image/jpg" {
                                 let filename = attachment.attachment_name()
-                                    .map(|name| name.to_string());
-                                let attachment_data = attachment.contents();
-                                let base64_data = base64::encode(attachment_data);
+                                    .map(|name| name.to_string())
+                                    .unwrap_or_else(|| format!("attachment.{}", subtype));
+                                let attachment_data = attachment.contents().to_vec();
 
-                                tracing::info!("Found image attachment: {:?} ({})", filename, content_type_str);
+                                tracing::info!("Found image attachment: {} ({})", filename, content_type_str);
 
-                                return Some(EmailAttachment {
+                                // Upload to Twilio (pass owned values)
+                                let upload_future = upload_media_to_twilio(
+                                    content_type_str,
+                                    attachment_data,
                                     filename,
-                                    content_type: content_type_str,
-                                    data: base64_data,
-                                    size: attachment_data.len(),
-                                });
+                                );
+                                
+                                attachment_futures.push(upload_future);
                             }
                         }
                     }
-                    None
-                })
-                .collect::<Vec<_>>()
-        }).unwrap_or_default();
+                }
 
-        (clean_content, snippet, attachments)
-    }).unwrap_or_else(|| (String::new(), String::new(), Vec::new()));
+                // Await all upload futures and collect successful results
+                let mut uploaded_attachments = Vec::new();
+                for future in attachment_futures {
+                    match future.await {
+                        Ok(url) => {
+                            tracing::info!("Successfully uploaded attachment to Twilio: {}", url);
+                            uploaded_attachments.push(url);
+                        },
+                        Err(e) => {
+                            tracing::error!("Failed to upload attachment to Twilio: {}", e);
+                            // Continue processing other attachments even if one fails
+                        }
+                    }
+                }
+                
+                uploaded_attachments
+            } else {
+                Vec::new()
+            };
+
+            (clean_content, snippet, attachments)
+        },
+        None => (String::new(), String::new(), Vec::new())
+    };
 
     // Logout
     imap_session

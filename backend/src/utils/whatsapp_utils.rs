@@ -425,9 +425,6 @@ pub async fn fetch_whatsapp_room_messages(
     chat_name: &str,
     limit: Option<u64>,
 ) -> Result<(Vec<WhatsAppMessage>, String)> {
-
-    let user = state.user_core.find_by_id(user_id)?
-        .ok_or_else(|| anyhow!("User not found"))?;
     
     tracing::info!(
         "Starting WhatsApp message fetch - User: {}, Message Limit: {}", 
@@ -444,7 +441,7 @@ pub async fn fetch_whatsapp_room_messages(
         return Err(anyhow!("WhatsApp bridge not found"));
     }
 
-    let client = crate::utils::matrix_auth::get_client(user_id, &state, false).await?;
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
 
     let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
         .unwrap_or_else(|_| "@whatsappbot:".to_string());

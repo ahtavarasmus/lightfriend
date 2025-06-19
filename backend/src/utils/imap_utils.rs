@@ -4,8 +4,67 @@ use tracing::{info, error};
 use std::env;
 use openai_api_rs;
 use serde_json;
+use reqwest;
+use serde::Deserialize;
 
 use crate::handlers::imap_handlers::ImapEmailPreview;
+
+use reqwest::multipart;
+
+#[derive(Debug, Deserialize)]
+struct TwilioMediaResponse {
+    sid: String,
+    links: TwilioMediaLinks,
+}
+
+#[derive(Debug, Deserialize)]
+struct TwilioMediaLinks {
+    content_direct_temporary: String,
+}
+
+pub async fn upload_media_to_twilio(
+    content_type: String,
+    data: Vec<u8>,
+    filename: String,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let twilio_account_sid = env::var("TWILIO_ACCOUNT_SID")
+        .map_err(|_| "TWILIO_ACCOUNT_SID not set")?;
+    let twilio_auth_token = env::var("TWILIO_AUTH_TOKEN")
+        .map_err(|_| "TWILIO_AUTH_TOKEN not set")?;
+    let twilio_chat_service = env::var("TWILIO_CHAT_SERVICE")
+        .map_err(|_| "TWILIO_CHAT_SERVICE not set")?;
+    
+    let client = reqwest::Client::new();
+    
+    let url = format!(
+        "https://mcs.us1.twilio.com/v1/Services/{}/Media",
+        twilio_chat_service
+    );
+
+    // Create multipart form data
+    let part = multipart::Part::bytes(data)
+        .file_name(filename.clone())
+        .mime_str(&content_type)?;
+    
+    let form = multipart::Form::new()
+        .part("file", part);
+    
+    let response = client
+        .post(&url)
+        .basic_auth(&twilio_account_sid, Some(&twilio_auth_token))
+        .multipart(form)
+        .send()
+        .await?;
+    
+    if !response.status().is_success() {
+        let error_text = response.text().await?;
+        return Err(format!("Failed to upload media: {}", error_text).into());
+    }
+    
+    let media_response: TwilioMediaResponse = response.json().await?;
+    Ok(media_response.links.content_direct_temporary)
+}
+
 
 pub async fn judge_email_importance(
     state: &Arc<AppState>,
