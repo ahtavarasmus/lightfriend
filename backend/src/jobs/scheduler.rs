@@ -389,7 +389,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                                     // Append final message notice if needed
                                     let final_notification = if is_final_message {
-                                        format!("{}\n\nNote: This is your final proactive message for this month. Your message quota will reset at the start of next month.", notification)
+                                        format!("{}\n\nNote: This is your final proactive message for this month.", notification)
                                     } else {
                                         notification
                                     };

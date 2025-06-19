@@ -973,21 +973,34 @@ pub async fn handle_whatsapp_message(
 
             if should_notify {
                 // Handle waiting check removal if LLM matched one
+                // TODO 
+                /*
                 if let Some(matched_check_id) = matched_waiting_check {
                     tracing::info!("LLM matched waiting check ID: {}", matched_check_id);
                     if let Some(check) = waiting_checks.iter().find(|wc| wc.id == Some(matched_check_id)) {
                         if check.remove_when_found {
                             tracing::info!("Removing waiting check with ID {}", matched_check_id);
-                            if let Err(e) = state.user_repository.delete_waiting_check(
+                            match state.user_repository.delete_waiting_check(
                                 user_id,
                                 "whatsapp",
                                 &check.content
                             ) {
-                                tracing::error!("Failed to delete waiting check: {}", e);
+                                Ok(_) => {
+                                    tracing::info!("Successfully removed waiting check with ID {}", matched_check_id);
+                                },
+                                Err(e) => {
+                                    tracing::error!("Failed to delete waiting check with ID {}: {}", matched_check_id, e);
+                                    // Continue processing even if deletion fails - the notification should still be sent
+                                }
                             }
                         }
+                    } else {
+                        tracing::warn!("LLM matched waiting check ID {} but check not found in current list", matched_check_id);
                     }
+                } else {
+                    tracing::debug!("No waiting check was matched by LLM");
                 }
+                */
 
                 // Send notification
                 send_whatsapp_notification(
@@ -1219,17 +1232,16 @@ async fn send_whatsapp_notification(
 
     // Check if this is the final message
     let is_final_message = user.msgs_left <= 1;
-
     // Format notification message
     let notification = format!(
-        "Important WhatsApp message from {}:\n\n\"{}\"",
+        "WhatsApp from {}: {}",
         chat_name,
         content
     );
 
     // Append final message notice if needed
     let final_notification = if is_final_message {
-        format!("{}\n\nNote: This is your final proactive message for this month. Your message quota will reset at the start of next month.", notification)
+        format!("{}\n\nNote: This is your final proactive message for this month.", notification)
     } else {
         notification
     };
