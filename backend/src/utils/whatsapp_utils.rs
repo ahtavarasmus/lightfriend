@@ -1364,17 +1364,45 @@ pub async fn search_whatsapp_rooms(
 
     // First pass: collect all WhatsApp rooms with their details
     for room in joined_rooms {
-        let room_name = room.display_name().await?.to_string();
+        let room_name = match room.display_name().await {
+            Ok(name) => {
+                let name_str = name.to_string();
+                tracing::debug!("Processing room: {}", name_str);
+                name_str
+            },
+            Err(e) => {
+                tracing::error!("Failed to get room name: {}", e);
+                continue;
+            }
+        };
         
         // Get room members
         let members = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
-            Ok(members) => members,
-            Err(_) => continue,
+            Ok(members) => {
+                tracing::debug!("Got {} members for room {}", members.len(), room_name);
+                members
+            },
+            Err(e) => {
+                tracing::error!("Failed to get members for room {}: {}", room_name, e);
+                continue;
+            }
         };
 
         // Check if bridge bot is a member of the room
-        let has_bridge_bot = members.iter().any(|member| 
-            member.user_id().to_string().contains(&bridge_bot_username)
+        let has_bridge_bot = members.iter().any(|member| {
+            let member_id = member.user_id().to_string();
+            let is_bridge = member_id.contains(&bridge_bot_username);
+            tracing::debug!("Checking member {} against bridge bot pattern {}: {}", 
+                member_id, bridge_bot_username, is_bridge);
+            is_bridge
+        });
+
+        // Log room details
+        tracing::debug!(
+            "Room '{}' - Has bridge bot: {}, Is WhatsApp room: {}", 
+            room_name, 
+            has_bridge_bot, 
+            room_name.contains("(WA)")
         );
 
         // Skip if bridge bot is not a member or if not a WhatsApp room
