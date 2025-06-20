@@ -418,7 +418,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                 notification_first_message,
                                                 final_notification.clone(),
                                                 user.id.to_string(),
-                                                                user_settings.timezone,
+                                                user_settings.timezone,
                                             ).await {
                                                 Ok(mut response) => {
                                                     // Add dynamic variables to the client data

@@ -210,7 +210,6 @@ pub async fn judge_email_importance(
             for waiting_check in &waiting_checks {
                 if body.to_lowercase().contains(&waiting_check.content.to_lowercase()) ||
                    subject.to_lowercase().contains(&waiting_check.content.to_lowercase()) {
-                    info!("Fast check: Waiting check matched for user {}: '{}'", user_id, waiting_check.content);
                     
                     let evaluation = serde_json::json!({
                         "should_notify": true,
@@ -232,7 +231,6 @@ pub async fn judge_email_importance(
         if priority_senders_active {
             for priority_sender in &priority_senders {
                 if from_email_str.to_lowercase().contains(&priority_sender.sender.to_lowercase()) {
-                    info!("Fast check: Priority sender matched for user {}: '{}'", user_id, priority_sender.sender);
                     
                     let evaluation = serde_json::json!({
                         "should_notify": true,
@@ -254,7 +252,6 @@ pub async fn judge_email_importance(
             for keyword in &keywords {
                 if body.to_lowercase().contains(&keyword.keyword.to_lowercase()) ||
                    subject.to_lowercase().contains(&keyword.keyword.to_lowercase()) {
-                    info!("Fast check: Keyword matched for user {}: '{}'", user_id, keyword.keyword);
                     
                     let evaluation = serde_json::json!({
                         "should_notify": true,
@@ -366,7 +363,6 @@ pub async fn judge_email_importance(
 
         match client.chat_completion(req.clone()).await {
             Ok(response) => {
-                info!("Received LLM response: {:?}", response);
                 if let Some(tool_calls) = response.choices.first().and_then(|choice| choice.message.tool_calls.as_ref()) {
                     for tool_call in tool_calls {
                         if tool_call.function.name.as_deref() == Some("evaluate_email") {

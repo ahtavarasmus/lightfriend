@@ -629,11 +629,6 @@ pub async fn handle_whatsapp_message(
     state: Arc<AppState>,
 ) {
     tracing::info!("Entering WhatsApp message handler");
-    tracing::info!(
-        "Event details: sender={}, event_id={}",
-        event.sender,
-        event.event_id,
-    );
     // Get room name
     let room_name = match room.display_name().await {
         Ok(name) => name.to_string(),
@@ -645,29 +640,20 @@ pub async fn handle_whatsapp_message(
 
     // Only process WhatsApp rooms
     if !room_name.contains("(WA)") {
-        tracing::info!("Skipping non-WhatsApp room: {}", room_name);
+        tracing::info!("Skipping non-WhatsApp room");
         return;
     }
-    tracing::info!(
-        "Processing WhatsApp room: {} (room_id: {})",
-        room_name,
-        room.room_id()
-    );
 
     // Only process messages from WhatsApp users
     if !event.sender.localpart().starts_with("whatsapp_") {
         tracing::debug!(
-            "Skipping non-WhatsApp sender: {} in room: {}",
-            event.sender.localpart(),
-            room_name
+            "Skipping non-WhatsApp sender",
         );
         return;
     }
-    tracing::info!("Processing WhatsApp message from: {}", event.sender.localpart());
 
     // Find the user ID for this Matrix client
     let client_user_id = client.user_id().unwrap().to_string();
-    tracing::info!("Looking up user for Matrix ID: {}", client_user_id);
 
     // Extract the local part of the Matrix user ID (before the domain)
     let local_user_id = client_user_id
@@ -675,7 +661,6 @@ pub async fn handle_whatsapp_message(
         .next()
         .map(|s| s.trim_start_matches('@')) // Remove leading '@'
         .unwrap_or(&client_user_id); // Fallback to original if parsing fails
-    tracing::info!("Extracted local user ID: {}", local_user_id);
 
     // Get user for additional info
     let user = match state.user_repository.get_user_by_matrix_user_id(local_user_id) {
@@ -690,29 +675,20 @@ pub async fn handle_whatsapp_message(
         }
     };
 
-    // TODO remove before live
-    if user.id != 1 {
-        tracing::info!("Skipping message processing for non-test user: {}", user.id);
-        return;
-    }
-    tracing::info!("Processing message for test user ID: {}", user.id);
-
     let user_id = user.id;
 
     // Check if user has proactive WhatsApp enabled
     match state.user_repository.get_proactive_whatsapp(user_id) {
         Ok(true) => {
             tracing::info!(
-                "User {} has proactive WhatsApp enabled, processing message from room: {}",
+                "User {} has proactive WhatsApp enabled, processing message from room",
                 user_id,
-                room_name
             );
         },
         Ok(false) => {
             tracing::info!(
-                "User {} has proactive WhatsApp disabled, skipping message from room: {}",
+                "User {} has proactive WhatsApp disabled, skipping message from room",
                 user_id,
-                room_name
             );
             return;
         },
@@ -778,16 +754,9 @@ pub async fn handle_whatsapp_message(
        content.contains("media no longer available") ||
        content.contains("Decrypting message from WhatsApp failed") ||
        content.starts_with("* Failed to") {
-        tracing::info!(
-            "Skipping error message in room {}",
-            room_name,
-        );
+        tracing::info!("Skipping error message because content contained error messages");
         return;
     }
-    tracing::info!(
-        "Message passed error check filters for room {}",
-        room_name,
-    );
 
     // Extract clean chat name from room name
     let chat_name = room_name
@@ -802,11 +771,6 @@ pub async fn handle_whatsapp_message(
         .strip_prefix("whatsapp_")
         .unwrap_or(event.sender.localpart())
         .to_string();
-
-    // TODO remove before we remove the user_id == 1 check above
-    println!("chat_name: {}", chat_name);
-    println!("sender_name: {}", sender_name);
-    println!("content: {}", content);
 
     // Get filter activation settings
     let (keywords_active, priority_senders_active, waiting_checks_active, general_importance_active) = 
@@ -1193,6 +1157,9 @@ async fn evaluate_message_with_llm(
     Err(anyhow!("No valid tool call response from LLM"))
 }
 
+
+use tracing::{debug, error};
+
 async fn send_whatsapp_notification(
     state: &Arc<AppState>,
     user_id: i32,
@@ -1206,9 +1173,18 @@ async fn send_whatsapp_notification(
         Ok(None) => {
             tracing::error!("User {} not found for notification", user_id);
             return;
-        },
+        }
         Err(e) => {
             tracing::error!("Failed to get user {}: {}", user_id, e);
+            return;
+        }
+    };
+
+    // Get user settings (assuming state has a user_settings repository or similar)
+    let user_settings = match state.user_core.get_user_settings(user_id) {
+        Ok(settings) => settings,
+        Err(e) => {
+            tracing::error!("Failed to get settings for user {}: {}", user_id, e);
             return;
         }
     };
@@ -1218,12 +1194,12 @@ async fn send_whatsapp_notification(
         Some(number) => {
             tracing::info!("Using user's preferred number: {}", number);
             number
-        },
+        }
         None => {
             let number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set");
             tracing::info!("Using default SHAZAM_PHONE_NUMBER: {}", number);
             number
-        },
+        }
     };
 
     // Get the conversation for the user
@@ -1238,48 +1214,99 @@ async fn send_whatsapp_notification(
     // Check if this is the final message
     let is_final_message = user.msgs_left <= 1;
     // Format notification message
-    let notification = format!(
-        "WhatsApp from {}: {}",
-        chat_name,
-        content
-    );
+    let notification = format!("WhatsApp from {}: {}", chat_name, content);
 
     // Append final message notice if needed
     let final_notification = if is_final_message {
-        format!("{}\n\nNote: This is your final proactive message for this month.", notification)
+        format!(
+            "{}\n\nNote: This is your final proactive message for this month.",
+            notification
+        )
     } else {
         notification
     };
-    // Send SMS notification
-    match crate::api::twilio_utils::send_conversation_message(
-        &conversation.conversation_sid,
-        &conversation.twilio_number,
-        &final_notification,
-        true,
-        &user,
-    ).await {
-        Ok(_) => {
-            tracing::info!("Successfully sent WhatsApp notification to user {} (reason: {})", user_id, reason);
-            println!("SMS notification sent successfully for user {}", user_id);
-            // Decrease messages here, we have already checked before that they should have at least one left
-            match state.user_repository.decrease_messages_left(user_id) {
-                Ok(msgs_left) => {
-                    tracing::info!("User {} has {} messages left after decrease", user_id, msgs_left);
-                    println!("Messages left after decrease: {}", msgs_left);
-                },
-                Err(e) => {
-                    tracing::error!("Failed to decrease messages left for user {}: {}", user_id, e);
-                    println!("Error decreasing messages left for user {}", user_id);
+
+    // Check user's notification preference from settings
+    let notification_type = user_settings.notification_type.as_deref().unwrap_or("sms");
+    match notification_type {
+        "call" => {
+            // For calls, we need a brief intro and detailed message
+            let notification_first_message = "Hello, I have an important WhatsApp message to tell you about.".to_string();
+
+            // Create dynamic variables (optional, can be customized based on needs)
+            let mut dynamic_vars = std::collections::HashMap::new();
+            dynamic_vars.insert("chat_name".to_string(), chat_name.to_string());
+
+            match crate::api::elevenlabs::make_notification_call(
+                &state.clone(),
+                user.phone_number.clone(),
+                user.preferred_number
+                    .unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set")),
+                chat_name.to_string(), // Using chat_name as a unique identifier
+                "whatsapp".to_string(), // Notification type
+                notification_first_message,
+                final_notification.clone(),
+                user.id.to_string(),
+                user_settings.timezone,
+            ).await {
+                Ok(mut response) => {
+                    // Add dynamic variables to the client data
+                    if let Some(client_data) = response.get_mut("client_data") {
+                        if let Some(obj) = client_data.as_object_mut() {
+                            obj.extend(dynamic_vars.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))));
+                        }
+                    }
+                    debug!("Successfully initiated call notification for user {} with chat name {}", user.id, chat_name);
+                    // Decrease messages left after successful call
+                    match state.user_repository.decrease_messages_left(user_id) {
+                        Ok(msgs_left) => {
+                            tracing::info!("User {} has {} messages left after decrease", user_id, msgs_left);
+                            println!("Messages left after decrease: {}", msgs_left);
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to decrease messages left for user {}: {}", user_id, e);
+                            println!("Error decreasing messages left for user {}", user_id);
+                        }
+                    }
                 }
-            };
-        },
-        Err(e) => {
-            tracing::error!("Failed to send WhatsApp notification: {}", e);
-            println!("Failed to send SMS notification for user {}", user_id);
-        },
+                Err((_, json_err)) => {
+                    error!("Failed to initiate call notification: {:?}", json_err);
+                    println!("Failed to send call notification for user {}", user_id);
+                }
+            }
+        }
+        _ => {
+            // Default to WhatsApp/SMS notification
+            match crate::api::twilio_utils::send_conversation_message(
+                &conversation.conversation_sid,
+                &conversation.twilio_number,
+                &final_notification,
+                true,
+                &user,
+            ).await {
+                Ok(_) => {
+                    tracing::info!("Successfully sent WhatsApp notification to user {} (reason: {})", user_id, reason);
+                    println!("SMS notification sent successfully for user {}", user_id);
+                    // Decrease messages left after successful message
+                    match state.user_repository.decrease_messages_left(user_id) {
+                        Ok(msgs_left) => {
+                            tracing::info!("User {} has {} messages left after decrease", user_id, msgs_left);
+                            println!("Messages left after decrease: {}", msgs_left);
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to decrease messages left for user {}: {}", user_id, e);
+                            println!("Error decreasing messages left for user {}", user_id);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("Failed to send WhatsApp notification: {}", e);
+                    println!("Failed to send SMS notification for user {}", user_id);
+                }
+            }
+        }
     }
 }
-
 
 pub async fn search_whatsapp_rooms(
     state: &Arc<AppState>,

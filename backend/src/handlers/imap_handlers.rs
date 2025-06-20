@@ -367,9 +367,6 @@ pub async fn respond_to_email(
     tracing::info!("Attempting to send email via SMTP...");
     tracing::info!("SMTP Configuration - Server: {}, Port: {}", smtp_server, smtp_port);
     
-    // Log email details (excluding sensitive content)
-    tracing::info!("Email details - To: {}, Subject: {}", reply_to_address, subject);
-    
     // Attempt to send the email with detailed error logging
     let send_result = mailer.send(&email_message);
     
