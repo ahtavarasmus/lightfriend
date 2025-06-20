@@ -772,17 +772,31 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
     sched.add(credits_reset_job).await.expect("Failed to add credits reset job to scheduler");
 
-                // Create a job that runs every minute to check for upcoming calendar events
+                // Create a job that runs every 5 minutes to check for upcoming calendar events
                 let state_clone = Arc::clone(&state);
-                let calendar_notification_job = Job::new_async("*/5 * * * * *", move |_, _| {
+                let calendar_notification_job = Job::new_async("0 */5 * * * *", move |_, _| {  // Run every 5 minutes
                     let state = state_clone.clone();
                     Box::pin(async move {
-                        // Ensure all error types implement Send + Sync
-                        type BoxError = Box<dyn std::error::Error + Send + Sync>;
-                        // Clean up old notifications (older than 24 hours)
+                        // Use a mutex to ensure only one instance runs at a time
+                        let calendar_mutex = tokio::sync::Mutex::new(());
+                        let _lock = calendar_mutex.try_lock();
+                        if _lock.is_err() {
+                            debug!("Calendar check already in progress, skipping this run");
+                            return;
+                        }
+
+                        // Clean up old notifications (older than 24 hours) with retry logic
                         let cleanup_threshold = (chrono::Utc::now() - chrono::Duration::hours(24)).timestamp() as i32;
-                        if let Err(e) = state.user_repository.cleanup_old_calendar_notifications(cleanup_threshold) {
-                            error!("Failed to clean up old calendar notifications: {}", e);
+                        for attempt in 1..=3 {
+                            match state.user_repository.cleanup_old_calendar_notifications(cleanup_threshold) {
+                                Ok(_) => break,
+                                Err(e) => {
+                                    error!("Attempt {} to clean up old calendar notifications failed: {}", attempt, e);
+                                    if attempt < 3 {
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(100 * attempt as u64)).await;
+                                    }
+                                }
+                            }
                         }
 
                         // Get all users with valid Google Calendar connection and subscription
@@ -802,13 +816,23 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                         let now = chrono::Utc::now();
                         let window_end = now + chrono::Duration::minutes(30);
 
-                        debug!("🗓️ Calendar check: Checking events between {} and {}", 
-                            now.format("%Y-%m-%d %H:%M:%S UTC"),
-                            window_end.format("%Y-%m-%d %H:%M:%S UTC")
+                        debug!("🗓️ Calendar check: Starting check for {} users at {}", 
+                            users.len(),
+                            now.format("%Y-%m-%d %H:%M:%S UTC")
                         );
 
-                        for user in users {
-                            debug!("🗓️ Calendar check: Fetching events for user {}", user.id);
+                        // Process users with rate limiting
+                        for (index, user) in users.iter().enumerate() {
+                            // Add delay between users to avoid rate limiting
+                            if index > 0 {
+                                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                            }
+
+                            debug!("🗓️ Calendar check: Processing user {} ({}/{})", 
+                                user.id, 
+                                index + 1, 
+                                users.len()
+                            );
                             // Get the last activation time
                             let last_activated = match state.user_repository.get_proactive_calendar_status(user.id) {
                                 Ok((_, timestamp)) => timestamp,
