@@ -1367,7 +1367,7 @@ pub async fn search_whatsapp_rooms(
         let room_name = match room.display_name().await {
             Ok(name) => {
                 let name_str = name.to_string();
-                tracing::debug!("Processing room: {}", name_str);
+                tracing::info!("Processing room: {}", name_str);
                 name_str
             },
             Err(e) => {
@@ -1379,7 +1379,7 @@ pub async fn search_whatsapp_rooms(
         // Get room members
         let members = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
             Ok(members) => {
-                tracing::debug!("Got {} members for room {}", members.len(), room_name);
+                tracing::info!("Got {} members for room {}", members.len(), room_name);
                 members
             },
             Err(e) => {
@@ -1392,13 +1392,13 @@ pub async fn search_whatsapp_rooms(
         let has_bridge_bot = members.iter().any(|member| {
             let member_id = member.user_id().to_string();
             let is_bridge = member_id.contains(&bridge_bot_username);
-            tracing::debug!("Checking member {} against bridge bot pattern {}: {}", 
+            tracing::info!("Checking member {} against bridge bot pattern {}: {}", 
                 member_id, bridge_bot_username, is_bridge);
             is_bridge
         });
 
         // Log room details
-        tracing::debug!(
+        tracing::info!(
             "Room '{}' - Has bridge bot: {}, Is WhatsApp room: {}", 
             room_name, 
             has_bridge_bot, 
