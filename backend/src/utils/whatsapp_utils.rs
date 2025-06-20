@@ -1087,8 +1087,8 @@ async fn evaluate_message_with_llm(
         openai_api_rs::v1::chat_completion::Tool {
             r#type: openai_api_rs::v1::chat_completion::ToolType::Function,
             function: openai_api_rs::v1::types::Function {
-                name: String::from("evaluate_whatsapp_message"),
-                description: Some(String::from("Evaluate WhatsApp message importance and determine if notification is needed")),
+                name: String::from("evaluate_message"),
+                description: Some(String::from("Evaluate message importance and determine if notification is needed")),
                 parameters: openai_api_rs::v1::types::FunctionParameters {
                     schema_type: openai_api_rs::v1::types::JSONSchemaType::Object,
                     properties: Some(message_eval_properties),
@@ -1128,15 +1128,37 @@ async fn evaluate_message_with_llm(
     .tool_choice(openai_api_rs::v1::chat_completion::ToolChoiceType::Required);
 
     // Get LLM evaluation
-    let response = client_ai.chat_completion(req).await
-        .map_err(|e| anyhow!("Failed to get LLM response: {}", e))?;
+    let response = match client_ai.chat_completion(req).await {
+        Ok(resp) => resp,
+        Err(e) => {
+            tracing::error!("Failed to get LLM response: {}", e);
+            return Err(anyhow!("Failed to get LLM response: {}", e));
+        }
+    };
 
-    if let Some(tool_calls) = response.choices[0].message.tool_calls.as_ref() {
+    // Debug log the raw response
+    tracing::debug!("Raw LLM response: {:?}", response);
+
+    // Safely access the first choice and its tool calls
+    let first_choice = match response.choices.get(0) {
+        Some(choice) => choice,
+        None => {
+            tracing::error!("No choices in LLM response");
+            return Err(anyhow!("No choices in LLM response"));
+        }
+    };
+
+    if let Some(tool_calls) = first_choice.message.tool_calls.as_ref() {
         for tool_call in tool_calls {
-            if tool_call.function.name.as_deref() == Some("evaluate_whatsapp_message") {
+            if let Some("evaluate_message") = tool_call.function.name.as_deref() {
                 if let Some(arguments) = &tool_call.function.arguments {
-                    let evaluation: serde_json::Value = serde_json::from_str(arguments)
-                        .map_err(|e| anyhow!("Failed to parse LLM response: {}", e))?;
+                    let evaluation = match serde_json::from_str::<serde_json::Value>(arguments) {
+                        Ok(eval) => eval,
+                        Err(e) => {
+                            tracing::error!("Failed to parse LLM response arguments: {}\nArguments: {}", e, arguments);
+                            return Err(anyhow!("Failed to parse LLM response arguments: {}", e));
+                        }
+                    };
                     
                     let should_notify = evaluation["should_notify"].as_bool().unwrap_or(false);
                     let reason = evaluation["reason"].as_str().unwrap_or("No reason provided").to_string();

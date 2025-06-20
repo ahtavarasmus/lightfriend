@@ -10,12 +10,87 @@ use std::env;
 use crate::handlers::imap_handlers;
 use crate::api::twilio_utils;
 
+async fn initialize_matrix_clients(state: Arc<AppState>) {
+    tracing::debug!("Starting Matrix client initialization...");
+    
+    // Get all users with active WhatsApp connection
+    match state.user_repository.get_users_with_matrix_bridge_connections() {
+        Ok(users) => {
+            let mut matrix_clients = state.matrix_clients.lock().await;
+            let mut sync_tasks = state.matrix_sync_tasks.lock().await;
+            
+            // Remove any existing clients and sync tasks
+            for (_, task) in sync_tasks.drain() {
+                task.abort();
+            }
+            matrix_clients.clear();
+
+            // Setup clients and sync tasks for active users
+            for user_id in users {
+                tracing::debug!("Setting up new Matrix client for user {}", user_id);
+                
+                // Create and initialize client
+                match crate::utils::matrix_auth::get_client(user_id, &state, true).await {
+                    Ok(client) => {
+                        // Add event handlers before storing/cloning the client
+                        use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
+                        use matrix_sdk::room::Room;
+                        
+                        let state_for_handler = Arc::clone(&state);
+                        client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
+                            let state = Arc::clone(&state_for_handler);
+                            async move {
+                                tracing::debug!("📨 Received message in room {}: {:?}", room.room_id(), ev);
+                                crate::utils::whatsapp_utils::handle_whatsapp_message(ev, room, client, state).await;
+                            }
+                        });
+
+                        // Store the client
+                        let client = Arc::new(client);
+                        matrix_clients.insert(user_id, client.clone());
+
+                        // Create sync task
+                        let sync_settings = matrix_sdk::config::SyncSettings::default()
+                            .timeout(std::time::Duration::from_secs(30))
+                            .full_state(true);
+
+                        let handle = tokio::spawn(async move {
+                            loop {
+                                match client.sync(sync_settings.clone()).await {
+                                    Ok(_) => {
+                                        tracing::debug!("Sync completed normally for user {}", user_id);
+                                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                                    },
+                                    Err(e) => {
+                                        error!("Matrix sync error for user {}: {}", user_id, e);
+                                        tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                                    }
+                                }
+                            }
+                        });
+
+                        sync_tasks.insert(user_id, handle);
+                    },
+                    Err(e) => {
+                        error!("Failed to create Matrix client for user {}: {}", user_id, e);
+                    }
+                }
+            }
+        },
+        Err(e) => error!("Failed to get active WhatsApp users: {}", e),
+    }
+}
+
 pub async fn start_scheduler(state: Arc<AppState>) {
+    // Initialize matrix clients and sync tasks once on startup
+    tracing::debug!("Initializing Matrix clients and sync tasks...");
+    initialize_matrix_clients(Arc::clone(&state)).await;
+
     let sched = JobScheduler::new().await.expect("Failed to create scheduler");
 
-    // Create a job that runs every minute to check for new messages across services
+    // Create a job that runs every 10 minutes to check for new IMAP messages
     let state_clone = Arc::clone(&state);
-    let message_monitor_job = Job::new_async("0 * * * * *", move |_, _| {
+    let message_monitor_job = Job::new_async("0 */10 * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
             
@@ -455,28 +530,14 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                         }
                     }
                 }
-
-                // Check if we should continue processing other services
-                let state_clone = Arc::clone(&state);
-                match state_clone.user_repository.has_valid_subscription_tier_with_messages(user.id, "tier 2") {
-                    Ok(false) => {
-                        continue;
-                    },
-                    Err(e) => {
-                        error!("Failed to check messages left for user {}: {}", user.id, e);
-                        continue;
-                    },
-                    Ok(true) => {
-                    }
-                }
-
-                // Add more services here following the same pattern
             }
 
         })
     }).expect("Failed to create message monitor job");
 
     sched.add(message_monitor_job).await.expect("Failed to add message monitor job to scheduler");
+
+    /*
 
     // Create a job that runs every minute to handle ongoing usage logs
     let state_clone = Arc::clone(&state);
@@ -607,6 +668,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     }).expect("Failed to create usage monitor job");
 
     sched.add(usage_monitor_job).await.expect("Failed to add usage monitor job to scheduler");
+    */
 
     // Create a job that runs daily to clean up old task notifications
     let state_clone = Arc::clone(&state);
@@ -712,7 +774,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                 // Create a job that runs every minute to check for upcoming calendar events
                 let state_clone = Arc::clone(&state);
-                let calendar_notification_job = Job::new_async("0 * * * * *", move |_, _| {
+                let calendar_notification_job = Job::new_async("*/5 * * * * *", move |_, _| {
                     let state = state_clone.clone();
                     Box::pin(async move {
                         // Ensure all error types implement Send + Sync
@@ -909,95 +971,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                 sched.add(calendar_notification_job).await.expect("Failed to add calendar notification job to scheduler");
 
-
-                let state_clone = Arc::clone(&state);
-                let matrix_sync_job = Job::new_async("0 * * * * *", move |_, _| {
-                    let state = state_clone.clone();
-                    Box::pin(async move {
-                        tracing::debug!("Managing Matrix clients and sync tasks...");
-                        
-                        // Get all users with active WhatsApp connection
-                        match state.user_repository.get_users_with_matrix_bridge_connections() {
-                            Ok(users) => {
-                                let mut matrix_clients = state.matrix_clients.lock().await;
-                                let mut sync_tasks = state.matrix_sync_tasks.lock().await;
-                                
-                                // Remove clients and sync tasks for inactive users
-                                let inactive_users: Vec<i32> = matrix_clients.keys()
-                                    .filter(|&user_id| !users.contains(user_id))
-                                    .copied()
-                                    .collect();
-
-                                for user_id in inactive_users {
-                                    tracing::debug!("Removing client and sync task for inactive user {}", user_id);
-                                    if let Some(task) = sync_tasks.remove(&user_id) {
-                                        task.abort();
-
-                                    }
-                                    matrix_clients.remove(&user_id);
-                                }
-
-                                // Setup clients and sync tasks for active users
-                                for user_id in users {
-                                    if !matrix_clients.contains_key(&user_id) {
-                                        tracing::debug!("Setting up new Matrix client for user {}", user_id);
-                                        
-                                        // Create and initialize client
-                                        match crate::utils::matrix_auth::get_client(user_id, &state, true).await {
-                                            Ok(client) => {
-                                                // Add event handlers before storing/cloning the client
-                                                use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
-                                                use matrix_sdk::room::Room;
-                                                
-                                                let state_for_handler = Arc::clone(&state);
-                                                client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
-                                                    let state = Arc::clone(&state_for_handler);
-                                                    async move {
-                                                        tracing::debug!("📨 Received message in room {}: {:?}", room.room_id(), ev);
-                                                        crate::utils::whatsapp_utils::handle_whatsapp_message(ev, room, client, state).await;
-                                                    }
-                                                });
-
-                                                // Store the client
-                                                let client = Arc::new(client);
-                                                matrix_clients.insert(user_id, client.clone());
-
-                                                // Create sync task
-                                                let sync_settings = matrix_sdk::config::SyncSettings::default()
-                                                    .timeout(std::time::Duration::from_secs(30))
-                                                    .full_state(true);
-
-                                                let handle = tokio::spawn(async move {
-                                                    loop {
-                                                        match client.sync(sync_settings.clone()).await {
-                                                            Ok(_) => {
-                                                                tracing::debug!("Sync completed normally for user {}", user_id);
-                                                                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                                                            },
-                                                            Err(e) => {
-                                                                error!("Matrix sync error for user {}: {}", user_id, e);
-                                                                tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
-                                                            }
-                                                        }
-                                                    }
-                                                });
-
-                                                sync_tasks.insert(user_id, handle);
-                                            },
-                                            Err(e) => {
-                                                error!("Failed to create Matrix client for user {}: {}", user_id, e);
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            Err(e) => error!("Failed to get active WhatsApp users: {}", e),
-                        }
-                    })
-                }).expect("Failed to create matrix sync job");
-
-    sched.add(matrix_sync_job).await.expect("Failed to add matrix sync job to scheduler");
-       
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");
 

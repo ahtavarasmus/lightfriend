@@ -251,6 +251,7 @@ async fn main() {
     let matrix_sync_tasks = Arc::new(Mutex::new(HashMap::new()));
     let matrix_invitation_tasks = Arc::new(Mutex::new(HashMap::new()));
     let matrix_clients = Arc::new(Mutex::new(HashMap::new()));
+
     let state = Arc::new(AppState {
         db_pool: pool,
         password_reset_otps: DashMap::new(),

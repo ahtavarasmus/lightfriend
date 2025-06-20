@@ -481,7 +481,49 @@ async fn monitor_whatsapp_connection(
                                 state.user_repository.delete_whatsapp_bridge(user_id)?;
                                 state.user_repository.create_bridge(new_bridge)?;
 
+                                // Add client to app state and start sync
+                                let mut matrix_clients = state.matrix_clients.lock().await;
+                                let mut sync_tasks = state.matrix_sync_tasks.lock().await;
+
+                                // Add event handlers before storing/cloning the client
+                                use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
+                                use matrix_sdk::room::Room;
                                 
+                                let state_for_handler = Arc::clone(&state);
+                                client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
+                                    let state = Arc::clone(&state_for_handler);
+                                    async move {
+                                        tracing::debug!("📨 Received message in room {}: {:?}", room.room_id(), ev);
+                                        crate::utils::whatsapp_utils::handle_whatsapp_message(ev, room, client, state).await;
+                                    }
+                                });
+
+                                // Store the client
+                                let client_arc = Arc::new(client.clone());
+                                matrix_clients.insert(user_id, client_arc.clone());
+
+                                // Create sync task
+                                let sync_settings = MatrixSyncSettings::default()
+                                    .timeout(Duration::from_secs(30))
+                                    .full_state(true);
+
+                                let handle = tokio::spawn(async move {
+                                    loop {
+                                        match client_arc.sync(sync_settings.clone()).await {
+                                            Ok(_) => {
+                                                tracing::debug!("Sync completed normally for user {}", user_id);
+                                                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                                            },
+                                            Err(e) => {
+                                                tracing::error!("Matrix sync error for user {}: {}", user_id, e);
+                                                tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                                            }
+                                        }
+                                    }
+                                });
+
+                                sync_tasks.insert(user_id, handle);
+
                                 // Send sync commands with reduced delays
                                 if let Some(room) = client.get_room(&room_id) {
                                     // Send both commands quickly without long waits
@@ -496,17 +538,6 @@ async fn monitor_whatsapp_connection(
                                 } else {
                                     tracing::error!("WhatsApp room not found for sync commands");
                                 }
-
-                                // Start continuous sync in background
-                                let sync_client = client.clone();
-                                tokio::spawn(async move {
-
-                                    tracing::info!("Starting continuous sync for WhatsApp bridge");
-                                    let sync_settings = MatrixSyncSettings::default()
-                                        .timeout(Duration::from_secs(30));
-                                    let _ = sync_client.sync(sync_settings).await;
-                                    tracing::info!("Continuous sync ended");
-                                });
 
 
                                 return Ok(());
@@ -735,6 +766,23 @@ pub async fn disconnect_whatsapp(
             tracing::error!("Failed to send delete-session command: {}", e);
         }
         sleep(Duration::from_secs(5)).await;
+    }
+
+    // Remove client and sync task from app state
+    {
+        let mut matrix_clients = state.matrix_clients.lock().await;
+        let mut sync_tasks = state.matrix_sync_tasks.lock().await;
+
+        // Remove and abort the sync task if it exists
+        if let Some(task) = sync_tasks.remove(&auth_user.user_id) {
+            task.abort();
+            tracing::debug!("Aborted sync task for user {}", auth_user.user_id);
+        }
+
+        // Remove the client if it exists
+        if matrix_clients.remove(&auth_user.user_id).is_some() {
+            tracing::debug!("Removed Matrix client for user {}", auth_user.user_id);
+        }
     }
 
     // Delete the bridge record

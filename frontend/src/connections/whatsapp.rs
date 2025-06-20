@@ -888,18 +888,19 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                     }
                     .sync-spinner {
                         display: inline-block;
-                        width: 20px;
-                        height: 20px;
-                        border: 3px solid rgba(30, 144, 255, 0.1);
+                        width: 24px;
+                        height: 24px;
+                        border: 2px solid rgba(30, 144, 255, 0.1);
                         border-radius: 50%;
                         border-top-color: #1E90FF;
                         animation: spin 1s ease-in-out infinite;
                         margin-right: 10px;
+                        box-sizing: border-box;
                     }
 
                     .sync-indicator {
                         display: flex;
-                        align-items: center;
+                        align-items: space-between;
                         background: rgba(30, 144, 255, 0.1);
                         border-radius: 8px;
                         padding: 1rem;
