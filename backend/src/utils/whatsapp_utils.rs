@@ -1335,163 +1335,113 @@ pub async fn search_whatsapp_rooms(
     user_id: i32,
     search_term: &str,
 ) -> Result<Vec<WhatsAppRoom>> {
-    // Get bridge bot username from environment variable or use default pattern
     let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
         .unwrap_or_else(|_| "@whatsappbot:".to_string());
-    tracing::info!("Searching WhatsApp rooms for user {} ", user_id);
-    println!("Starting WhatsApp room search for user {}", user_id);
 
-    // Get Matrix client using cached version for better performance
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
-    println!("Matrix client obtained successfully");
-
-    // Check if we're logged in first
+    // Validate bridge connection first
     let bridge = state.user_repository.get_whatsapp_bridge(user_id)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
-        println!("WhatsApp bridge not connected for user {}", user_id);
         return Err(anyhow!("WhatsApp bridge is not connected. Please log in first."));
     }
-    println!("WhatsApp bridge connection verified");
 
-    // Get all joined rooms
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
     let joined_rooms = client.joined_rooms();
-    tracing::info!("Found {} total joined rooms", joined_rooms.len());
-    println!("Found {} total joined rooms", joined_rooms.len());
-
-    let mut all_whatsapp_rooms = Vec::new();
     let search_term_lower = search_term.trim().to_lowercase();
-    println!("Processing rooms to find WhatsApp rooms...");
 
-    // First pass: collect all WhatsApp rooms with their details
-    for room in joined_rooms {
-        let room_name = match room.display_name().await {
-            Ok(name) => {
-                let name_str = name.to_string();
-                tracing::info!("Processing room: {}", name_str);
-                name_str
-            },
-            Err(e) => {
-                tracing::error!("Failed to get room name: {}", e);
-                continue;
+    // Process rooms in parallel
+    let room_futures = joined_rooms.into_iter().map(|room| {
+        let bridge_bot_username = bridge_bot_username.clone();
+        async move {
+            // Quick check for room name
+            let room_name = match room.display_name().await {
+                Ok(name) => name.to_string(),
+                Err(_) => return None,
+            };
+
+            // Early filter for WhatsApp rooms
+            if !room_name.contains("(WA)") {
+                return None;
             }
-        };
-        
-        // Get room members
-        let members = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
-            Ok(members) => {
-                tracing::info!("Got {} members for room {}", members.len(), room_name);
-                members
-            },
-            Err(e) => {
-                tracing::error!("Failed to get members for room {}: {}", room_name, e);
-                continue;
+
+            // Check bridge bot membership
+            let has_bridge_bot = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
+                Ok(members) => members.iter().any(|member| 
+                    member.user_id().to_string().contains(&bridge_bot_username)
+                ),
+                Err(_) => return None,
+            };
+
+            if !has_bridge_bot {
+                return None;
             }
-        };
 
-        // Check if bridge bot is a member of the room
-        let has_bridge_bot = members.iter().any(|member| {
-            let member_id = member.user_id().to_string();
-            let is_bridge = member_id.contains(&bridge_bot_username);
-            tracing::info!("Checking member {} against bridge bot pattern {}: {}", 
-                member_id, bridge_bot_username, is_bridge);
-            is_bridge
-        });
+            // Get clean name and last activity
+            let clean_name = room_name
+                .split(" (WA)")
+                .next()
+                .unwrap_or(&room_name)
+                .trim()
+                .to_string();
 
-        // Log room details
-        tracing::info!(
-            "Room '{}' - Has bridge bot: {}, Is WhatsApp room: {}", 
-            room_name, 
-            has_bridge_bot, 
-            room_name.contains("(WA)")
-        );
+            // Get last activity timestamp efficiently
+            let mut options = matrix_sdk::room::MessagesOptions::backward();
+            options.limit = matrix_sdk::ruma::UInt::new(1).unwrap();
+            
+            let last_activity = match room.messages(options).await {
+                Ok(response) => response.chunk.first()
+                    .and_then(|event| event.raw().deserialize().ok())
+                    .map(|e: AnySyncTimelineEvent| i64::from(e.origin_server_ts().0) / 1000)
+                    .unwrap_or(0),
+                Err(_) => 0,
+            };
 
-        // Skip if bridge bot is not a member or if not a WhatsApp room
-        if !has_bridge_bot || !room_name.contains("(WA)") {
-            continue;
+            Some((clean_name, WhatsAppRoom {
+                room_id: room.room_id().to_string(),
+                display_name: room_name,
+                last_activity,
+                last_activity_formatted: format_timestamp(last_activity, None),
+            }))
         }
+    });
 
-        // Extract clean room name (without WA suffix)
-        let clean_name = room_name
-            .split(" (WA)")
-            .next()
-            .unwrap_or(&room_name)
-            .trim()
-            .to_string();
+    // Collect results from parallel processing
+    let all_whatsapp_rooms: Vec<(String, WhatsAppRoom)> = join_all(room_futures)
+        .await
+        .into_iter()
+        .flatten()
+        .collect();
 
-        // Get last message timestamp
-        let mut options = matrix_sdk::room::MessagesOptions::backward();
-        options.limit = matrix_sdk::ruma::UInt::new(1).unwrap();
-        
-        let last_activity = match room.messages(options).await {
-            Ok(response) => {
-                if let Some(event) = response.chunk.first() {
-                    if let Ok(any_event) = event.raw().deserialize() {
-                        i64::from(any_event.origin_server_ts().0) / 1000
-                    } else {
-                        0
-                    }
+    // Single-pass matching with prioritized results
+    let mut matching_rooms: Vec<(f64, WhatsAppRoom)> = all_whatsapp_rooms
+        .into_iter()
+        .filter_map(|(name, room)| {
+            let name_lower = name.to_lowercase();
+            if name_lower == search_term_lower {
+                // Exact match gets highest priority
+                Some((2.0, room))
+            } else if name_lower.contains(&search_term_lower) {
+                // Substring match gets medium priority
+                Some((1.0, room))
+            } else {
+                // Try similarity match only if needed
+                let similarity = strsim::jaro_winkler(&name_lower, &search_term_lower);
+                if similarity >= 0.7 {
+                    Some((similarity, room))
                 } else {
-                    0
+                    None
                 }
-            },
-            Err(_) => 0,
-        };
-
-        all_whatsapp_rooms.push((clean_name, WhatsAppRoom {
-            room_id: room.room_id().to_string(),
-            display_name: room_name,
-            last_activity,
-            last_activity_formatted: format_timestamp(last_activity, None),
-        }));
-    }
-
-    println!("Found {} WhatsApp rooms total", all_whatsapp_rooms.len());
-    let mut matching_rooms = Vec::new();
-
-    // Exact matches (case insensitive)
-    let exact_matches: Vec<WhatsAppRoom> = all_whatsapp_rooms.iter()
-        .filter(|(name, _)| name.to_lowercase() == search_term_lower)
-        .map(|(_, room)| room.clone())
+            }
+        })
         .collect();
-    println!("Found {} exact matches", exact_matches.len());
-    matching_rooms.extend(exact_matches);
 
-    // Substring matches
-    let substring_matches: Vec<WhatsAppRoom> = all_whatsapp_rooms.iter()
-        .filter(|(name, _)| name.to_lowercase().contains(&search_term_lower))
-        .filter(|(name, _)| name.to_lowercase() != search_term_lower) // Exclude exact matches
-        .map(|(_, room)| room.clone())
-        .collect();
-    println!("Found {} substring matches", substring_matches.len());
-    matching_rooms.extend(substring_matches);
+    // Sort by match quality (higher score = better match) and then by last activity
+    matching_rooms.sort_by(|a, b| {
+        b.0.partial_cmp(&a.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(b.1.last_activity.cmp(&a.1.last_activity))
+    });
 
-    // Similarity matches (if no exact or substring matches found)
-    if matching_rooms.is_empty() {
-        println!("No exact or substring matches found, trying similarity matching...");
-        let mut similarity_matches: Vec<(f64, WhatsAppRoom)> = all_whatsapp_rooms.iter()
-            .map(|(name, room)| {
-                let similarity = strsim::jaro_winkler(&name.to_lowercase(), &search_term_lower);
-                (similarity, room.clone())
-            })
-            .filter(|(similarity, _)| *similarity >= 0.7) // Only include rooms with high similarity
-            .collect();
-
-        // Sort by similarity score (highest first)
-        similarity_matches.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
-        
-        println!("Found {} similarity matches", similarity_matches.len());
-        // Add similar rooms to results
-        matching_rooms.extend(similarity_matches.into_iter().map(|(_, room)| room));
-    }
-
-    // Sort all results by last activity (most recent first)
-    matching_rooms.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
-
-    tracing::info!(
-        "Found {} matching WhatsApp rooms (including similar matches)",
-        matching_rooms.len()
-    );
-    println!("Returning {} total matching rooms", matching_rooms.len());
-
-    Ok(matching_rooms)
+    tracing::info!("Found {} matching WhatsApp rooms", matching_rooms.len());
+    
+    Ok(matching_rooms.into_iter().map(|(_, room)| room).collect())
 }
