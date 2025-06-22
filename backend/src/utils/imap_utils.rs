@@ -26,19 +26,18 @@ pub async fn upload_media_to_twilio(
     content_type: String,
     data: Vec<u8>,
     filename: String,
+    service_sid: String,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let twilio_account_sid = env::var("TWILIO_ACCOUNT_SID")
         .map_err(|_| "TWILIO_ACCOUNT_SID not set")?;
     let twilio_auth_token = env::var("TWILIO_AUTH_TOKEN")
         .map_err(|_| "TWILIO_AUTH_TOKEN not set")?;
-    let twilio_chat_service = env::var("TWILIO_CHAT_SERVICE")
-        .map_err(|_| "TWILIO_CHAT_SERVICE not set")?;
     
     let client = reqwest::Client::new();
     
     let url = format!(
         "https://mcs.us1.twilio.com/v1/Services/{}/Media",
-        twilio_chat_service
+        service_sid
     );
 
     // Create multipart form data

@@ -17,6 +17,7 @@ use crate::{
     AppState,
     handlers::auth_middleware::AuthUser,
     utils::imap_utils::upload_media_to_twilio,
+    repositories::user_conversations::UserConversations,
 };
 
 fn format_timestamp(timestamp: i64, timezone: Option<String>) -> String {
@@ -705,6 +706,15 @@ pub async fn fetch_single_email_imap(
     user_id: i32,
     email_id: &str,
 ) -> Result<ImapEmail, ImapError> {
+    // Get user's active conversation to get service_sid
+    let user = state.user_core.find_by_id(user_id)
+        .map_err(|e| ImapError::FetchError(format!("Failed to get user: {}", e)))?
+        .ok_or_else(|| ImapError::FetchError("User not found".to_string()))?;
+
+    let conversation = state.user_conversations.find_active_conversation(&user, user.preferred_number.clone().unwrap_or(std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER must be set").to_string()))
+        .map_err(|e| ImapError::FetchError(format!("Failed to get conversation: {}", e)))?
+        .ok_or_else(|| ImapError::FetchError("No active conversation found".to_string()))?;
+
     // Get IMAP credentials
     let (email, password, imap_server, imap_port) = state
         .user_repository
@@ -886,6 +896,7 @@ pub async fn fetch_single_email_imap(
                                     content_type_str,
                                     attachment_data,
                                     filename,
+                                    conversation.service_sid.clone(),
                                 );
                                 
                                 attachment_futures.push(upload_future);
