@@ -117,36 +117,55 @@ pub async fn handle_fetch_emails(state: &Arc<AppState>, user_id: i32) -> String 
 }
 
 pub async fn handle_fetch_specific_email(state: &Arc<AppState>, user_id: i32, query: &str) -> String {
+    // Create OpenAI client for email selection
+    let client = match crate::tool_call_utils::utils::create_openai_client() {
+        Ok(client) => client,
+        Err(e) => {
+            eprintln!("Failed to create OpenAI client: {}", e);
+            return "Failed to process email search".to_string();
+        }
+    };
+
+    let state_clone = state.clone();
+    let user_id_clone = user_id.clone();
+
     // Fetch the latest 20 emails with full content
-    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user_id, true, Some(20), false).await {
+    match crate::handlers::imap_handlers::fetch_emails_imap(&state_clone, user_id_clone, true, Some(20), false).await {
         Ok(emails) => {
             if emails.is_empty() {
-                return "No emails found.".to_string();
+                return "No emails found".to_string();
             }
 
-            // Format all emails into a searchable response
-            let mut response = format!("Search query: '{}'\n\nLatest emails (newest first):\n\n", query);
-            for (i, email) in emails.iter().enumerate() {
+            // Format emails for LLM analysis
+            let mut formatted_emails = String::new();
+            for email in emails.iter() {
                 let formatted_email = format!(
-                    "Email {}:\nFrom: {}\nSubject: {}\nDate: {}\n\n{}\n",
-                    i + 1,
+                    "email_id {}:\nFrom: {}\nSubject: {}\nDate: {}\n\n{}\n\n",
+                    email.id,
                     email.from.as_deref().unwrap_or("Unknown"),
                     email.subject.as_deref().unwrap_or("No subject"),
                     email.date_formatted.as_deref().unwrap_or("No date"),
                     email.body.as_deref().unwrap_or("No content"),
                 );
-                response.push_str(&formatted_email);
+                formatted_emails.push_str(&formatted_email);
             }
 
-            response
+            // Use LLM to select the most relevant email
+            match crate::tool_call_utils::utils::select_most_relevant_email(&client, query, &formatted_emails).await {
+                Ok((selected_email_id, _)) => selected_email_id,
+                Err(e) => {
+                    eprintln!("Failed to select relevant email: {}", e);
+                    "Failed to process email search".to_string()
+                }
+            }
         }
         Err(e) => {
             let error_message = match e {
-                ImapError::NoConnection => "No IMAP connection found. Please check your email settings.",
-                ImapError::CredentialsError(_) => "Your email credentials need to be updated.",
+                ImapError::NoConnection => "No IMAP connection found",
+                ImapError::CredentialsError(_) => "Invalid credentials",
                 ImapError::ConnectionError(msg) | ImapError::FetchError(msg) | ImapError::ParseError(msg) => {
                     eprintln!("Failed to fetch emails: {}", msg);
-                    "Failed to fetch emails. Please try again later."
+                    "Failed to fetch emails"
                 }
             };
             error_message.to_string()

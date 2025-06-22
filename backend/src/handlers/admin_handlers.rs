@@ -295,6 +295,7 @@ async fn process_broadcast_messages(
                     &sender_number,
                     &message_with_stop,
                     false,
+                    None,
                     &user,
                 )
                 .await

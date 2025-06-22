@@ -104,6 +104,7 @@ pub async fn handle_confirmation(
                             twilio_number,
                             confirmation_msg,
                             true,
+                            None,
                             user,
                         ).await {
                             tracing::error!("Failed to send confirmation message: {}", e);
@@ -124,6 +125,7 @@ pub async fn handle_confirmation(
                             twilio_number,
                             &error_msg,
                             true,
+                            None,
                             user,
                         ).await {
                             tracing::error!("Failed to send error message: {}", e);
@@ -145,6 +147,7 @@ pub async fn handle_confirmation(
                     twilio_number,
                     cancel_msg,
                     true,
+                    None,
                     user,
                 ).await {
                     tracing::error!("Failed to send cancellation confirmation: {}", e);
@@ -207,6 +210,7 @@ pub async fn handle_confirmation(
                             twilio_number,
                             &confirmation_msg,
                             true,
+                            None,
                             user,
                         ).await {
                             tracing::error!("Failed to send confirmation message: {}", e);
@@ -229,6 +233,7 @@ pub async fn handle_confirmation(
                             twilio_number,
                             &error_msg,
                             true,
+                            None,
                             user,
                         ).await {
                             tracing::error!("Failed to send error message: {}", send_err);
@@ -251,6 +256,7 @@ pub async fn handle_confirmation(
                     twilio_number,
                     cancel_msg,
                     true,
+                    None,
                     user,
                 ).await {
                     tracing::error!("Failed to send cancellation confirmation: {}", e);
@@ -326,6 +332,7 @@ pub async fn handle_confirmation(
                             twilio_number,
                             &confirmation_msg,
                             true,
+                            None,
                             user,
                         ).await {
                             tracing::error!("Failed to send confirmation message: {}", e);
@@ -346,6 +353,7 @@ pub async fn handle_confirmation(
                             twilio_number,
                             &error_msg,
                             true,
+                            None,
                             user,
                         ).await {
                             tracing::error!("Failed to send error message: {}", e);
@@ -368,6 +376,7 @@ pub async fn handle_confirmation(
                     twilio_number,
                     cancel_msg,
                     true,
+                    None,
                     user,
                 ).await {
                     tracing::error!("Failed to send cancellation confirmation: {}", e);

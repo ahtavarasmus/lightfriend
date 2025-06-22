@@ -515,6 +515,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                 &conversation.twilio_number,
                                                 &final_notification,
                                                 true,
+                                                None,
                                                 &user,
                                             ).await {
                                                 Ok(_) => debug!("Successfully sent email notification to user {}", user.id),
@@ -970,6 +971,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                                             &conversation.twilio_number,
                                                                             &notification_clone,
                                                                             false,
+                                                                            None,
                                                                             &user_clone,
                                                                         ).await {
                                                                             Ok(_) => debug!("🗓️ Calendar notification: Successfully sent SMS notification to user {}", user_clone.id),

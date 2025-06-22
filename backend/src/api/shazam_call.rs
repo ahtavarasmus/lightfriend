@@ -373,6 +373,7 @@ pub async fn send_shazam_answer_to_user(
         &conversation.twilio_number,
         message,
         true,
+        None,
         &user,
     )
     .await {

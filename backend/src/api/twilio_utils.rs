@@ -685,6 +685,12 @@ pub async fn redact_message(
     Ok(())
 }
 
+
+#[derive(Deserialize)]
+pub struct MediaResponse {
+    pub sid: String,
+}
+
 // Function to upload media to Twilio Media Content Service
 pub async fn upload_media_to_twilio(
     chat_service_sid: &str,
@@ -726,10 +732,6 @@ pub async fn upload_media_to_twilio(
         return Err(format!("Failed to upload media to Twilio: {} - {}", response.status(), response.text().await?).into());
     }
 
-    #[derive(Deserialize)]
-    struct MediaResponse {
-        sid: String,
-    }
 
     let media_response: MediaResponse = response.json().await?;
     tracing::debug!("Successfully uploaded media to Twilio with SID: {}", media_response.sid);
@@ -778,7 +780,7 @@ pub async fn delete_twilio_message_media(
 
 pub async fn delete_media_from_twilio(
     chat_service_sid: &str,
-    media_sid: &str,
+    media_sid: String,
     user: &User,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     // Check if user has SMS discount tier and use their credentials if they do
@@ -814,98 +816,13 @@ pub async fn delete_media_from_twilio(
     Ok(())
 }
 
-// Function to send conversation message with media attachment
-pub async fn send_conversation_message_with_media(
-    conversation_sid: &str,
-    twilio_number: &String,
-    body: &str,
-    media_sid: &str,
-    redact: bool,
-    user: &User,
-) -> Result<String, Box<dyn Error>> {
-    // If this is a non-free reply message, we should redact previous free reply messages
-    if redact && !body.contains("(free reply)") {
-        // Fetch recent messages
-        let messages = match crate::api::twilio_sms::fetch_conversation_messages(conversation_sid).await {
-            Ok(msgs) => msgs,
-            Err(e) => {
-                eprintln!("Failed to fetch messages for redaction: {}", e);
-                vec![] // Continue with sending the message even if fetching fails
-            }
-        };
-
-        // Find and redact free reply messages until we hit a non-free reply message
-        for msg in messages {
-            if msg.author == "lightfriend" && msg.body.contains("(free reply)") {
-                let redacted_body = redact_sensitive_info(&msg.body).await;
-                if let Err(e) = redact_message(conversation_sid, &msg.sid, &redacted_body, &user).await {
-                    eprintln!("Failed to redact free reply message {}: {}", msg.sid, e);
-                }
-            } else if msg.author == "lightfriend" {
-                // Stop when we hit a non-free reply message
-                break;
-            }
-        }
-    }
-
-
-    // Check if user has SMS discount tier and use their credentials if they do
-    let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
-        (
-            env::var(format!("TWILIO_ACCOUNT_SID_{}", user.id))
-                .map_err(|_| format!("Missing TWILIO_ACCOUNT_SID_{}", user.id))?,
-            env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
-                .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
-        )
-    } else {
-        (
-            env::var("TWILIO_ACCOUNT_SID")?,
-            env::var("TWILIO_AUTH_TOKEN")?,
-        )
-    };
-
-
-    let client = Client::new();
-
-    let form_data = vec![
-        ("Body", body),
-        ("Author", "lightfriend"),
-        ("MediaSid", media_sid),
-        ("From", twilio_number),
-        ("X-Twilio-Webhook-Enabled", "true")
-    ];
-
-    let response: MessageResponse = client
-        .post(format!(
-            "https://conversations.twilio.com/v1/Conversations/{}/Messages",
-            conversation_sid
-        ))
-        .basic_auth(&account_sid, Some(&auth_token))
-        .form(&form_data)
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    tracing::debug!("Successfully sent conversation message with media, SID: {}", response.sid);
-
-    // Only redact the current message if it's not a free reply message
-    if redact && !body.contains("(free reply)") {
-        // Redact sensitive information using enhanced LLM-based redaction
-        let redacted_body = redact_sensitive_info(&body).await;
-        
-        // Update the message with the redacted body
-        redact_message(conversation_sid, &response.sid, &redacted_body, &user).await?;
-    }
-
-    Ok(response.sid)
-}
 
 pub async fn send_conversation_message(
     conversation_sid: &str, 
     twilio_number: &String,
     body: &str,
     redact: bool,
+    media_sid: Option<&String>,
     user: &User,
 ) -> Result<String, Box<dyn Error>> {
     // If this is a non-free reply message, we should redact previous free reply messages
@@ -950,12 +867,17 @@ pub async fn send_conversation_message(
 
     let client = Client::new();
 
-    let form_data = vec![
+    // Build form data with required fields
+    let mut form_data = vec![
         ("Body", body), 
-        ("Author", "lightfriend"), // Use a consistent author name
-        ("From", twilio_number),   // Specify the actual phone number in From field
-        ("X-Twilio-Webhook-Enabled", "true") // Enable webhooks for delivery status
+        ("Author", "lightfriend"),
+        ("From", twilio_number),
     ];
+
+    // Add media_sid if provided
+    if let Some(media_sid) = media_sid {
+        form_data.push(("MediaSid", media_sid));
+    }
 
     let response: MessageResponse = client
         .post(format!(
@@ -963,15 +885,17 @@ pub async fn send_conversation_message(
             conversation_sid
         ))
         .basic_auth(&account_sid, Some(&auth_token))
+        .header("X-Twilio-Webhook-Enabled", "true")
         .form(&form_data)
         .send()
         .await?
         .json()
         .await?;
-    tracing::debug!("successfully sent the conversation message with SID: {}", response.sid);
 
+    tracing::debug!("Successfully sent conversation message{} with SID: {}", 
+        if media_sid.is_some() { " with media" } else { "" },
+        response.sid);
 
-    
     // Only redact the current message if it's not a free reply message
     if redact && !body.contains("(free reply)") {
         // Redact sensitive information using enhanced LLM-based redaction

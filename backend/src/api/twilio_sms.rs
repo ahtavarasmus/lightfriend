@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::AppState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::cell::RefCell;
 use axum::{
     extract::Form,
     response::IntoResponse,
@@ -19,6 +20,10 @@ use crate::tool_call_utils::utils::{
 };
 use chrono::Utc;
 
+// Thread-local storage for media SID mapping
+thread_local! {
+    static MEDIA_SID_MAP: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+}
 
 use openai_api_rs::v1::{
     chat_completion,
@@ -651,8 +656,83 @@ pub async fn process_sms(
                         }
                     };
 
-                    let response = crate::tool_call_utils::email::handle_fetch_specific_email(&state, user.id, &query.query).await;
-                    tool_answers.insert(tool_call_id, response);
+                    // First get the email ID
+                    let email_id = crate::tool_call_utils::email::handle_fetch_specific_email(&state, user.id, &query.query).await;
+                    let auth_user = crate::handlers::auth_middleware::AuthUser {
+                        user_id: user.id,
+                        is_admin: false,
+                    };
+                    
+                    // Then fetch the complete email with that ID
+                    match crate::handlers::imap_handlers::fetch_single_imap_email(axum::extract::State(state.clone()), auth_user, axum::extract::Path(email_id)).await {
+                        Ok(email) => {
+                            let email = &email["email"];
+                            
+                            // Upload attachments to Twilio if present
+                            let mut uploaded_attachments: Vec<(String, String)> = Vec::new(); // (filename, media_sid)
+                            if let Some(attachments) = email["attachments"].as_array() {
+                                for attachment_url in attachments {
+                                    if let Some(url) = attachment_url.as_str() {
+                                        // Download attachment content
+                                        if let Ok(response) = reqwest::get(url).await {
+                                            if let Some(content_type) = response.headers().get("content-type")
+                                                .and_then(|ct| ct.to_str().ok())
+                                                .map(|s| s.to_string()) {
+                                                if let Ok(bytes) = response.bytes().await {
+                                                    // Extract filename from URL or use default
+                                                    let filename = url.split('/').last()
+                                                        .unwrap_or("attachment")
+                                                        .to_string();
+                                                    
+                                                    // Upload to Twilio
+                                                    match crate::api::twilio_utils::upload_media_to_twilio(
+&conversation.service_sid,
+                                                        &bytes,
+                                                        &content_type,
+                                                        &filename,
+                                                        &user
+                                                    ).await {
+                                                        Ok(media_sid) => {
+                                                            // Store in thread-local map
+                                                            MEDIA_SID_MAP.with(|map| {
+                                                                map.borrow_mut().insert(filename.clone(), media_sid.clone());
+                                                            });
+                                                            uploaded_attachments.push((filename.clone(), media_sid));
+                                                        },
+                                                        Err(e) => {
+                                                            tracing::error!("Failed to upload attachment to Twilio: {}", e);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Format the response with all email details and just filenames for attachments
+                            let mut response = format!(
+                                "From: {}\nSubject: {}\nDate: {}\n\n{}",
+                                email["from"],
+                                email["subject"],
+                                email["date_formatted"],
+                                email["body"]
+                            );
+
+                            // Add attachment information with just filenames
+                            if !uploaded_attachments.is_empty() {
+                                response.push_str("\n\nAttachments:\n");
+                                for (filename, _) in &uploaded_attachments {
+                                    response.push_str(&format!("- {}\n", filename));
+                                }
+                            }
+
+                            tool_answers.insert(tool_call_id, response);
+                        },
+                        Err(e) => {
+                            tool_answers.insert(tool_call_id, "Failed to fetch the complete email".to_string());
+                        }
+                    }
                 } else if name == "create_waiting_check" {
                     tracing::debug!("Executing create_waiting_check tool call");
                     match crate::tool_call_utils::management::handle_create_waiting_check(&state, user.id, arguments).await {
@@ -915,8 +995,34 @@ pub async fn process_sms(
         );
     }
 
+    // Extract filenames from the response and look up their media SIDs
+    let mut media_sids = Vec::new();
+    let clean_response = final_response_with_notice.lines().filter_map(|line| {
+        // Look for lines that contain filenames from the media map
+        MEDIA_SID_MAP.with(|map| {
+            let map = map.borrow();
+            for (filename, media_sid) in map.iter() {
+                if line.contains(filename) {
+                    media_sids.push(media_sid.clone());
+                    return None; // Remove the line containing the filename
+                }
+            }
+            Some(line.to_string())
+        })
+    }).collect::<Vec<String>>().join("\n");
+
+    // Take only the first media SID if there are multiple
+    let media_sid = media_sids.first();
+
     // Send the actual message if not in test mode
-    match crate::api::twilio_utils::send_conversation_message(&conversation.conversation_sid, &conversation.twilio_number, &final_response_with_notice, redact_the_body, &user).await {
+    match crate::api::twilio_utils::send_conversation_message(
+        &conversation.conversation_sid,
+        &conversation.twilio_number,
+        &clean_response,
+        redact_the_body,
+        media_sid,
+        &user
+    ).await {
         Ok(message_sid) => {
             // Log the SMS usage metadata and store message history
             tracing::debug!("status of the message: {}", status);

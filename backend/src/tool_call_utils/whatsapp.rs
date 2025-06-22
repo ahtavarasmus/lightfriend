@@ -191,6 +191,7 @@ pub async fn handle_send_whatsapp_message(
                     twilio_number,
                     &error_msg,
                     true,
+                    None,
                     user,
                 ).await {
                     eprintln!("Failed to send error message: {}", e);
@@ -225,6 +226,7 @@ pub async fn handle_send_whatsapp_message(
                     twilio_number,
                     "Failed to prepare WhatsApp message sending. (not charged, contact rasmus@ahtava.com)",
                     true,
+                    None,
                     user,
                 ).await {
                     tracing::error!("Failed to send error message: {}", e);
@@ -252,6 +254,7 @@ pub async fn handle_send_whatsapp_message(
                 twilio_number,
                 &confirmation_msg,
                 true, // Don't redact since we need to extract info from this message later
+                None,
                 user,
             ).await {
                 Ok(_) => {
@@ -287,6 +290,7 @@ pub async fn handle_send_whatsapp_message(
                 twilio_number,
                 error_msg,
                 true,
+                None,
                 user,
             ).await {
                 eprintln!("Failed to send error message: {}", e);

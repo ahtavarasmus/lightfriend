@@ -226,6 +226,7 @@ pub async fn fetch_assistant(
                     &conversation.twilio_number,
                     &error_message,
                     false, // Don't redact since there is nothing there 
+                    None,
                     &user,
                 ).await {
                     error!("Failed to send insufficient credits message: {}", e);
@@ -676,6 +677,7 @@ pub async fn handle_send_sms_tool_call(
         &conversation.twilio_number,
         &payload.message,
         true,
+        None,
         &user,
     ).await {
         Ok(message_sid) => {
@@ -1378,6 +1380,7 @@ pub async fn handle_whatsapp_confirm_send(
                 &conversation.twilio_number,
                 &confirmation_message,
                 false, // Don't redact since we need to extract info from this message later
+                None,
                 &user,
             ).await {
                 Ok(message_sid) => {
@@ -1518,6 +1521,7 @@ pub async fn handle_calendar_event_confirm(
         &conversation.twilio_number,
         &confirmation_message,
         false, // Don't redact since we need to extract info from this message later
+        None,
         &user,
     ).await {
         Ok(message_sid) => {
@@ -1912,6 +1916,7 @@ pub async fn handle_email_response_tool_call(
                 &conversation.twilio_number,
                 &confirmation_message,
                 false, // Don't redact since we need to extract info from this message later
+                None,
                 &user,
             ).await {
                 Ok(message_sid) => {
@@ -2226,6 +2231,7 @@ pub async fn make_notification_call(
         &twilio_number,
         &notification_sms,
         true,
+        None,
         &user,
     ).await {
         error!("Failed to send notification SMS: {}", e);

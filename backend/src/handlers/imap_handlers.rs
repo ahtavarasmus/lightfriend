@@ -699,6 +699,7 @@ pub async fn fetch_emails_imap(
 
     Ok(email_previews)
 }
+
 pub async fn fetch_single_email_imap(
     state: &AppState,
     user_id: i32,

@@ -1304,6 +1304,7 @@ async fn send_whatsapp_notification(
                 &conversation.twilio_number,
                 &final_notification,
                 true,
+                None,
                 &user,
             ).await {
                 Ok(_) => {
