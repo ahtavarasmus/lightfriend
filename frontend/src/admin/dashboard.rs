@@ -587,21 +587,24 @@ pub fn admin_dashboard() -> Html {
                                                         {
                                                             Ok(response) => {
                                                                 if response.ok() {
-                                                                                                    match response.json::<serde_json::Value>().await {
-                                                                                                        Ok(data) => {
-                                                                                                            if let Some(reply) = data.get("message").and_then(|m| m.as_str()) {
-                                                                                                                let mut new_messages = (*chat_messages).clone();
-                                                                new_messages.push(ChatMessage {
-                                                                    content: reply.to_string(),
-                                                                    is_user: false,
-                                                                    timestamp: chrono::Utc::now().timestamp(),
-                                                                    image_url: None,
-                                                                });
-                                                                                                                chat_messages.set(new_messages);
-                                                                                                                // Clear the image preview after successful response
-                                                                                                                image_preview.set(ImagePreview { data_url: None });
-                                                                                                            }
-                                                                        }
+                                                                    match response.json::<serde_json::Value>().await {
+                                                                        Ok(data) => {
+                                                                            let mut new_messages = (*chat_messages).clone();
+                                                                            
+                                                                            // Extract message and image URL from response
+                                                                            let reply = data.get("message").and_then(|m| m.as_str()).unwrap_or_default();
+                                                                            let image_url = data.get("image_url").and_then(|u| u.as_str()).map(String::from);
+                                                                            
+                                                                            new_messages.push(ChatMessage {
+                                                                                content: reply.to_string(),
+                                                                                is_user: false,
+                                                                                timestamp: chrono::Utc::now().timestamp(),
+                                                                                image_url: image_url,
+                                                                            });
+                                                                            chat_messages.set(new_messages);
+                                                                            // Clear the image preview after successful response
+                                                                            image_preview.set(ImagePreview { data_url: None });
+                                                                        },
                                                                         Err(_) => {
                                                                             error.set(Some("Failed to parse response".to_string()));
                                                                         }
