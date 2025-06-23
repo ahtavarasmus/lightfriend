@@ -19,7 +19,9 @@ struct TwilioMediaResponse {
 
 #[derive(Debug, Deserialize)]
 struct TwilioMediaLinks {
-    content_direct_temporary: String,
+    #[serde(default)]
+    content_direct_temporary: Option<String>,
+    content: String,
 }
 
 pub async fn upload_media_to_twilio(
@@ -40,6 +42,8 @@ pub async fn upload_media_to_twilio(
         service_sid
     );
 
+    tracing::info!("Uploading media to Twilio. Content-Type: {}, Filename: {}", content_type, filename);
+
     // Create multipart form data
     let part = multipart::Part::bytes(data)
         .file_name(filename.clone())
@@ -55,13 +59,38 @@ pub async fn upload_media_to_twilio(
         .send()
         .await?;
     
-    if !response.status().is_success() {
+    let status = response.status();
+    let headers = response.headers().clone();
+    
+    tracing::debug!("Twilio response status: {}", status);
+    tracing::debug!("Twilio response headers: {:?}", headers);
+    
+    if !status.is_success() {
         let error_text = response.text().await?;
-        return Err(format!("Failed to upload media: {}", error_text).into());
+        tracing::error!("Twilio upload failed with status {} and error: {}", status, error_text);
+        return Err(format!("Failed to upload media: {} - {}", status, error_text).into());
     }
     
-    let media_response: TwilioMediaResponse = response.json().await?;
-    Ok(media_response.links.content_direct_temporary)
+    let response_text = response.text().await?;
+    tracing::debug!("Twilio response body: {}", response_text);
+    
+    match serde_json::from_str::<TwilioMediaResponse>(&response_text) {
+        Ok(media_response) => {
+            tracing::info!("Successfully uploaded media to Twilio");
+            match media_response.links.content_direct_temporary {
+                Some(url) => Ok(url),
+                None => Ok(format!( // ← new fallback
+                    "https://mcs.us1.twilio.com{}",
+                    media_response.links.content
+                )),
+            }
+        },
+        Err(e) => {
+            tracing::error!("Failed to parse Twilio response: {}", e);
+            tracing::error!("Raw response: {}", response_text);
+            Err(format!("Failed to parse Twilio response: {} - Raw response: {}", e, response_text).into())
+        }
+    }
 }
 
 
