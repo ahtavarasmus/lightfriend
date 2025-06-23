@@ -237,6 +237,7 @@ diesel::table! {
         confirm_send_event_start_time -> Nullable<Text>,
         confirm_send_event_duration -> Nullable<Text>,
         confirm_send_event_id -> Nullable<Text>,
+        confirm_send_event_image_url -> Nullable<Text>,
     }
 }
 

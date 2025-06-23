@@ -74,6 +74,7 @@ pub struct TempVariable {
     pub confirm_send_event_start_time: Option<String>,
     pub confirm_send_event_duration: Option<String>,
     pub confirm_send_event_id: Option<String>,
+    pub confirm_send_event_image_url: Option<String>,
 }
 
 #[derive(Insertable)]
@@ -87,6 +88,7 @@ pub struct NewTempVariable {
     pub confirm_send_event_start_time: Option<String>,
     pub confirm_send_event_duration: Option<String>,
     pub confirm_send_event_id: Option<String>,
+    pub confirm_send_event_image_url: Option<String>,
 }
 
 

@@ -26,6 +26,7 @@ pub struct SearchWhatsAppRoomsResponse {
 pub struct SendWhatsAppMessageRequest {
     chat_name: String,
     message: String,
+    image_url: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -55,6 +56,7 @@ pub async fn send_message(
         auth_user.user_id,
         &request.chat_name,
         &request.message,
+        request.image_url,
     ).await {
         Ok(message) => {
             tracing::info!("Successfully sent WhatsApp message to {}", request.chat_name);

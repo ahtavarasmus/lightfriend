@@ -273,7 +273,8 @@ pub async fn handle_create_calendar_event(
         Some(&args.description.unwrap_or_default()),
         Some(&args.start_time),
         Some(&args.duration_minutes.to_string()),
-        None
+        None,
+        None,
     ) {
         tracing::error!("Failed to set temporary variable: {}", e);
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(

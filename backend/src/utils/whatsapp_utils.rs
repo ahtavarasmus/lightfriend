@@ -285,6 +285,7 @@ pub async fn send_whatsapp_message(
     user_id: i32,
     chat_name: &str,
     message: &str,
+    media_url: Option<String>,
 ) -> Result<WhatsAppMessage> {
     // Get user for timezone info
     let user = state.user_core.find_by_id(user_id)?
@@ -385,9 +386,74 @@ pub async fn send_whatsapp_message(
         return Err(anyhow!(error_msg));
     };
 
+    use matrix_sdk::{
+        attachment::AttachmentConfig,   // optional, for metadata
+        ruma::events::room::message::{
+            RoomMessageEventContent, MessageType, ImageMessageEventContent,
+        },
+    };
+
     // Create message content
     let content = RoomMessageEventContent::text_plain(message);
 
+
+
+    if let Some(url) = media_url {
+
+        // ── 1. Download the image and get MIME type ────────────────────────────────
+        let resp = reqwest::get(&url).await?;
+        
+        // Get MIME type from headers before consuming the response
+        let mime: mime_guess::mime::Mime = resp
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|h| h.to_str().ok())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or_else(|| mime_guess::MimeGuess::from_path(&url).first_or_octet_stream());
+
+        // Now consume the response to get the bytes
+        let bytes = resp.bytes().await?;
+        let size = bytes.len();
+
+        // ── 2. Filename (best-effort) ────────────────────────────────────────────
+
+        let filename = std::path::Path::new(&url)
+            .file_name()
+            .and_then(|p| p.to_str())
+            .unwrap_or("file");
+
+        // ── 3. Upload to the homeserver ──────────────────────────────────────────
+        // This gives you an `mxc://…` URI without posting anything to the room.
+        let upload_resp = client
+            .media()
+            .upload(&mime, bytes.to_vec(), None)
+            .await?;                                     // :contentReference[oaicite:0]{index=0}
+
+        let mxc: matrix_sdk::ruma::OwnedMxcUri = upload_resp.content_uri;
+
+        // ── 4. Build the image-message content with caption in *one* event ──────
+        let mut img = ImageMessageEventContent::plain(
+            message.to_owned(),   // ← this is the caption / body
+            mxc,
+        );
+
+        // Optional but nice: add basic metadata so bridges & clients know the size
+        let mut imageinfo = matrix_sdk::ruma::events::room::ImageInfo::new();
+        imageinfo.size = Some(matrix_sdk::ruma::UInt::new(size as u64).unwrap_or_default());
+        img.info = Some(Box::new(
+            imageinfo
+        ));
+
+        // Wrap it as a generic “m.room.message”
+        let content = RoomMessageEventContent::new(MessageType::Image(img));
+
+        // ── 5. Send it ───────────────────────────────────────────────────────────
+        room.send(content).await?;
+
+    } else {
+        // plain text
+        room.send(RoomMessageEventContent::text_plain(message)).await?;
+    }
     // Send the message with transaction ID
     let txn_id = matrix_sdk::ruma::TransactionId::new();
     room.send(content.clone()).with_transaction_id(txn_id).await?;

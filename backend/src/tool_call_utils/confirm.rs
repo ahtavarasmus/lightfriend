@@ -168,8 +168,8 @@ pub async fn handle_confirmation(
     } else if event_type == &"whatsapp".to_string() {
         // Get the WhatsApp message details from temp variables
         let whatsapp_details = match state.user_core.get_whatsapp_temp_variable(user.id) {
-            Ok(Some((recipient, message_content))) => {
-                (recipient.unwrap_or_default(), message_content.unwrap_or_default())
+            Ok(Some((recipient, message_content, image_url))) => {
+                (recipient.unwrap_or_default(), message_content.unwrap_or_default(), image_url.unwrap_or("".to_string()))
             },
             _ => {
                 response = Some((
@@ -190,7 +190,12 @@ pub async fn handle_confirmation(
             }
         };
 
-        let (recipient, message_content) = whatsapp_details;
+        let (recipient, message_content, image_url) = whatsapp_details;
+        let image_url_option = if !image_url.is_empty() {
+            Some(image_url)
+        } else {
+            None
+        };
 
         match user_response.as_str() {
             "yes" => {
@@ -200,6 +205,7 @@ pub async fn handle_confirmation(
                     user.id,
                     &recipient,
                     &message_content,
+                    image_url_option,
                 ).await {
                     Ok(_) => {
                         // Send confirmation via Twilio

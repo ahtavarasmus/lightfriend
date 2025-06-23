@@ -386,7 +386,7 @@ impl UserCore {
     }
 
     pub fn set_temp_variable(&self, user_id: i32, event_type: Option<&str>, recipient: Option<&str>, subject: Option<&str>, 
-        content: Option<&str>, start_time: Option<&str>, duration: Option<&str>, event_id: Option<&str>) -> Result<(), DieselError> {
+        content: Option<&str>, start_time: Option<&str>, duration: Option<&str>, event_id: Option<&str>, image_url: Option<&str>) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         // Start a transaction
@@ -410,6 +410,7 @@ impl UserCore {
                 confirm_send_event_start_time: start_time.map(|s| s.to_string()),
                 confirm_send_event_duration: duration.map(|s| s.to_string()),
                 confirm_send_event_id: event_id.map(|s| s.to_string()),
+                confirm_send_event_image_url: image_url.map(|s| s.to_string()),
             };
 
             // Insert the new temp variable
@@ -422,7 +423,7 @@ impl UserCore {
     }
 
 
-    pub fn get_whatsapp_temp_variable(&self, user_id: i32) -> Result<Option<(Option<String>, Option<String>)>, DieselError> {
+    pub fn get_whatsapp_temp_variable(&self, user_id: i32) -> Result<Option<(Option<String>, Option<String>, Option<String>)>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         let temp_var = temp_variables::table
@@ -432,7 +433,7 @@ impl UserCore {
             .optional()?;
             
         match temp_var {
-            Some(var) => Ok(Some((var.confirm_send_event_recipient, var.confirm_send_event_content))),
+            Some(var) => Ok(Some((var.confirm_send_event_recipient, var.confirm_send_event_content, var.confirm_send_event_image_url))),
             None => Ok(None)
         }
     }

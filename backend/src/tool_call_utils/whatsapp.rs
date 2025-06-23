@@ -172,6 +172,7 @@ pub async fn handle_send_whatsapp_message(
     twilio_number: &String,
     args: &str,
     user: &crate::models::user_models::User,
+    image_url: Option<&str>
 ) -> Result<(axum::http::StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<crate::api::twilio_sms::TwilioResponse>), Box<dyn std::error::Error>> {
     let args: WhatsAppSendArgs = serde_json::from_str(args)?;
 
@@ -209,6 +210,7 @@ pub async fn handle_send_whatsapp_message(
             let best_match = &rooms[0];
             let exact_name = best_match.display_name.trim_end_matches(" (WA)").to_string();
 
+
             // Set the temporary variable for WhatsApp message
             if let Err(e) = state.user_core.set_temp_variable(
                 user_id,
@@ -218,7 +220,8 @@ pub async fn handle_send_whatsapp_message(
                 Some(&args.message),
                 None,
                 None,
-                None
+                None,
+                image_url,
             ) {
                 tracing::error!("Failed to set temporary variable: {}", e);
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
@@ -242,11 +245,19 @@ pub async fn handle_send_whatsapp_message(
 
             tracing::info!("Successfully set temporary variable for WhatsApp message");
 
-            // Format the confirmation message with the found contact name
-            let confirmation_msg = format!(
-                "Send WhatsApp to '{}' with content: '{}' (yes-> send, no -> discard) (free reply)",
-                exact_name, args.message
-            );
+
+            // Format the confirmation message with the found contact name and image if present
+            let confirmation_msg = if image_url.is_some() {
+                format!(
+                    "Send WhatsApp to '{}' with the above image and a caption '{}' (yes-> send, no -> discard) (free reply)",
+                    exact_name, args.message
+                )
+            } else {
+                format!(
+                    "Send WhatsApp to '{}' with content: '{}' (yes-> send, no -> discard) (free reply)",
+                    exact_name, args.message
+                )
+            };
 
             // Send the confirmation message
             match crate::api::twilio_utils::send_conversation_message(

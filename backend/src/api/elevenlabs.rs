@@ -1338,7 +1338,8 @@ pub async fn handle_whatsapp_confirm_send(
                 Some(&payload.message),
                 None,
                 None,
-                None
+                None,
+                None,
             ) {
                 tracing::error!("Failed to set temporary variable: {}", e);
                 return Err((
@@ -1503,7 +1504,8 @@ pub async fn handle_calendar_event_confirm(
         Some(&payload.description.unwrap_or_default()),
         Some(&payload.start_time),
         Some(&payload.duration_minutes.to_string()),
-        None
+        None,
+        None,
     ) {
         error!("Failed to set temporary variable: {}", e);
         return Err((
@@ -1874,7 +1876,8 @@ pub async fn handle_email_response_tool_call(
                 Some(&payload.response_text),
                 None,
                 None,
-                Some(&payload.email_id)
+                Some(&payload.email_id),
+                None,
             ) {
                 tracing::error!("Failed to set temporary variable: {}", e);
                 return Err((

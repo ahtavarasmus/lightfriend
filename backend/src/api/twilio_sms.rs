@@ -783,6 +783,7 @@ pub async fn process_sms(
                         &conversation.twilio_number,
                         arguments,
                         &user,
+                        image_url.as_deref(),
                     ).await {
                         Ok(response) => return response,
                         Err(e) => {
