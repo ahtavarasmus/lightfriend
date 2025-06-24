@@ -8,6 +8,7 @@ use chrono::Date;
 use wasm_bindgen::JsValue;
 use crate::profile::imap_general_checks::ImapGeneralChecks;
 use crate::proactive::whatsapp_general_checks::WhatsappGeneralChecks;
+use crate::proactive::telegram_general_checks::TelegramGeneralChecks;
 
 use crate::proactive::{
     email::FilterActivityLog,
@@ -145,6 +146,7 @@ pub fn connected_services(props: &Props) -> Html {
     let filter_settings = use_state(|| None::<FilterSettings>);
     let is_calendar_proactive = use_state(|| false);
     let is_whatsapp_proactive = use_state(|| false);
+    let is_telegram_proactive = use_state(|| false);
 
     // Function to fetch keywords for a specific service
     let fetch_keywords = {
@@ -289,6 +291,40 @@ pub fn connected_services(props: &Props) -> Html {
         }, ());
     }
 
+    // Fetch TELEGRAM proactive state on mount
+    {
+        let is_telegram_proactive = is_telegram_proactive.clone();
+        let error = error.clone();
+
+        use_effect_with_deps(move |_| {
+            if let Some(token) = window()
+                .and_then(|w| w.local_storage().ok())
+                .flatten()
+                .and_then(|s| s.get_item("token").ok())
+                .flatten()
+            {
+                spawn_local(async move {
+                    if let Ok(resp) = Request::get(&format!(
+                        "{}/api/profile/telegram-proactive", config::get_backend_url()
+                    ))
+                    .header("Authorization", &format!("Bearer {}", token))
+                    .send()
+                    .await
+                    {
+                        if let Ok(json) = resp.json::<serde_json::Value>().await {
+                            if let Some(val) = json.get("proactive").and_then(|v| v.as_bool()) {
+                                is_telegram_proactive.set(val);
+                            }
+                        }
+                    } else {
+                        error.set(Some("Failed to fetch Telegram state".into()));
+                    }
+                });
+            }
+            || ()
+        }, ());
+    }
+
 
     // Fetch connected services and their keywords on mount
     {
@@ -418,6 +454,7 @@ pub fn connected_services(props: &Props) -> Html {
         let on_service_click = on_service_click.clone();
         let is_calendar_proactive = is_calendar_proactive.clone();
         let is_whatsapp_proactive = is_whatsapp_proactive.clone();
+        let is_telegram_proactive = is_telegram_proactive.clone();
         let is_proactive = is_proactive.clone();
 
         move || {
@@ -461,6 +498,12 @@ pub fn connected_services(props: &Props) -> Html {
                                     } else {
                                         html! { <span class="status-dot" title="Inactive"></span> }
                                     }
+                                } else if service.service_type == "telegram" {
+                                    if *is_telegram_proactive {
+                                        html! { <span class="status-dot active" title="Active"></span> }
+                                    } else {
+                                        html! { <span class="status-dot" title="Inactive"></span> }
+                                    }
                                 } else {
                                     html! { <span class="status-dot" title="Inactive"></span> }
                                 }
@@ -474,6 +517,10 @@ pub fn connected_services(props: &Props) -> Html {
                             } else if service.service_type == "whatsapp" {
                                 html! {
                                     <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 448 512'%3E%3Cpath fill='%234285f4' d='M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 10.2 77.3 29.6 111L0 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 0-59.3-25.2-115-67.1-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z'/%3E%3C/svg%3E" alt="WhatsApp"/>
+                                }
+                            } else if service.service_type == "telegram" {
+                                html! {
+                                    <img src="" alt="Telegram"/>
                                 }
                             } else {
                                 html! {
@@ -648,6 +695,185 @@ pub fn connected_services(props: &Props) -> Html {
                                                 />
 
                                                 <WhatsappGeneralChecks 
+                                                    on_update={Callback::from(|_| {})}
+                                                    keywords={settings.keywords.clone()}
+                                                    priority_senders={settings.priority_senders.iter().map(|s| s.sender.clone()).collect::<Vec<String>>()}
+                                                    waiting_checks={settings.waiting_checks.iter().map(|w| w.content.clone()).collect::<Vec<String>>()}
+                                                    threshold={settings.importance_priority.as_ref().map(|ip| ip.threshold).unwrap_or(7)}
+                                                />
+
+                                                <div class="importance-flow-visualization">
+                                                    <div class="flow-result">
+                                                        <div class="result-box no-match">
+                                                            <div class="result-icon">{"❌"}</div>
+                                                            <div class="result-text">
+                                                                <strong>{"No Match Found"}</strong>
+                                                                <p>{"If none of the above conditions are met, no notification is sent"}</p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                                </div>
+                            }
+                        
+                        } else { // if no filter settings, should not happen and  TODO
+                            html! {}
+                        }
+                    } else if service.service_type == "telegram" {
+                        if let Some(settings) = &service.filter_settings {
+                            html! {
+                                <div class="filters-container">
+                                    <div class="proactive-toggle-section">
+                                        <div class="notify-toggle">
+                                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 448 512'%3E%3Cpath fill='%234285f4' d='M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 10.2 77.3 29.6 111L0 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 0-59.3-25.2-115-67.1-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z'/%3E%3C/svg%3E" alt="Telegram"/>
+                                            <span class="proactive-title">{"TELEGRAM NOTIFICATIONS"}</span>
+                                            <span class="toggle-status">
+                                                {if *is_telegram_proactive { "Active" } else { "Inactive" }}
+                                            </span>
+                                            <label class="switch"
+                                                   onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={*is_telegram_proactive}
+                                                    onchange={Callback::from({
+                                                        let flag = is_telegram_proactive.clone();
+                                                        let error = error.clone();
+                                                        move |e: Event| {
+                                                            let el: HtmlInputElement = e.target_unchecked_into();
+                                                            let val = el.checked();
+                                                            let handle = flag.clone();
+                                                            let error_handle = error.clone();
+                                                            if let Some(tok) = window()
+                                                                .and_then(|w| w.local_storage().ok())
+                                                                .flatten()
+                                                                .and_then(|s| s.get_item("token").ok())
+                                                                .flatten()
+                                                            {
+                                                                spawn_local(async move {
+                                                                    match Request::post(&format!(
+                                                                        "{}/api/profile/telegram-proactive",
+                                                                        config::get_backend_url()
+                                                                    ))
+                                                                    .header("Authorization", &format!("Bearer {}", tok))
+                                                                    .json(&json!({ "proactive": val }))
+                                                                    .expect("Failed to create request")
+                                                                    .send()
+                                                                    .await {
+                                                                        Ok(response) => {
+                                                                            if response.ok() {
+                                                                                handle.set(val);
+                                                                                error_handle.set(None);
+                                                                            } else {
+                                                                                error_handle.set(Some("Failed to update Telegram proactive state".to_string()));
+                                                                            }
+                                                                        }
+                                                                        Err(_) => {
+                                                                            error_handle.set(Some("Network error while updating Telegram proactive state".to_string()));
+                                                                        }
+                                                                    }
+                                                                });
+                                                            }
+                                                        }
+                                                    })}
+                                                />
+                                                <span class="slider round"></span>
+                                            </label>
+                                        </div>
+                                        <p class="notification-description">
+                                            {"Enable notifications for your Telegram messages. When enabled, you will receive SMS notifications for new important Telegram messages. Lightfriend processes them based on your notification preferences below."}
+                                        </p>
+                                    </div>
+                                    {
+                                        if *is_telegram_proactive {
+                                            html! {
+                                                <>
+                                                <KeywordsSection
+                                                    service_type={service.service_type.clone()}
+                                                    keywords={settings.keywords.clone()}
+                                                    on_change={Callback::from({
+                                                        let services_state   = services_state.clone();
+                                                        let service_type     = service.service_type.clone();
+                                                        move |new_list: Vec<String>| {
+                                                            let mut services = (*services_state).clone();
+                                                            if let Some(svc) = services.iter_mut().find(|s| s.service_type == service_type) {
+                                                                if let Some(fs) = &mut svc.filter_settings {
+                                                                    fs.keywords = new_list;
+                                                                }
+                                                            }
+                                                            services_state.set(services);
+                                                        }
+                                                    })}
+                                                />
+                                                <PrioritySendersSection
+                                                    service_type={service.service_type.clone()}
+                                                    senders={settings.priority_senders.clone()}
+                                                    on_change={Callback::from({
+                                                        let services_state = services_state.clone();
+                                                        let stype          = service.service_type.clone();
+                                                        move |list: Vec<PrioritySender>| {
+                                                            let mut svcs = (*services_state).clone();
+                                                            if let Some(svc) = svcs.iter_mut().find(|s| s.service_type == stype) {
+                                                                if let Some(fs) = &mut svc.filter_settings {
+                                                                    fs.priority_senders = list;
+                                                                }
+                                                            }
+                                                            services_state.set(svcs);
+                                                        }
+                                                    })}
+                                                />
+                                                <WaitingChecksSection
+                                                    service_type={service.service_type.clone()}
+                                                    checks={settings.waiting_checks.clone()}
+                                                    on_change={Callback::from({
+                                                        let services_state = services_state.clone();
+                                                        let stype          = service.service_type.clone();
+                                                        move |list: Vec<WaitingCheck>| {
+                                                            let mut svcs = (*services_state).clone();
+                                                            if let Some(svc) = svcs.iter_mut().find(|s| s.service_type == stype) {
+                                                                if let Some(fs) = &mut svc.filter_settings {
+                                                                    fs.waiting_checks = list;
+                                                                }
+                                                            }
+                                                            services_state.set(svcs);
+                                                        }
+                                                    })}
+                                                />
+                                                <ImportancePrioritySection
+                                                    service_type={service.service_type.clone()}
+                                                    current_threshold={
+                                                        settings.importance_priority
+                                                                .as_ref()
+                                                                .map(|ip| ip.threshold)
+                                                                .unwrap_or(7)
+                                                    }
+                                                    on_change={Callback::from({
+                                                        let services_state = services_state.clone();
+                                                        let stype          = service.service_type.clone();
+                                                        move |new_thr: i32| {
+                                                            let mut svcs = (*services_state).clone();
+                                                            if let Some(svc) = svcs.iter_mut().find(|s| s.service_type == stype) {
+                                                                if let Some(fs) = &mut svc.filter_settings {
+                                                                    fs.importance_priority = Some(ImportancePriority { threshold: new_thr });
+                                                                }
+                                                            }
+                                                            services_state.set(svcs);
+                                                        }
+                                                    })}
+                                                    keywords={settings.keywords.clone()}
+
+                                                    priority_senders={settings.priority_senders.iter().map(|s| s.sender.clone()).collect::<Vec<String>>()}
+                                                    waiting_checks={settings.waiting_checks.iter().map(|w| w.content.clone()).collect::<Vec<String>>()}
+                                                    threshold={settings.importance_priority.as_ref().map(|ip| ip.threshold).unwrap_or(7)}
+                                                    is_active={*is_proactive}
+                                                />
+
+                                                <TelegramGeneralChecks 
                                                     on_update={Callback::from(|_| {})}
                                                     keywords={settings.keywords.clone()}
                                                     priority_senders={settings.priority_senders.iter().map(|s| s.sender.clone()).collect::<Vec<String>>()}
@@ -1031,6 +1257,71 @@ pub fn connected_services(props: &Props) -> Html {
                                     </div>
                                 </div>
                             }
+                        } else if service.service_type == "telegram" {
+                            html! {
+                                <div class="filters-container">
+                                    <div class="proactive-toggle-section">
+                                        <div class="notify-toggle">
+                                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 448 512'%3E%3Cpath fill='%234285f4' d='M380.9 97.1C339 55.1 283.2 32 223.9 32c-122.4 0-222 99.6-222 222 0 39.1 10.2 77.3 29.6 111L0 480l117.7-30.9c32.4 17.7 68.9 27 106.1 27h.1c122.3 0 224.1-99.6 224.1-222 0-59.3-25.2-115-67.1-157zm-157 341.6c-33.2 0-65.7-8.9-94-25.7l-6.7-4-69.8 18.3L72 359.2l-4.4-7c-18.5-29.4-28.2-63.3-28.2-98.2 0-101.7 82.8-184.5 184.6-184.5 49.3 0 95.6 19.2 130.4 54.1 34.8 34.9 56.2 81.2 56.1 130.5 0 101.8-84.9 184.6-186.6 184.6zm101.2-138.2c-5.5-2.8-32.8-16.2-37.9-18-5.1-1.9-8.8-2.8-12.5 2.8-3.7 5.6-14.3 18-17.6 21.8-3.2 3.7-6.5 4.2-12 1.4-32.6-16.3-54-29.1-75.5-66-5.7-9.8 5.7-9.1 16.3-30.3 1.8-3.7.9-6.9-.5-9.7-1.4-2.8-12.5-30.1-17.1-41.2-4.5-10.8-9.1-9.3-12.5-9.5-3.2-.2-6.9-.2-10.6-.2-3.7 0-9.7 1.4-14.8 6.9-5.1 5.6-19.4 19-19.4 46.3 0 27.3 19.9 53.7 22.6 57.4 2.8 3.7 39.1 59.7 94.8 83.8 35.2 15.2 49 16.5 66.6 13.9 10.7-1.6 32.8-13.4 37.4-26.4 4.6-13 4.6-24.1 3.2-26.4-1.3-2.5-5-3.9-10.5-6.6z'/%3E%3C/svg%3E" alt="Telegram"/>
+                                            <span class="proactive-title">{"TELEGRAM NOTIFICATIONS"}</span>
+                                            <span class="toggle-status">
+                                                {if *is_telegram_proactive { "Active" } else { "Inactive" }}
+                                            </span>
+                                            <label class="switch"
+                                                   onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                                                <input
+                                                    type="checkbox"
+                                                    checked={*is_telegram_proactive}
+                                                    onchange={Callback::from({
+                                                        let flag = is_telegram_proactive.clone();
+                                                        let error = error.clone();
+                                                        move |e: Event| {
+                                                            let el: HtmlInputElement = e.target_unchecked_into();
+                                                            let val = el.checked();
+                                                            let handle = flag.clone();
+                                                            let error_handle = error.clone();
+                                                            if let Some(tok) = window()
+                                                                .and_then(|w| w.local_storage().ok())
+                                                                .flatten()
+                                                                .and_then(|s| s.get_item("token").ok())
+                                                                .flatten()
+                                                            {
+                                                                spawn_local(async move {
+                                                                    match Request::post(&format!(
+                                                                        "{}/api/profile/telegram-proactive",
+                                                                        config::get_backend_url()
+                                                                    ))
+                                                                    .header("Authorization", &format!("Bearer {}", tok))
+                                                                    .json(&json!({ "proactive": val }))
+                                                                    .expect("Failed to create request")
+                                                                    .send()
+                                                                    .await {
+                                                                        Ok(response) => {
+                                                                            if response.ok() {
+                                                                                handle.set(val);
+                                                                                error_handle.set(None);
+                                                                            } else {
+                                                                                error_handle.set(Some("Failed to update Telegram proactive state".to_string()));
+                                                                            }
+                                                                        }
+                                                                        Err(_) => {
+                                                                            error_handle.set(Some("Network error while updating Telegram proactive state".to_string()));
+                                                                        }
+                                                                    }
+                                                                });
+                                                            }
+                                                        }
+                                                    })}
+                                                />
+                                                <span class="slider round"></span>
+                                            </label>
+                                        </div>
+                                        <p class="notification-description">
+                                            {"Enable notifications for your Telegram messages. When enabled, you will receive SMS notifications for new Telegram messages. Lightfriend checks for new messages every minute and processes them based on your notification preferences. No message content is stored on lightfriend's servers."}
+                                        </p>
+                                    </div>
+                                </div>
+                            }
                         } else {
                             html! {}
                         }
@@ -1202,6 +1493,12 @@ pub fn connected_services(props: &Props) -> Html {
                     width: 100%;
                 }
                 .whatsapp-search-container input[type="text"] {
+                    flex: 2;
+                    width: 100%;
+                }
+
+                .telegram-search-container input[type="text"] {
+
                     flex: 2;
                     width: 100%;
                 }
