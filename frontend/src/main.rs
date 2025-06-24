@@ -31,9 +31,9 @@ mod pages {
 mod proactive {
     pub mod email;
     pub mod calendar;
-    pub mod whatsapp;
     pub mod common;
     pub mod whatsapp_general_checks;
+    pub mod telegram_general_checks;
 }
 
 mod connections {

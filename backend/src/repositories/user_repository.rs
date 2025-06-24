@@ -156,6 +156,12 @@ impl UserRepository {
             email_priority_senders_active: true,
             email_waiting_checks_active: true,
             email_general_importance_active: true,
+            proactive_telegram: false,
+            telegram_general_checks: None,
+            telegram_keywords_active: true,
+            telegram_priority_senders_active: true,
+            telegram_waiting_checks_active: true,
+            telegram_general_importance_active: true,
         };
 
         diesel::insert_into(proactive_settings::table)
@@ -783,6 +789,18 @@ impl UserRepository {
         Ok(settings.map_or(false, |s| s.proactive_whatsapp))
     }
 
+    pub fn get_proactive_telegram(&self, user_id: i32) -> Result<bool, DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
+
+        Ok(settings.map_or(false, |s| s.proactive_telegram))
+    }
+
     pub fn update_proactive_whatsapp(&self, user_id: i32, proactive: bool) -> Result<(), DieselError> {
         use crate::schema::proactive_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -819,6 +837,42 @@ impl UserRepository {
         Ok(())
     }
 
+    pub fn update_proactive_telegram(&self, user_id: i32, proactive: bool) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        // Check if settings exist for this user
+        let existing_settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
+
+        match existing_settings {
+            Some(_) => {
+                // Update existing settings
+                diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+                    .set((
+                        proactive_settings::proactive_telegram.eq(proactive),
+                        proactive_settings::updated_at.eq(current_time),
+                    ))
+                    .execute(&mut conn)?;
+            },
+            None => {
+                self.create_default_proactive_settings(user_id)?;
+                // Update the newly created settings with the proactive value
+                diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+                    .set(proactive_settings::proactive_telegram.eq(proactive))
+                    .execute(&mut conn)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn get_whatsapp_general_checks(&self, user_id: i32) -> Result<String, DieselError> {
         use crate::schema::proactive_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -830,6 +884,53 @@ impl UserRepository {
             
         Ok(settings.and_then(|s| s.whatsapp_general_checks).unwrap_or_else(|| {
             // Default general checks prompt for WhatsApp messages
+            String::from("
+                Step 1: Check for Urgency Indicators
+                - Look for words like 'urgent', 'immediate', 'asap', 'deadline', 'important', 'emergency'
+                - Check for time-sensitive phrases like 'by tomorrow', 'end of day', 'as soon as possible', 'right now'
+                - Look for multiple exclamation marks or all-caps words that might indicate urgency
+                - Check for repeated messages or follow-ups indicating urgency
+
+                Step 2: Analyze Sender Importance
+                - Check if it's from family members, close friends, or emergency contacts
+                - Look for messages from work colleagues, managers, or supervisors
+                - Consider if it's from clients or important business partners
+                - Assess if it's from service providers (doctors, lawyers, etc.)
+
+                Step 3: Assess Content Significance
+                - Look for action items or direct requests that need immediate response
+                - Check for mentions of meetings, appointments, or time-sensitive events
+                - Identify emergency situations or health-related concerns
+                - Look for financial matters, payments, or important transactions
+                - Check for travel-related information or changes
+
+                Step 4: Consider Context and Timing
+                - Consider if it's outside normal hours (late night/early morning might indicate urgency)
+                - Check if it's a reply to something you sent recently
+                - Look for group messages where you're specifically mentioned
+                - Consider if it's breaking a long silence in conversation
+
+                Step 5: Evaluate Personal Impact
+                - Assess if immediate action or response is required
+                - Consider if delaying response could have negative consequences
+                - Look for personal emergencies or family matters
+                - Check for work-critical communications
+                - Identify if it contains sensitive or confidential information
+            ")
+        }))
+    }
+
+    pub fn get_telegram_general_checks(&self, user_id: i32) -> Result<String, DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
+            
+        Ok(settings.and_then(|s| s.telegram_general_checks).unwrap_or_else(|| {
+            // Default general checks prompt for Telegram messages
             String::from("
                 Step 1: Check for Urgency Indicators
                 - Look for words like 'urgent', 'immediate', 'asap', 'deadline', 'important', 'emergency'
@@ -905,6 +1006,46 @@ impl UserRepository {
         Ok(())
     }
 
+
+    // Update user's custom Telegram general checks
+    pub fn update_telegram_general_checks(&self, user_id: i32, checks: Option<&str>) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        // Check if settings exist for this user
+        let existing_settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
+
+        match existing_settings {
+            Some(_) => {
+                // Update existing settings
+                diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+                    .set((
+                        proactive_settings::telegram_general_checks.eq(checks.map(|s| s.to_string())),
+                        proactive_settings::updated_at.eq(current_time),
+                    ))
+                    .execute(&mut conn)?;
+            },
+            None => {
+                self.create_default_proactive_settings(user_id)?;
+                // Update the newly created settings with the checks value
+                if let Some(checks_str) = checks {
+                    diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+                        .set(proactive_settings::telegram_general_checks.eq(checks_str.to_string()))
+                        .execute(&mut conn)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     // WhatsApp filter activation methods
     pub fn update_whatsapp_keywords_active(&self, user_id: i32, active: bool) -> Result<(), DieselError> {
         println!("at update_whatsapp_keywords_active!");
@@ -921,6 +1062,28 @@ impl UserRepository {
         diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
             .set((
                 proactive_settings::whatsapp_keywords_active.eq(active),
+                proactive_settings::updated_at.eq(current_time),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    // Telegram filter activation methods
+    pub fn update_telegram_keywords_active(&self, user_id: i32, active: bool) -> Result<(), DieselError> {
+        println!("at update_telegram_keywords_active!");
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        self.ensure_proactive_settings_exist(user_id)?;
+
+        diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+            .set((
+                proactive_settings::telegram_keywords_active.eq(active),
                 proactive_settings::updated_at.eq(current_time),
             ))
             .execute(&mut conn)?;
@@ -947,6 +1110,27 @@ impl UserRepository {
         Ok(())
     }
 
+    pub fn update_telegram_priority_senders_active(&self, user_id: i32, active: bool) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        self.ensure_proactive_settings_exist(user_id)?;
+
+        diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+            .set((
+                proactive_settings::telegram_priority_senders_active.eq(active),
+                proactive_settings::updated_at.eq(current_time),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+
     pub fn update_whatsapp_waiting_checks_active(&self, user_id: i32, active: bool) -> Result<(), DieselError> {
         use crate::schema::proactive_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -967,6 +1151,26 @@ impl UserRepository {
         Ok(())
     }
 
+    pub fn update_telegram_waiting_checks_active(&self, user_id: i32, active: bool) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        self.ensure_proactive_settings_exist(user_id)?;
+
+        diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+            .set((
+                proactive_settings::telegram_waiting_checks_active.eq(active),
+                proactive_settings::updated_at.eq(current_time),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
     pub fn update_whatsapp_general_importance_active(&self, user_id: i32, active: bool) -> Result<(), DieselError> {
         use crate::schema::proactive_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -981,6 +1185,26 @@ impl UserRepository {
         diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
             .set((
                 proactive_settings::whatsapp_general_importance_active.eq(active),
+                proactive_settings::updated_at.eq(current_time),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_telegram_general_importance_active(&self, user_id: i32, active: bool) -> Result<(), DieselError> {
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+
+        self.ensure_proactive_settings_exist(user_id)?;
+
+        diesel::update(proactive_settings::table.filter(proactive_settings::user_id.eq(user_id)))
+            .set((
+                proactive_settings::telegram_general_importance_active.eq(active),
                 proactive_settings::updated_at.eq(current_time),
             ))
             .execute(&mut conn)?;
@@ -1107,6 +1331,12 @@ impl UserRepository {
                 email_priority_senders_active: true,
                 email_waiting_checks_active: true,
                 email_general_importance_active: true,
+                proactive_telegram: false,
+                telegram_general_checks: None,
+                telegram_keywords_active: true,
+                telegram_priority_senders_active: true,
+                telegram_waiting_checks_active: true,
+                telegram_general_importance_active: true,
             };
             diesel::insert_into(proactive_settings::table)
                 .values(&new_settings)
@@ -1133,6 +1363,28 @@ impl UserRepository {
                 s.whatsapp_priority_senders_active,
                 s.whatsapp_waiting_checks_active,
                 s.whatsapp_general_importance_active,
+            )
+        ))
+    }
+
+    // Getter methods for filter activation status
+    pub fn get_telegram_filter_settings(&self, user_id: i32) -> Result<(bool, bool, bool, bool), DieselError> {
+        println!("at get_telegram_filter_settings!");
+        use crate::schema::proactive_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let settings = proactive_settings::table
+            .filter(proactive_settings::user_id.eq(user_id))
+            .first::<ProactiveSettings>(&mut conn)
+            .optional()?;
+
+        Ok(settings.map_or(
+            (true, true, true, true), // Default all active
+            |s| (
+                s.telegram_keywords_active,
+                s.telegram_priority_senders_active,
+                s.telegram_waiting_checks_active,
+                s.telegram_general_importance_active,
             )
         ))
     }
@@ -1595,19 +1847,6 @@ impl UserRepository {
         Ok(())
     }
 
-
-    pub fn get_telegram_bridge(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
-        use crate::schema::bridges;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let bridge = bridges::table
-            .filter(bridges::user_id.eq(user_id))
-            .filter(bridges::bridge_type.eq("telegram"))
-            .first::<Bridge>(&mut conn)
-            .optional()?;
-
-        Ok(bridge)
-    }
     pub fn get_whatsapp_bridge(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
         use crate::schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1621,6 +1860,19 @@ impl UserRepository {
         Ok(bridge)
     }
 
+    pub fn get_telegram_bridge(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
+        use crate::schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let bridge = bridges::table
+            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::bridge_type.eq("telegram"))
+            .first::<Bridge>(&mut conn)
+            .optional()?;
+
+        Ok(bridge)
+    }
+
     pub fn get_active_whatsapp_connection(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
         use crate::schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1628,6 +1880,20 @@ impl UserRepository {
         let bridge = bridges::table
             .filter(bridges::user_id.eq(user_id))
             .filter(bridges::bridge_type.eq("whatsapp"))
+            .filter(bridges::status.eq("connected"))
+            .first::<Bridge>(&mut conn)
+            .optional()?;
+
+        Ok(bridge)
+    }
+
+    pub fn get_active_telegram_connection(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
+        use crate::schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let bridge = bridges::table
+            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::bridge_type.eq("telegram"))
             .filter(bridges::status.eq("connected"))
             .first::<Bridge>(&mut conn)
             .optional()?;

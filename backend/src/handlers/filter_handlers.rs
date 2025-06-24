@@ -458,6 +458,7 @@ pub async fn toggle_keywords(
     let result = match service_type.as_str() {
         "whatsapp" => state.user_repository.update_whatsapp_keywords_active(auth_user.user_id, request.active),
         "imap" => state.user_repository.update_email_keywords_active(auth_user.user_id, request.active),
+        "telegram" => state.user_repository.update_telegram_keywords_active(auth_user.user_id, request.active),
         _ => return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "Invalid service type"}))
@@ -465,6 +466,9 @@ pub async fn toggle_keywords(
     };
 
     let keywords = state.user_repository.get_whatsapp_filter_settings(auth_user.user_id).unwrap();
+    println!("whatsapp keywords state after toggling: {}", keywords.0);
+
+    let telegram_keywords = state.user_repository.get_telegram_filter_settings(auth_user.user_id).unwrap();
     println!("whatsapp keywords state after toggling: {}", keywords.0);
 
     let email_keywords = state.user_repository.get_email_filter_settings(auth_user.user_id).unwrap();
@@ -631,6 +635,36 @@ pub async fn get_whatsapp_filter_settings(
         },
         Err(e) => {
             tracing::error!("Failed to fetch WhatsApp filter settings for user {}: {}", auth_user.user_id, e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)}))
+            ))
+        },
+    }
+}
+
+// Get filter settings handlers
+pub async fn get_telegram_filter_settings(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Fetching Telegram filter settings for user {}", auth_user.user_id);
+
+    match state.user_repository.get_telegram_filter_settings(auth_user.user_id) {
+        Ok((telegram_keywords_active, telegram_priority_senders_active, telegram_waiting_checks_active, telegram_general_importance_active)) => {
+            println!("telegram_keywords_active in get_telegram_filter_settings: {}", telegram_keywords_active);
+            println!("telegram_priority_senders_active in get_telegram_filter_settings: {}", telegram_priority_senders_active);
+            println!("telegram_waiting_checks_active in get_telegram_filter_settings: {}", telegram_waiting_checks_active);
+            println!("telegram_general_importance_active in get_telegram_filter_settings: {}", telegram_general_importance_active);
+            Ok(Json(json!({
+                "keywords_active": telegram_keywords_active,
+                "priority_senders_active": telegram_priority_senders_active,
+                "waiting_checks_active": telegram_waiting_checks_active,
+                "general_importance_active": telegram_general_importance_active
+            })))
+        },
+        Err(e) => {
+            tracing::error!("Failed to fetch Telegram filter settings for user {}: {}", auth_user.user_id, e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)}))

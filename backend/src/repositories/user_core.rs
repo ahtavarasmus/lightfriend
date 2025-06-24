@@ -438,6 +438,21 @@ impl UserCore {
         }
     }
 
+    pub fn get_telegram_temp_variable(&self, user_id: i32) -> Result<Option<(Option<String>, Option<String>, Option<String>)>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let temp_var = temp_variables::table
+            .filter(temp_variables::user_id.eq(user_id))
+            .filter(temp_variables::confirm_send_event_type.eq("telegram"))
+            .first::<TempVariable>(&mut conn)
+            .optional()?;
+            
+        match temp_var {
+            Some(var) => Ok(Some((var.confirm_send_event_recipient, var.confirm_send_event_content, var.confirm_send_event_image_url))),
+            None => Ok(None)
+        }
+    }
+
     pub fn get_calendar_temp_variable(&self, user_id: i32) -> Result<Option<(Option<String>, Option<String>, Option<String>, Option<String>)>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         

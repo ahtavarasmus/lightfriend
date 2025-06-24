@@ -192,6 +192,12 @@ diesel::table! {
         email_priority_senders_active -> Bool,
         email_waiting_checks_active -> Bool,
         email_general_importance_active -> Bool,
+        proactive_telegram -> Bool,
+        telegram_general_checks -> Nullable<Text>,
+        telegram_keywords_active -> Bool,
+        telegram_priority_senders_active -> Bool,
+        telegram_waiting_checks_active -> Bool,
+        telegram_general_importance_active -> Bool,
     }
 }
 

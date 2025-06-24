@@ -526,6 +526,27 @@ pub async fn get_whatsapp_proactive(
     }
 }
 
+#[derive(Serialize)]
+pub struct TelegramProactiveResponse {
+    proactive: bool,
+}
+
+pub async fn get_telegram_proactive(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<TelegramProactiveResponse>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_repository.get_proactive_telegram(auth_user.user_id) {
+        Ok(proactive) => Ok(Json(TelegramProactiveResponse { proactive })),
+        Err(e) => {
+            tracing::error!("Failed to get Telegram proactive setting: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to get Telegram proactive setting: {}", e)}))
+            ))
+        }
+    }
+}
+
 #[derive(Deserialize)]
 pub struct WhatsappProactiveRequest {
     proactive: bool,
@@ -545,6 +566,31 @@ pub async fn update_whatsapp_proactive(
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Failed to update WhatsApp proactive setting: {}", e)}))
+            ))
+        }
+    }
+}
+
+
+#[derive(Deserialize)]
+pub struct TelegramProactiveRequest {
+    proactive: bool,
+}
+
+pub async fn update_telegram_proactive(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<TelegramProactiveRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_repository.update_proactive_telegram(auth_user.user_id, request.proactive) {
+        Ok(_) => Ok(Json(json!({
+            "message": "Telegram proactive setting updated successfully"
+        }))),
+        Err(e) => {
+            tracing::error!("Failed to update Telegram proactive setting: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to update Telegram proactive setting: {}", e)}))
             ))
         }
     }
@@ -609,6 +655,16 @@ pub struct WhatsappGeneralChecksResponse {
     checks: String,
 }
 
+#[derive(Deserialize)]
+pub struct TelegramGeneralChecksRequest {
+    checks: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct TelegramGeneralChecksResponse {
+    checks: String,
+}
+
 pub async fn get_whatsapp_general_checks(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -621,6 +677,21 @@ pub async fn get_whatsapp_general_checks(
         )),
     }
 }
+
+
+pub async fn get_telegram_general_checks(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<TelegramGeneralChecksResponse>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_repository.get_telegram_general_checks(auth_user.user_id) {
+        Ok(checks) => Ok(Json(TelegramGeneralChecksResponse { checks })),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to get Telegram general checks: {}", e)}))
+        )),
+    }
+}
+
 
 pub async fn update_whatsapp_general_checks(
     State(state): State<Arc<AppState>>,
@@ -638,6 +709,26 @@ pub async fn update_whatsapp_general_checks(
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to update WhatsApp general checks: {}", e)}))
+        )),
+    }
+}
+
+pub async fn update_telegram_general_checks(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<TelegramGeneralChecksRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Convert Option<String> to Option<&str>
+    let checks_ref: Option<&str> = request.checks.as_deref();
+
+    // Update the WhatsApp general checks
+    match state.user_repository.update_telegram_general_checks(auth_user.user_id, checks_ref) {
+        Ok(_) => Ok(Json(json!({
+            "message": "Telegram general checks updated successfully"
+        }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to update Telegram general checks: {}", e)}))
         )),
     }
 }

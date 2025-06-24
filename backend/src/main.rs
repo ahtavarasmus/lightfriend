@@ -51,6 +51,7 @@ mod handlers {
     pub mod google_tasks;
     pub mod google_tasks_auth;
     pub mod telegram_auth;
+    pub mod telegram_handlers;
     pub mod idea_widget;
 }
 
@@ -60,6 +61,7 @@ mod utils {
     pub mod usage;
     pub mod matrix_auth;
     pub mod whatsapp_utils;
+    pub mod telegram_utils;
     pub mod elevenlabs_prompts;
     pub mod imap_utils;
     pub mod qr_utils;
@@ -67,6 +69,7 @@ mod utils {
 
 mod tool_call_utils {
     pub mod whatsapp;
+    pub mod telegram;
     pub mod email;
     pub mod calendar;
     pub mod tasks;
@@ -124,7 +127,7 @@ use handlers::google_tasks;
 //use handlers::gmail;
 use handlers::imap_auth;
 use handlers::imap_handlers;
-use handlers::{whatsapp_auth, whatsapp_handlers, telegram_auth};
+use handlers::{whatsapp_auth, whatsapp_handlers, telegram_auth, telegram_handlers};
 use handlers::filter_handlers;
 use api::twilio_sms;
 use api::elevenlabs;
@@ -301,6 +304,10 @@ async fn main() {
         .route("/api/call/whatsapp/specific-room", get(elevenlabs::handle_whatsapp_fetch_specific_room_tool_call))
         .route("/api/call/whatsapp/search", post(elevenlabs::handle_whatsapp_search_tool_call))
         .route("/api/call/whatsapp/confirm", post(elevenlabs::handle_whatsapp_confirm_send))
+        .route("/api/call/telegram", get(elevenlabs::handle_telegram_fetch_tool_call))
+        .route("/api/call/telegram/specific-room", get(elevenlabs::handle_telegram_fetch_specific_room_tool_call))
+        .route("/api/call/telegram/search", post(elevenlabs::handle_telegram_search_tool_call))
+        .route("/api/call/telegram/confirm", post(elevenlabs::handle_telegram_confirm_send))
         .layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::check_subscription_access))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 
@@ -397,6 +404,10 @@ async fn main() {
         .route("/api/auth/telegram/status", get(telegram_auth::get_telegram_status))
         .route("/api/auth/telegram/connect", get(telegram_auth::start_telegram_connection))
         .route("/api/auth/telegram/disconnect", delete(telegram_auth::disconnect_telegram))
+        .route("/api/telegram/test-messages", get(telegram_handlers::test_fetch_messages))
+        .route("/api/telegram/send", post(telegram_handlers::send_message))
+        .route("/api/telegram/search-rooms", post(telegram_handlers::search_telegram_rooms_handler))
+        .route("/api/telegram/search-rooms", get(telegram_handlers::search_rooms_handler))
 
         .route("/api/auth/whatsapp/status", get(whatsapp_auth::get_whatsapp_status))
         .route("/api/auth/whatsapp/connect", get(whatsapp_auth::start_whatsapp_connection))
@@ -436,12 +447,15 @@ async fn main() {
 
         // Filter settings getter routes
         .route("/api/filters/whatsapp/settings", get(filter_handlers::get_whatsapp_filter_settings))
+        .route("/api/filters/telegram/settings", get(filter_handlers::get_telegram_filter_settings))
         .route("/api/filters/imap/settings", get(filter_handlers::get_email_filter_settings))
 
         .route("/api/profile/imap-general-checks", post(profile_handlers::update_imap_general_checks))
         .route("/api/profile/imap-general-checks", get(profile_handlers::get_imap_general_checks))
         .route("/api/profile/whatsapp-general-checks", post(profile_handlers::update_whatsapp_general_checks))
         .route("/api/profile/whatsapp-general-checks", get(profile_handlers::get_whatsapp_general_checks))
+        .route("/api/profile/telegram-general-checks", post(profile_handlers::update_telegram_general_checks))
+        .route("/api/profile/telegram-general-checks", get(profile_handlers::get_telegram_general_checks))
         .route("/api/profile/imap-proactive", post(profile_handlers::update_imap_proactive))
         .route("/api/profile/imap-proactive", get(profile_handlers::get_imap_proactive))
         .route("/api/profile/email-judgments", get(profile_handlers::get_email_judgments))
@@ -450,6 +464,8 @@ async fn main() {
         .route("/api/profile/calendar-proactive", post(profile_handlers::update_calendar_proactive))
         .route("/api/profile/whatsapp-proactive", get(profile_handlers::get_whatsapp_proactive))
         .route("/api/profile/whatsapp-proactive", post(profile_handlers::update_whatsapp_proactive))
+        .route("/api/profile/telegram-proactive", get(profile_handlers::get_telegram_proactive))
+        .route("/api/profile/telegram-proactive", post(profile_handlers::update_telegram_proactive))
         .route("/api/profile/migrate-to-daily/{user_id}", post(profile_handlers::migrate_to_daily))
 
         /*

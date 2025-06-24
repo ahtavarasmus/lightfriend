@@ -115,6 +115,12 @@ pub struct ProactiveSettings {
     pub email_priority_senders_active: bool,
     pub email_waiting_checks_active: bool,
     pub email_general_importance_active: bool,
+    pub proactive_telegram: bool,
+    pub telegram_general_checks: Option<String>,
+    pub telegram_keywords_active: bool,
+    pub telegram_priority_senders_active: bool,
+    pub telegram_waiting_checks_active: bool,
+    pub telegram_general_importance_active: bool,
 }
 
 

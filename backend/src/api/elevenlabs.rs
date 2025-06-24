@@ -972,7 +972,18 @@ pub struct WhatsAppSearchPayload {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct TelegramSearchPayload {
+    search_term: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct WhatsAppConfirmPayload {
+    chat_name: String,
+    message: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TelegramConfirmPayload {
     chat_name: String,
     message: String,
 }
@@ -1423,6 +1434,152 @@ pub async fn handle_whatsapp_confirm_send(
     }
 }
 
+pub async fn handle_telegram_confirm_send(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    Json(payload): Json<TelegramConfirmPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+
+    // Extract user_id from query parameters
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing or invalid user_id"
+                }))
+            ));
+        }
+    };
+
+    // Get user from database
+    let user = match state.user_core.find_by_id(user_id) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": "User not found"
+                }))
+            ));
+        }
+        Err(e) => {
+            error!("Error fetching user: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to fetch user"
+                }))
+            ));
+        }
+    };
+
+    // First, try to find the exact room using fetch_telegram_room_messages
+    match crate::utils::telegram_utils::fetch_telegram_room_messages(
+        &state,
+        user_id,
+        &payload.chat_name,
+        Some(1), // Limit to 1 message since we only need the room name
+    ).await {
+        Ok((_, room_name)) => {
+            // Get the actual room name without the (WA) suffix
+            let clean_room_name = room_name.trim_end_matches(" (WA)").to_string();
+            
+            // Set the temporary variable for Telegram message
+            if let Err(e) = state.user_core.set_temp_variable(
+                user_id,
+                Some("telegram"),
+                Some(&clean_room_name),
+                None,
+                Some(&payload.message),
+                None,
+                None,
+                None,
+                None,
+            ) {
+                tracing::error!("Failed to set temporary variable: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": "Failed to prepare Telegram message",
+                        "details": e.to_string()
+                    }))
+                ));
+            }
+
+            // Create confirmation message
+            let confirmation_message = format!(
+                "Send Telegram to '{}' with content: '{}' (yes-> send, no -> discard) (free reply)",
+                clean_room_name,
+                payload.message
+            );
+
+            // Get conversation for the user
+            let conversation = match state.user_conversations.get_conversation(
+                &user, 
+                user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
+            ).await {
+                Ok(conv) => conv,
+                Err(e) => {
+                    error!("Failed to get conversation: {}", e);
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "Failed to get or create conversation"
+                        }))
+                    ));
+                }
+            };
+
+            // Send the confirmation SMS
+            match crate::api::twilio_utils::send_conversation_message(
+                &conversation.conversation_sid,
+                &conversation.twilio_number,
+                &confirmation_message,
+                false, // Don't redact since we need to extract info from this message later
+                None,
+                &user,
+            ).await {
+                Ok(message_sid) => {
+                    // Deduct credits for the confirmation message
+                    if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
+                        error!("Failed to deduct user credits: {}", e);
+                        // Continue execution even if credit deduction fails
+                    }
+                    
+                    Ok(Json(json!({
+                        "status": "success",
+                        "message": "Telegram confirmation message sent",
+                        "room_name": clean_room_name,
+                        "message_sid": message_sid
+                    })))
+                }
+                Err(e) => {
+                    error!("Failed to send confirmation SMS: {}", e);
+                    Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "Failed to send confirmation message",
+                            "details": e.to_string()
+                        }))
+                    ))
+                }
+            }
+        },
+        Err(e) => {
+            error!("Failed to find Telegram room: {}", e);
+            Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": "Failed to find Telegram room",
+                    "details": e.to_string()
+                }))
+            ))
+        }
+    }
+}
+
 pub async fn handle_calendar_event_confirm(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
@@ -1624,6 +1781,77 @@ pub async fn handle_whatsapp_search_tool_call(
     }
 }
 
+pub async fn handle_telegram_search_tool_call(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    Json(payload): Json<TelegramSearchPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+
+    // Extract user_id from query parameters
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing or invalid user_id"
+                }))
+            ));
+        }
+    };
+
+    // Search for rooms using the existing utility function
+    match crate::utils::telegram_utils::search_telegram_rooms(&state, user_id, &payload.search_term).await {
+        Ok(rooms) => {
+            if rooms.is_empty() {
+                return Ok(Json(json!({
+                    "response": format!("No Telegram contacts found matching '{}'.", payload.search_term),
+                    "rooms": []
+                })));
+            }
+
+            // Format rooms for voice response
+            let mut response_text = format!(
+                "Found {} matching Telegram contacts. ",
+                rooms.len()
+            );
+
+            // Add up to 5 most relevant rooms to the voice response
+            for (i, room) in rooms.iter().take(5).enumerate() {
+                response_text.push_str(&format!(
+                    "Contact {} is {}, last active {}. ",
+                    i + 1,
+                    room.display_name.trim_end_matches(" (WA)"),
+                    room.last_activity_formatted
+                ));
+            }
+
+            if rooms.len() > 5 {
+                response_text.push_str(&format!(
+                    "And {} more contacts found. ",
+                    rooms.len() - 5
+                ));
+            }
+
+            Ok(Json(json!({
+                "response": response_text,
+                "rooms": rooms,
+                "total_count": rooms.len()
+            })))
+        },
+        Err(e) => {
+            error!("Failed to search Telegram rooms: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to search Telegram contacts",
+                    "details": e.to_string()
+                }))
+            ))
+        }
+    }
+}
+
 pub async fn handle_whatsapp_fetch_specific_room_tool_call(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
@@ -1695,6 +1923,84 @@ pub async fn handle_whatsapp_fetch_specific_room_tool_call(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
                     "error": "Failed to fetch WhatsApp messages",
+                    "details": e.to_string()
+                }))
+            ))
+        }
+    }
+}
+
+pub async fn handle_telegram_fetch_specific_room_tool_call(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    tracing::debug!("Starting Telegram specific room message fetch");
+
+    // Extract user_id and chat_room from query parameters
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing or invalid user_id"
+                }))
+            ));
+        }
+    };
+
+    let chat_room = match params.get("chat_room") {
+        Some(room) => room,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing chat_room parameter"
+                }))
+            ));
+        }
+    };
+
+    // Fetch messages using the existing utility function
+    match crate::utils::telegram_utils::fetch_telegram_room_messages(&state, user_id, chat_room, Some(20)).await {
+        Ok((messages, room_name)) => {
+            if messages.is_empty() {
+                return Ok(Json(json!({
+                    "response": format!("No Telegram messages found in chat room '{}'.", chat_room),
+                    "messages": []
+                })));
+            }
+
+            // Format messages for voice response
+            let mut response_text = format!(
+                "Here are the recent messages from {}: ",
+                room_name.trim_end_matches(" (WA)")
+            );
+
+            // Add messages to the voice response
+            for (i, msg) in messages.iter().take(20).enumerate() {
+                response_text.push_str(&format!(
+                    "Message {} from {}, sent on {}: {}. ",
+                    i + 1,
+                    msg.sender_display_name,
+                    msg.formatted_timestamp,
+                    msg.content
+                ));
+            }
+
+            Ok(Json(json!({
+                "response": response_text,
+                "messages": messages,
+                "room_name": room_name,
+                "total_count": messages.len()
+            })))
+        },
+        Err(e) => {
+            error!("Failed to fetch Telegram messages: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to fetch Telegram messages",
                     "details": e.to_string()
                 }))
             ))
@@ -1796,6 +2102,107 @@ pub async fn handle_whatsapp_fetch_tool_call(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
                     "error": "Failed to fetch WhatsApp messages",
+                    "details": e.to_string()
+                }))
+            ))
+        }
+    }
+}
+
+pub async fn handle_telegram_fetch_tool_call(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    tracing::debug!("Starting Telegram message fetch with time range");
+
+    // Extract user_id from query parameters
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing or invalid user_id"
+                }))
+            ));
+        }
+    };
+
+    // Extract and parse start_time from query parameters
+    let start_timestamp = match params.get("start_time").and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()) {
+        Some(dt) => dt.timestamp(),
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing or invalid start_time. Expected RFC3339 format (e.g., '2024-03-16T00:00:00Z')"
+                }))
+            ));
+        }
+    };
+
+    // Extract and parse end_time from query parameters
+    let end_timestamp = match params.get("end_time").and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()) {
+        Some(dt) => dt.timestamp(),
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing or invalid end_time. Expected RFC3339 format (e.g., '2024-03-16T00:00:00Z')"
+                }))
+            ));
+        }
+    };
+
+    // Fetch messages using the existing utility function
+    match crate::utils::telegram_utils::fetch_telegram_messages(&state, user_id, start_timestamp, end_timestamp).await {
+        Ok(messages) => {
+            if messages.is_empty() {
+                return Ok(Json(json!({
+                    "response": "No Telegram messages found for the specified time range.",
+                    "messages": []
+                })));
+            }
+
+            // Format messages for voice response
+            let mut response_text = format!(
+                "Found {} Telegram messages. Here are the highlights: ",
+                messages.len()
+            );
+
+            // Add up to 5 most recent messages to the voice response
+            for (i, msg) in messages.iter().take(20).enumerate() {
+
+                response_text.push_str(&format!(
+                    "Message {} from {} in chat {}, sent on {}: {}. ",
+                    i + 1,
+                    msg.sender_display_name,
+                    msg.room_name,
+                    msg.formatted_timestamp,
+                    msg.content
+                ));
+            }
+
+            if messages.len() > 20 {
+                response_text.push_str(&format!(
+                    "And {} more messages. ",
+                    messages.len() - 20 
+                ));
+            }
+
+            Ok(Json(json!({
+                "response": response_text,
+                "messages": messages,
+                "total_count": messages.len()
+            })))
+        },
+        Err(e) => {
+            error!("Failed to fetch Telegram messages: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to fetch Telegram messages",
                     "details": e.to_string()
                 }))
             ))
