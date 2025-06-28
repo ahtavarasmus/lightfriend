@@ -486,23 +486,46 @@ pub fn digest_section() -> Html {
                 <div class={classes!("digest-option", if morning_digest_time.is_some() { "active" } else { "inactive" })}>
                     <span class="digest-label">{"Morning Digest"}</span>
                     <div class="digest-time">
-                        <input
-                            type="time"
+                        <select
                             class="time-input"
-                            data-format="24"
                             value={morning_digest_time.as_ref().cloned().unwrap_or_else(|| "08:00".to_string())}
-                            placeholder="Choose Time"
                             onchange={Callback::from({
                                 let morning_digest_time = morning_digest_time.clone();
                                 let handle_time_change = handle_time_change.clone();
                                 move |e: Event| {
-                                    let input: web_sys::HtmlInputElement = e.target_unchecked_into();
-                                    let time = input.value();
-                                    morning_digest_time.set(if time.is_empty() { None } else { Some(time) });
+                                    let select: web_sys::HtmlSelectElement = e.target_unchecked_into();
+                                    let time = select.value();
+                                    morning_digest_time.set(if time == "none" { None } else { Some(time) });
                                     handle_time_change.emit(());
                                 }
                             })}
-                        />
+                        >
+                            <option value="none">{"Disabled"}</option>
+                            <option value="00:00">{"00:00 (12:00 AM)"}</option>
+                            <option value="01:00">{"01:00 (1:00 AM)"}</option>
+                            <option value="02:00">{"02:00 (2:00 AM)"}</option>
+                            <option value="03:00">{"03:00 (3:00 AM)"}</option>
+                            <option value="04:00">{"04:00 (4:00 AM)"}</option>
+                            <option value="05:00">{"05:00 (5:00 AM)"}</option>
+                            <option value="06:00">{"06:00 (6:00 AM)"}</option>
+                            <option value="07:00">{"07:00 (7:00 AM)"}</option>
+                            <option value="08:00">{"08:00 (8:00 AM)"}</option>
+                            <option value="09:00">{"09:00 (9:00 AM)"}</option>
+                            <option value="10:00">{"10:00 (10:00 AM)"}</option>
+                            <option value="11:00">{"11:00 (11:00 AM)"}</option>
+                            <option value="12:00">{"12:00 (12:00 PM)"}</option>
+                            <option value="13:00">{"13:00 (1:00 PM)"}</option>
+                            <option value="14:00">{"14:00 (2:00 PM)"}</option>
+                            <option value="15:00">{"15:00 (3:00 PM)"}</option>
+                            <option value="16:00">{"16:00 (4:00 PM)"}</option>
+                            <option value="17:00">{"17:00 (5:00 PM)"}</option>
+                            <option value="18:00">{"18:00 (6:00 PM)"}</option>
+                            <option value="19:00">{"19:00 (7:00 PM)"}</option>
+                            <option value="20:00">{"20:00 (8:00 PM)"}</option>
+                            <option value="21:00">{"21:00 (9:00 PM)"}</option>
+                            <option value="22:00">{"22:00 (10:00 PM)"}</option>
+                            <option value="23:00">{"23:00 (11:00 PM)"}</option>
+                        </select>
                         <span class={classes!("status-text", if morning_digest_time.is_some() { "active" } else { "inactive" })}>
                             {if morning_digest_time.is_some() { "Active" } else { "Inactive" }}
                         </span>
@@ -512,23 +535,46 @@ pub fn digest_section() -> Html {
                 <div class={classes!("digest-option", if day_digest_time.is_some() { "active" } else { "inactive" })}>
                     <span class="digest-label">{"Day Digest"}</span>
                     <div class="digest-time">
-                        <input
-                            type="time"
+                        <select
                             class="time-input"
-                            data-format="24"
                             value={day_digest_time.as_ref().cloned().unwrap_or_else(|| "12:00".to_string())}
-                            placeholder="Choose Time"
                             onchange={Callback::from({
                                 let day_digest_time = day_digest_time.clone();
                                 let handle_time_change = handle_time_change.clone();
                                 move |e: Event| {
-                                    let input: web_sys::HtmlInputElement = e.target_unchecked_into();
-                                    let time = input.value();
-                                    day_digest_time.set(if time.is_empty() { None } else { Some(time) });
+                                    let select: web_sys::HtmlSelectElement = e.target_unchecked_into();
+                                    let time = select.value();
+                                    day_digest_time.set(if time == "none" { None } else { Some(time) });
                                     handle_time_change.emit(());
                                 }
                             })}
-                        />
+                        >
+                            <option value="none">{"Disabled"}</option>
+                            <option value="00:00">{"00:00 (12:00 AM)"}</option>
+                            <option value="01:00">{"01:00 (1:00 AM)"}</option>
+                            <option value="02:00">{"02:00 (2:00 AM)"}</option>
+                            <option value="03:00">{"03:00 (3:00 AM)"}</option>
+                            <option value="04:00">{"04:00 (4:00 AM)"}</option>
+                            <option value="05:00">{"05:00 (5:00 AM)"}</option>
+                            <option value="06:00">{"06:00 (6:00 AM)"}</option>
+                            <option value="07:00">{"07:00 (7:00 AM)"}</option>
+                            <option value="08:00">{"08:00 (8:00 AM)"}</option>
+                            <option value="09:00">{"09:00 (9:00 AM)"}</option>
+                            <option value="10:00">{"10:00 (10:00 AM)"}</option>
+                            <option value="11:00">{"11:00 (11:00 AM)"}</option>
+                            <option value="12:00">{"12:00 (12:00 PM)"}</option>
+                            <option value="13:00">{"13:00 (1:00 PM)"}</option>
+                            <option value="14:00">{"14:00 (2:00 PM)"}</option>
+                            <option value="15:00">{"15:00 (3:00 PM)"}</option>
+                            <option value="16:00">{"16:00 (4:00 PM)"}</option>
+                            <option value="17:00">{"17:00 (5:00 PM)"}</option>
+                            <option value="18:00">{"18:00 (6:00 PM)"}</option>
+                            <option value="19:00">{"19:00 (7:00 PM)"}</option>
+                            <option value="20:00">{"20:00 (8:00 PM)"}</option>
+                            <option value="21:00">{"21:00 (9:00 PM)"}</option>
+                            <option value="22:00">{"22:00 (10:00 PM)"}</option>
+                            <option value="23:00">{"23:00 (11:00 PM)"}</option>
+                        </select>
                         <span class={classes!("status-text", if day_digest_time.is_some() { "active" } else { "inactive" })}>
                             {if day_digest_time.is_some() { "Active" } else { "Inactive" }}
                         </span>
@@ -538,23 +584,46 @@ pub fn digest_section() -> Html {
                 <div class={classes!("digest-option", if evening_digest_time.is_some() { "active" } else { "inactive" })}>
                     <span class="digest-label">{"Evening Digest"}</span>
                     <div class="digest-time">
-                        <input
-                            type="time"
+                        <select
                             class="time-input"
-                            data-format="24"
                             value={evening_digest_time.as_ref().cloned().unwrap_or_else(|| "18:00".to_string())}
-                            placeholder="Choose Time"
                             onchange={Callback::from({
                                 let evening_digest_time = evening_digest_time.clone();
                                 let handle_time_change = handle_time_change.clone();
                                 move |e: Event| {
-                                    let input: web_sys::HtmlInputElement = e.target_unchecked_into();
-                                    let time = input.value();
-                                    evening_digest_time.set(if time.is_empty() { None } else { Some(time) });
+                                    let select: web_sys::HtmlSelectElement = e.target_unchecked_into();
+                                    let time = select.value();
+                                    evening_digest_time.set(if time == "none" { None } else { Some(time) });
                                     handle_time_change.emit(());
                                 }
                             })}
-                        />
+                        >
+                            <option value="none">{"Disabled"}</option>
+                            <option value="00:00">{"00:00 (12:00 AM)"}</option>
+                            <option value="01:00">{"01:00 (1:00 AM)"}</option>
+                            <option value="02:00">{"02:00 (2:00 AM)"}</option>
+                            <option value="03:00">{"03:00 (3:00 AM)"}</option>
+                            <option value="04:00">{"04:00 (4:00 AM)"}</option>
+                            <option value="05:00">{"05:00 (5:00 AM)"}</option>
+                            <option value="06:00">{"06:00 (6:00 AM)"}</option>
+                            <option value="07:00">{"07:00 (7:00 AM)"}</option>
+                            <option value="08:00">{"08:00 (8:00 AM)"}</option>
+                            <option value="09:00">{"09:00 (9:00 AM)"}</option>
+                            <option value="10:00">{"10:00 (10:00 AM)"}</option>
+                            <option value="11:00">{"11:00 (11:00 AM)"}</option>
+                            <option value="12:00">{"12:00 (12:00 PM)"}</option>
+                            <option value="13:00">{"13:00 (1:00 PM)"}</option>
+                            <option value="14:00">{"14:00 (2:00 PM)"}</option>
+                            <option value="15:00">{"15:00 (3:00 PM)"}</option>
+                            <option value="16:00">{"16:00 (4:00 PM)"}</option>
+                            <option value="17:00">{"17:00 (5:00 PM)"}</option>
+                            <option value="18:00">{"18:00 (6:00 PM)"}</option>
+                            <option value="19:00">{"19:00 (7:00 PM)"}</option>
+                            <option value="20:00">{"20:00 (8:00 PM)"}</option>
+                            <option value="21:00">{"21:00 (9:00 PM)"}</option>
+                            <option value="22:00">{"22:00 (10:00 PM)"}</option>
+                            <option value="23:00">{"23:00 (11:00 PM)"}</option>
+                        </select>
                         <span class={classes!("status-text", if evening_digest_time.is_some() { "active" } else { "inactive" })}>
                             {if evening_digest_time.is_some() { "Active" } else { "Inactive" }}
                         </span>

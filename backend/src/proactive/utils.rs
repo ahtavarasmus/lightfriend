@@ -8,13 +8,13 @@ use openai_api_rs::v1::{
 use chrono::Timelike;
 use crate::tool_call_utils::utils::create_openai_client;
 use serde::{Deserialize, Serialize};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, Duration};
 
 #[derive(Debug, Serialize, Deserialize)]
-struct DigestData {
-    messages: Vec<MessageInfo>,
-    calendar_events: Vec<CalendarEvent>,
-    time_period_hours: u32,
+pub struct DigestData {
+    pub messages: Vec<MessageInfo>,
+    pub calendar_events: Vec<CalendarEvent>,
+    pub time_period_hours: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -249,8 +249,123 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 }
             };
 
-            let mut message = format!("Good morning! Here's your morning digest covering the last {} hours. ", hours_since_prev);
-            message.push_str(&format!("Next digest in {} hours.", hours_to_next));
+            // Format start time (now) and end time (now + hours_to_next) in RFC3339
+            let start_time = now.with_timezone(&Utc).to_rfc3339();
+            let end_time = (now + Duration::hours(hours_to_next as i64)).with_timezone(&Utc).to_rfc3339();
+
+            // Fetch calendar events for the period
+            let calendar_events = match crate::handlers::google_calendar::handle_calendar_fetching(state.as_ref(), user_id, &start_time, &end_time).await {
+                Ok(axum::Json(value)) => {
+                    if let Some(events) = value.get("events").and_then(|e| e.as_array()) {
+                        events.iter().filter_map(|event| {
+                            let summary = event.get("summary")?.as_str()?.to_string();
+                            let start = event.get("start")?.as_str()?.parse().ok()?;
+                            let end = event.get("end")?.as_str()?.parse().ok()?;
+                            Some(CalendarEvent {
+                                title: summary,
+                                start_time: start,
+                                end_time: end,
+                                description: None,
+                            })
+                        }).collect()
+                    } else {
+                        Vec::new()
+                    }
+                },
+                Err(_) => Vec::new(),
+            };
+
+            // Calculate the time range for message fetching
+            let now = Utc::now();
+            let cutoff_time = now - Duration::hours(hours_since_prev as i64);
+            let start_timestamp = cutoff_time.timestamp();
+            let end_timestamp = now.timestamp();
+            
+            // Fetch and filter emails
+            let mut messages = match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false).await {
+                Ok(emails) => {
+                    emails.into_iter()
+                        .filter(|email| {
+                            // Filter emails based on timestamp
+                            if let Some(date) = email.date {
+                                date >= cutoff_time
+                            } else {
+                                false // Exclude emails without a timestamp
+                            }
+                        })
+                        .map(|email| MessageInfo {
+                            sender: email.from.unwrap_or_else(|| "Unknown sender".to_string()),
+                            content: email.snippet.unwrap_or_else(|| "No content".to_string()),
+                            timestamp: email.date.unwrap_or_else(|| Utc::now()),
+                            platform: "email".to_string(),
+                        })
+                        .collect::<Vec<MessageInfo>>()
+                },
+                Err(e) => {
+                    tracing::error!("Failed to fetch emails for digest: {:#?}", e);
+                    Vec::new()
+                }
+            };
+
+            // Log the number of filtered email messages
+            tracing::debug!(
+                "Filtered {} email messages from the last {} hours for digest",
+                messages.len(),
+                hours_since_prev
+            );
+
+            // Fetch WhatsApp messages
+            match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp).await {
+                Ok(whatsapp_messages) => {
+                    // Convert WhatsAppMessage to MessageInfo and add to messages
+                    let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
+                        .map(|msg| MessageInfo {
+                            sender: format!("{} ({})", msg.sender_display_name, msg.room_name),
+                            content: msg.content,
+                            timestamp: DateTime::from_timestamp(msg.timestamp, 0)
+                                .unwrap_or_else(|| Utc::now()),
+                            platform: "whatsapp".to_string(),
+                        })
+                        .collect();
+                    
+                    tracing::debug!(
+                        "Fetched {} WhatsApp messages from the last {} hours for digest",
+                        whatsapp_infos.len(),
+                        hours_since_prev
+                    );
+
+                    // Extend messages with WhatsApp messages
+                    messages.extend(whatsapp_infos);
+
+                    // Sort all messages by timestamp (most recent first)
+                    messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+                }
+                Err(e) => {
+                    tracing::error!("Failed to fetch WhatsApp messages for digest: {}", e);
+                }
+            }
+
+            // Log total number of messages
+            tracing::debug!(
+                "Total {} messages collected for digest",
+                messages.len()
+            );
+
+            // Prepare digest data
+            let digest_data = DigestData {
+                messages,
+                calendar_events,
+                time_period_hours: hours_to_next,
+            };
+
+            // Generate the digest
+            let digest_message = match generate_digest(digest_data).await {
+                Ok(digest) => digest,
+                Err(_) => format!(
+                    "Good morning! Here's your morning digest covering the last {} hours. Next digest in {} hours.",
+                    hours_since_prev, hours_to_next
+                ),
+            };
                 
             tracing::info!("Sending morning digest for user {} at {}:00 in timezone {}", 
                 user_id, digest_hour, timezone);
@@ -258,9 +373,395 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             send_notification(
                 state,
                 user_id,
-                &message,
+                &digest_message,
                 "morning_digest".to_string(),
-                None,
+                Some("Good morning! Want to hear your morning digest?".to_string()),
+            ).await;
+        }
+    }
+    
+    Ok(())
+}
+
+pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(), Box<dyn std::error::Error>> {
+    // Get the user's digest settings and timezone
+    let (morning_digest, day_digest, evening_digest) = state.user_core.get_digests(user_id)?;
+    let user_settings = state.user_core.get_user_settings(user_id)?;
+    
+    // If day digest is enabled (Some value) and we have a timezone, check the time
+    if let (Some(digest_hour_str), Some(timezone)) = (day_digest.clone(), user_settings.timezone) {
+        // Parse the timezone
+        let tz: chrono_tz::Tz = timezone.parse()
+            .map_err(|e| format!("Invalid timezone: {}", e))?;
+            
+        // Get current time in user's timezone
+        let now = chrono::Utc::now().with_timezone(&tz);
+        
+        // Parse the digest hour (expected format: "HH:00" like "00:00", "23:00")
+        let digest_hour: u32 = digest_hour_str
+            .split(':')
+            .next()
+            .ok_or("Invalid time format")?
+            .parse()
+            .map_err(|e| format!("Invalid hour in digest time: {}", e))?;
+
+        // Validate hour is between 0-23
+        if digest_hour > 23 {
+            tracing::error!("Invalid hour value (must be 0-23): {}", digest_hour);
+            return Ok(());
+        }
+            
+        // Compare current hour with digest hour
+        if now.hour() == digest_hour {
+            // Calculate hours until next digest
+            let hours_to_next = match evening_digest.as_ref() {
+                Some(evening) => {
+                    let evening_hour: u32 = evening.split(':').next().unwrap_or("0").parse().unwrap_or(0);
+                    hours_until(digest_hour, evening_hour)
+                },
+                None => {
+                    // If no other digests, calculate hours until evening
+                    hours_until(digest_hour, 0)
+                }
+            };
+
+            // Calculate hours since previous digest
+            let hours_since_prev = match morning_digest.as_ref() {
+                Some(morning) => {
+                    let morning_hour: u32 = morning.split(':').next().unwrap_or("6").parse().unwrap_or(6);
+                    hours_since(digest_hour, morning_hour)
+                },
+                None => {
+                    // If no morning digest, calculate hours since 6 o'clock 
+                    hours_since(digest_hour, 6)
+                }
+            };
+
+            // Format start time (now) and end time (now + hours_to_next) in RFC3339
+            let start_time = now.with_timezone(&Utc).to_rfc3339();
+            let end_time = (now + Duration::hours(hours_to_next as i64)).with_timezone(&Utc).to_rfc3339();
+
+            // Fetch calendar events for the period
+            let calendar_events = match crate::handlers::google_calendar::handle_calendar_fetching(state.as_ref(), user_id, &start_time, &end_time).await {
+                Ok(axum::Json(value)) => {
+                    if let Some(events) = value.get("events").and_then(|e| e.as_array()) {
+                        events.iter().filter_map(|event| {
+                            let summary = event.get("summary")?.as_str()?.to_string();
+                            let start = event.get("start")?.as_str()?.parse().ok()?;
+                            let end = event.get("end")?.as_str()?.parse().ok()?;
+                            Some(CalendarEvent {
+                                title: summary,
+                                start_time: start,
+                                end_time: end,
+                                description: None,
+                            })
+                        }).collect()
+                    } else {
+                        Vec::new()
+                    }
+                },
+                Err(_) => Vec::new(),
+            };
+
+            // Calculate the time range for message fetching
+            let now = Utc::now();
+            let cutoff_time = now - Duration::hours(hours_since_prev as i64);
+            let start_timestamp = cutoff_time.timestamp();
+            let end_timestamp = now.timestamp();
+            
+            // Fetch and filter emails
+            let mut messages = match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false).await {
+                Ok(emails) => {
+                    emails.into_iter()
+                        .filter(|email| {
+                            // Filter emails based on timestamp
+                            if let Some(date) = email.date {
+                                date >= cutoff_time
+                            } else {
+                                false // Exclude emails without a timestamp
+                            }
+                        })
+                        .map(|email| MessageInfo {
+                            sender: email.from.unwrap_or_else(|| "Unknown sender".to_string()),
+                            content: email.snippet.unwrap_or_else(|| "No content".to_string()),
+                            timestamp: email.date.unwrap_or_else(|| Utc::now()),
+                            platform: "email".to_string(),
+                        })
+                        .collect::<Vec<MessageInfo>>()
+                },
+                Err(e) => {
+                    tracing::error!("Failed to fetch emails for digest: {:#?}", e);
+                    Vec::new()
+                }
+            };
+
+            // Log the number of filtered email messages
+            tracing::debug!(
+                "Filtered {} email messages from the last {} hours for digest",
+                messages.len(),
+                hours_since_prev
+            );
+
+            // Fetch WhatsApp messages
+            match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp).await {
+                Ok(whatsapp_messages) => {
+                    // Convert WhatsAppMessage to MessageInfo and add to messages
+                    let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
+                        .map(|msg| MessageInfo {
+                            sender: format!("{} ({})", msg.sender_display_name, msg.room_name),
+                            content: msg.content,
+                            timestamp: DateTime::from_timestamp(msg.timestamp, 0)
+                                .unwrap_or_else(|| Utc::now()),
+                            platform: "whatsapp".to_string(),
+                        })
+                        .collect();
+                    
+                    tracing::debug!(
+                        "Fetched {} WhatsApp messages from the last {} hours for digest",
+                        whatsapp_infos.len(),
+                        hours_since_prev
+                    );
+
+                    // Extend messages with WhatsApp messages
+                    messages.extend(whatsapp_infos);
+
+                    // Sort all messages by timestamp (most recent first)
+                    messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+                }
+                Err(e) => {
+                    tracing::error!("Failed to fetch WhatsApp messages for digest: {}", e);
+                }
+            }
+
+            // Log total number of messages
+            tracing::debug!(
+                "Total {} messages collected for digest",
+                messages.len()
+            );
+
+            // Prepare digest data
+            let digest_data = DigestData {
+                messages,
+                calendar_events,
+                time_period_hours: hours_to_next,
+            };
+
+            // Generate the digest
+            let digest_message = match generate_digest(digest_data).await {
+                Ok(digest) => digest,
+                Err(_) => format!(
+                    "Hello! Here's your daily digest covering the last {} hours. Next digest in {} hours.",
+                    hours_since_prev, hours_to_next
+                ),
+            };
+                
+            tracing::info!("Sending day digest for user {} at {}:00 in timezone {}", 
+                user_id, digest_hour, timezone);
+                
+            send_notification(
+                state,
+                user_id,
+                &digest_message,
+                "day_digest".to_string(),
+                Some("Hello! Want to hear your daily digest?".to_string()),
+            ).await;
+        }
+    }
+    
+    Ok(())
+}
+
+pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result<(), Box<dyn std::error::Error>> {
+    // Get the user's digest settings and timezone
+    let (morning_digest, day_digest, evening_digest) = state.user_core.get_digests(user_id)?;
+    let user_settings = state.user_core.get_user_settings(user_id)?;
+    
+    // If morning digest is enabled (Some value) and we have a timezone, check the time
+    if let (Some(digest_hour_str), Some(timezone)) = (evening_digest.clone(), user_settings.timezone) {
+        // Parse the timezone
+        let tz: chrono_tz::Tz = timezone.parse()
+            .map_err(|e| format!("Invalid timezone: {}", e))?;
+            
+        // Get current time in user's timezone
+        let now = chrono::Utc::now().with_timezone(&tz);
+        
+        // Parse the digest hour (expected format: "HH:00" like "00:00", "23:00")
+        let digest_hour: u32 = digest_hour_str
+            .split(':')
+            .next()
+            .ok_or("Invalid time format")?
+            .parse()
+            .map_err(|e| format!("Invalid hour in digest time: {}", e))?;
+
+        // Validate hour is between 0-23
+        if digest_hour > 23 {
+            tracing::error!("Invalid hour value (must be 0-23): {}", digest_hour);
+            return Ok(());
+        }
+            
+        // Compare current hour with digest hour
+        if now.hour() == digest_hour {
+            // Calculate hours until next digest
+            let hours_to_next = match morning_digest.as_ref() {
+                Some(morning) => {
+                    let morning_hour: u32 = morning.split(':').next().unwrap_or("8").parse().unwrap_or(8);
+                    hours_until(digest_hour, morning_hour)
+                },
+                None => {
+                    // If no other digests, calculate hours until morning
+                    hours_until(digest_hour, 8)
+                }
+            };
+
+            // Calculate hours since previous digest
+            let hours_since_prev = match day_digest.as_ref() {
+                Some(day) => {
+                    let day_hour: u32 = day.split(':').next().unwrap_or("12").parse().unwrap_or(12);
+                    hours_since(digest_hour, day_hour)
+                },
+                None => {
+                    // If no morning digest, calculate hours since 6 o'clock 
+                    hours_since(digest_hour, 12)
+                }
+            };
+
+            // Format start time (now) and end time (now + hours_to_next) in RFC3339
+            let start_time = now.with_timezone(&Utc).to_rfc3339();
+
+            // Calculate end of tomorrow
+            let tomorrow_end = now.date_naive().succ_opt() // Get tomorrow's date
+                .unwrap_or(now.date_naive()) // Fallback to today if overflow
+                .and_hms_opt(23, 59, 59) // Set to end of day
+                .unwrap_or(now.naive_local()) // Fallback to now if invalid time
+                .and_local_timezone(tz)
+                .earliest() // Get the earliest possible time if ambiguous
+                .unwrap_or(now); // Fallback to now if conversion fails
+            
+            let end_time = tomorrow_end.with_timezone(&Utc).to_rfc3339();
+
+            // Fetch calendar events for the period
+            let calendar_events = match crate::handlers::google_calendar::handle_calendar_fetching(state.as_ref(), user_id, &start_time, &end_time).await {
+                Ok(axum::Json(value)) => {
+                    if let Some(events) = value.get("events").and_then(|e| e.as_array()) {
+                        events.iter().filter_map(|event| {
+                            let summary = event.get("summary")?.as_str()?.to_string();
+                            let start = event.get("start")?.as_str()?.parse().ok()?;
+                            let end = event.get("end")?.as_str()?.parse().ok()?;
+                            Some(CalendarEvent {
+                                title: summary,
+                                start_time: start,
+                                end_time: end,
+                                description: None,
+                            })
+                        }).collect()
+                    } else {
+                        Vec::new()
+                    }
+                },
+                Err(_) => Vec::new(),
+            };
+
+            // Calculate the time range for message fetching
+            let now = Utc::now();
+            let cutoff_time = now - Duration::hours(hours_since_prev as i64);
+            let start_timestamp = cutoff_time.timestamp();
+            let end_timestamp = now.timestamp();
+            
+            // Fetch and filter emails
+            let mut messages = match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false).await {
+                Ok(emails) => {
+                    emails.into_iter()
+                        .filter(|email| {
+                            // Filter emails based on timestamp
+                            if let Some(date) = email.date {
+                                date >= cutoff_time
+                            } else {
+                                false // Exclude emails without a timestamp
+                            }
+                        })
+                        .map(|email| MessageInfo {
+                            sender: email.from.unwrap_or_else(|| "Unknown sender".to_string()),
+                            content: email.snippet.unwrap_or_else(|| "No content".to_string()),
+                            timestamp: email.date.unwrap_or_else(|| Utc::now()),
+                            platform: "email".to_string(),
+                        })
+                        .collect::<Vec<MessageInfo>>()
+                },
+                Err(e) => {
+                    tracing::error!("Failed to fetch emails for digest: {:#?}", e);
+                    Vec::new()
+                }
+            };
+
+            // Log the number of filtered email messages
+            tracing::debug!(
+                "Filtered {} email messages from the last {} hours for digest",
+                messages.len(),
+                hours_since_prev
+            );
+
+            // Fetch WhatsApp messages
+            match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp).await {
+                Ok(whatsapp_messages) => {
+                    // Convert WhatsAppMessage to MessageInfo and add to messages
+                    let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
+                        .map(|msg| MessageInfo {
+                            sender: format!("{} ({})", msg.sender_display_name, msg.room_name),
+                            content: msg.content,
+                            timestamp: DateTime::from_timestamp(msg.timestamp, 0)
+                                .unwrap_or_else(|| Utc::now()),
+                            platform: "whatsapp".to_string(),
+                        })
+                        .collect();
+                    
+                    tracing::debug!(
+                        "Fetched {} WhatsApp messages from the last {} hours for digest",
+                        whatsapp_infos.len(),
+                        hours_since_prev
+                    );
+
+                    // Extend messages with WhatsApp messages
+                    messages.extend(whatsapp_infos);
+
+                    // Sort all messages by timestamp (most recent first)
+                    messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+                }
+                Err(e) => {
+                    tracing::error!("Failed to fetch WhatsApp messages for digest: {}", e);
+                }
+            }
+
+            // Log total number of messages
+            tracing::debug!(
+                "Total {} messages collected for digest",
+                messages.len()
+            );
+
+            // Prepare digest data
+            let digest_data = DigestData {
+                messages,
+                calendar_events,
+                time_period_hours: hours_to_next,
+            };
+
+            // Generate the digest
+            let digest_message = match generate_digest(digest_data).await {
+                Ok(digest) => digest,
+                Err(_) => format!(
+                    "Hello! Here's your evening digest covering the last {} hours. Next digest in {} hours.",
+                    hours_since_prev, hours_to_next
+                ),
+            };
+                
+            tracing::info!("Sending evening digest for user {} at {}:00 in timezone {}", 
+                user_id, digest_hour, timezone);
+                
+            send_notification(
+                state,
+                user_id,
+                &digest_message,
+                "evening_digest".to_string(),
+                Some("Good evening! Want to hear your evening digest?".to_string()),
             ).await;
         }
     }
@@ -276,7 +777,8 @@ pub async fn generate_digest(data: DigestData) -> Result<String, Box<dyn std::er
         .iter()
         .map(|msg| {
             format!(
-                "- {} on {}: {}",
+                "- [{}] {} on {}: {}",
+                msg.platform.to_uppercase(),
                 msg.sender,
                 msg.timestamp.format("%H:%M"),
                 msg.content
@@ -304,7 +806,7 @@ pub async fn generate_digest(data: DigestData) -> Result<String, Box<dyn std::er
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
             content: chat_completion::Content::Text(
-                "You are an AI that creates concise, SMS-friendly digests (max 160 chars) of messages and calendar events. Focus on what's most important and actionable. If there are critical messages that need immediate attention, highlight those first. For calendar events, prioritize upcoming events in the next few hours.".to_string(),
+                "You are an AI that creates concise, SMS-friendly digests (max 160 chars) of messages and calendar events. Focus on what's most important and actionable. When mentioning messages, include the platform (EMAIL/WHATSAPP) if it adds important context. If there are critical messages that need immediate attention, highlight those first. For calendar events, prioritize upcoming events in the next few hours.".to_string(),
             ),
             name: None,
             tool_calls: None,

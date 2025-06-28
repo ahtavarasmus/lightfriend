@@ -492,6 +492,41 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
     sched.add(task_cleanup_job).await.expect("Failed to add task cleanup job to scheduler");
 
+    // Create a job that runs every hour to check morning digests
+    let state_clone = Arc::clone(&state);
+    let digest_check_job = Job::new_async("0 0 * * * *", move |_, _| {
+        let state = state_clone.clone();
+        Box::pin(async move {
+            debug!("Running hourly morning digest check...");
+            
+            // Get all users with tier 2 subscription
+            match state.user_core.get_all_users() {
+                Ok(users) => {
+                    for user in users {
+                        // Check if user has a tier 2 subscription
+                        if let Ok(Some(tier)) = state.user_repository.get_subscription_tier(user.id) {
+                            if tier == "tier 2" {
+                                debug!("Checking morning digest for user {} with tier 2 subscription", user.id);
+                                if let Err(e) = crate::proactive::utils::check_morning_digest(&state, user.id).await {
+                                    error!("Failed to check morning digest for user {}: {}", user.id, e);
+                                }
+                                if let Err(e) = crate::proactive::utils::check_day_digest(&state, user.id).await {
+                                    error!("Failed to check day digest for user {}: {}", user.id, e);
+                                }
+                                if let Err(e) = crate::proactive::utils::check_evening_digest(&state, user.id).await {
+                                    error!("Failed to check evening digest for user {}: {}", user.id, e);
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => error!("Failed to fetch users for morning digest check: {}", e),
+            }
+        })
+    }).expect("Failed to create digest check job");
+
+    sched.add(digest_check_job).await.expect("Failed to add digest check job to scheduler");
+
     // Create a job that runs at midnight UTC to reset credits_left for subscribers
     let state_clone = Arc::clone(&state);
     let credits_reset_job = Job::new_async("0 0 0 * * *", move |_, _| {
