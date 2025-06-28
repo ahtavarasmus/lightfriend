@@ -231,10 +231,12 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             // Spawn a new task for sending notification
                                             let state_clone = state.clone();
                                             tokio::spawn(async move {
-                                                crate::utils::imap_utils::send_notification_about_email(
+                                                crate::proactive::utils::send_notification(
                                                     &state_clone,
                                                     user.id,
                                                     &message,
+                                                    "email".to_string(),
+                                                    Some("Hello, I have a critical Email to tell you about.".to_string()),
                                                 ).await;
                                             });
                                             continue;
@@ -272,10 +274,12 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                 let state_clone = state.clone();
                                                 let message_clone= message.clone();
                                                 tokio::spawn(async move {
-                                                    crate::utils::imap_utils::send_notification_about_email(
+                                                    crate::proactive::utils::send_notification(
                                                         &state_clone,
                                                         user.id,
                                                         &message_clone,
+                                                        "email".to_string(),
+                                                        Some("Hello, I have a critical Email to tell you about.".to_string()),
                                                     ).await;
                                                 });
 
@@ -299,10 +303,12 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                 let state_clone = state.clone();
                                                 let message_clone= message.clone();
                                                 tokio::spawn(async move {
-                                                    crate::utils::imap_utils::send_notification_about_email(
+                                                    crate::proactive::utils::send_notification(
                                                         &state_clone,
                                                         user.id,
                                                         &message_clone,
+                                                        "email".to_string(),
+                                                        Some("Hello, I have a critical Email to tell you about.".to_string()),
                                                     ).await;
                                                 });
 

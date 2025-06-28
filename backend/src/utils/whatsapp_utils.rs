@@ -863,15 +863,15 @@ pub async fn handle_whatsapp_message(
             
             // Spawn a new task for sending notification
             let state_clone = state.clone();
-            let chat_name_clone = chat_name.clone();
             let content_clone = content.clone();
             let message= format!("WhatsApp from {}: {}", priority_sender.sender, content_clone);
             tokio::spawn(async move {
-                send_whatsapp_notification(
+                crate::proactive::utils::send_notification(
                     &state_clone,
                     user_id,
-                    &chat_name_clone,
                     &message,
+                    "whatsapp".to_string(),
+                    Some("Hello, I have an important WhatsApp message to tell you about.".to_string()),
                 ).await;
             });
             return;
@@ -889,14 +889,13 @@ pub async fn handle_whatsapp_message(
                 
                 // Spawn a new task for sending critical message notification
                 let state_clone = state.clone();
-                let chat_name_clone = chat_name.clone();
-                let message_clone= message.clone();
                 tokio::spawn(async move {
-                    send_whatsapp_notification(
+                    crate::proactive::utils::send_notification(
                         &state_clone,
                         user_id,
-                        &chat_name_clone,
-          &message_clone.as_str(),
+                        &message,
+                        "whatsapp".to_string(),
+                        Some("Hello, I have an important WhatsApp message to tell you about.".to_string()),
                     ).await;
                 });
             } else if let Some(check_id) = waiting_check_id {
@@ -917,14 +916,13 @@ pub async fn handle_whatsapp_message(
 
                 // Spawn a new task for sending waiting check notification
                 let state_clone = state.clone();
-                let chat_name_clone = chat_name.clone();
-                let message_clone = message.clone();
                 tokio::spawn(async move {
-                    send_whatsapp_notification(
+                    crate::proactive::utils::send_notification(
                         &state_clone,
                         user_id,
-                        &chat_name_clone,
-                        &message_clone,
+                        &message,
+                        "whatsapp".to_string(),
+                        Some("Hello, I have an important WhatsApp message to tell you about.".to_string()),
                     ).await;
                 });
             } else {
@@ -940,116 +938,6 @@ pub async fn handle_whatsapp_message(
     }
 }
 
-use tracing::{debug, error};
-
-async fn send_whatsapp_notification(
-    state: &Arc<AppState>,
-    user_id: i32,
-    chat_name: &str,
-    notification: &str,
-) {
-    // Get user info
-    let user = match state.user_core.find_by_id(user_id) {
-        Ok(Some(user)) => user,
-        Ok(None) => {
-            tracing::error!("User {} not found for notification", user_id);
-            return;
-        }
-        Err(e) => {
-            tracing::error!("Failed to get user {}: {}", user_id, e);
-            return;
-        }
-    };
-
-    // Get user settings (assuming state has a user_settings repository or similar)
-    let user_settings = match state.user_core.get_user_settings(user_id) {
-        Ok(settings) => settings,
-        Err(e) => {
-            tracing::error!("Failed to get settings for user {}: {}", user_id, e);
-            return;
-        }
-    };
-
-    // Get the user's preferred number or default
-    let sender_number = match user.preferred_number.clone() {
-        Some(number) => {
-            tracing::info!("Using user's preferred number: {}", number);
-            number
-        }
-        None => {
-            let number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set");
-            tracing::info!("Using default SHAZAM_PHONE_NUMBER: {}", number);
-            number
-        }
-    };
-
-    // Get the conversation for the user
-    let conversation = match state.user_conversations.get_conversation(&user, sender_number).await {
-        Ok(conv) => conv,
-        Err(e) => {
-            tracing::error!("Failed to ensure conversation exists: {}", e);
-            return;
-        }
-    };
-
-    // Check user's notification preference from settings
-    let notification_type = user_settings.notification_type.as_deref().unwrap_or("sms");
-    match notification_type {
-        "call" => {
-            // For calls, we need a brief intro and detailed message
-            let notification_first_message = "Hello, I have an important WhatsApp message to tell you about.".to_string();
-
-            // Create dynamic variables (optional, can be customized based on needs)
-            let mut dynamic_vars = std::collections::HashMap::new();
-
-            match crate::api::elevenlabs::make_notification_call(
-                &state.clone(),
-                user.phone_number.clone(),
-                user.preferred_number
-                    .unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set")),
-                "whatsapp".to_string(), // Notification type
-                notification_first_message,
-                notification.clone().to_string(),
-                user.id.to_string(),
-                user_settings.timezone,
-            ).await {
-                Ok(mut response) => {
-                    // Add dynamic variables to the client data
-                    if let Some(client_data) = response.get_mut("client_data") {
-                        if let Some(obj) = client_data.as_object_mut() {
-                            obj.extend(dynamic_vars.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))));
-                        }
-                    }
-                    debug!("Successfully initiated call notification for user {} with chat name {}", user.id, chat_name);
-                }
-                Err((_, json_err)) => {
-                    error!("Failed to initiate call notification: {:?}", json_err);
-                    println!("Failed to send call notification for user {}", user_id);
-                }
-            }
-        }
-        _ => {
-            // Default to WhatsApp/SMS notification
-            match crate::api::twilio_utils::send_conversation_message(
-                &conversation.conversation_sid,
-                &conversation.twilio_number,
-                &notification,
-                true,
-                None,
-                &user,
-            ).await {
-                Ok(_) => {
-                    tracing::info!("Successfully sent WhatsApp notification to user {}", user_id);
-                    println!("SMS notification sent successfully for user {}", user_id);
-                }
-                Err(e) => {
-                    tracing::error!("Failed to send WhatsApp notification: {}", e);
-                    println!("Failed to send SMS notification for user {}", user_id);
-                }
-            }
-        }
-    }
-}
 
 pub async fn search_whatsapp_rooms(
     state: &Arc<AppState>,

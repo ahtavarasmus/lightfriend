@@ -1,10 +1,37 @@
 use crate::models::user_models::WaitingCheck;
+use crate::AppState;
+use std::sync::Arc;
 use openai_api_rs::v1::{
     chat_completion,
     types,
 };
+use chrono::Timelike;
 use crate::tool_call_utils::utils::create_openai_client;
 use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Utc};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DigestData {
+    messages: Vec<MessageInfo>,
+    calendar_events: Vec<CalendarEvent>,
+    time_period_hours: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct MessageInfo {
+    sender: String,
+    content: String,
+    timestamp: DateTime<Utc>,
+    platform: String, // e.g., "email", "whatsapp", etc.
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CalendarEvent {
+    title: String,
+    start_time: DateTime<Utc>,
+    end_time: DateTime<Utc>,
+    description: Option<String>,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct MatchResponse {
@@ -145,3 +172,350 @@ pub async fn check_message_importance(
     }
 }
 
+
+// Helper function to calculate hours until a target hour
+fn hours_until(current_hour: u32, target_hour: u32) -> u32 {
+    if current_hour <= target_hour {
+        target_hour - current_hour
+    } else {
+        24 - (current_hour - target_hour)
+    }
+}
+
+// Helper function to calculate hours since a previous hour
+fn hours_since(current_hour: u32, previous_hour: u32) -> u32 {
+    if current_hour >= previous_hour {
+        current_hour - previous_hour
+    } else {
+        current_hour + (24 - previous_hour)
+    }
+}
+
+pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result<(), Box<dyn std::error::Error>> {
+    // Get the user's digest settings and timezone
+    let (morning_digest, day_digest, evening_digest) = state.user_core.get_digests(user_id)?;
+    let user_settings = state.user_core.get_user_settings(user_id)?;
+    
+    // If morning digest is enabled (Some value) and we have a timezone, check the time
+    if let (Some(digest_hour_str), Some(timezone)) = (morning_digest.clone(), user_settings.timezone) {
+        // Parse the timezone
+        let tz: chrono_tz::Tz = timezone.parse()
+            .map_err(|e| format!("Invalid timezone: {}", e))?;
+            
+        // Get current time in user's timezone
+        let now = chrono::Utc::now().with_timezone(&tz);
+        
+        // Parse the digest hour (expected format: "HH:00" like "00:00", "23:00")
+        let digest_hour: u32 = digest_hour_str
+            .split(':')
+            .next()
+            .ok_or("Invalid time format")?
+            .parse()
+            .map_err(|e| format!("Invalid hour in digest time: {}", e))?;
+
+        // Validate hour is between 0-23
+        if digest_hour > 23 {
+            tracing::error!("Invalid hour value (must be 0-23): {}", digest_hour);
+            return Ok(());
+        }
+            
+        // Compare current hour with digest hour
+        if now.hour() == digest_hour {
+            // Calculate hours until next digest
+            let hours_to_next = match (day_digest.as_ref(), evening_digest.as_ref()) {
+                (Some(day), _) => {
+                    let day_hour: u32 = day.split(':').next().unwrap_or("12").parse().unwrap_or(12);
+                    hours_until(digest_hour, day_hour)
+                },
+                (None, Some(evening)) => {
+                    let evening_hour: u32 = evening.split(':').next().unwrap_or("18").parse().unwrap_or(18);
+                    hours_until(digest_hour, evening_hour)
+                },
+                (None, None) => {
+                    // If no other digests, calculate hours until midnight
+                    hours_until(digest_hour, 0)
+                }
+            };
+
+            // Calculate hours since previous digest
+            let hours_since_prev = match evening_digest.as_ref() {
+                Some(evening) => {
+                    let evening_hour: u32 = evening.split(':').next().unwrap_or("18").parse().unwrap_or(18);
+                    hours_since(digest_hour, evening_hour)
+                },
+                None => {
+                    // If no evening digest, calculate hours since midnight
+                    hours_since(digest_hour, 0)
+                }
+            };
+
+            let mut message = format!("Good morning! Here's your morning digest covering the last {} hours. ", hours_since_prev);
+            message.push_str(&format!("Next digest in {} hours.", hours_to_next));
+                
+            tracing::info!("Sending morning digest for user {} at {}:00 in timezone {}", 
+                user_id, digest_hour, timezone);
+                
+            send_notification(
+                state,
+                user_id,
+                &message,
+                "morning_digest".to_string(),
+                None,
+            ).await;
+        }
+    }
+    
+    Ok(())
+}
+
+pub async fn generate_digest(data: DigestData) -> Result<String, Box<dyn std::error::Error>> {
+    let client = create_openai_client()?;
+
+    // Format messages for the prompt
+    let messages_str = data.messages
+        .iter()
+        .map(|msg| {
+            format!(
+                "- {} on {}: {}",
+                msg.sender,
+                msg.timestamp.format("%H:%M"),
+                msg.content
+            )
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    // Format calendar events for the prompt
+    let events_str = data.calendar_events
+        .iter()
+        .map(|event| {
+            format!(
+                "- {} at {}-{}: {}",
+                event.title,
+                event.start_time.format("%H:%M"),
+                event.end_time.format("%H:%M"),
+                event.description.as_deref().unwrap_or("")
+            )
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    let messages = vec![
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::system,
+            content: chat_completion::Content::Text(
+                "You are an AI that creates concise, SMS-friendly digests (max 160 chars) of messages and calendar events. Focus on what's most important and actionable. If there are critical messages that need immediate attention, highlight those first. For calendar events, prioritize upcoming events in the next few hours.".to_string(),
+            ),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::user,
+            content: chat_completion::Content::Text(format!(
+                "Create a digest covering the last {} hours.\n\nMessages:\n{}\n\nUpcoming calendar events:\n{}",
+                data.time_period_hours, messages_str, events_str
+            )),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+    ];
+
+    let mut properties = std::collections::HashMap::new();
+    properties.insert(
+        "digest".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("The SMS-friendly digest message (max 160 chars)".to_string()),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "has_critical".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Boolean),
+            description: Some("Whether there are any critical messages that need immediate attention".to_string()),
+            ..Default::default()
+        }),
+    );
+
+    let tools = vec![chat_completion::Tool {
+        r#type: chat_completion::ToolType::Function,
+        function: types::Function {
+            name: String::from("create_digest"),
+            description: Some(String::from(
+                "Creates a concise digest of messages and calendar events"
+            )),
+            parameters: types::FunctionParameters {
+                schema_type: types::JSONSchemaType::Object,
+                properties: Some(properties),
+                required: Some(vec![
+                    String::from("digest"),
+                    String::from("has_critical"),
+                ]),
+            },
+        },
+    }];
+
+    let request = chat_completion::ChatCompletionRequest::new(
+        "openai/gpt-4o-mini".to_string(),
+        messages,
+    )
+    .tools(tools)
+    .tool_choice(chat_completion::ToolChoiceType::Required)
+    .max_tokens(200);
+
+    match client.chat_completion(request).await {
+        Ok(result) => {
+            if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
+                if let Some(first_call) = tool_calls.first() {
+                    if let Some(args) = &first_call.function.arguments {
+                        #[derive(Debug, Deserialize)]
+                        struct DigestResponse {
+                            digest: String,
+                            has_critical: bool,
+                        }
+
+                        match serde_json::from_str::<DigestResponse>(args) {
+                            Ok(response) => {
+                                tracing::debug!(
+                                    "Generated digest (has_critical={}): {}",
+                                    response.has_critical,
+                                    response.digest
+                                );
+                                Ok(response.digest)
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to parse digest response: {}", e);
+                                Ok("Failed to generate digest.".to_string())
+                            }
+                        }
+                    } else {
+                        tracing::error!("No arguments found in tool call");
+                        Ok("Failed to generate digest.".to_string())
+                    }
+                } else {
+                    tracing::error!("No tool calls found");
+                    Ok("Failed to generate digest.".to_string())
+                }
+            } else {
+                tracing::error!("No tool calls section in response");
+                Ok("Failed to generate digest.".to_string())
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to generate digest: {}", e);
+            Err(e.into())
+        }
+    }
+}
+
+pub async fn send_notification(
+    state: &Arc<AppState>,
+    user_id: i32,
+    notification: &str,
+    content_type: String,
+    first_message: Option<String>,
+) {
+    // Get user info
+    let user = match state.user_core.find_by_id(user_id) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            tracing::error!("User {} not found for notification", user_id);
+            return;
+        }
+        Err(e) => {
+            tracing::error!("Failed to get user {}: {}", user_id, e);
+            return;
+        }
+    };
+
+    // Get user settings (assuming state has a user_settings repository or similar)
+    let user_settings = match state.user_core.get_user_settings(user_id) {
+        Ok(settings) => settings,
+        Err(e) => {
+            tracing::error!("Failed to get settings for user {}: {}", user_id, e);
+            return;
+        }
+    };
+
+    // Get the user's preferred number or default
+    let sender_number = match user.preferred_number.clone() {
+        Some(number) => {
+            tracing::info!("Using user's preferred number: {}", number);
+            number
+        }
+        None => {
+            let number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set");
+            tracing::info!("Using default SHAZAM_PHONE_NUMBER: {}", number);
+            number
+        }
+    };
+
+    // Get the conversation for the user
+    let conversation = match state.user_conversations.get_conversation(&user, sender_number).await {
+        Ok(conv) => conv,
+        Err(e) => {
+            tracing::error!("Failed to ensure conversation exists: {}", e);
+            return;
+        }
+    };
+
+    // Check user's notification preference from settings
+    let notification_type = user_settings.notification_type.as_deref().unwrap_or("sms");
+    match notification_type {
+        "call" => {
+            // For calls, we need a brief intro and detailed message
+
+            // Create dynamic variables (optional, can be customized based on needs)
+            let mut dynamic_vars = std::collections::HashMap::new();
+
+            match crate::api::elevenlabs::make_notification_call(
+                &state.clone(),
+                user.phone_number.clone(),
+                user.preferred_number
+                    .unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set")),
+                content_type, // Notification type
+                first_message.unwrap_or("Hello, I have a critical notification to tell you about".to_string()),
+                notification.clone().to_string(),
+                user.id.to_string(),
+                user_settings.timezone,
+            ).await {
+                Ok(mut response) => {
+                    // Add dynamic variables to the client data
+                    if let Some(client_data) = response.get_mut("client_data") {
+                        if let Some(obj) = client_data.as_object_mut() {
+                            obj.extend(dynamic_vars.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))));
+                        }
+                    }
+                    tracing::debug!("Successfully initiated call notification for user {}", user.id);
+                }
+                Err((_, json_err)) => {
+                    tracing::error!("Failed to initiate call notification: {:?}", json_err);
+                    println!("Failed to send call notification for user {}", user_id);
+                }
+            }
+        }
+        _ => {
+            // Default to SMS notification
+            match crate::api::twilio_utils::send_conversation_message(
+                &conversation.conversation_sid,
+                &conversation.twilio_number,
+                &notification,
+                true,
+                None,
+                &user,
+            ).await {
+                Ok(_) => {
+                    tracing::info!("Successfully sent notification to user {}", user_id);
+                    println!("SMS notification sent successfully for user {}", user_id);
+                }
+                Err(e) => {
+                    tracing::error!("Failed to send notification: {}", e);
+                    println!("Failed to send SMS notification for user {}", user_id);
+                }
+            }
+        }
+    }
+}

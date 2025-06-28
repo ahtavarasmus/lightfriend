@@ -780,6 +780,7 @@ pub async fn get_digests(
 ) -> Result<Json<DigestsResponse>, (StatusCode, Json<serde_json::Value>)> {
     match state.user_core.get_digests(auth_user.user_id) {
         Ok((morning_digest_time, day_digest_time, evening_digest_time)) => {
+            println!("{:#?}, {:#?}, {:#?}", morning_digest_time, day_digest_time, evening_digest_time);
             Ok(Json(DigestsResponse {
                 morning_digest_time,
                 day_digest_time,
@@ -801,6 +802,39 @@ pub async fn update_digests(
     auth_user: AuthUser,
     Json(request): Json<UpdateDigestsRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Validate time format (HH:MM)
+    let validate_time = |time: &Option<String>, name: &str| -> Result<(), (StatusCode, Json<serde_json::Value>)> {
+        if let Some(time_str) = time {
+            let parts: Vec<&str> = time_str.split(':').collect();
+            if parts.len() != 2 {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": format!("Invalid {} digest time format. Expected HH:MM", name)}))
+                ));
+            }
+            
+            if let (Ok(hour), Ok(minute)) = (parts[0].parse::<i32>(), parts[1].parse::<i32>()) {
+                if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({"error": format!("{} digest time must be valid 24-hour time (00:00-23:59)", name)}))
+                    ));
+                }
+            } else {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": format!("Invalid {} digest time format", name)}))
+                ));
+            }
+        }
+        Ok(())
+    };
+
+    // Validate all times
+    validate_time(&request.morning_digest_time, "Morning")?;
+    validate_time(&request.day_digest_time, "Day")?;
+    validate_time(&request.evening_digest_time, "Evening")?;
+
     match state.user_core.update_digests(
         auth_user.user_id,
         request.morning_digest_time.as_deref(),
