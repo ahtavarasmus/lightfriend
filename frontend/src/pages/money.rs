@@ -10,6 +10,8 @@ use crate::config;
 use gloo_net::http::Request;
 use serde::Deserialize;
 use std::collections::HashMap;
+use wasm_bindgen::JsCast;
+use web_sys::HtmlSelectElement;
 
 #[derive(Deserialize, Clone)]
 struct UserProfile {
@@ -101,33 +103,64 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
 #[function_component(Pricing)]
 pub fn pricing(props: &PricingProps) -> Html {
     let selected_country = use_state(|| "US".to_string());
+    let country_name = use_state(|| String::new());
+    
+    // Detect user's country on component mount
+    {
+        let selected_country = selected_country.clone();
+        let country_name = country_name.clone();
+        use_effect_with_deps(
+            move |_| {
+                wasm_bindgen_futures::spawn_local(async move {
+                    if let Ok(response) = Request::get("https://ipapi.co/json/")
+                        .send()
+                        .await
+                    {
+                        if let Ok(json) = response.json::<Value>().await {
+                            if let Some(country_code) = json.get("country_code").and_then(|c| c.as_str()) {
+                                let country_code = country_code.to_uppercase();
+                                // Get full country name
+                                if let Some(country) = json.get("country_name").and_then(|c| c.as_str()) {
+                                    country_name.set(country.to_string());
+                                }
+                                // Only set if it's one of our supported countries
+                                if ["US", "FI", "UK", "AU"].contains(&country_code.as_str()) {
+                                    selected_country.set(country_code);
+                                } else {
+                                    selected_country.set("Other".to_string());
+                                }
+                            }
+                        }
+                    }
+                });
+                || ()
+            },
+            (),
+        );
+    }
+
+    let prices: HashMap<String, f64> = HashMap::from([
+        ("US".to_string(), 20.00),
+        ("FI".to_string(), 35.00),
+        ("UK".to_string(), 35.00),
+        ("AU".to_string(), 35.00),
+        ("Other".to_string(), 40.00),
+    ]);
 
     let basic_prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 10.00),
-        ("FI".to_string(), 25.00),
-        ("UK".to_string(), 25.00),
-        ("AU".to_string(), 25.00),
+        ("US".to_string(), 8.00),
+        ("FI".to_string(), 15.00),
+        ("UK".to_string(), 15.00),
+        ("AU".to_string(), 15.00),
+        ("Other".to_string(), 15.00),
     ]);
 
-    let premium_prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 50.00),
-        ("FI".to_string(), 70.00),
-        ("UK".to_string(), 70.00),
-        ("AU".to_string(), 70.00),
-    ]);
-
-    let daily_limits: HashMap<String, (i32, i32)> = HashMap::from([
-        ("US".to_string(), (10, 15)), // (Basic, Escape) - daily
-        ("FI".to_string(), (50, 100)), // (Basic, Escape) - monthly
-        ("UK".to_string(), (50, 100)), // (Basic, Escape) - monthly
-        ("AU".to_string(), (50, 100)), // (Basic, Escape) - monthly
-    ]);
-
-    let overage_rates: HashMap<String, (f64, f64)> = HashMap::from([
-        ("US".to_string(), (0.10, 0.20)), // (message cost, voice cost per minute)
-        ("FI".to_string(), (0.30, 0.25)),
-        ("UK".to_string(), (0.30, 0.25)),
-        ("AU".to_string(), (0.40, 0.25)),
+    let credit_rates: HashMap<String, f64> = HashMap::from([
+        ("US".to_string(), 0.20), // cost per additional message/question
+        ("FI".to_string(), 0.30),
+        ("UK".to_string(), 0.30),
+        ("AU".to_string(), 0.30),
+        ("Other".to_string(), 0.30),
     ]);
 
     let on_country_change = {
@@ -144,36 +177,69 @@ pub fn pricing(props: &PricingProps) -> Html {
             <div class="pricing-header">
                 <h1>{"Invest in Your Peace of Mind"}</h1>
                 <p>{"Reduce anxiety, sleep better, and live with clarity without the constant pull of your smartphone."}</p>
+                {
+                    if *selected_country == "Other" {
+                        html! {
+                            <>
+                            <br/>
+                            <p class="availability-note" style="color: #ff9494; font-size: 0.9rem; margin-top: 0.5rem;">
+                                {format!("Note: Service may be limited or unavailable in {}. Contact to ask for availability ", (*country_name).clone())}
+                                <span class="legal-links">
+                                    <a style="color: #1E90FF;" 
+                                       href={format!("mailto:rasmus@ahtava.com?subject=Country%20Availability%20Inquiry%20for%20{}&body=Hey,%0A%0AIs%20the%20service%20available%20in%20{}%3F%0A%0AThanks,%0A", 
+                                       (*country_name).clone(), (*country_name).clone())}>
+                                        {"here."}
+                                    </a>
+                                </span>
+                            </p>
+                            </>
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
             </div>
 
             <div class="country-selector">
                 <label for="country">{"Select your country: "}</label>
                 <select id="country" onchange={on_country_change}>
-                    { for ["US", "FI", "UK", "AU"].iter().map(|&c| html! { <option value={c} selected={*selected_country == c}>{c}</option> }) }
+                    { for ["US", "FI", "UK", "AU", "Other"].iter().map(|&c| html! { <option value={c} selected={*selected_country == c}>{c}</option> }) }
                 </select>
             </div>
-
+            
             <div class="pricing-grid">
-                <div class="pricing-card subscription basic">
+
+                <div class="pricing-card subscription">
                     <div class="card-header">
                         <h3>{"Basic Plan"}</h3>
-                        <p class="best-for">{"Best for hardcore users who rely only on SMS and calls."}</p>
+                        <p class="best-for">{"Essential AI tools for weather queries and internet searches."}</p>
+                        
                         <div class="price">
-                            <span class="amount">{format!("€{:.2}", basic_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
-                            <span class="period">{"/month"}</span>
+                            {
+                                if *selected_country == "Other" {
+                                    html! {
+                                        <>
+                                            <span class="amount">{format!("from €{:.2}", basic_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </>
+                                    }
+                                } else {
+                                    html! {
+                                        <>
+                                            <span class="amount">{format!("€{:.2}", basic_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </>
+                                    }
+                                }
+                            }
                         </div>
                         <div class="includes">
                             <p>{"Subscription includes:"}</p>
                             <ul class="quota-list">
-                                <li>{
-                                    if *selected_country == "US" {
-                                        format!("📞 Up to {} messages or minutes/day", daily_limits.get(&*selected_country).map(|(basic, _)| *basic).unwrap_or(0))
-                                    } else {
-                                        format!("📞 Up to {} messages or minutes/month", daily_limits.get(&*selected_country).map(|(basic, _)| *basic).unwrap_or(0))
-                                    }
-                                }</li>
-                                <li>{"⚡ Auto-top-up packages (opt-in, credits carry over)"}</li>
-                                <li>{"🔍 Includes Internet search & weather"}</li>
+                                <li>{"🔍 Internet Search (Perplexity)"}</li>
+                                <li>{"☀️ Weather Updates"}</li>
+                                <li>{"📱 40 questions/messages per month"}</li>
+                                <li>{"💳 Additional credits for more messages"}</li>
                             </ul>
                         </div>
                     </div>
@@ -190,15 +256,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                     <CheckoutButton 
                                         user_id={props.user_id} 
                                         user_email={props.user_email.clone()} 
-                                        subscription_type="hard_mode"
-                                    />
-                                }
-                            } else if props.sub_tier.as_ref().map_or(false, |tier| tier != "tier 1") {
-                                html! {
-                                    <CheckoutButton 
-                                        user_id={props.user_id} 
-                                        user_email={props.user_email.clone()} 
-                                        subscription_type="hard_mode"
+                                        subscription_type="basic"
                                     />
                                 }
                             } else {
@@ -212,7 +270,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                     e.prevent_default();
                                     if let Some(window) = web_sys::window() {
                                         if let Ok(Some(storage)) = window.local_storage() {
-                                            let _ = storage.set_item("selected_plan", "hard_mode");
+                                            let _ = storage.set_item("selected_plan", "basic");
                                             let _ = window.location().set_href("/register");
                                         }
                                     }
@@ -228,25 +286,37 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <div class="pricing-card subscription premium">
                     <div class="premium-tag">{"Save 100+ Hours Monthly*"}</div>
                     <div class="card-header">
-                        <h3>{"Escape Plan"}</h3>
-                        <p class="best-for">{"Best for users who need access to essentials like messaging apps, email, and calendar."}</p>
+                        <h3>{"Freedom Plan"}</h3>
+                        <p class="best-for">{"Your personal AI assistant that helps you stay connected while maintaining digital peace of mind."}</p>
                         <div class="price">
-                            <span class="amount">{format!("€{:.2}", premium_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
-                            <span class="period">{"/month"}</span>
+                            {
+                                if *selected_country == "Other" {
+                                    html! {
+                                        <>
+                                            <span class="amount">{format!("from €{:.2}", prices.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </>
+                                    }
+                                } else {
+                                    html! {
+                                        <>
+                                            <span class="amount">{format!("€{:.2}", prices.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </>
+                                    }
+                                }
+                            }
                         </div>
                         <div class="includes">
                             <p>{"Subscription includes:"}</p>
                             <ul class="quota-list">
-                                <li>{
-                                    if *selected_country == "US" {
-                                        format!("📞 Up to {} messages or minutes/day", daily_limits.get(&*selected_country).map(|(_, escape)| *escape).unwrap_or(0))
-                                    } else {
-                                        format!("📞 Up to {} messages or minutes/month", daily_limits.get(&*selected_country).map(|(_, escape)| *escape).unwrap_or(0))
-                                    }
-                                }</li>
-                                <li>{"⚡ Auto-top-up packages (opt-in, credits carry over)"}</li>
-                                <li>{"🎯 Up to 80 filtered notifications/month"}</li>
-                                <li>{"🔍 Includes all essentials"}</li>
+                                <li>{"📊 Daily digest summaries (morning, day, evening)"}</li>
+                                <li>{"🔔 24/7 monitoring for critical messages"}</li>
+                                <li>{"⚡ Up to 5 custom waiting checks"}</li>
+                                <li>{"⭐ Priority sender notifications"}</li>
+                                <li>{"📱 40 questions/messages per month"}</li>
+                                <li>{"💳 Additional credits for more messages"}</li>
+                                <li>{"✨ Everything in Basic Plan included"}</li>
                             </ul>
                         </div>
                     </div>
@@ -263,15 +333,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                     <CheckoutButton 
                                         user_id={props.user_id} 
                                         user_email={props.user_email.clone()} 
-                                        subscription_type="world"
-                                    />
-                                }
-                            } else if props.sub_tier.as_ref().map_or(false, |tier| tier != "tier 2") {
-                                html! {
-                                    <CheckoutButton 
-                                        user_id={props.user_id} 
-                                        user_email={props.user_email.clone()} 
-                                        subscription_type="world"
+                                        subscription_type="smart"
                                     />
                                 }
                             } else {
@@ -285,14 +347,14 @@ pub fn pricing(props: &PricingProps) -> Html {
                                     e.prevent_default();
                                     if let Some(window) = web_sys::window() {
                                         if let Ok(Some(storage)) = window.local_storage() {
-                                            let _ = storage.set_item("selected_plan", "world");
+                                            let _ = storage.set_item("selected_plan", "smart");
                                             let _ = window.location().set_href("/register");
                                         }
                                     }
                                 })
                             };
                             html! {
-                                <button onclick={onclick} class="iq-button signup-button pro-signup"><b>{"Buy Back Your Time"}</b></button>
+                                <button onclick={onclick} class="iq-button signup-button"><b>{"Get Started"}</b></button>
                             }
                         }
                     }
@@ -306,17 +368,10 @@ pub fn pricing(props: &PricingProps) -> Html {
                     <div class="pricing-card main">
                         <div class="card-header">
                             <div class="package-row">
-                                <h3>{"Messages:"}</h3>
+                                <h3>{"Additional Messages:"}</h3>
                                 <div class="price">
-                                    <span class="amount">{format!("€{:.2}", overage_rates.get(&*selected_country).map(|(msg, _)| *msg).unwrap_or(0.0))}</span>
+                                    <span class="amount">{format!("€{:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0))}</span>
                                     <span class="period">{" per message"}</span>
-                                </div>
-                            </div>
-                            <div class="package-row">
-                                <h3>{"Voice Calls:"}</h3>
-                                <div class="price">
-                                    <span class="amount">{format!("€{:.2}", overage_rates.get(&*selected_country).map(|(_, voice)| *voice).unwrap_or(0.0))}</span>
-                                    <span class="period">{" per minute"}</span>
                                 </div>
                             </div>
                         </div>
@@ -352,92 +407,68 @@ pub fn pricing(props: &PricingProps) -> Html {
             </div>
 
             <div class="feature-comparison">
-                <h2>{"Feature Comparison"}</h2>
+                <h2>{"Included Features"}</h2>
                 <table>
-                    <thead>
-                        <tr>
-                            <th>{"Feature"}</th>
-                            <th>{"Basic Plan"}</th>
-                            <th>{"Escape Plan"}</th>
-                        </tr>
-                    </thead>
                     <tbody>
                         <tr>
-                            <td>{"Message/Minute Limit"}</td>
-                            <td>{
-                                if *selected_country == "US" {
-                                    format!("{}/day", daily_limits.get(&*selected_country).map(|(basic, _)| *basic).unwrap_or(0))
-                                } else {
-                                    format!("{}/month", daily_limits.get(&*selected_country).map(|(basic, _)| *basic).unwrap_or(0))
-                                }
-                            }</td>
-                            <td>{
-                                if *selected_country == "US" {
-                                    format!("{}/day", daily_limits.get(&*selected_country).map(|(_, escape)| *escape).unwrap_or(0))
-                                } else {
-                                    format!("{}/month", daily_limits.get(&*selected_country).map(|(_, escape)| *escape).unwrap_or(0))
-                                }
-                            }</td>
+                            <td>{"Daily Digests"}</td>
+                            <td>{"Morning, Day, and Evening summaries"}</td>
                         </tr>
                         <tr>
-                            <td>{"Auto-Top-Up Packages"}</td>
-                            <td>{"Available"}</td>
-                            <td>{"Available"}</td>
+                            <td>{"Critical Message Monitoring"}</td>
+                            <td>{"24/7 automated monitoring"}</td>
                         </tr>
                         <tr>
-                            <td>{"Search Internet with Perplexity"}</td>
-                            <td>{"✅"}</td>
-                            <td>{"✅"}</td>
+                            <td>{"Custom Waiting Checks"}</td>
+                            <td>{"Up to 5 simultaneous checks"}</td>
                         </tr>
                         <tr>
-                            <td>{"Fetch Current Weather"}</td>
-                            <td>{"✅"}</td>
-                            <td>{"✅"}</td>
+                            <td>{"Base Messages"}</td>
+                            <td>{"40 messages/month"}</td>
                         </tr>
                         <tr>
-                            <td>{"Photo Analysis & Translation (US & AUS only)"}</td>
-                            <td>{"✅"}</td>
+                            <td>{"Priority Sender Notifications"}</td>
+                            <td>{"Using message credits or unused digest slots"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"Additional Messages"}</td>
+                            <td>{"Available through credit purchase"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"Internet Search"}</td>
+                            <td>{"✅ Powered by Perplexity"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"Weather Updates"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
-                            <td>{"Fetch QR Code data from photo (US & AUS only)"}</td>
-                            <td>{"✅"}</td>
+                            <td>{"Photo Analysis & Translation"}</td>
+                            <td>{"✅ (US & AUS only)"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"QR Code Scanning"}</td>
+                            <td>{"✅ (US & AUS only)"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"WhatsApp Integration"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
-                            <td>{"Fetch & Send WhatsApp Messages"}</td>
-                            <td>{"❌"}</td>
+                            <td>{"Email Integration"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
-                            <td>{"Email: Fetch + Notifications"}</td>
-                            <td>{"❌"}</td>
+                            <td>{"Calendar Integration"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
-                            <td>{"Calendar: Fetch & Create Events"}</td>
-                            <td>{"❌"}</td>
+                            <td>{"Task Management"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
-                            <td>{"Tasks: Fetch & Create"}</td>
-                            <td>{"❌"}</td>
-                            <td>{"✅"}</td>
-                        </tr>
-                        <tr>
-                            <td>{"24/7 Automated Monitoring"}</td>
-                            <td>{"❌"}</td>
-                            <td>{"✅"}</td>
-                        </tr>
-                        <tr>
-                            <td>{"Filtered Notifications"}</td>
-                            <td>{"❌"}</td>
-                            <td>{"Up to 80/month"}</td>
-                        </tr>
-                        <tr>
-                            <td>{"Priority Support (24hr Response)"}</td>
-                            <td>{"✅"}</td>
-                            <td>{"✅ (Enhanced)"}</td>
+                            <td>{"Priority Support"}</td>
+                            <td>{"✅ 24-hour response time"}</td>
                         </tr>
                     </tbody>
                 </table>
@@ -470,19 +501,23 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <div class="faq-grid">
                     <details>
                         <summary>{"How does billing work?"}</summary>
-                        <p>{"Pricing varies by country. For US customers, Basic Plan includes 10 messages/day and Escape Plan includes 15 messages/day. For all other countries, Basic Plan includes 50 messages/month and Escape Plan includes 100 messages/month. All Escape Plans include 80 filtered notifications/month. Enable auto-top-up (opt-in) to add extra messages/minutes when you reach your limit. Unused credits carry over indefinitely, with caps to control costs. No hidden fees or commitments."}</p>
+                        <p>{"Freedom Plan includes 40 messages per month, with pricing varying by country (€20/month for US, €35/month for FI/UK/AU, €40+ for other countries depending on the country). Basic Plan starts at €8/month for US, €15/month for FI/UK/AU, and €15+ for other countries. Additional messages can be purchased using credits. All plans include daily digests, 24/7 monitoring, and up to 5 custom waiting checks. Unused credits carry over indefinitely. No hidden fees or commitments."}</p>
                     </details>
                     <details>
-                        <summary>{"What counts as a message/minute?"}</summary>
-                        <p>{"Voice calls are counted by seconds when you call. Messages are counted per query, with free replies if the AI needs clarification. For US customers, limits reset every 24 hours. For all other countries, limits reset monthly."}</p>
+                        <summary>{"What counts as a message?"}</summary>
+                        <p>{"Each question or request you send counts as one message. AI clarification responses don't count against your limit. Daily digests and critical notifications are included in your plan and don't use message credits. Priority sender notifications use either unused digest slots or purchased credits."}</p>
                     </details>
                     <details>
-                        <summary>{"How does auto-top-up work?"}</summary>
-                        <p>{"Enable auto-top-up in your dashboard to automatically add credits when you run low. When enabled, we'll charge your card based on your country's rates. You'll be notified when charges occur, and you can set daily limits to control costs. Unused credits never expire."}</p>
+                        <summary>{"How do credits work?"}</summary>
+                        <p>{"Credits can be used for additional messages beyond your monthly limit or for priority sender notifications. Credit rates vary by country (€0.50 per message in US, €0.75 elsewhere). Enable auto-top-up to automatically purchase credits when you run low. Unused credits never expire."}</p>
                     </details>
                     <details>
                         <summary>{"How does automatic monitoring work?"}</summary>
-                        <p>{"The AI monitors your email/calendar every minute, notifying you of important emails/events based on priority and custom criteria."}</p>
+                        <p>{"The AI continuously monitors your email, messages, and calendar, providing three daily digest summaries (morning, day, evening). Critical messages are flagged immediately. You can set up to 5 custom waiting checks to monitor for specific types of messages or emails, and designate priority senders whose messages will always be notified about."}</p>
+                    </details>
+                    <details>
+                        <summary>{"Is the service available in my country?"}</summary>
+                        <p>{"Service availability and features vary by country. The Basic Plan may be limited or unavailable in countries where we can't provide local phone numbers (including many parts of Asia, Africa, and some European countries). For full service availability, you can either: 1) Request a new number availability for your country, or 2) Bring your own Twilio number to enable service worldwide and get 50% off any plan. Contact us to check availability for your specific location."}</p>
                     </details>
                 </div>
             </div>

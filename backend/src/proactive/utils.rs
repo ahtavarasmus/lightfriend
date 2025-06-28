@@ -806,7 +806,7 @@ pub async fn generate_digest(data: DigestData) -> Result<String, Box<dyn std::er
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
             content: chat_completion::Content::Text(
-                "You are an AI that creates concise, SMS-friendly digests (max 160 chars) of messages and calendar events. Focus on what's most important and actionable. When mentioning messages, include the platform (EMAIL/WHATSAPP) if it adds important context. If there are critical messages that need immediate attention, highlight those first. For calendar events, prioritize upcoming events in the next few hours.".to_string(),
+                "You are an AI that creates concise, SMS-friendly digests (maximum 480 chars, but the shorter the better without losing any critical information) of messages and calendar events. Focus on what's most important and actionable. When mentioning messages, include the platform (EMAIL/WHATSAPP) if it adds important context. If there are critical messages that need immediate attention, highlight those first. For calendar events, prioritize upcoming events in the next few hours.".to_string(),
             ),
             name: None,
             tool_calls: None,
@@ -829,15 +829,7 @@ pub async fn generate_digest(data: DigestData) -> Result<String, Box<dyn std::er
         "digest".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The SMS-friendly digest message (max 160 chars)".to_string()),
-            ..Default::default()
-        }),
-    );
-    properties.insert(
-        "has_critical".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some("Whether there are any critical messages that need immediate attention".to_string()),
+            description: Some("The SMS-friendly digest message".to_string()),
             ..Default::default()
         }),
     );
@@ -854,7 +846,6 @@ pub async fn generate_digest(data: DigestData) -> Result<String, Box<dyn std::er
                 properties: Some(properties),
                 required: Some(vec![
                     String::from("digest"),
-                    String::from("has_critical"),
                 ]),
             },
         },
@@ -876,14 +867,12 @@ pub async fn generate_digest(data: DigestData) -> Result<String, Box<dyn std::er
                         #[derive(Debug, Deserialize)]
                         struct DigestResponse {
                             digest: String,
-                            has_critical: bool,
                         }
 
                         match serde_json::from_str::<DigestResponse>(args) {
                             Ok(response) => {
                                 tracing::debug!(
-                                    "Generated digest (has_critical={}): {}",
-                                    response.has_critical,
+                                    "Generated digest: {}",
                                     response.digest
                                 );
                                 Ok(response.digest)
