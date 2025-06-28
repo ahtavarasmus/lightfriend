@@ -34,6 +34,10 @@ mod proactive {
     pub mod common;
     pub mod whatsapp_general_checks;
     pub mod telegram_general_checks;
+    pub mod waiting_checks;
+    pub mod constant_monitoring;
+    pub mod digest;
+    pub mod critical;
 }
 
 mod connections {

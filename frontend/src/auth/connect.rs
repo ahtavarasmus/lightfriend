@@ -32,6 +32,7 @@ struct ServiceGroupState {
     connected_count: usize,
 }
 
+
 #[function_component(Connect)]
 pub fn connect(props: &ConnectProps) -> Html {
     let error = use_state(|| None::<String>);
@@ -419,6 +420,120 @@ let group_states = use_state(|| {
                     </div>
 
 
+
+                    // Management Tools
+                    <div class="service-group">
+                        <h3 class="service-group-title"
+                            onclick={let group_states = group_states.clone();
+                                Callback::from(move |_| {
+                                    let mut new_states = (*group_states).clone();
+                                    if let Some(state) = new_states.get_mut("management") {
+                                        state.expanded = !state.expanded;
+                                    }
+                                    group_states.set(new_states);
+                                })
+                            }
+                        >
+                            <i class="fa-solid fa-plus"></i>
+                            {"Management tools"}
+                            <div class="group-summary">
+                                <span class="service-count">{"2 tools ready!"}</span>
+                                <i class={if group_states.get("management").map(|s| s.expanded).unwrap_or(false) {
+                                    "fas fa-chevron-up"
+                                } else {
+                                    "fas fa-chevron-down"
+                                }}></i>
+                            </div>
+                        </h3>
+                        <div class={classes!(
+                            "service-list",
+                            if group_states.get("management").map(|s| s.expanded).unwrap_or(false) {
+                                "expanded"
+                            } else {
+                                "collapsed"
+                            }
+                        )}>
+                            // Waiting Checks
+                            <div class="service-item">
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        {"⏰ Waiting Checks"}
+                                    </div>
+                                    <button class="info-button" onclick={Callback::from(|_| {
+                                        if let Some(element) = web_sys::window()
+                                            .and_then(|w| w.document())
+                                            .and_then(|d| d.get_element_by_id("waiting-checks-info"))
+                                        {
+                                            let display = element.get_attribute("style")
+                                                .unwrap_or_else(|| "display: none".to_string());
+                                            
+                                            if display.contains("none") {
+                                                let _ = element.set_attribute("style", "display: block");
+                                            } else {
+                                                let _ = element.set_attribute("style", "display: none");
+                                            }
+                                        }
+                                    })}>
+                                        {"ⓘ"}
+                                    </button>
+                                </div>
+                                <p class="service-description">
+                                    {"Set up proactive notifications for when you're waiting for something. Get a message when it's time to check on what you're waiting for. Currently only can be only put for emails. "}
+                                </p>
+                                <div id="waiting-checks-info" class="info-section" style="display: none">
+                                    <h4>{"How It Works"}</h4>
+                                    <div class="info-subsection">
+                                        <ul>
+                                            <li>{"1. Tell lightfriend what you're waiting for"}</li>
+                                            <li>{"2. Set how long to wait before checking"}</li>
+                                            <li>{"3. When lightfriend notices the event, it sends you a text"}</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+
+                            // SMS During Calls
+                            <div class="service-item">
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        {"📱 SMS During Calls"}
+                                    </div>
+                                    <button class="info-button" onclick={Callback::from(|_| {
+                                        if let Some(element) = web_sys::window()
+                                            .and_then(|w| w.document())
+                                            .and_then(|d| d.get_element_by_id("sms-during-calls-info"))
+                                        {
+                                            let display = element.get_attribute("style")
+                                                .unwrap_or_else(|| "display: none".to_string());
+                                            
+                                            if display.contains("none") {
+                                                let _ = element.set_attribute("style", "display: block");
+                                            } else {
+                                                let _ = element.set_attribute("style", "display: none");
+                                            }
+                                        }
+                                    })}>
+                                        {"ⓘ"}
+                                    </button>
+                                </div>
+                                <p class="service-description">
+                                    {"Send information via SMS while you're on a voice call with lightfriend. Perfect for getting details you need to write down or remember."}
+                                </p>
+                                <div id="sms-during-calls-info" class="info-section" style="display: none">
+                                    <h4>{"How It Works"}</h4>
+                                    <div class="info-subsection">
+                                        <ul>
+                                            <li>{"1. During any voice call with lightfriend"}</li>
+                                            <li>{"2. Ask for information to be sent via SMS"}</li>
+                                            <li>{"3. Continue your conversation while receiving the info"}</li>
+                                            <li>{"4. Check your messages after the call for the details"}</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     // Calendar Services
                     <div class="service-group">
                         <h3 class="service-group-title"
@@ -470,24 +585,6 @@ let group_states = use_state(|| {
                                     }))
                                 }}
                             />
-
-                            <br/>
-                            // Outlook Calendar (Coming Soon)
-                            <div class="service-item coming-soon">
-                                <div class="service-header">
-                                    <div class="service-name">
-                                        <img src="https://upload.wikimedia.org/wikipedia/commons/d/df/Microsoft_Office_Outlook_%282018%E2%80%93present%29.svg" alt="Outlook Calendar"  width="24" height="24"/>
-                                        {"Outlook Calendar"}
-                                        <span class="coming-soon-tag">{"Coming Soon"}</span>
-                                    </div>
-                                </div>
-                                <p class="service-description">
-                                    {"Manage your Outlook Calendar events through SMS or voice calls."}
-                                </p>
-                                <button class="connect-button" disabled=true>
-                                    {"Connect"}
-                                </button>
-                            </div>
                         </div>
                     </div>
                     <div class="service-group">
@@ -661,118 +758,108 @@ let group_states = use_state(|| {
 
                     </div>
 
-                    // Management Tools
-                    <div class="service-group">
-                        <h3 class="service-group-title"
-                            onclick={let group_states = group_states.clone();
-                                Callback::from(move |_| {
-                                    let mut new_states = (*group_states).clone();
-                                    if let Some(state) = new_states.get_mut("management") {
-                                        state.expanded = !state.expanded;
-                                    }
-                                    group_states.set(new_states);
-                                })
-                            }
-                        >
-                            <i class="fa-solid fa-plus"></i>
-                            {"Management tools"}
-                            <div class="group-summary">
-                                <span class="service-count">{"2 tools ready!"}</span>
-                                <i class={if group_states.get("management").map(|s| s.expanded).unwrap_or(false) {
-                                    "fas fa-chevron-up"
-                                } else {
-                                    "fas fa-chevron-down"
-                                }}></i>
-                            </div>
-                        </h3>
-                        <div class={classes!(
-                            "service-list",
-                            if group_states.get("management").map(|s| s.expanded).unwrap_or(false) {
-                                "expanded"
+                    // Waiting Checks Section (with inactive state when services not connected)
+                    <div class={classes!(
+                        "feature-section",
+                        if !(*email_connected || *whatsapp_connected) { "inactive" } else { "" }
+                    )}>
+                        {
+                            if !(*email_connected || *whatsapp_connected) {
+                                html! {
+                                    <div class="feature-overlay">
+                                        <div class="overlay-content" style="color: #999;">
+                                            <i class="fas fa-lock"></i>
+                                            <p>{"Connect Email or WhatsApp to use Waiting Checks"}</p>
+                                        </div>
+                                    </div>
+                                }
                             } else {
-                                "collapsed"
-                            }
-                        )}>
-                            // Waiting Checks
-                            <div class="service-item">
-                                <div class="service-header">
-                                    <div class="service-name">
-                                        {"⏰ Waiting Checks"}
-                                    </div>
-                                    <button class="info-button" onclick={Callback::from(|_| {
-                                        if let Some(element) = web_sys::window()
-                                            .and_then(|w| w.document())
-                                            .and_then(|d| d.get_element_by_id("waiting-checks-info"))
-                                        {
-                                            let display = element.get_attribute("style")
-                                                .unwrap_or_else(|| "display: none".to_string());
-                                            
-                                            if display.contains("none") {
-                                                let _ = element.set_attribute("style", "display: block");
-                                            } else {
-                                                let _ = element.set_attribute("style", "display: none");
-                                            }
-                                        }
-                                    })}>
-                                        {"ⓘ"}
-                                    </button>
-                                </div>
-                                <p class="service-description">
-                                    {"Set up proactive notifications for when you're waiting for something. Get a message when it's time to check on what you're waiting for. Currently only can be only put for emails. "}
-                                </p>
-                                <div id="waiting-checks-info" class="info-section" style="display: none">
-                                    <h4>{"How It Works"}</h4>
-                                    <div class="info-subsection">
-                                        <ul>
-                                            <li>{"1. Tell lightfriend what you're waiting for"}</li>
-                                            <li>{"2. Set how long to wait before checking"}</li>
-                                            <li>{"3. When lightfriend notices the event, it sends you a text"}</li>
-                                        </ul>
-                                    </div>
-                                </div>
-                            </div>
+                                html! {
+                                    <crate::proactive::waiting_checks::WaitingChecksSection
+                                        service_type={"whatsapp".to_string()}
+                                        checks={Vec::new()}
+                                        on_change={Callback::from(|_| ())}
 
-                            // SMS During Calls
-                            <div class="service-item">
-                                <div class="service-header">
-                                    <div class="service-name">
-                                        {"📱 SMS During Calls"}
-                                    </div>
-                                    <button class="info-button" onclick={Callback::from(|_| {
-                                        if let Some(element) = web_sys::window()
-                                            .and_then(|w| w.document())
-                                            .and_then(|d| d.get_element_by_id("sms-during-calls-info"))
-                                        {
-                                            let display = element.get_attribute("style")
-                                                .unwrap_or_else(|| "display: none".to_string());
-                                            
-                                            if display.contains("none") {
-                                                let _ = element.set_attribute("style", "display: block");
-                                            } else {
-                                                let _ = element.set_attribute("style", "display: none");
-                                            }
-                                        }
-                                    })}>
-                                        {"ⓘ"}
-                                    </button>
-                                </div>
-                                <p class="service-description">
-                                    {"Send information via SMS while you're on a voice call with lightfriend. Perfect for getting details you need to write down or remember."}
-                                </p>
-                                <div id="sms-during-calls-info" class="info-section" style="display: none">
-                                    <h4>{"How It Works"}</h4>
-                                    <div class="info-subsection">
-                                        <ul>
-                                            <li>{"1. During any voice call with lightfriend"}</li>
-                                            <li>{"2. Ask for information to be sent via SMS"}</li>
-                                            <li>{"3. Continue your conversation while receiving the info"}</li>
-                                            <li>{"4. Check your messages after the call for the details"}</li>
-                                        </ul>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                                    />
+                                }
+                            }
+                        }
+                        
                     </div>
+
+                    // Monitored Contacts Section (with inactive state when WhatsApp not connected)
+                    <div class={classes!(
+                        "feature-section",
+                        if !*whatsapp_connected { "inactive" } else { "" }
+                    )}>
+                        {
+                            if !*whatsapp_connected {
+                                html! {
+                                    <div class="feature-overlay">
+                                        <div class="overlay-content" style="color: #999;">
+                                            <i class="fas fa-lock"></i>
+                                            <p>{"Connect WhatsApp to use Monitored Contacts"}</p>
+                                        </div>
+                                    </div>
+                                }
+                            } else {
+                                html! {
+                                    <crate::proactive::constant_monitoring::MonitoredContactsSection
+                                        service_type={"whatsapp".to_string()}
+                                        contacts={Vec::new()}
+                                        on_change={Callback::from(|_| ())}
+                                    />
+                                }
+                            }
+                        }
+                    </div>
+
+                    // Digest Section (with inactive state when no services connected)
+                    <div class={classes!(
+                        "feature-section",
+                        if !(*email_connected || *calendar_connected || *whatsapp_connected) { "inactive" } else { "" }
+                    )}>
+                        {
+                            if !(*email_connected || *calendar_connected || *whatsapp_connected) {
+                                html! {
+                                    <div class="feature-overlay">
+                                        <div class="overlay-content" style="color: #999;">
+                                            <i class="fas fa-lock"></i>
+                                            <p>{"Connect Email, Calendar, or WhatsApp to use Digest"}</p>
+                                        </div>
+                                    </div>
+                                }
+                            } else {
+                                html! {
+                                    <crate::proactive::digest::DigestSection/>
+                                }
+                            }
+                        }
+                    </div>
+
+                    // Critical Section (with inactive state when no services connected)
+                    <div class={classes!(
+                        "feature-section",
+                        if !(*email_connected || *calendar_connected || *whatsapp_connected) { "inactive" } else { "" }
+                    )}>
+                        {
+                            if !(*email_connected || *calendar_connected || *whatsapp_connected) {
+                                html! {
+                                    <div class="feature-overlay">
+                                        <div class="overlay-content" style="color: #999;">
+                                            <i class="fas fa-lock"></i>
+                                            <p>{"Connect Email, Calendar, or WhatsApp to use Critical Notifications"}</p>
+                                        </div>
+                                    </div>
+                                }
+                            } else {
+                                html! {
+                                    <crate::proactive::critical::CriticalSection/>
+                                }
+                            }
+                        }
+                    </div>
+
                     if let Some(err) = (*error).as_ref() {
                         <div class="error-message">
                             {err}
@@ -1441,6 +1528,253 @@ let group_states = use_state(|| {
                             border: 1px solid rgba(255, 99, 71, 0.2);
                         }
 
+                        /* Waiting Checks Section Styles */
+                        .filter-section {
+                            background: rgba(0, 0, 0, 0.2);
+                            border: 1px solid rgba(30, 144, 255, 0.2);
+                            border-radius: 12px;
+                            padding: 1.5rem;
+                            margin-top: 1rem;
+                        }
+
+                        .filter-section.inactive {
+                            opacity: 0.7;
+                        }
+
+                        .filter-header {
+                            display: flex;
+                            align-items: center;
+                            justify-content: space-between;
+                            margin-bottom: 1rem;
+                        }
+
+                        .filter-header h3 {
+                            margin: 0;
+                            color: #F59E0B;
+                            font-size: 1.1rem;
+                        }
+
+                        .waiting-check-input {
+                            display: flex;
+                            gap: 1rem;
+                            margin-bottom: 1rem;
+                        }
+
+                        .waiting-check-fields {
+                            flex: 1;
+                            display: flex;
+                            gap: 1rem;
+                            align-items: center;
+                        }
+
+                        .waiting-check-fields input[type="text"] {
+                            flex: 1;
+                            padding: 0.75rem;
+                            border-radius: 8px;
+                            border: 1px solid rgba(30, 144, 255, 0.2);
+                            background: rgba(0, 0, 0, 0.2);
+                            color: #fff;
+                        }
+
+                        .date-label {
+                            display: flex;
+                            flex-direction: column;
+                            gap: 0.25rem;
+                        }
+
+                        .date-label span {
+                            font-size: 0.8rem;
+                            color: #999;
+                        }
+
+                        .date-label input[type="date"] {
+                            padding: 0.75rem;
+                            border-radius: 8px;
+                            border: 1px solid rgba(30, 144, 255, 0.2);
+                            background: rgba(0, 0, 0, 0.2);
+                            color: #fff;
+                        }
+
+                        .waiting-check-input button {
+                            padding: 0.75rem 1.5rem;
+                            border-radius: 8px;
+                            border: none;
+                            background: linear-gradient(45deg, #F59E0B, #D97706);
+                            color: white;
+                            cursor: pointer;
+                            transition: all 0.3s ease;
+                        }
+
+                        .waiting-check-input button:hover {
+                            transform: translateY(-2px);
+                            box-shadow: 0 4px 20px rgba(245, 158, 11, 0.3);
+                        }
+
+                        .filter-list {
+                            list-style: none;
+                            padding: 0;
+                            margin: 0;
+                        }
+
+                        .filter-list li {
+                            display: flex;
+                            align-items: center;
+                            justify-content: space-between;
+                            padding: 0.75rem;
+                            background: rgba(0, 0, 0, 0.2);
+                            border: 1px solid rgba(30, 144, 255, 0.1);
+                            border-radius: 8px;
+                            margin-bottom: 0.5rem;
+                            color: #fff;
+                        }
+
+                        .filter-list li:last-child {
+                            margin-bottom: 0;
+                        }
+
+                        .filter-list .due-date {
+                            font-size: 0.9rem;
+                            color: #999;
+                            margin-left: 1rem;
+                        }
+
+                        .filter-list .remove-when-found {
+                            font-size: 0.8rem;
+                            color: #F59E0B;
+                            margin-left: 1rem;
+                        }
+
+                        .filter-list .delete-btn {
+                            background: none;
+                            border: none;
+                            color: #FF6347;
+                            font-size: 1.2rem;
+                            cursor: pointer;
+                            padding: 0.25rem 0.5rem;
+                            border-radius: 4px;
+                            transition: all 0.3s ease;
+                        }
+
+                        .filter-list .delete-btn:hover {
+                            background: rgba(255, 99, 71, 0.1);
+                        }
+
+                        .toggle-container {
+                            display: flex;
+                            align-items: center;
+                            gap: 0.75rem;
+                        }
+
+                        .toggle-label {
+                            font-size: 0.9rem;
+                            color: #999;
+                        }
+
+                        .switch {
+                            position: relative;
+                            display: inline-block;
+                            width: 48px;
+                            height: 24px;
+                        }
+
+                        .switch input {
+                            opacity: 0;
+                            width: 0;
+                            height: 0;
+                        }
+
+                        .slider {
+                            position: absolute;
+                            cursor: pointer;
+                            top: 0;
+                            left: 0;
+                            right: 0;
+                            bottom: 0;
+                            background-color: rgba(0, 0, 0, 0.2);
+                            transition: .4s;
+                            border: 1px solid rgba(30, 144, 255, 0.2);
+                        }
+
+                        .slider:before {
+                            position: absolute;
+                            content: "";
+                            height: 16px;
+                            width: 16px;
+                            left: 4px;
+                            bottom: 3px;
+                            background-color: white;
+                            transition: .4s;
+                        }
+
+                        input:checked + .slider {
+                            background-color: #F59E0B;
+                        }
+
+                        input:checked + .slider:before {
+                            transform: translateX(24px);
+                        }
+
+                        .slider.round {
+                            border-radius: 24px;
+                        }
+
+                        .slider.round:before {
+                            border-radius: 50%;
+                        }
+
+                        /* Feature Section Styles */
+                        .feature-section {
+                            position: relative;
+                            background: rgba(30, 30, 30, 0.7);
+                            border: 1px solid rgba(30, 144, 255, 0.1);
+                            border-radius: 16px;
+                            padding: 2rem;
+                            margin-bottom: 2rem;
+                            backdrop-filter: blur(10px);
+                            transition: all 0.3s ease;
+                        }
+
+                        .feature-section.inactive {
+                            opacity: 0.7;
+                            filter: grayscale(50%);
+                        }
+
+                        .feature-overlay {
+                            position: absolute;
+                            top: 0;
+                            left: 0;
+                            right: 0;
+                            bottom: 0;
+                            background: rgba(0, 0, 0, 0.7);
+                            backdrop-filter: blur(4px);
+                            border-radius: 16px;
+                            color: #999;
+                            font-size: 0.9rem;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            z-index: 10;
+                        }
+
+                        .overlay-content {
+                            text-align: center;
+                            color: #999;
+                            font-size: 0.9rem;
+                            padding: 2rem;
+                        }
+
+                        .overlay-content i {
+                            font-size: 2rem;
+                            color: #999 !important;
+                            margin-bottom: 1rem;
+                        }
+
+                        .overlay-content p {
+                            font-size: 1.1rem;
+                            margin: 0;
+                            color: #999 !important;
+                        }
+
                         @media (max-width: 768px) {
                             .connect-section {
                                 padding: 0;
@@ -1454,8 +1788,23 @@ let group_states = use_state(|| {
                             .service-item {
                                 padding: 1rem;
                             }
-                        }
 
+                            .feature-section {
+                                padding: 1rem;
+                            }
+
+                            .overlay-content {
+                                padding: 1rem;
+                            }
+
+                            .overlay-content i {
+                                font-size: 1.5rem;
+                            }
+
+                            .overlay-content p {
+                                font-size: 1rem;
+                            }
+                        }
 
 
                         "#}

@@ -290,6 +290,10 @@ diesel::table! {
         sub_country -> Nullable<Text>,
         save_context -> Nullable<Integer>,
         info -> Nullable<Text>,
+        morning_digest -> Nullable<Text>,
+        day_digest -> Nullable<Text>,
+        evening_digest -> Nullable<Text>,
+        critical_enabled -> Bool,
     }
 }
 
@@ -322,6 +326,7 @@ diesel::table! {
         discount_tier -> Nullable<Text>,
         free_reply -> Bool,
         confirm_send_event -> Nullable<Text>,
+        waiting_checks_count -> Integer,
     }
 }
 

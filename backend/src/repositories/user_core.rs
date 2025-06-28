@@ -228,7 +228,6 @@ impl UserCore {
             ("USA_PHONE", "+1"),
             ("AUS_PHONE", "+61"),
             ("GB_PHONE", "+44"),
-            ("ISR_PHONE", "+972"),
         ];
 
         // Collect phone numbers into a HashMap for easier matching
@@ -537,6 +536,76 @@ impl UserCore {
 
             Ok(())
         })
+    }
+
+    pub fn update_digests(&self, user_id: i32, morning_digest: Option<&str>, day_digest: Option<&str>, evening_digest: Option<&str>) -> Result<(), DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+
+        // Update the digest settings
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set((
+                user_settings::morning_digest.eq(morning_digest.map(|s| s.to_string())),
+                user_settings::day_digest.eq(day_digest.map(|s| s.to_string())),
+                user_settings::evening_digest.eq(evening_digest.map(|s| s.to_string())),
+            ))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn get_digests(&self, user_id: i32) -> Result<(Option<String>, Option<String>, Option<String>), DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+
+        // Get the user settings
+        let settings = user_settings::table
+            .filter(user_settings::user_id.eq(user_id))
+            .select((
+                user_settings::morning_digest,
+                user_settings::day_digest,
+                user_settings::evening_digest,
+            ))
+            .first::<(Option<String>, Option<String>, Option<String>)>(&mut conn)?;
+
+        Ok(settings)
+    }
+
+    pub fn update_critical_enabled(&self, user_id: i32, enabled: bool) -> Result<(), DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+
+        // Update the critical_enabled setting
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::critical_enabled.eq(enabled))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn get_critical_enabled(&self, user_id: i32) -> Result<bool, DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+
+        // Get the critical_enabled setting
+        let critical_enabled = user_settings::table
+            .filter(user_settings::user_id.eq(user_id))
+            .select(user_settings::critical_enabled)
+            .first::<bool>(&mut conn)?;
+
+        Ok(critical_enabled)
     }
 
 }

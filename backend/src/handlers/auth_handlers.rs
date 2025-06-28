@@ -519,6 +519,7 @@ pub async fn register(
         verified: false,
         credits: 0.00,
         charge_when_under: false,
+        waiting_checks_count: 0,
     };
 
     state.user_core.create_user(new_user).map_err(|e| {

@@ -84,7 +84,6 @@ pub async fn update_preferred_number_admin(
         std::env::var("FIN_PHONE").expect("FIN_PHONE must be set in environment"),
         std::env::var("AUS_PHONE").expect("AUS_PHONE must be set in environment"),
         std::env::var("GB_PHONE").expect("GB_PHONE must be set in environment"),
-        std::env::var("ISR_PHONE").expect("ISR_PHONE must be set in environment"),
     ];
 
     // Validate that the preferred number is in the allowed list

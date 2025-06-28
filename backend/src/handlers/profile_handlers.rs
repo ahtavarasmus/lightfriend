@@ -8,6 +8,16 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
+pub struct CriticalEnabledRequest {
+    enabled: bool,
+}
+
+#[derive(Serialize)]
+pub struct CriticalEnabledResponse {
+    enabled: bool,
+}
+
+#[derive(Deserialize)]
 pub struct TimezoneUpdateRequest {
     timezone: String,
 }
@@ -50,8 +60,6 @@ pub async fn migrate_to_daily(
         "AU"
     } else if user.phone_number.starts_with("+44") {
         "UK"
-    } else if user.phone_number.starts_with("+972") {
-        "IL"
     } else {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -65,7 +73,6 @@ pub async fn migrate_to_daily(
         "FI" => 4.0,   // Basic plan limit for Finland
         "UK" => 4.0,   // Basic plan limit for UK
         "AU" => 3.0,   // Basic plan limit for Australia
-        "IL" => 2.0,   // Basic plan limit for Israel
         _ => return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({"error": "Invalid country code"}))
@@ -247,7 +254,6 @@ pub async fn update_preferred_number(
             std::env::var("FIN_PHONE").expect("FIN_PHONE must be set in environment"),
             std::env::var("AUS_PHONE").expect("AUS_PHONE must be set in environment"),
             std::env::var("GB_PHONE").expect("GB_PHONE must be set in environment"),
-            std::env::var("ISR_PHONE").expect("ISR_PHONE must be set in environment"),
         ];
         // Use the first available number as default
         allowed_numbers[0].clone()
@@ -730,6 +736,105 @@ pub async fn update_telegram_general_checks(
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to update Telegram general checks: {}", e)}))
         )),
+    }
+}
+
+#[derive(Serialize)]
+pub struct DigestsResponse {
+    morning_digest_time: Option<String>,
+    day_digest_time: Option<String>,
+    evening_digest_time: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateDigestsRequest {
+    morning_digest_time: Option<String>,
+    day_digest_time: Option<String>,
+    evening_digest_time: Option<String>,
+}
+
+pub async fn get_critical_enabled(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<CriticalEnabledResponse>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_core.get_critical_enabled(auth_user.user_id) {
+        Ok(enabled) => {
+            Ok(Json(CriticalEnabledResponse{
+                enabled,
+            }))
+        },
+        Err(e) => {
+            tracing::error!("Failed to get critical enabled setting: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to get critical enabled setting: {}", e)}))
+            ))
+        }
+    }
+}
+
+
+pub async fn get_digests(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<DigestsResponse>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_core.get_digests(auth_user.user_id) {
+        Ok((morning_digest_time, day_digest_time, evening_digest_time)) => {
+            Ok(Json(DigestsResponse {
+                morning_digest_time,
+                day_digest_time,
+                evening_digest_time,
+            }))
+        },
+        Err(e) => {
+            tracing::error!("Failed to get digest settings: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to get digest settings: {}", e)}))
+            ))
+        }
+    }
+}
+
+pub async fn update_digests(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<UpdateDigestsRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_core.update_digests(
+        auth_user.user_id,
+        request.morning_digest_time.as_deref(),
+        request.day_digest_time.as_deref(),
+        request.evening_digest_time.as_deref(),
+    ) {
+        Ok(_) => Ok(Json(json!({
+            "message": "Digest settings updated successfully"
+        }))),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to update digest settings: {}", e)}))
+        )),
+    }
+}
+
+pub async fn update_critical_enabled(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<CriticalEnabledRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+
+    // Update critical enabled setting
+    match state.user_core.update_critical_enabled(auth_user.user_id, request.enabled) {
+        Ok(_) => Ok(Json(json!({
+            "message": "Critical enabled setting updated successfully"
+        }))),
+        Err(e) => {
+            tracing::error!("Failed to update critical enabled setting: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to update critical enabled setting: {}", e)}))
+            ))
+        }
     }
 }
 

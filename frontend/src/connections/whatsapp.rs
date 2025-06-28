@@ -546,6 +546,39 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                             if *is_connecting {
                                 if let Some(pairing_code) = (*qr_code).clone() {
                                     <div class="verification-code-container">
+                                    <button onclick={{
+                                        let error = error.clone();
+                                        Callback::from(move |_| {
+                                            let error = error.clone();
+                                            if let Some(token) = window()
+                                                .and_then(|w| w.local_storage().ok())
+                                                .flatten()
+                                                .and_then(|storage| storage.get_item("token").ok())
+                                                .flatten()
+                                            {
+                                                spawn_local(async move {
+                                                    match Request::post(&format!("{}/api/auth/whatsapp/reset", config::get_backend_url()))
+                                                        .header("Authorization", &format!("Bearer {}", token))
+                                                        .send()
+                                                        .await
+                                                    {
+                                                        Ok(_) => {
+                                                            // Reload the page to restart the connection process
+                                                            if let Some(window) = web_sys::window() {
+                                                                                                            let location = window.location();
+                                                                                                            let _ = location.reload();
+                                                            }
+                                                        }
+                                                        Err(_) => {
+                                                            error.set(Some("Failed to reset WhatsApp connection".to_string()));
+                                                        }
+                                                    }
+                                                });
+                                            }
+                                        })
+                                    }} class="reset-button">
+                                        {"Having trouble? Reset Connection"}
+                                    </button>
                                     <p>{"Enter this code in WhatsApp to connect:"}</p>
                                     <div class="verification-code">
                                         {pairing_code}
@@ -1042,6 +1075,25 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
 
                     .service-status {
                         white-space: nowrap;
+                    }
+
+                    .reset-button {
+                        background: linear-gradient(45deg, #FF8C00, #FFA500);
+                        color: white;
+                        border: none;
+                        padding: 0.8rem 1.5rem;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        margin-bottom: 1rem;
+                        width: 100%;
+                        font-weight: bold;
+                    }
+
+                    .reset-button:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 12px rgba(255, 140, 0, 0.3);
+                        background: linear-gradient(45deg, #FFA500, #FFB700);
                     }
 
                     @keyframes spin {

@@ -20,10 +20,7 @@ use crate::{
 // Request DTOs
 #[derive(Deserialize, Serialize)]
 pub struct WaitingCheckRequest {
-    waiting_type: String,
     content: String,
-    due_date: i32,
-    remove_when_found: bool,
     service_type: String, // imap, whatsapp, etc.
 }
 
@@ -61,8 +58,6 @@ pub struct ConnectedService {
 pub struct WaitingCheckResponse {
     user_id: i32,
     content: String,
-    due_date: i32,
-    remove_when_found: bool,
     service_type: String,
 }
 
@@ -87,6 +82,7 @@ pub struct ImportancePriorityResponse {
     service_type: String,
 }
 
+
 // Waiting Checks handlers
 pub async fn create_waiting_check(
     State(state): State<Arc<AppState>>,
@@ -97,15 +93,15 @@ pub async fn create_waiting_check(
 
     let new_check = NewWaitingCheck {
         user_id: auth_user.user_id,
-        due_date: request.due_date,
+        due_date: 0,
         content: request.content,
-        remove_when_found: request.remove_when_found,
+        remove_when_found: true, // Always false now
         service_type: request.service_type,
     };
 
     match state.user_repository.create_waiting_check(&new_check) {
         Ok(_) => {
-            println!("Successfully created waiting check {} for user {}", request.waiting_type, auth_user.user_id);
+            println!("Successfully created waiting check for user {}", auth_user.user_id);
             Ok(Json(json!({"message": "Waiting check created successfully"})))
         },
         Err(DieselError::RollbackTransaction) => Err((
@@ -150,12 +146,11 @@ pub async fn delete_waiting_check(
 
 pub async fn get_waiting_checks(
     State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Path(service_type): Path<String>,
+    auth_user: AuthUser
 ) -> Result<Json<Vec<WaitingCheckResponse>>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Fetching waiting checks for user {} and service {}", auth_user.user_id, service_type);
+    println!("Fetching waiting checks for user {}", auth_user.user_id);
 
-    let checks = state.user_repository.get_waiting_checks(auth_user.user_id, &service_type)
+    let checks = state.user_repository.get_waiting_checks_all(auth_user.user_id)
         .map_err(|e| {
             tracing::error!("Failed to fetch waiting checks for user {}: {}", auth_user.user_id, e);
             (
@@ -167,8 +162,6 @@ pub async fn get_waiting_checks(
     let response: Vec<WaitingCheckResponse> = checks.into_iter().map(|check| WaitingCheckResponse {
         user_id: check.user_id,
         content: check.content,
-        due_date: check.due_date,
-        remove_when_found: check.remove_when_found,
         service_type: check.service_type,
     }).collect();
 
@@ -236,12 +229,11 @@ pub async fn delete_priority_sender(
 
 pub async fn get_priority_senders(
     State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Path(service_type): Path<String>,
+    auth_user: AuthUser
 ) -> Result<Json<Vec<PrioritySenderResponse>>, (StatusCode, Json<serde_json::Value>)> {
-    println!("Fetching priority senders for user {} and service {}", auth_user.user_id, service_type);
+    println!("Fetching priority senders for user {}", auth_user.user_id);
 
-    let senders = state.user_repository.get_priority_senders(auth_user.user_id, &service_type)
+    let senders = state.user_repository.get_priority_senders_all(auth_user.user_id)
         .map_err(|e| {
             tracing::error!("Failed to fetch priority senders for user {}: {}", auth_user.user_id, e);
             (
@@ -249,6 +241,8 @@ pub async fn get_priority_senders(
                 Json(json!({"error": format!("Database error: {}", e)}))
             )
         })?;
+
+    println!("senders found: {}", !senders.is_empty());
 
     let response: Vec<PrioritySenderResponse> = senders.into_iter().map(|sender| PrioritySenderResponse {
         user_id: sender.user_id,

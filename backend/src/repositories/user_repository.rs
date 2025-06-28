@@ -528,6 +528,22 @@ impl UserRepository {
         Ok(())
     }
 
+    pub fn delete_waiting_check_by_id(&self, user_id: i32, id: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(waiting_checks::table)
+            .filter(waiting_checks::user_id.eq(user_id))
+            .filter(waiting_checks::id.eq(id))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_waiting_checks_all(&self, user_id: i32) -> Result<Vec<WaitingCheck>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        waiting_checks::table
+            .filter(waiting_checks::user_id.eq(user_id))
+            .load::<WaitingCheck>(&mut conn)
+    }
+
     pub fn get_waiting_checks(&self, user_id: i32, service_type: &str) -> Result<Vec<WaitingCheck>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         waiting_checks::table
@@ -553,6 +569,13 @@ impl UserRepository {
             .filter(priority_senders::sender.eq(sender))
             .execute(&mut conn)?;
         Ok(())
+    }
+
+    pub fn get_priority_senders_all(&self, user_id: i32) -> Result<Vec<PrioritySender>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        priority_senders::table
+            .filter(priority_senders::user_id.eq(user_id))
+            .load::<PrioritySender>(&mut conn)
     }
 
     pub fn get_priority_senders(&self, user_id: i32, service_type: &str) -> Result<Vec<PrioritySender>, DieselError> {
@@ -1943,7 +1966,7 @@ impl UserRepository {
             .unwrap()
             .as_secs() as i32;
 
-        let new_processed_email = crate::models::user_models::NewProcessedEmails {
+        let new_processed_email = crate::models::user_models::NewProcessedEmail {
             user_id,
             email_uid: email_uid.to_string(),
             processed_at: current_time,

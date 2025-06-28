@@ -188,339 +188,134 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         let b_date = b.date.unwrap_or_else(|| chrono::Utc::now());
                                         b_date.cmp(&a_date)
                                     });
-                                    
-                                    // Take only the most recent email
-                                    let latest_email = sorted_emails.into_iter().next().unwrap();
-                                    let emails = vec![latest_email];
 
-
-                                    let importance_priority = match state.user_repository.get_importance_priority(user.id, "imap") {
-                                        Ok(Some(priority)) => priority.threshold,
-                                        Ok(None) => 7, // Default threshold
+                                    let priority_senders = match state.user_repository.get_priority_senders(user.id, "imap") {
+                                        Ok(senders) => senders,
                                         Err(e) => {
-                                            error!("Failed to get importance priority for user {}: {}", user.id, e);
-                                            7 // Default threshold on error
-                                        }
-                                    };
-                                    // Create OpenAI client
-                                    let api_key = match env::var("OPENROUTER_API_KEY") {
-                                        Ok(key) => key,
-                                        Err(e) => {
-                                            error!("Failed to get OPENROUTER_API_KEY: {}", e);
-                                            continue;
+                                            tracing::error!("Failed to get priority senders for user {}: {}", user.id, e);
+                                            Vec::new()
                                         }
                                     };
 
-                                    let client = match openai_api_rs::v1::api::OpenAIClient::builder()
-                                        .with_endpoint("https://openrouter.ai/api/v1")
-                                        .with_api_key(api_key)
-                                        .build() {
-                                        Ok(client) => client,
-                                        Err(e) => {
-                                            error!("Failed to build OpenAI client: {}", e);
-                                            continue;
-                                        }
-                                    };
+                                    // Mark emails as processed and format them for importance checking
+                                    let mut emails_content = String::new();
+                                    for email in &sorted_emails {
 
-                                    let mut important_emails: Option<Vec<(ImapEmailPreview, serde_json::Value)>> = None;
-
-                                    match crate::utils::imap_utils::judge_email_importance(&state, user.id, emails.clone(), importance_priority, last_activated).await {
-                                        Ok(important_emails_with_evaluations) => {
-                                            if important_emails_with_evaluations.is_empty() {
-                                                debug!("No important emails found for user {}", user.id);
+                                        // Check if this email was already processed
+                                        if let Ok(already_processed) = state.user_repository.is_email_processed(user.id, &email.id) {
+                                            if already_processed {
+                                                debug!("Skipping already processed email {}", email.id);
                                                 continue;
                                             }
-
-                                            // Store the important emails for later use
-                                            important_emails = Some(important_emails_with_evaluations.clone());
-
-                                            for (email, evaluation) in &important_emails_with_evaluations {
-                                                debug!("Parsed evaluation");
-
-                                                let current_time = std::time::SystemTime::now()
-                                                    .duration_since(std::time::UNIX_EPOCH)
-                                                    .unwrap()
-                                                    .as_secs() as i32;
-
-                                                let new_judgment = crate::models::user_models::NewEmailJudgment {
-                                                    user_id: user.id,
-                                                    email_timestamp: evaluation["email_timestamp"].as_i64().unwrap_or(0) as i32,
-                                                    processed_at: current_time,
-                                                    should_notify: evaluation["should_notify"].as_bool().unwrap_or(false),
-                                                    score: evaluation["score"].as_i64().unwrap_or(0) as i32,
-                                                    reason: evaluation["reason"].as_str().unwrap_or("No reason provided").to_string(),
-                                                };
-
-                                                if let Err(e) = state.user_repository.create_email_judgment(&new_judgment) {
-                                                    error!("Failed to create email judgment log: {}", e);
-                                                } else {
-                                                    debug!("Successfully created email judgment log for email");
-                                                }
-
-                                                // Check if notification was due to a waiting check
-                                                if let Some(matched_check_id) = evaluation["matched_waiting_check"].as_i64() {
-                                                    debug!("Matched waiting check ID: {}", matched_check_id);
-                                                    // Get waiting checks again to handle the removal
-                                                    if let Ok(waiting_checks) = state.user_repository.get_waiting_checks(user.id, "imap") {
-                                                        if let Some(check) = waiting_checks.iter().find(|wc| wc.id == Some(matched_check_id as i32)) {
-                                                            if check.remove_when_found {
-                                                                debug!("Removing waiting check with ID {}", matched_check_id);
-                                                                if let Err(e) = state.user_repository.delete_waiting_check(
-                                                                    user.id,
-                                                                    "imap",
-                                                                    &check.content
-                                                                ) {
-                                                                    error!("Failed to delete waiting check: {}", e);
-                                                                }
-                                                            }
-                                                        }
-
-                                                    }
-
-                                                }
-
-                                            }
                                         }
-                                        Err(e) => {
-                                            error!("Failed to judge email importance: {}", e);
+                                        
+                                        if let Err(e) = state.user_repository.mark_email_as_processed(user.id, &email.id) {
+                                            error!("Failed to mark email {} as processed: {}", email.id, e);
                                             continue;
                                         }
-                                    }
 
-                                    // Check if we should process this notification based on messages left
-                                    let should_continue = match state.user_repository.decrease_messages_left(user.id) {
-                                        Ok(msgs_left) => {
-                                            debug!("User {} has {} messages left after decrease", user.id, msgs_left);
-                                            msgs_left > 0
-                                        },
-                                        Err(e) => {
-                                            error!("Failed to decrease messages left for user {}: {}", user.id, e);
-                                            false
-                                        }
-                                    };
-
-                                    if !should_continue {
-                                        debug!("Skipping further processing for user {} due to no messages left", user.id);
-                                        continue;
-                                    }
-                                    // Get user settings first
-                                    let user_settings = match state.user_core.get_user_settings(user.id) {
-                                        Ok(settings) => settings,
-                                        Err(e) => {
-                                            error!("Failed to get user settings: {}", e);
+                                        // Check if sender matches priority senders and send the noti anyways about it
+                                        if priority_senders.iter().any(|priority_sender| {
+                                            email.from.as_deref().unwrap_or("Uknown").to_lowercase().contains(&priority_sender.sender.to_lowercase())
+                                        }) {
+                                            tracing::info!("Fast check: Priority sender matched for user {}", user.id);
+                                            
+                                            // Format the notification message with sender and content
+                                            let message = format!(
+                                                "Email from: {}\nSubject: {}\nContent: {}",
+                                                email.from.as_deref().unwrap_or("Unknown"),
+                                                email.subject.as_deref().unwrap_or("No subject"),
+                                                email.body.as_deref().unwrap_or("No content").chars().take(200).collect::<String>()
+                                            );
+                                            
+                                            // Spawn a new task for sending notification
+                                            let state_clone = state.clone();
+                                            tokio::spawn(async move {
+                                                crate::utils::imap_utils::send_notification_about_email(
+                                                    &state_clone,
+                                                    user.id,
+                                                    &message,
+                                                ).await;
+                                            });
                                             continue;
                                         }
-                                    };
-
-                                    let sender_number = match user.preferred_number.clone() {
-                                        Some(number) => {
-                                            tracing::debug!("Using user's preferred number: {}", number);
-                                            number
-                                        },
-                                        None => {
-                                            let number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set");
-                                            tracing::debug!("Using default SHAZAM_PHONE_NUMBER: {}", number);
-                                            number
-                                        },
-                                    };
-
-                                    // Get the conversation for the user
-                                    let conversation = match state.user_conversations.get_conversation(&user, sender_number).await {
-                                        Ok(conv) => conv,
-                                        Err(e) => {
-                                            eprintln!("Failed to ensure conversation exists: {}", e);
-                                            continue;
-                                        }
-                                    };
-
-                                    // Format the email data for LLM processing
-                                    let email_summaries = important_emails.as_ref().unwrap().iter()
-                                        .take(3) // Still limit to 3 emails
-                                        .map(|(email, _)| format!(
-                                            "From: {} \nSubject: {}\nBody: {}",
-                                            email.from_email.as_deref().unwrap_or("unknown@email.com"),
+                                        // Add email to content string for importance checking
+                                        emails_content.push_str(&format!(
+                                            "From: {}\nSubject: {}\nDate: {}\nBody: {}\n---\n",
+                                            email.from.as_deref().unwrap_or("Unknown"),
                                             email.subject.as_deref().unwrap_or("No subject"),
-                                            email.body.as_deref().unwrap_or("No body")
-                                        ))
-                                        .collect::<Vec<_>>()
-                                        .join("\n\n---\n\n");
+                                            email.date_formatted.as_deref().unwrap_or("Unknown date"),
+                                            email.body.as_deref().unwrap_or("No content")
+                                        ));
+                                    }
 
-                                    // Define the system message for notification formatting
-                                    let format_system_message = "You are an AI assistant that creates very concise SMS notifications about important emails. \
-                                        Create notifications that are STRICTLY under 120 characters and use ONLY ASCII characters (no emoji, no Unicode). \
-                                        Focus only on the most critical information. \
-                                        Always start with 'Email:' and be direct and brief. \
-                                        Never use quotes or special characters.";
 
-                                    // Define the tool for notification formatting
-                                    let mut format_properties = std::collections::HashMap::new();
-                                    format_properties.insert(
-                                        "notification_text".to_string(),
-                                        Box::new(openai_api_rs::v1::types::JSONSchemaDefine {
-                                            schema_type: Some(openai_api_rs::v1::types::JSONSchemaType::String),
-                                            description: Some("The formatted notification message".to_string()),
-                                            ..Default::default()
-                                        }),
-                                    );
 
-                                    let format_tools = vec![
-                                        openai_api_rs::v1::chat_completion::Tool {
-                                            r#type: openai_api_rs::v1::chat_completion::ToolType::Function,
-                                            function: openai_api_rs::v1::types::Function {
-                                                name: String::from("format_notification"),
-                                                description: Some(String::from("Format a brief ASCII-only notification under 120 chars")),
-                                                parameters: openai_api_rs::v1::types::FunctionParameters {
-                                                    schema_type: openai_api_rs::v1::types::JSONSchemaType::Object,
-                                                    properties: Some(format_properties),
-                                                    required: Some(vec![String::from("notification_text")]),
-                                                },
-                                            },
-                                        },
-                                    ];
-
-                                    // Add a post-processing step to ensure notification length and character constraints
-                                    let process_notification = |notification: String| -> String {
-                                        // Remove any non-ASCII characters
-                                        let ascii_only: String = notification.chars()
-                                            .filter(|c| c.is_ascii())
-                                            .collect();
-                                        // Truncate to 120 chars if needed, ensuring we don't panic on unicode boundaries
-                                        if ascii_only.len() > 120 {
-                                            ascii_only.char_indices()
-                                                .take_while(|(i, _)| *i < 120)
-                                                .map(|(_, c)| c)
-                                                .collect()
-                                        } else {
-                                            ascii_only
+                                    let waiting_checks = match state.user_repository.get_waiting_checks(user.id, "imap") {
+                                        Ok(checks) => checks,
+                                        Err(e) => {
+                                            tracing::error!("Failed to get waiting checks for user {}: {}", user.id, e);
+                                            Vec::new()
                                         }
                                     };
 
-                                    let format_messages = vec![
-                                        openai_api_rs::v1::chat_completion::ChatCompletionMessage {
-                                            role: openai_api_rs::v1::chat_completion::MessageRole::system,
-                                            content: openai_api_rs::v1::chat_completion::Content::Text(format_system_message.to_string()),
-                                            name: None,
-                                            tool_calls: None,
-                                            tool_call_id: None,
-                                        },
-                                        openai_api_rs::v1::chat_completion::ChatCompletionMessage {
-                                            role: openai_api_rs::v1::chat_completion::MessageRole::user,
-                                            content: openai_api_rs::v1::chat_completion::Content::Text(format!(
-                                                "Please format a notification for these {} important emails:\n\n{}",
-                                                important_emails.clone().unwrap().len(),
-                                                email_summaries
-                                            )),
-                                            name: None,
-                                            tool_calls: None,
-                                            tool_call_id: None,
-                                        },
-                                    ];
+                                    // Check message importance based on waiting checks and criticality
+                                    match crate::proactive::utils::check_message_importance(&emails_content, waiting_checks).await {
+                                        Ok((waiting_check_id, is_critical, message)) => {
+                                            if is_critical {
+                                                tracing::info!(
+                                                    "Email critical check passed for user {}: {}",
+                                                    user.id, message
+                                                );
+                                                                
+                                                // Spawn a new task for sending critical message notification
+                                                let state_clone = state.clone();
+                                                let message_clone= message.clone();
+                                                tokio::spawn(async move {
+                                                    crate::utils::imap_utils::send_notification_about_email(
+                                                        &state_clone,
+                                                        user.id,
+                                                        &message_clone,
+                                                    ).await;
+                                                });
 
-                                    let format_req = openai_api_rs::v1::chat_completion::ChatCompletionRequest::new(
-                                        "meta-llama/llama-4-maverick".to_string(),
-                                        format_messages,
-                                    )
-                                    .tools(format_tools)
-                                    .tool_choice(openai_api_rs::v1::chat_completion::ToolChoiceType::Required);
+                                            } else if let Some(check_id) = waiting_check_id {
+                                                tracing::info!(
+                                                    "Email waiting check matched for user {} (check_id: {:?}): {}",
+                                                    user.id, check_id, message
+                                                );
 
-                                    // Get the formatted notification from LLM
-                                    let notification = match client.chat_completion(format_req).await {
-                                        Ok(response) => {
-                                            if let Some(tool_calls) = response.choices[0].message.tool_calls.as_ref() {
-                                                if let Some(tool_call) = tool_calls.first() {
-                                                    if let Some(arguments) = &tool_call.function.arguments {
-                                                        match serde_json::from_str::<serde_json::Value>(arguments) {
-                                                            Ok(formatted) => {
-                                                                process_notification(
-                                                                    formatted["notification_text"]
-                                                                        .as_str()
-                                                                        .unwrap_or("Email: New important message received.")
-                                                                        .to_string()
-                                                                )
-                                                            }
-                                                            Err(e) => {
-                                                                error!("Failed to parse notification format response: {}", e);
-                                                                format!("Email: {} new important messages.", important_emails.unwrap().len())
-                                                            }
-                                                        }
-                                                    } else {
-                                                        format!("Email: {} new important messages.", important_emails.unwrap().len())
+                                                // Delete the waiting check since it has been matched
+                                                match state.user_repository.delete_waiting_check_by_id(user.id, check_id) {
+                                                    Ok(_) => {
+                                                        tracing::info!("Successfully deleted waiting check {} for user {}", check_id, user.id);
+                                                    },
+                                                    Err(e) => {
+                                                        tracing::error!("Failed to delete waiting check {} for user {}: {}", check_id, user.id, e);
                                                     }
-                                                } else {
-                                                    format!("Email: {} new important messages.", important_emails.unwrap().len())
                                                 }
+
+                                                // Spawn a new task for sending critical message notification
+                                                let state_clone = state.clone();
+                                                let message_clone= message.clone();
+                                                tokio::spawn(async move {
+                                                    crate::utils::imap_utils::send_notification_about_email(
+                                                        &state_clone,
+                                                        user.id,
+                                                        &message_clone,
+                                                    ).await;
+                                                });
+
                                             } else {
-                                                format!("Email: {} new important messages.", important_emails.unwrap().len())
+                                                tracing::debug!(
+                                                    "Email not considered important for user {} (check_id: {:?}): {}",
+                                                    user.id, waiting_check_id, message
+                                                );
+
                                             }
                                         }
                                         Err(e) => {
-                                            error!("Failed to get notification format from LLM: {}", e);
-                                            format!("Email: {} new important messages.", important_emails.unwrap().len())
-                                        }
-                                    };
-
-                                    // Check if this is the final message
-                                    let is_final_message = user.msgs_left <= 1;
-
-                                    // Append final message notice if needed
-                                    let final_notification = if is_final_message {
-                                        format!("{}\n\nNote: This is your final proactive message for this month.", notification)
-                                    } else {
-                                        notification
-                                    };
-
-                                    // Check user's notification preference from settings
-                                    let notification_type = user_settings.notification_type.as_deref().unwrap_or("sms");
-                                    match notification_type {
-                                        "call" => {
-                                            // For calls, we need a brief intro and detailed message
-                                            let notification_first_message = "Hello, I have an important email to tell you about.".to_string();
-                                            
-                                            // Extract the email ID from the latest email
-                                            let email_id = emails.first().map(|email| email.id.clone()).unwrap_or_default();
-                                            
-                                            // Create dynamic variables with email ID
-                                            let mut dynamic_vars = std::collections::HashMap::new();
-                                            dynamic_vars.insert("email_id".to_string(), email_id.clone());
-                                            
-                                            match crate::api::elevenlabs::make_notification_call(
-                                                &state.clone(),
-                                                user.phone_number.clone(),
-                                                user.preferred_number.unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set")),
-                                                email_id,
-                                                "email".to_string(),
-
-                                                notification_first_message,
-                                                final_notification.clone(),
-                                                user.id.to_string(),
-                                                user_settings.timezone,
-                                            ).await {
-                                                Ok(mut response) => {
-                                                    // Add dynamic variables to the client data
-                                                    if let Some(client_data) = response.get_mut("client_data") {
-                                                        if let Some(obj) = client_data.as_object_mut() {
-                                                            obj.extend(dynamic_vars.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))));
-                                                        }
-                                                    }
-                                                    debug!("Successfully initiated call notification for user {} with email ID", user.id);
-                                                },
-                                                Err((_, json_err)) => error!("Failed to initiate call notification: {:?}", json_err),
-                                            }
-                                        },
-
-
-                                        _ => { // Default to SMS for "sms" or None
-                                            match twilio_utils::send_conversation_message(
-                                                &conversation.conversation_sid,
-                                                &conversation.twilio_number,
-                                                &final_notification,
-                                                true,
-                                                None,
-                                                &user,
-                                            ).await {
-                                                Ok(_) => debug!("Successfully sent email notification to user {}", user.id),
-                                                Err(e) => error!("Failed to send email notification: {}", e),
-                                            }
+                                            tracing::error!("Failed to check email importance: {}", e);
                                         }
                                     }
                                 }
@@ -721,14 +516,12 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         (Some("FI"), "tier 1") => Ok(4.0),   // Finland: 4/day
                                         (Some("UK"), "tier 1") => Ok(4.0),   // United Kingdom: 4/day
                                         (Some("AU"), "tier 1") => Ok(3.0),   // Australia: 3/day
-                                        (Some("IL"), "tier 1") => Ok(2.0),   // Israel: 2/day
                                         
                                         // Tier 2 (Escape Plan) credits
                                         (Some("US"), "tier 2") => Ok(15.0),  // United States: 15/day
                                         (Some("FI"), "tier 2") => Ok(10.0),  // Finland: 10/day
                                         (Some("UK"), "tier 2") => Ok(10.0),  // United Kingdom: 10/day
                                         (Some("AU"), "tier 2") => Ok(6.0),   // Australia: 6/day
-                                        (Some("IL"), "tier 2") => Ok(3.0),   // Israel: 3/day
                                         
                                         (Some(country), tier_type) => {
                                             error!("Invalid country/tier combination for user {}: country '{}', tier '{}'", user.id, country, tier_type);
@@ -934,7 +727,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                                             &state_clone,
                                                                             user_clone.phone_number.clone(),
                                                                             sender_number_clone,
-                                                                            "1".to_string(),
                                                                             "calendar".to_string(),
                                                                             intro,
                                                                             notification_clone,

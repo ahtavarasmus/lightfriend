@@ -570,7 +570,6 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                             "FI" => (4, 10),
                                                             "UK" => (4, 10),
                                                             "AU" => (3, 6),
-                                                            "IL" => (2, 3),
                                                             _ => (0, 0)
                                                         };
                                                         if sub_tier == "hard_mode" {
@@ -599,7 +598,6 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                         "FI" => (4, 10),
                                                         "UK" => (4, 10),
                                                         "AU" => (3, 6),
-                                                        "IL" => (2, 3),
                                                         _ => (0, 0)
                                                     };
                                                     let daily_limit = if user_profile.sub_tier.as_ref().map_or(false, |tier| tier == "hard_mode") {

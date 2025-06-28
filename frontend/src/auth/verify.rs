@@ -23,7 +23,6 @@ const PHONE_NUMBERS: &[(&str, &str)] = &[
     ("fin", "+358454901522"),
     ("aus", "+61489260976"),
     ("gbr", "+447383240344"),
-    ("isr", "+972534513541"),
 ];
 
 #[function_component]

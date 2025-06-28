@@ -28,7 +28,6 @@ pub async fn check_user_credits(
             Some("FI") => (0.30, 0.0042),  // Finland: €0.30/msg, €0.25/minute
             Some("UK") => (0.30, 0.0042),  // UK: £0.30/msg, £0.25/minute
             Some("AU") => (0.40, 0.0042),  // Australia: A$0.40/msg, A$0.25/minute
-            Some("IL") => (0.90, 0.0033),  // Israel: ₪0.90/msg, ₪0.20/minute
             Some(_) => (0.30, 0.0042),     // Default rate for unrecognized country codes
             None => {
                 // Fallback to phone number based detection
@@ -40,8 +39,6 @@ pub async fn check_user_credits(
                     (0.30, 0.0042)  // UK
                 } else if user.phone_number.starts_with("+61") {
                     (0.40, 0.0042)  // Australia
-                } else if user.phone_number.starts_with("+972") {
-                    (0.90, 0.0033)  // Israel
                 } else {
                     (0.30, 0.0042)  // Default to Finland/UK rate
                 }
@@ -178,7 +175,6 @@ pub fn deduct_user_credits(
             Some("FI") => (0.30, 0.0042),  // Finland: €0.30/msg, €0.25/minute
             Some("UK") => (0.30, 0.0042),  // UK: £0.30/msg, £0.25/minute
             Some("AU") => (0.40, 0.0042),  // Australia: A$0.40/msg, A$0.25/minute
-            Some("IL") => (0.90, 0.0033),  // Israel: ₪0.90/msg, ₪0.20/minute
             Some(_) => (0.30, 0.0042),     // Default rate for unrecognized country codes
             None => {
                 // Fallback to phone number based detection
@@ -190,8 +186,6 @@ pub fn deduct_user_credits(
                     (0.30, 0.0042)  // UK
                 } else if user.phone_number.starts_with("+61") {
                     (0.40, 0.0042)  // Australia
-                } else if user.phone_number.starts_with("+972") {
-                    (0.90, 0.0033)  // Israel
                 } else {
                     (0.30, 0.0042)  // Default to Finland/UK rate
                 }

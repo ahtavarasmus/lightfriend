@@ -12,7 +12,7 @@ use crate::proactive::telegram_general_checks::TelegramGeneralChecks;
 
 use crate::proactive::{
     email::FilterActivityLog,
-    common::{ImportancePrioritySection, PrioritySendersSection, KeywordsSection, WaitingChecksSection},
+    common::{ImportancePrioritySection, PrioritySendersSection, KeywordsSection},
 };
 
 
@@ -39,13 +39,6 @@ use wasm_bindgen_futures::spawn_local;
 pub struct ConnectedService {
     pub service_type: String,
     pub identifier: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-pub struct WaitingCheck {
-    pub content: String,
-    pub due_date: i32,
-    pub remove_when_found: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -79,6 +72,13 @@ impl ImportancePriority {
     pub fn new(threshold: i32) -> Self {
         Self { threshold }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct WaitingCheck {
+    pub content: String,
+    pub due_date: i32,
+    pub remove_when_found: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -648,23 +648,6 @@ pub fn connected_services(props: &Props) -> Html {
                                                         }
                                                     })}
                                                 />
-                                                <WaitingChecksSection
-                                                    service_type={service.service_type.clone()}
-                                                    checks={settings.waiting_checks.clone()}
-                                                    on_change={Callback::from({
-                                                        let services_state = services_state.clone();
-                                                        let stype          = service.service_type.clone();
-                                                        move |list: Vec<WaitingCheck>| {
-                                                            let mut svcs = (*services_state).clone();
-                                                            if let Some(svc) = svcs.iter_mut().find(|s| s.service_type == stype) {
-                                                                if let Some(fs) = &mut svc.filter_settings {
-                                                                    fs.waiting_checks = list;
-                                                                }
-                                                            }
-                                                            services_state.set(svcs);
-                                                        }
-                                                    })}
-                                                />
                                                 <ImportancePrioritySection
                                                     service_type={service.service_type.clone()}
                                                     current_threshold={
@@ -821,23 +804,6 @@ pub fn connected_services(props: &Props) -> Html {
                                                             if let Some(svc) = svcs.iter_mut().find(|s| s.service_type == stype) {
                                                                 if let Some(fs) = &mut svc.filter_settings {
                                                                     fs.priority_senders = list;
-                                                                }
-                                                            }
-                                                            services_state.set(svcs);
-                                                        }
-                                                    })}
-                                                />
-                                                <WaitingChecksSection
-                                                    service_type={service.service_type.clone()}
-                                                    checks={settings.waiting_checks.clone()}
-                                                    on_change={Callback::from({
-                                                        let services_state = services_state.clone();
-                                                        let stype          = service.service_type.clone();
-                                                        move |list: Vec<WaitingCheck>| {
-                                                            let mut svcs = (*services_state).clone();
-                                                            if let Some(svc) = svcs.iter_mut().find(|s| s.service_type == stype) {
-                                                                if let Some(fs) = &mut svc.filter_settings {
-                                                                    fs.waiting_checks = list;
                                                                 }
                                                             }
                                                             services_state.set(svcs);
@@ -1074,23 +1040,6 @@ pub fn connected_services(props: &Props) -> Html {
                                                     })}
                                                 />
 
-                                                <WaitingChecksSection
-                                                    service_type={service.service_type.clone()}
-                                                    checks={settings.waiting_checks.clone()}
-                                                    on_change={Callback::from({
-                                                        let services_state = services_state.clone();
-                                                        let stype          = service.service_type.clone();
-                                                        move |list: Vec<WaitingCheck>| {
-                                                            let mut svcs = (*services_state).clone();
-                                                            if let Some(svc) = svcs.iter_mut().find(|s| s.service_type == stype) {
-                                                                if let Some(fs) = &mut svc.filter_settings {
-                                                                    fs.waiting_checks = list;
-                                                                }
-                                                            }
-                                                            services_state.set(svcs);
-                                                        }
-                                                    })}
-                                                />
                                                 <ImportancePrioritySection
                                                     service_type={service.service_type.clone()}
                                                     current_threshold={

@@ -77,7 +77,6 @@ const PHONE_NUMBERS: &[(&str, &str, Option<&str>)] = &[
     ("fin", "+358454901522", None),
     ("gb", "+447383240344", None),
     ("aus", "+61489260976", None),
-    ("isr", "+972534513541", None),
 ];
 
 
@@ -85,7 +84,6 @@ const PHONE_NUMBERS: &[(&str, &str, Option<&str>)] = &[
 #[derive(Clone, PartialEq)]
 enum DashboardTab {
     Connections,
-    Proactive,
     Personal,
 }
 
@@ -549,6 +547,7 @@ pub fn Home() -> Html {
                         >
                             {"Connections"}
                         </button>
+                            /*
                         <button 
                             class={classes!("tab-button", (*active_tab == DashboardTab::Proactive).then(|| "active"))}
                             onclick={{
@@ -558,6 +557,7 @@ pub fn Home() -> Html {
                         >
                             {"Proactive"}
                         </button>
+                            */
                         <button 
                             class={classes!("tab-button", (*active_tab == DashboardTab::Personal).then(|| "active"))}
                             onclick={{
@@ -607,6 +607,7 @@ pub fn Home() -> Html {
 
                                     </div>
                                 },
+                                /*
                                 DashboardTab::Proactive => html! {
                                     <div class="proactive-tab">
                                         {
@@ -700,6 +701,7 @@ pub fn Home() -> Html {
                                         }
                                     </div>
                                 },
+                            */
                                 DashboardTab::Personal => html! {
                                     <div class="personal-tab">
                                         {

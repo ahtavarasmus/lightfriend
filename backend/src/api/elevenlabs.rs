@@ -2372,7 +2372,6 @@ pub async fn make_notification_call(
     state: &Arc<AppState>,
     to_phone_number: String,
     preferred_from_number: String,
-    content_id: String,
     content_type: String,
     notification_first_message: String,
     notification_message: String,
@@ -2421,8 +2420,6 @@ pub async fn make_notification_call(
                     std::env::var("AUS_PHONE_NUMBER_ID")
                 } else if preferred_from_number.contains("+44") {
                     std::env::var("GB_PHONE_NUMBER_ID")
-                } else if preferred_from_number.contains("+972") {
-                    std::env::var("ISR_PHONE_NUMBER_ID")
                 } else {
                     std::env::var("USA_PHONE_NUMBER_ID")
                 }.map_err(|e| {
@@ -2445,8 +2442,6 @@ pub async fn make_notification_call(
             std::env::var("AUS_PHONE_NUMBER_ID")
         } else if preferred_from_number.contains("+44") {
             std::env::var("GB_PHONE_NUMBER_ID")
-        } else if preferred_from_number.contains("+972") {
-            std::env::var("ISR_PHONE_NUMBER_ID")
         } else {
             std::env::var("USA_PHONE_NUMBER_ID")
         }.map_err(|e| {
@@ -2478,11 +2473,6 @@ pub async fn make_notification_call(
     
 
     // set the ids to -1 to prevent agent from making mistake
-    dynamic_variables.insert("email_id".to_string(), json!("-1".to_string()));
-    // Add content-specific dynamic variables
-    if content_type == "email" {
-        dynamic_variables.insert("email_id".to_string(), json!(content_id));
-    } 
     dynamic_variables.insert("content_type".to_string(), json!(content_type));
     dynamic_variables.insert("user_id".to_string(), json!(user_id));
     // Get timezone from user info or default to UTC

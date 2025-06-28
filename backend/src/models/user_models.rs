@@ -59,6 +59,7 @@ pub struct User {
     pub discount_tier: Option<String>, // could be None, "msg", "voice" or "full"
     pub free_reply: bool, // flag that gets set when previous message needs more information to finish the reply
     pub confirm_send_event: Option<String>, // flag for if sending event needs confirmation. can be "whatsapp", "email" or "calendar"
+    pub waiting_checks_count: i32, // how many waiting checks the user currently has(max 3 is possible)
 }
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -186,7 +187,7 @@ pub struct ProcessedEmail {
 
 #[derive(Insertable)]
 #[diesel(table_name = processed_emails)]
-pub struct NewProcessedEmails {
+pub struct NewProcessedEmail {
     pub user_id: i32,
     pub email_uid: String,
     pub processed_at: i32, 
@@ -547,9 +548,13 @@ pub struct UserSettings {
     pub timezone: Option<String>,
     pub timezone_auto: Option<bool>,
     pub agent_language: String, // language the agent will use to answer, default 'en'. 
-    pub sub_country: Option<String>, // "US", "FI", "UK", "AU", "IL"
+    pub sub_country: Option<String>, // "US", "FI", "UK", "AU"
     pub save_context: Option<i32>, // how many messages to save in context or None if nothing is saved
     pub info: Option<String>, // extra info about the user for the ai
+    pub morning_digest: Option<String>, // whether and when to send user morning digest noti, time is in UTC as rfc
+    pub day_digest: Option<String>, // whether and when to send day digest, time is in UTC as rfc
+    pub evening_digest: Option<String>, // whether and when to send user evening digest noti, time is in UTC rfc
+    pub critical_enabled: bool, // whether to inform users about their critical messages immediately
 }
 
 #[derive(Insertable)]

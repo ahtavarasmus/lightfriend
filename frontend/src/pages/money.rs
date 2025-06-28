@@ -107,7 +107,6 @@ pub fn pricing(props: &PricingProps) -> Html {
         ("FI".to_string(), 25.00),
         ("UK".to_string(), 25.00),
         ("AU".to_string(), 25.00),
-        ("IL".to_string(), 50.00),
     ]);
 
     let premium_prices: HashMap<String, f64> = HashMap::from([
@@ -115,15 +114,13 @@ pub fn pricing(props: &PricingProps) -> Html {
         ("FI".to_string(), 70.00),
         ("UK".to_string(), 70.00),
         ("AU".to_string(), 70.00),
-        ("IL".to_string(), 99.00),
     ]);
 
     let daily_limits: HashMap<String, (i32, i32)> = HashMap::from([
-        ("US".to_string(), (10, 15)), // (Basic, Escape)
-        ("FI".to_string(), (4, 10)),
-        ("UK".to_string(), (4, 10)),
-        ("AU".to_string(), (3, 6)),
-        ("IL".to_string(), (2, 3)),
+        ("US".to_string(), (10, 15)), // (Basic, Escape) - daily
+        ("FI".to_string(), (50, 100)), // (Basic, Escape) - monthly
+        ("UK".to_string(), (50, 100)), // (Basic, Escape) - monthly
+        ("AU".to_string(), (50, 100)), // (Basic, Escape) - monthly
     ]);
 
     let overage_rates: HashMap<String, (f64, f64)> = HashMap::from([
@@ -131,7 +128,6 @@ pub fn pricing(props: &PricingProps) -> Html {
         ("FI".to_string(), (0.30, 0.25)),
         ("UK".to_string(), (0.30, 0.25)),
         ("AU".to_string(), (0.40, 0.25)),
-        ("IL".to_string(), (0.90, 0.20)),
     ]);
 
     let on_country_change = {
@@ -153,7 +149,7 @@ pub fn pricing(props: &PricingProps) -> Html {
             <div class="country-selector">
                 <label for="country">{"Select your country: "}</label>
                 <select id="country" onchange={on_country_change}>
-                    { for ["US", "FI", "UK", "AU", "IL"].iter().map(|&c| html! { <option value={c} selected={*selected_country == c}>{c}</option> }) }
+                    { for ["US", "FI", "UK", "AU"].iter().map(|&c| html! { <option value={c} selected={*selected_country == c}>{c}</option> }) }
                 </select>
             </div>
 
@@ -169,7 +165,13 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <div class="includes">
                             <p>{"Subscription includes:"}</p>
                             <ul class="quota-list">
-                                <li>{format!("📞 Up to {} messages or minutes/day", daily_limits.get(&*selected_country).map(|(basic, _)| *basic).unwrap_or(0))}</li>
+                                <li>{
+                                    if *selected_country == "US" {
+                                        format!("📞 Up to {} messages or minutes/day", daily_limits.get(&*selected_country).map(|(basic, _)| *basic).unwrap_or(0))
+                                    } else {
+                                        format!("📞 Up to {} messages or minutes/month", daily_limits.get(&*selected_country).map(|(basic, _)| *basic).unwrap_or(0))
+                                    }
+                                }</li>
                                 <li>{"⚡ Auto-top-up packages (opt-in, credits carry over)"}</li>
                                 <li>{"🔍 Includes Internet search & weather"}</li>
                             </ul>
@@ -235,7 +237,13 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <div class="includes">
                             <p>{"Subscription includes:"}</p>
                             <ul class="quota-list">
-                                <li>{format!("📞 Up to {} messages or minutes/day", daily_limits.get(&*selected_country).map(|(_, escape)| *escape).unwrap_or(0))}</li>
+                                <li>{
+                                    if *selected_country == "US" {
+                                        format!("📞 Up to {} messages or minutes/day", daily_limits.get(&*selected_country).map(|(_, escape)| *escape).unwrap_or(0))
+                                    } else {
+                                        format!("📞 Up to {} messages or minutes/month", daily_limits.get(&*selected_country).map(|(_, escape)| *escape).unwrap_or(0))
+                                    }
+                                }</li>
                                 <li>{"⚡ Auto-top-up packages (opt-in, credits carry over)"}</li>
                                 <li>{"🎯 Up to 80 filtered notifications/month"}</li>
                                 <li>{"🔍 Includes all essentials"}</li>
@@ -355,9 +363,21 @@ pub fn pricing(props: &PricingProps) -> Html {
                     </thead>
                     <tbody>
                         <tr>
-                            <td>{"Daily Message/Minute Limit"}</td>
-                            <td>{format!("{}/day", daily_limits.get(&*selected_country).map(|(basic, _)| *basic).unwrap_or(0))}</td>
-                            <td>{format!("{}/day", daily_limits.get(&*selected_country).map(|(_, escape)| *escape).unwrap_or(0))}</td>
+                            <td>{"Message/Minute Limit"}</td>
+                            <td>{
+                                if *selected_country == "US" {
+                                    format!("{}/day", daily_limits.get(&*selected_country).map(|(basic, _)| *basic).unwrap_or(0))
+                                } else {
+                                    format!("{}/month", daily_limits.get(&*selected_country).map(|(basic, _)| *basic).unwrap_or(0))
+                                }
+                            }</td>
+                            <td>{
+                                if *selected_country == "US" {
+                                    format!("{}/day", daily_limits.get(&*selected_country).map(|(_, escape)| *escape).unwrap_or(0))
+                                } else {
+                                    format!("{}/month", daily_limits.get(&*selected_country).map(|(_, escape)| *escape).unwrap_or(0))
+                                }
+                            }</td>
                         </tr>
                         <tr>
                             <td>{"Auto-Top-Up Packages"}</td>
@@ -429,7 +449,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     <div class="options-grid">
                         <div class="option-card">
                             <h3>{"Request New Number"}</h3>
-                            <p>{"Need a phone number? We can provide numbers in select countries like US, Finland, UK, Australia, and Israel. Due to regulatory restrictions, we cannot provide numbers in many countries including Germany, India, most African countries, and parts of Asia. If your country isn't listed in the pricing above, contact us to check availability."}</p>
+                            <p>{"Need a phone number? We can provide numbers in select countries like US, Finland, UK, and Australia. Due to regulatory restrictions, we cannot provide numbers in many countries including Germany, India, most African countries, and parts of Asia. If your country isn't listed in the pricing above, contact us to check availability."}</p>
                             <a href="mailto:rasmus@ahtava.com?subject=Request New Phone Number">
                                 <button class="iq-button signup-button">{"Check Number Availability"}</button>
                             </a>
@@ -450,11 +470,11 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <div class="faq-grid">
                     <details>
                         <summary>{"How does billing work?"}</summary>
-                        <p>{"Pricing varies by country. Basic Plan includes a daily limit of messages or minutes. Escape Plan includes a higher daily limit and 80 filtered notifications/month. Enable auto-top-up (opt-in) to add packages of 5, 10, or 20 messages/minutes when you reach your limit. Unused credits carry over indefinitely, with daily caps to control costs. No hidden fees or commitments."}</p>
+                        <p>{"Pricing varies by country. For US customers, Basic Plan includes 10 messages/day and Escape Plan includes 15 messages/day. For all other countries, Basic Plan includes 50 messages/month and Escape Plan includes 100 messages/month. All Escape Plans include 80 filtered notifications/month. Enable auto-top-up (opt-in) to add extra messages/minutes when you reach your limit. Unused credits carry over indefinitely, with caps to control costs. No hidden fees or commitments."}</p>
                     </details>
                     <details>
                         <summary>{"What counts as a message/minute?"}</summary>
-                        <p>{"Voice calls are counted by seconds when you call. Messages are counted per query, with free replies if the AI needs clarification. Daily limits reset every 24 hours."}</p>
+                        <p>{"Voice calls are counted by seconds when you call. Messages are counted per query, with free replies if the AI needs clarification. For US customers, limits reset every 24 hours. For all other countries, limits reset monthly."}</p>
                     </details>
                     <details>
                         <summary>{"How does auto-top-up work?"}</summary>

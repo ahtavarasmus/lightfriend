@@ -117,8 +117,6 @@ pub async fn create_hard_mode_subscription_checkout(
         std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_UK")
     } else if user.phone_number.starts_with("+61") {
         std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_AU")
-    } else if user.phone_number.starts_with("+972") {
-        std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_IL")
     } else {
         // Default to Finland/UK price for other countries
         std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_FI")
@@ -263,8 +261,6 @@ pub async fn create_subscription_checkout(
         std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_UK")
     } else if user.phone_number.starts_with("+61") {
         std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_AU")
-    } else if user.phone_number.starts_with("+972") {
-        std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_IL")
     } else {
         // Default to Finland/UK price for other countries
         std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_FI")
@@ -612,7 +608,7 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
     }
 
     // Tier 1 Plans (Hard Mode and Basic Daily)
-    for country in ["US", "FI", "UK", "AU", "IL"] {
+    for country in ["US", "FI", "UK", "AU"] {
         // Check Hard Mode price IDs (older subscriptions)
         check_price_id!(
             country,
@@ -629,7 +625,7 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
     }
 
     // Tier 2 Plans (World and Escape Daily) 
-    for country in ["US", "FI", "UK", "AU", "IL"] {
+    for country in ["US", "FI", "UK", "AU"] {
         // Check World price IDs (older subscriptions)
         check_price_id!(
             country,
@@ -738,7 +734,6 @@ pub async fn stripe_webhook(
                             Some("FI") => 4.0,   // Finland
                             Some("UK") => 4.0,   // UK
                             Some("AU") => 3.0,   // Australia
-                            Some("IL") => 2.0,   // Israel
                             _ => 4.0,            // Default to Finland/UK limit
                         };
 

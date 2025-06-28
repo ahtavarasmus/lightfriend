@@ -67,6 +67,10 @@ mod utils {
     pub mod qr_utils;
 }
 
+mod proactive {
+    pub mod utils;
+}
+
 mod tool_call_utils {
     pub mod whatsapp;
     pub mod telegram;
@@ -166,7 +170,7 @@ pub fn validate_env() {
     let required_vars = [
         "JWT_SECRET_KEY", "JWT_REFRESH_KEY", "DATABASE_URL", "PERPLEXITY_API_KEY",
         "ASSISTANT_ID", "ELEVENLABS_SERVER_URL_SECRET", "FIN_PHONE", "USA_PHONE",
-        "AUS_PHONE", "GB_PHONE", "ISR_PHONE", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN",
+        "AUS_PHONE", "GB_PHONE", "TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN",
         "ENVIRONMENT", "FRONTEND_URL", "STRIPE_CREDITS_PRODUCT_ID",
         "STRIPE_SUBSCRIPTION_WORLD_PRICE_ID",
         "STRIPE_SECRET_KEY", "STRIPE_PUBLISHABLE_KEY", "STRIPE_WEBHOOK_SECRET",
@@ -356,6 +360,10 @@ async fn main() {
         .route("/api/profile/preferred-number", post(profile_handlers::update_preferred_number))
         .route("/api/profile", get(profile_handlers::get_profile))
         .route("/api/profile/update-notify/{user_id}", post(profile_handlers::update_notify))
+        .route("/api/profile/digests", post(profile_handlers::update_digests))
+        .route("/api/profile/digests", get(profile_handlers::get_digests))
+        .route("/api/profile/critical", post(profile_handlers::update_critical_enabled))
+        .route("/api/profile/critical", get(profile_handlers::get_critical_enabled))
 
         .route("/api/billing/increase-credits/{user_id}", post(billing_handlers::increase_credits))
         .route("/api/billing/usage", post(billing_handlers::get_usage_data))
@@ -419,9 +427,13 @@ async fn main() {
         .route("/api/whatsapp/search-rooms", get(whatsapp_handlers::search_rooms_handler))
 
         // Filter routes
+        .route("/api/filters/waiting-checks", get(filter_handlers::get_waiting_checks))
         .route("/api/filters/waiting-check/{service_type}", post(filter_handlers::create_waiting_check))
         .route("/api/filters/waiting-check/{service_type}/{content}", delete(filter_handlers::delete_waiting_check))
-        .route("/api/filters/waiting-checks/{service_type}", get(filter_handlers::get_waiting_checks))
+
+        .route("/api/filters/monitored-contacts", get(filter_handlers::get_priority_senders))
+        .route("/api/filters/monitored-contact/{service_type}", post(filter_handlers::create_priority_sender))
+        .route("/api/filters/monitored-contact/{service_type}/{content}", delete(filter_handlers::delete_priority_sender))
 
         .route("/api/filters/priority-sender/{service_type}", post(filter_handlers::create_priority_sender))
         .route("/api/filters/priority-sender/{service_type}/{sender}", delete(filter_handlers::delete_priority_sender))

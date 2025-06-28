@@ -849,7 +849,6 @@ pub async fn handle_telegram_message(
             }
         };
 
-    // Only fetch active filters
     let waiting_checks = if waiting_checks_active {
         match state.user_repository.get_waiting_checks(user_id, "telegram") {
             Ok(checks) => checks,
@@ -1324,14 +1323,12 @@ async fn send_telegram_notification(
 
             // Create dynamic variables (optional, can be customized based on needs)
             let mut dynamic_vars = std::collections::HashMap::new();
-            dynamic_vars.insert("chat_name".to_string(), chat_name.to_string());
 
             match crate::api::elevenlabs::make_notification_call(
                 &state.clone(),
                 user.phone_number.clone(),
                 user.preferred_number
                     .unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set")),
-                chat_name.to_string(), // Using chat_name as a unique identifier
                 "telegram".to_string(), // Notification type
                 notification_first_message,
                 final_notification.clone(),
