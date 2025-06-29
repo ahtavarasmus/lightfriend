@@ -521,147 +521,15 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
 
                             // Purchased Credits
                             <div class="section-container">
-                                <div class="section-header">
-                                    <h3>{"Credits"}</h3>
-                                </div>
                                 <div class="credits-grid">
-                                    <div class="credits-card one-time-credits">
-                                        <div class="credits-header">{"Purchased Overage Credits"}</div>
-                                        <div class="tooltip">
+                                    <div class="credits-header">{"Purchased Overage Credits"}</div>
+                                    <div class="tooltip">
 
-                                            {"These are the overage credits you've purchased. They don't expire and can be used for voice calls or messages when monthly quota is used up."}
-                                        </div>
+                                        {"These are the overage credits you've purchased. They don't expire and can be used for voice calls, messages or to receive priority sender notifications when monthly Message quota is used up. Check overage costs in the pricing page."}
+                                    </div>
 
                                     <div class="credits-amount">
                                         <span class="amount">{format!("{:.2}€", one_time_credits)}</span>
-                                        {
-                                            if one_time_credits < 0.0 {
-                                                html! {
-                                                    <span class="usage-estimate">{" (0 minutes/messages)"}</span>
-                                                }
-                                            } else {
-                                                html! {
-                                                    <div class="usage-estimate">
-                                                        <span class="time-estimate">{format!("({:.0}min {:.0}s", one_time_minutes, one_time_seconds)}</span>
-                                                        <span class="or">{"or"}</span>
-                                                        <span class="message-estimate">{format!("{:.0} messages)", one_time_messages)}</span>
-                                                    </div>
-                                                }
-                                            }
-                                        }
-                                    </div>
-                                    </div>
-                                    <div class="credits-card monthly-credits">
-                                        <div class="credits-header">
-                                            {
-                                                if user_profile.sub_country.is_some() {
-                                                    "Daily Quota Left"
-                                                } else {
-                                                    "Monthly Quota Left"
-                                                }
-                                            }
-                                        </div>
-                                        <div class="tooltip">
-                                            {
-                                                if let Some(sub_tier) = &user_profile.sub_tier {
-                                                    if let Some(country) = &user_profile.sub_country {
-                                                        let (basic_limit, escape_limit) = match country.as_str() {
-                                                            "US" => (10, 15),
-                                                            "FI" => (4, 10),
-                                                            "UK" => (4, 10),
-                                                            "AU" => (3, 6),
-                                                            _ => (0, 0)
-                                                        };
-                                                        if sub_tier == "hard_mode" {
-                                                            format!("Your Basic Plan includes {} messages or minutes per day. Credits reset daily at midnight in your timezone. When you run out, your purchased overage credits will be used.", basic_limit)
-                                                        } else {
-                                                            format!("Your Escape Plan includes {} messages or minutes per day. Credits reset daily at midnight in your timezone. When you run out, your purchased overage credits will be used.", escape_limit)
-                                                        }
-                                                    } else {
-                                                        if sub_tier == "hard_mode" {
-                                                            "Your Basic Plan Mode subscription includes 30 monthly messages. When these run out, your purchased overage credits will be used.".to_string()
-                                                        } else {
-                                                            "Your Escape Plan subscription includes 100 monthly messages or voice minutes. When these run out, your purchased overage credits will be used.".to_string()
-                                                        }
-                                                    }
-                                                } else {
-                                                    "This is how much quota you have left. When these run out, your purchased overage credits will be used.".to_string()
-                                                }
-                                            }
-                                        </div>
-
-                                        <div class="credits-amount">
-                                            {
-                                                if let Some(country) = &user_profile.sub_country {
-                                                    let (basic_limit, escape_limit) = match country.as_str() {
-                                                        "US" => (10, 15),
-                                                        "FI" => (4, 10),
-                                                        "UK" => (4, 10),
-                                                        "AU" => (3, 6),
-                                                        _ => (0, 0)
-                                                    };
-                                                    let daily_limit = if user_profile.sub_tier.as_ref().map_or(false, |tier| tier == "hard_mode") {
-                                                        basic_limit
-                                                    } else {
-                                                        escape_limit
-                                                    };
-                                                    html! {
-                                                        <>
-                                                            <div class="usage-estimate">
-                                                                <span class="message-estimate">{format!("{:.0} / {} daily messages or minutes", monthly_credits, daily_limit)}</span>
-                                                            </div>
-                                                            <div class="reset-info">
-                                                                {format!("Resets to {} every day at midnight", daily_limit)}
-                                                            </div>
-                                                        </>
-                                                    }
-                                                } else {
-                                                    if monthly_credits < 0.0 {
-                                                        html! {
-                                                            <span class="usage-estimate">{"0 minutes/messages"}</span>
-                                                        }
-                                                    } else {
-                                                        html! {
-                                                            <div class="usage-estimate">
-                                                                <span class="time-estimate">{format!("{:.0}min {:.0}s", monthly_minutes, monthly_seconds)}</span>
-                                                                <span class="or">{"or"}</span>
-                                                                <span class="message-estimate">{format!("{:.0} messages", monthly_messages)}</span>
-                                                            </div>
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        </div>
-                                    </div>
-                                    <div class="credits-card proactive-messages">
-                                        <div class="credits-header">{"Monthly Proactive Messages"}</div>
-                                        <div class="tooltip">
-                                            {
-                                                if let Some(sub_tier) = &user_profile.sub_tier {
-                                                    if sub_tier == "hard_mode" {
-                                                        "Proactive notifications are only available with the Escape Plan subscription. Upgrade to get access to email and calendar notifications!"
-                                                    } else {
-                                                        "Your Escape Plan includes 80 proactive notifications per month. Lightfriend uses these to notify you about important events, emails, and calendar updates."
-                                                    }
-                                                } else {
-                                                    "Proactive notifications are available with the Escape Plan subscription. Subscribe to get notified about important events, emails, and calendar updates!"
-                                                }
-                                            }
-                                        </div>
-
-                                        <div class="credits-amount">
-                                            <div class="usage-estimate">
-                                                <span class="message-estimate">
-                                                    {
-                                                        if user_profile.msgs_left <= 0 {
-                                                            "0 messages left".to_string()
-                                                        } else {
-                                                            format!("{} messages left", user_profile.msgs_left)
-                                                        }
-                                                    }
-                                                </span>
-                                            </div>
-                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -1143,7 +1011,6 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
     font-size: 1.1rem;
     font-weight: 600;
     margin-bottom: 1rem;
-    border-bottom: 1px solid rgba(30, 144, 255, 0.2);
     padding-bottom: 0.8rem;
 }
 

@@ -239,175 +239,48 @@ pub fn Home() -> Html {
                         <div class="credits-info">
                             {
                                 if let Some(profile) = (*profile_data).as_ref() {
-                                    if profile.sub_tier.is_some() && profile.sub_country.is_none() {
-                                        html! {
-                                            <div class="migration-info">
-                                                <button 
-                                                    class="migrate-small-button"
-                                                    onclick={{
-                                                        let user_id = profile.id;
-                                                        Callback::from(move |_| {
-                                                            if let Some(token) = window()
-                                                                .and_then(|w| w.local_storage().ok())
-                                                                .flatten()
-                                                                .and_then(|storage| storage.get_item("token").ok())
-                                                                .flatten()
-                                                            {
-                                                                spawn_local(async move {
-                                                                    let _ = Request::post(&format!("{}/api/profile/migrate-to-daily/{}", config::get_backend_url(), user_id))
-                                                                        .header("Authorization", &format!("Bearer {}", token))
-                                                                        .send()
-                                                                        .await;
-                                                                    if let Some(window) = window() {
-                                                                        let _ = window.location().reload();
-                                                                    }
-                                                                });
-                                                            }
-                                                        })
-                                                    }}
-                                                >
-                                                    {"Switch to Daily Reset Plan"}
-                                                    <div class="migrate-tooltip">
-                                                        {"Your subscription will automatically upgrade to our new daily reset plan on your next renewal. You can switch now to get the benefits immediately at no extra cost. The new plan includes daily message quotas that reset every 24 hours, giving you more messages overall and a peace of mind that you will always start with fresh credits to the day."}
-                                                    </div>
-                                                </button>
-                                                <style>
-                                                    {r#"
-                                                    .migration-info {
-                                                        margin-bottom: 1rem;
-                                                    }
-                                                    
-                                                    .migrate-small-button {
-                                                        background: rgba(30, 144, 255, 0.1);
-                                                        color: green;
-                                                        border: 1px solid rgba(30, 144, 255, 0.2);
-                                                        padding: 0.5rem 1rem;
-                                                        border-radius: 6px;
-                                                        font-size: 0.9rem;
-                                                        cursor: pointer;
-                                                        transition: all 0.3s ease;
-                                                        position: relative;
-                                                    }
-
-                                                    .migrate-small-button:hover {
-                                                        background: rgba(30, 144, 255, 0.15);
-                                                        border-color: rgba(30, 144, 255, 0.3);
-                                                    }
-
-                                                    .migrate-tooltip {
-                                                        position: absolute;
-                                                        bottom: calc(100% + 10px);
-                                                        left: 50%;
-                                                        transform: translateX(-50%);
-                                                        background: rgba(0, 0, 0, 0.9);
-                                                        color: #fff;
-                                                        padding: 1rem;
-                                                        border-radius: 8px;
-                                                        font-size: 0.85rem;
-                                                        width: max-content;
-                                                        max-width: 300px;
-                                                        z-index: 1000;
-                                                        opacity: 0;
-                                                        visibility: hidden;
-                                                        transition: all 0.3s ease;
-                                                        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-                                                        border: 1px solid rgba(30, 144, 255, 0.2);
-                                                        text-align: center;
-                                                        line-height: 1.4;
-                                                    }
-
-                                                    .migrate-tooltip::after {
-                                                        content: '';
-                                                        position: absolute;
-                                                        top: 100%;
-                                                        left: 50%;
-                                                        transform: translateX(-50%);
-                                                        border-width: 8px;
-                                                        border-style: solid;
-                                                        border-color: rgba(0, 0, 0, 0.9) transparent transparent transparent;
-                                                    }
-
-                                                    .migrate-small-button:hover .migrate-tooltip {
-                                                        opacity: 1;
-                                                        visibility: visible;
-                                                    }
-
-                                                    @media (max-width: 768px) {
-                                                        .migrate-tooltip {
-                                                            position: fixed;
-                                                            bottom: 20px;
-                                                            left: 50%;
-                                                            transform: translateX(-50%);
-                                                            width: 90%;
-                                                            max-width: 300px;
-                                                        }
-
-                                                        .migrate-tooltip::after {
-                                                            display: none;
-                                                        }
-                                                    }
-                                                    "#}
-                                                </style>
-                                            </div>
-                                        }
-                                    } else {
-                                        html! {
-                                            <div class="credits-grid">
-                                                if let Some(ref tier) = profile.sub_tier {
-                                                if profile.credits_left > 0.0 {
-                                                    <div class="credit-item" tabindex="0">
-                                                        <span class="credit-label">{"Today's Quota"}</span>
-                                                        <span class="credit-value">{profile.credits_left as i32}{" messages"}</span>
-                                                        <span class="credit-value">
-                                                            {
-                                                                if profile.credits_left as i32 >= 1 {
-                                                                    format!("{}m {}s", profile.credits_left as i32, ((profile.credits_left % 1.0) * 60.0) as i32)
-                                                                } else {
-                                                                    format!("{}s", (profile.credits_left * 60.0) as i32)
-                                                                }
-                                                            }
-                                                        </span>
-                                                        <div class="credit-tooltip">
-                                                            {"Your daily quota for messages and voice calls. Each credit can be used as either one message or one minute of voice time. Resets at midnight UTC."}
-                                                        </div>
-                                                        <span class="reset-timer" id="reset-timer">
+                                    html! {
+                                        <div class="credits-grid">
+                                            if let Some(ref tier) = profile.sub_tier {
+                                            if profile.credits_left > 0.0 {
+                                                <div class="credit-item" tabindex="0">
+                                                    <span class="credit-label">{"Monthly Message Quota"}</span>
+                                                    <span class="credit-value">{profile.credits_left as i32}{" messages"}</span>
+                                                    <span class="credit-value">
                                                         {
-                                                            format!("Resets in {}h {}m", 23 - js_sys::Date::new_0().get_utc_hours() as i32, 59 - js_sys::Date::new_0().get_utc_minutes() as i32)
+                                                            if profile.credits_left as i32 >= 1 {
+                                                                format!("{}m {}s", profile.credits_left as i32, ((profile.credits_left % 1.0) * 60.0) as i32)
+                                                            } else {
+                                                                format!("{}s", (profile.credits_left * 60.0) as i32)
+                                                            }
                                                         }
-                                                        </span>
-
+                                                    </span>
+                                                    <span class="credit-value">{profile.credits_left as i32 / 3}{" priority sender notificatios"}</span>
+                                                    <div class="credit-tooltip">
+                                                        {"Your monthly quota Message quota. Can be used to ask questions, voice calls(1 Message = 1 minute) or to receive priority sender notifications. Not enough? Buy overage credits or trade in unused digest slots for Messages(coming soon)."}
                                                     </div>
-                                                }
-                                                if tier == "tier 2" {
-                                                    <div class="credit-item" tabindex="0">
-                                                        <span class="credit-label">{"Monthly Notifications"}</span>
-                                                        <span class="credit-value">{profile.msgs_left}</span>
-                                                        <div class="credit-tooltip">
-                                                            {"Used for proactive notifications about important events. Adjust filters or turn off notifications if you're receiving too many. Currently cannot be increased beyond monthly limit."}
-                                                        </div>
-                                                    </div>
-                                                }
-                                                if profile.credits_left <= 0.0 && profile.credits <= 0.0 {
-                                                    <div class="credit-warning">
-                                                        {"Monthly quota used. Wait for next month or buy credits."}
-                                                    </div>
-                                                }
-                                            } else {
-                                                <div class="credit-warning">
-                                                    {"No active subscription. Check out our pricing to get started!"}
                                                 </div>
                                             }
-                                            if profile.credits > 0.0 {
-                                                <div class="credit-item" tabindex="0">
-                                                    <span class="credit-label">{"Overage Credits"}</span>
-                                                    <span class="credit-value">{format!("{:.2}€", profile.credits)}</span>
-                                                    <div class="credit-tooltip">
-                                                        {"Additional credits you can purchase and use when monthly quota is depleted. Can be bought in advance."}
-                                                    </div>
+                                            if profile.credits_left <= 0.0 && profile.credits <= 0.0 {
+                                                <div class="credit-warning">
+                                                    {"Monthly quota used. Wait for next month or buy overage credits."}
                                                 </div>
-                                                }
+                                            }
+                                        } else {
+                                            <div class="credit-warning">
+                                                {"No active subscription. Check out our pricing to get started!"}
                                             </div>
                                         }
+                                        if profile.credits > 0.0 {
+                                            <div class="credit-item" tabindex="0">
+                                                <span class="credit-label">{"Overage Credits"}</span>
+                                                <span class="credit-value">{format!("{:.2}€", profile.credits)}</span>
+                                                <div class="credit-tooltip">
+                                                    {"Additional credits you can purchase and use when monthly quota is depleted. Can be bought in advance and used for sending messages, voice calls or receiving notifications from priority senders."}
+                                                </div>
+                                            </div>
+                                            }
+                                        </div>
                                     }
                                 } else {
                                     html! {}
