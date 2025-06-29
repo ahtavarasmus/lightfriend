@@ -743,39 +743,17 @@ pub async fn handle_whatsapp_message(
 
     let user_id = user.id;
 
-    // Check if user has proactive WhatsApp enabled
-    match state.user_repository.get_proactive_whatsapp(user_id) {
+    // Check if user has valid subscription
+    match state.user_repository.has_valid_subscription_tier(user_id, "tier 2") {
         Ok(true) => {
             tracing::info!(
-                "User {} has proactive WhatsApp enabled, processing message from room",
-                user_id,
-            );
-        },
-        Ok(false) => {
-            tracing::info!(
-                "User {} has proactive WhatsApp disabled, skipping message from room",
-                user_id,
-            );
-            return;
-        },
-        Err(e) => {
-            tracing::error!("Failed to check proactive WhatsApp status for user {}: {}", user_id, e);
-            return;
-        }
-    }
-
-
-    // Check if user has valid subscription and messages left
-    match state.user_repository.has_valid_subscription_tier_with_messages(user_id, "tier 2") {
-        Ok(true) => {
-            tracing::info!(
-                "User {} has valid subscription and messages for WhatsApp monitoring",
+                "User {} has valid subscription for WhatsApp monitoring",
                 user_id
             );
         },
         Ok(false) => {
             tracing::info!(
-                "User {} does not have valid subscription or messages left for WhatsApp monitoring",
+                "User {} does not have valid subscription for WhatsApp monitoring",
                 user_id
             );
             return;
@@ -786,20 +764,6 @@ pub async fn handle_whatsapp_message(
         }
     }
 
-    // Check if we should process this notification based on messages left
-    if user.msgs_left <= 0 {
-        tracing::info!(
-            "User {} has no notification messages left (room: {})",
-            user_id,
-            room_name
-        );
-        return;
-    }
-    tracing::info!(
-        "User {} has {} messages left for notifications",
-        user_id,
-        user.msgs_left
-    );
 
 
     // Extract message content
@@ -889,8 +853,7 @@ pub async fn handle_whatsapp_message(
                     return;
                 }
                 Err(e) => {
-                    tracing::warn!("User {} does not have enough credits for notification: {}", user_id, e);
-                    return;
+                    tracing::warn!("User {} does not have enough credits for priority sender notification: {}, continuing though", user_id, e);
                 }
             }
         }

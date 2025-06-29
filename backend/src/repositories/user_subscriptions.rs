@@ -149,23 +149,21 @@ impl crate::repositories::user_repository::UserRepository {
     }
 
     // Check if user has a specific subscription tier and has messages left
-    pub fn has_valid_subscription_tier_with_messages(&self, user_id: i32, tier: &str) -> Result<bool, DieselError> {
+    pub fn has_valid_subscription_tier(&self, user_id: i32, tier: &str) -> Result<bool, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         let user = users::table
             .find(user_id)
-            .select((users::sub_tier, users::msgs_left, users::discount_tier))
-            .first::<(Option<String>, i32, Option<String>)>(&mut conn)?;
+            .select((users::sub_tier, users::discount_tier))
+            .first::<(Option<String>, Option<String>)>(&mut conn)?;
         
         // If user has msg discount tier, they always have messages available
-        if user.2.as_deref() == Some("msg") {
-            // ensure msg tier users have messages
-            self.ensure_msg_tier_messages(user_id)?;
+        if user.1.as_deref() == Some("msg") {
         
             return Ok(user.0.map_or(false, |t| t == tier));
         }
         
         // Check both subscription tier and remaining messages
-        Ok(user.0.map_or(false, |t| t == tier) && user.1 > 0)
+        Ok(user.0.map_or(false, |t| t == tier))
     }
 
     // Helper method to ensure msg discount tier users always have messages

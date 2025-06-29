@@ -767,7 +767,7 @@ pub async fn handle_telegram_message(
 
 
     // Check if user has valid subscription and messages left
-    match state.user_repository.has_valid_subscription_tier_with_messages(user_id, "tier 2") {
+    match state.user_repository.has_valid_subscription_tier(user_id, "tier 2") {
         Ok(true) => {
             tracing::info!(
                 "User {} has valid subscription and messages for Telegram monitoring",

@@ -99,7 +99,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 Ok(users) => {
                     let mut subscribed_users = Vec::new();
                     for user in users {
-                        match state.user_repository.has_valid_subscription_tier_with_messages(user.id, "tier 2") {
+                        match state.user_repository.has_valid_subscription_tier(user.id, "tier 2") {
                             Ok(true) => {
                                 subscribed_users.push(user);
                             },
@@ -124,17 +124,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                 // Check IMAP service
                 if let Ok(imap_users) = state.user_repository.get_active_imap_connection_users() {
-                    // Get both the proactive status and last activation timestamp
-                    let (is_proactive, last_activated) = match state.user_repository.get_imap_proactive_status(user.id) {
-                        Ok((enabled, timestamp)) => (enabled, timestamp),
-                        Err(e) => {
-                            error!("Failed to check IMAP proactive status for user {}: {}", user.id, e);
-                            continue;
-                        }
-                    };
-
-                    if imap_users.contains(&user.id) && is_proactive {
-                        debug!("Checking IMAP messages for user {} (activated since timestamp {})", user.id, last_activated);
+                    if imap_users.contains(&user.id) {
                         match imap_handlers::fetch_emails_imap(&state, user.id, true, Some(10), true).await {
                             Ok(emails) => {
                                 
@@ -562,9 +552,8 @@ pub async fn start_scheduler(state: Arc<AppState>) {
             let users = match state.user_core.get_all_users() {
                 Ok(users) => users.into_iter().filter(|user| {
                     // Check subscription and calendar status
-                    matches!(state.user_repository.has_valid_subscription_tier_with_messages(user.id, "tier 2"), Ok(true)) &&
-                    matches!(state.user_repository.has_active_google_calendar(user.id), Ok(true)) &&
-                    matches!(state.user_repository.get_proactive_calendar_status(user.id), Ok((true, _)))
+                    matches!(state.user_repository.has_valid_subscription_tier(user.id, "tier 2"), Ok(true)) &&
+                    matches!(state.user_repository.has_active_google_calendar(user.id), Ok(true))
                 }).collect::<Vec<_>>(),
                 Err(e) => {
                     error!("Failed to fetch users: {}", e);
@@ -592,14 +581,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     index + 1, 
                     users.len()
                 );
-                // Get the last activation time
-                let last_activated = match state.user_repository.get_proactive_calendar_status(user.id) {
-                    Ok((_, timestamp)) => timestamp,
-                    Err(e) => {
-                        error!("Failed to get last activation time for user {}: {}", user.id, e);
-                        continue;
-                    }
-                };
 
                 // Fetch upcoming events
                 match crate::handlers::google_calendar::fetch_calendar_events(
@@ -615,133 +596,40 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                         for event in events {
                             if let (Some(reminders), Some(start_time)) = (&event.reminders, event.start.date_time) {
                                 for reminder in &reminders.overrides {
-                                    let reminder_time = start_time - chrono::Duration::minutes(reminder.minutes as i64);
+                                    let reminder_key = format!("{}_{}", event.id, reminder.minutes);
                                     
-                                        // Only process if reminder should fire now or has just passed
-                                        if reminder_time <= now && start_time.timestamp() as i32 > last_activated {
-                                            tracing::debug!("🗓️ Calendar check: Processing reminder for event ({}min before)", 
-                                                reminder.minutes);
-                                        let reminder_key = format!("{}_{}", event.id, reminder.minutes);
-                                        
-                                        // Check if notification was already sent
-                                        if state.user_repository.check_calendar_notification_exists(user.id, &reminder_key).unwrap_or(true) {
-                                            continue;
-                                        }
-
-                                        // Record notification before sending
-                                        let new_notification = crate::models::user_models::NewCalendarNotification {
-                                            user_id: user.id,
-                                            event_id: reminder_key.clone(),
-                                            notification_time: now.timestamp() as i32,
-                                        };
-                                        
-                                        if let Err(e) = state.user_repository.create_calendar_notification(&new_notification) {
-                                            error!("Failed to record calendar notification: {}", e);
-                                            continue;
-                                        }
-
-                                        // Decrease message count
-                                        if !matches!(state.user_repository.decrease_messages_left(user.id), Ok(count) if count > 0) {
-                                            continue;
-                                        }
-
-                                        let event_summary = event.summary.clone().unwrap_or_else(|| "Untitled Event".to_string());
-                                        let notification = format!("Calendar: {} in {} mins", event_summary, reminder.minutes);
-                                        
-                                        let sender_number = user.preferred_number.clone()
-                                            .unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"));
-
-                                        // Send notification based on user preference
-                                        // Get user settings
-                                        let user_settings = match state.user_core.get_user_settings(user.id) {
-                                            Ok(settings) => settings,
-                                            Err(e) => {
-                                                error!("Failed to get user settings: {}", e);
-                                                continue;
-                                            }
-                                        };
-
-                                        debug!("🗓️ Calendar notification: Preparing to send notification for user {} via {}", 
-                                            user.id, 
-                                            user_settings.notification_type.as_deref().unwrap_or("sms"));
-
-                                        match user_settings.notification_type.as_deref().unwrap_or("sms") {
-                                            "call" => {
-                                                debug!("🗓️ Calendar notification: Initiating call notification process for user {}", user.id);
-                                                
-                                                // Clone necessary data for the new thread
-                                                let state_clone = Arc::clone(&state);
-                                                let user_clone = user.clone();
-                                                let sender_number_clone = sender_number.clone();
-                                                let notification_clone = notification.clone();
-                                                
-                                                // Convert error type to a Send + Sync error before spawning
-                                                debug!("🗓️ Calendar notification: Attempting to get conversation for call - user {}", user.id);
-                                                let conversation_result = state_clone.user_conversations
-                                                    .get_conversation(&user_clone, sender_number_clone.clone()).await;
-
-                                                match conversation_result {
-                                                    Ok(_conversation) => {
-                                                        debug!("🗓️ Calendar notification: Successfully got conversation for call - user {}", user.id);
-                                                        let intro = "Hello, I have a calendar event to tell you about.".to_string();
-                                                        
-                                                        // No need to convert error type, just handle the error directly
-                                                        tokio::spawn(async move {
-                                                            debug!("🗓️ Calendar notification: Initiating ElevenLabs call for user {}", user_clone.id);
-                                                            match crate::api::elevenlabs::make_notification_call(
-                                                                &state_clone,
-                                                                user_clone.phone_number.clone(),
-                                                                sender_number_clone,
-                                                                "calendar".to_string(),
-                                                                intro,
-                                                                notification_clone,
-                                                                user_clone.id.to_string(),
-                                                    user_settings.timezone.clone(),
-                                                            ).await {
-                                                                Ok(_) => debug!("🗓️ Calendar notification: Successfully completed call notification for user {}", user_clone.id),
-                                                                Err((_, e)) => error!("🗓️ Calendar notification: Failed to make call notification for user {}: {:?}", user_clone.id, e),
-                                                            }
-                                                        });
-                                                    }
-                                                    Err(e) => error!("🗓️ Calendar notification: Failed to get conversation for call - user {}: {:?}", user.id, e),
-                                                }
-                                            },
-                                            _ => {
-                                                debug!("🗓️ Calendar notification: Initiating SMS notification process for user {}", user.id);
-                                                
-                                                // Clone necessary data for the new thread
-                                                let state_clone = Arc::clone(&state);
-                                                let user_clone = user.clone();
-                                                let sender_number_clone = sender_number;
-                                                let notification_clone = notification;
-                                                
-                                                // Get conversation before spawning the thread
-                                                debug!("🗓️ Calendar notification: Attempting to get conversation for SMS - user {}", user.id);
-                                                match state_clone.user_conversations.get_conversation(&user_clone, sender_number_clone.clone()).await {
-                                                    Ok(conversation) => {
-                                                        debug!("🗓️ Calendar notification: Successfully got conversation for SMS - user {}", user.id);
-                                                        // Now spawn the thread with the conversation already retrieved
-                                                        tokio::spawn(async move {
-                                                            debug!("🗓️ Calendar notification: Sending SMS via Twilio for user {}", user_clone.id);
-                                                            match twilio_utils::send_conversation_message(
-                                                                &conversation.conversation_sid,
-                                                                &conversation.twilio_number,
-                                                                &notification_clone,
-                                                                false,
-                                                                None,
-                                                                &user_clone,
-                                                            ).await {
-                                                                Ok(_) => debug!("🗓️ Calendar notification: Successfully sent SMS notification to user {}", user_clone.id),
-                                                                Err(e) => error!("🗓️ Calendar notification: Failed to send SMS notification to user {}: {}", user_clone.id, e),
-                                                            }
-                                                        });
-                                                    }
-                                                    Err(e) => error!("🗓️ Calendar notification: Failed to get conversation for SMS - user {}: {:?}", user.id, e),
-                                                }
-                                            }
-                                        }
-
+                                    // Check if notification was already sent
+                                    if state.user_repository.check_calendar_notification_exists(user.id, &reminder_key).unwrap_or(true) {
+                                        continue;
                                     }
+
+                                    // Record notification before sending
+                                    let new_notification = crate::models::user_models::NewCalendarNotification {
+                                        user_id: user.id,
+                                        event_id: reminder_key.clone(),
+                                        notification_time: now.timestamp() as i32,
+                                    };
+                                    
+                                    if let Err(e) = state.user_repository.create_calendar_notification(&new_notification) {
+                                        error!("Failed to record calendar notification: {}", e);
+                                        continue;
+                                    }
+
+                                    let event_summary = event.summary.clone().unwrap_or_else(|| "Untitled Event".to_string());
+                                    let notification = format!("Calendar: {} in {} mins", event_summary, reminder.minutes);
+
+                                    let state_clone = state.clone();
+                                    let first_message = format!("Hello, you have a calendar event starting in {}.", reminder.minutes);
+                                    let user_id = user.id.clone();
+                                    tokio::spawn(async move {
+                                        crate::proactive::utils::send_notification(
+                                            &state_clone,
+                                            user_id,
+                                            &notification,
+                                            "calendar".to_string(),
+                                            Some(first_message),
+                                        ).await;
+                                    });
                                 }
                             }
                         }
