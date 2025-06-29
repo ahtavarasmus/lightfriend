@@ -245,19 +245,9 @@ pub fn Home() -> Html {
                                             if profile.credits_left > 0.0 {
                                                 <div class="credit-item" tabindex="0">
                                                     <span class="credit-label">{"Monthly Message Quota"}</span>
-                                                    <span class="credit-value">{profile.credits_left as i32}{" messages"}</span>
-                                                    <span class="credit-value">
-                                                        {
-                                                            if profile.credits_left as i32 >= 1 {
-                                                                format!("{}m {}s", profile.credits_left as i32, ((profile.credits_left % 1.0) * 60.0) as i32)
-                                                            } else {
-                                                                format!("{}s", (profile.credits_left * 60.0) as i32)
-                                                            }
-                                                        }
-                                                    </span>
-                                                    <span class="credit-value">{profile.credits_left as i32 / 3}{" priority sender notificatios"}</span>
+                                                    <span class="credit-value">{profile.credits_left as i32}{" Messages"}</span>
                                                     <div class="credit-tooltip">
-                                                        {"Your monthly quota Message quota. Can be used to ask questions, voice calls(1 Message = 1 minute) or to receive priority sender notifications. Not enough? Buy overage credits or trade in unused digest slots for Messages(coming soon)."}
+                                                        {"Your monthly quota Message quota. Can be used to ask questions, voice calls(1 Message = 1 minute) or to receive priority sender notifications(1 Message = 3 notifications). Not enough? Buy overage credits or trade in unused digest slots for Messages(coming soon)."}
                                                     </div>
                                                 </div>
                                             }
@@ -1927,9 +1917,9 @@ pub fn Home() -> Html {
                         color: #fff;
                         padding: 1rem;
                         border-radius: 8px;
-                        font-size: 0.85rem;
+                        font-size: 0.80rem;
                         width: max-content;
-                        max-width: 250px;
+                        max-width: 350px;
                         z-index: 1000;
                         opacity: 0;
                         visibility: hidden;
