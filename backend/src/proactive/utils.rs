@@ -263,26 +263,30 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             let start_time = now.with_timezone(&Utc).to_rfc3339();
             let end_time = (now + Duration::hours(hours_to_next as i64)).with_timezone(&Utc).to_rfc3339();
 
-            // Fetch calendar events for the period
-            let calendar_events = match crate::handlers::google_calendar::handle_calendar_fetching(state.as_ref(), user_id, &start_time, &end_time).await {
-                Ok(axum::Json(value)) => {
-                    if let Some(events) = value.get("events").and_then(|e| e.as_array()) {
-                        events.iter().filter_map(|event| {
-                            let summary = event.get("summary")?.as_str()?.to_string();
-                            let start = event.get("start")?.as_str()?.parse().ok()?;
-                            let end = event.get("end")?.as_str()?.parse().ok()?;
-                            Some(CalendarEvent {
-                                title: summary,
-                                start_time: start,
-                                end_time: end,
-                                description: None,
-                            })
-                        }).collect()
-                    } else {
-                        Vec::new()
-                    }
-                },
-                Err(_) => Vec::new(),
+            // Check if user has active Google Calendar before fetching events
+            let calendar_events = if state.user_repository.has_active_google_calendar(user_id)? {
+                match crate::handlers::google_calendar::handle_calendar_fetching(state.as_ref(), user_id, &start_time, &end_time).await {
+                    Ok(axum::Json(value)) => {
+                        if let Some(events) = value.get("events").and_then(|e| e.as_array()) {
+                            events.iter().filter_map(|event| {
+                                let summary = event.get("summary")?.as_str()?.to_string();
+                                let start = event.get("start")?.as_str()?.parse().ok()?;
+                                let end = event.get("end")?.as_str()?.parse().ok()?;
+                                Some(CalendarEvent {
+                                    title: summary,
+                                    start_time: start,
+                                    end_time: end,
+                                    description: None,
+                                })
+                            }).collect()
+                        } else {
+                            Vec::new()
+                        }
+                    },
+                    Err(_) => Vec::new(),
+                }
+            } else {
+                Vec::new()
             };
 
             // Calculate the time range for message fetching
@@ -291,30 +295,36 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             let start_timestamp = cutoff_time.timestamp();
             let end_timestamp = now.timestamp();
             
-            // Fetch and filter emails
-            let mut messages = match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false).await {
-                Ok(emails) => {
-                    emails.into_iter()
-                        .filter(|email| {
-                            // Filter emails based on timestamp
-                            if let Some(date) = email.date {
-                                date >= cutoff_time
-                            } else {
-                                false // Exclude emails without a timestamp
-                            }
-                        })
-                        .map(|email| MessageInfo {
-                            sender: email.from.unwrap_or_else(|| "Unknown sender".to_string()),
-                            content: email.snippet.unwrap_or_else(|| "No content".to_string()),
-                            timestamp: email.date.unwrap_or_else(|| Utc::now()),
-                            platform: "email".to_string(),
-                        })
-                        .collect::<Vec<MessageInfo>>()
-                },
-                Err(e) => {
-                    tracing::error!("Failed to fetch emails for digest: {:#?}", e);
-                    Vec::new()
+            // Check if user has IMAP credentials before fetching emails
+            let mut messages = if state.user_repository.get_imap_credentials(user_id)?.is_some() {
+                // Fetch and filter emails
+                match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false).await {
+                    Ok(emails) => {
+                        emails.into_iter()
+                            .filter(|email| {
+                                // Filter emails based on timestamp
+                                if let Some(date) = email.date {
+                                    date >= cutoff_time
+                                } else {
+                                    false // Exclude emails without a timestamp
+                                }
+                            })
+                            .map(|email| MessageInfo {
+                                sender: email.from.unwrap_or_else(|| "Unknown sender".to_string()),
+                                content: email.snippet.unwrap_or_else(|| "No content".to_string()),
+                                timestamp: email.date.unwrap_or_else(|| Utc::now()),
+                                platform: "email".to_string(),
+                            })
+                            .collect::<Vec<MessageInfo>>()
+                    },
+                    Err(e) => {
+                        tracing::error!("Failed to fetch emails for digest: {:#?}", e);
+                        Vec::new()
+                    }
                 }
+            } else {
+                tracing::debug!("Skipping email fetch - user {} has no IMAP credentials configured", user_id);
+                Vec::new()
             };
 
             // Log the number of filtered email messages
@@ -324,8 +334,10 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 hours_since_prev
             );
 
-            // Fetch WhatsApp messages
-            match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp).await {
+            // Check if user has proactive WhatsApp enabled before fetching messages
+            if state.user_repository.get_proactive_whatsapp(user_id)? {
+                // Fetch WhatsApp messages
+                match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp).await {
                 Ok(whatsapp_messages) => {
                     // Convert WhatsAppMessage to MessageInfo and add to messages
                     let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
@@ -350,8 +362,9 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                     // Sort all messages by timestamp (most recent first)
                     messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
                 }
-                Err(e) => {
-                    tracing::error!("Failed to fetch WhatsApp messages for digest: {}", e);
+                    Err(e) => {
+                        tracing::error!("Failed to fetch WhatsApp messages for digest: {}", e);
+                    }
                 }
             }
 
@@ -452,25 +465,29 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             let end_time = (now + Duration::hours(hours_to_next as i64)).with_timezone(&Utc).to_rfc3339();
 
             // Fetch calendar events for the period
-            let calendar_events = match crate::handlers::google_calendar::handle_calendar_fetching(state.as_ref(), user_id, &start_time, &end_time).await {
-                Ok(axum::Json(value)) => {
-                    if let Some(events) = value.get("events").and_then(|e| e.as_array()) {
-                        events.iter().filter_map(|event| {
-                            let summary = event.get("summary")?.as_str()?.to_string();
-                            let start = event.get("start")?.as_str()?.parse().ok()?;
-                            let end = event.get("end")?.as_str()?.parse().ok()?;
-                            Some(CalendarEvent {
-                                title: summary,
-                                start_time: start,
-                                end_time: end,
-                                description: None,
-                            })
-                        }).collect()
-                    } else {
-                        Vec::new()
-                    }
-                },
-                Err(_) => Vec::new(),
+            let calendar_events = if state.user_repository.has_active_google_calendar(user_id)? {
+                match crate::handlers::google_calendar::handle_calendar_fetching(state.as_ref(), user_id, &start_time, &end_time).await {
+                    Ok(axum::Json(value)) => {
+                        if let Some(events) = value.get("events").and_then(|e| e.as_array()) {
+                            events.iter().filter_map(|event| {
+                                let summary = event.get("summary")?.as_str()?.to_string();
+                                let start = event.get("start")?.as_str()?.parse().ok()?;
+                                let end = event.get("end")?.as_str()?.parse().ok()?;
+                                Some(CalendarEvent {
+                                    title: summary,
+                                    start_time: start,
+                                    end_time: end,
+                                    description: None,
+                                })
+                            }).collect()
+                        } else {
+                            Vec::new()
+                        }
+                    },
+                    Err(_) => Vec::new(),
+                }
+            } else {
+                Vec::new()
             };
 
             // Calculate the time range for message fetching
@@ -479,30 +496,36 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             let start_timestamp = cutoff_time.timestamp();
             let end_timestamp = now.timestamp();
             
-            // Fetch and filter emails
-            let mut messages = match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false).await {
-                Ok(emails) => {
-                    emails.into_iter()
-                        .filter(|email| {
-                            // Filter emails based on timestamp
-                            if let Some(date) = email.date {
-                                date >= cutoff_time
-                            } else {
-                                false // Exclude emails without a timestamp
-                            }
-                        })
-                        .map(|email| MessageInfo {
-                            sender: email.from.unwrap_or_else(|| "Unknown sender".to_string()),
-                            content: email.snippet.unwrap_or_else(|| "No content".to_string()),
-                            timestamp: email.date.unwrap_or_else(|| Utc::now()),
-                            platform: "email".to_string(),
-                        })
-                        .collect::<Vec<MessageInfo>>()
-                },
-                Err(e) => {
-                    tracing::error!("Failed to fetch emails for digest: {:#?}", e);
-                    Vec::new()
+            // Check if user has IMAP credentials before fetching emails
+            let mut messages = if state.user_repository.get_imap_credentials(user_id)?.is_some() {
+                // Fetch and filter emails
+                match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false).await {
+                    Ok(emails) => {
+                        emails.into_iter()
+                            .filter(|email| {
+                                // Filter emails based on timestamp
+                                if let Some(date) = email.date {
+                                    date >= cutoff_time
+                                } else {
+                                    false // Exclude emails without a timestamp
+                                }
+                            })
+                            .map(|email| MessageInfo {
+                                sender: email.from.unwrap_or_else(|| "Unknown sender".to_string()),
+                                content: email.snippet.unwrap_or_else(|| "No content".to_string()),
+                                timestamp: email.date.unwrap_or_else(|| Utc::now()),
+                                platform: "email".to_string(),
+                            })
+                            .collect::<Vec<MessageInfo>>()
+                    },
+                    Err(e) => {
+                        tracing::error!("Failed to fetch emails for digest: {:#?}", e);
+                        Vec::new()
+                    }
                 }
+            } else {
+                tracing::debug!("Skipping email fetch - user {} has no IMAP credentials configured", user_id);
+                Vec::new()
             };
 
             // Log the number of filtered email messages
@@ -513,33 +536,35 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             );
 
             // Fetch WhatsApp messages
-            match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp).await {
-                Ok(whatsapp_messages) => {
-                    // Convert WhatsAppMessage to MessageInfo and add to messages
-                    let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
-                        .map(|msg| MessageInfo {
-                            sender: format!("{} ({})", msg.sender_display_name, msg.room_name),
-                            content: msg.content,
-                            timestamp: DateTime::from_timestamp(msg.timestamp, 0)
-                                .unwrap_or_else(|| Utc::now()),
-                            platform: "whatsapp".to_string(),
-                        })
-                        .collect();
-                    
-                    tracing::debug!(
-                        "Fetched {} WhatsApp messages from the last {} hours for digest",
-                        whatsapp_infos.len(),
-                        hours_since_prev
-                    );
+            if state.user_repository.get_proactive_whatsapp(user_id)? {
+                match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp).await {
+                    Ok(whatsapp_messages) => {
+                        // Convert WhatsAppMessage to MessageInfo and add to messages
+                        let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
+                            .map(|msg| MessageInfo {
+                                sender: format!("{} ({})", msg.sender_display_name, msg.room_name),
+                                content: msg.content,
+                                timestamp: DateTime::from_timestamp(msg.timestamp, 0)
+                                    .unwrap_or_else(|| Utc::now()),
+                                platform: "whatsapp".to_string(),
+                            })
+                            .collect();
+                        
+                        tracing::debug!(
+                            "Fetched {} WhatsApp messages from the last {} hours for digest",
+                            whatsapp_infos.len(),
+                            hours_since_prev
+                        );
 
-                    // Extend messages with WhatsApp messages
-                    messages.extend(whatsapp_infos);
+                        // Extend messages with WhatsApp messages
+                        messages.extend(whatsapp_infos);
 
-                    // Sort all messages by timestamp (most recent first)
-                    messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-                }
-                Err(e) => {
-                    tracing::error!("Failed to fetch WhatsApp messages for digest: {}", e);
+                        // Sort all messages by timestamp (most recent first)
+                        messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to fetch WhatsApp messages for digest: {}", e);
+                    }
                 }
             }
 
@@ -649,26 +674,30 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             
             let end_time = tomorrow_end.with_timezone(&Utc).to_rfc3339();
 
-            // Fetch calendar events for the period
-            let calendar_events = match crate::handlers::google_calendar::handle_calendar_fetching(state.as_ref(), user_id, &start_time, &end_time).await {
-                Ok(axum::Json(value)) => {
-                    if let Some(events) = value.get("events").and_then(|e| e.as_array()) {
-                        events.iter().filter_map(|event| {
-                            let summary = event.get("summary")?.as_str()?.to_string();
-                            let start = event.get("start")?.as_str()?.parse().ok()?;
-                            let end = event.get("end")?.as_str()?.parse().ok()?;
-                            Some(CalendarEvent {
-                                title: summary,
-                                start_time: start,
-                                end_time: end,
-                                description: None,
-                            })
-                        }).collect()
-                    } else {
-                        Vec::new()
-                    }
-                },
-                Err(_) => Vec::new(),
+            // Check if user has active Google Calendar before fetching events
+            let calendar_events = if state.user_repository.has_active_google_calendar(user_id)? {
+                match crate::handlers::google_calendar::handle_calendar_fetching(state.as_ref(), user_id, &start_time, &end_time).await {
+                    Ok(axum::Json(value)) => {
+                        if let Some(events) = value.get("events").and_then(|e| e.as_array()) {
+                            events.iter().filter_map(|event| {
+                                let summary = event.get("summary")?.as_str()?.to_string();
+                                let start = event.get("start")?.as_str()?.parse().ok()?;
+                                let end = event.get("end")?.as_str()?.parse().ok()?;
+                                Some(CalendarEvent {
+                                    title: summary,
+                                    start_time: start,
+                                    end_time: end,
+                                    description: None,
+                                })
+                            }).collect()
+                        } else {
+                            Vec::new()
+                        }
+                    },
+                    Err(_) => Vec::new(),
+                }
+            } else {
+                Vec::new()
             };
 
             // Calculate the time range for message fetching
@@ -677,30 +706,36 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             let start_timestamp = cutoff_time.timestamp();
             let end_timestamp = now.timestamp();
             
-            // Fetch and filter emails
-            let mut messages = match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false).await {
-                Ok(emails) => {
-                    emails.into_iter()
-                        .filter(|email| {
-                            // Filter emails based on timestamp
-                            if let Some(date) = email.date {
-                                date >= cutoff_time
-                            } else {
-                                false // Exclude emails without a timestamp
-                            }
-                        })
-                        .map(|email| MessageInfo {
-                            sender: email.from.unwrap_or_else(|| "Unknown sender".to_string()),
-                            content: email.snippet.unwrap_or_else(|| "No content".to_string()),
-                            timestamp: email.date.unwrap_or_else(|| Utc::now()),
-                            platform: "email".to_string(),
-                        })
-                        .collect::<Vec<MessageInfo>>()
-                },
-                Err(e) => {
-                    tracing::error!("Failed to fetch emails for digest: {:#?}", e);
-                    Vec::new()
+            // Check if user has IMAP credentials before fetching emails
+            let mut messages = if state.user_repository.get_imap_credentials(user_id)?.is_some() {
+                // Fetch and filter emails
+                match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false).await {
+                    Ok(emails) => {
+                        emails.into_iter()
+                            .filter(|email| {
+                                // Filter emails based on timestamp
+                                if let Some(date) = email.date {
+                                    date >= cutoff_time
+                                } else {
+                                    false // Exclude emails without a timestamp
+                                }
+                            })
+                            .map(|email| MessageInfo {
+                                sender: email.from.unwrap_or_else(|| "Unknown sender".to_string()),
+                                content: email.snippet.unwrap_or_else(|| "No content".to_string()),
+                                timestamp: email.date.unwrap_or_else(|| Utc::now()),
+                                platform: "email".to_string(),
+                            })
+                            .collect::<Vec<MessageInfo>>()
+                    },
+                    Err(e) => {
+                        tracing::error!("Failed to fetch emails for digest: {:#?}", e);
+                        Vec::new()
+                    }
                 }
+            } else {
+                tracing::debug!("Skipping email fetch - user {} has no IMAP credentials configured", user_id);
+                Vec::new()
             };
 
             // Log the number of filtered email messages
@@ -711,33 +746,35 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             );
 
             // Fetch WhatsApp messages
-            match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp).await {
-                Ok(whatsapp_messages) => {
-                    // Convert WhatsAppMessage to MessageInfo and add to messages
-                    let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
-                        .map(|msg| MessageInfo {
-                            sender: format!("{} ({})", msg.sender_display_name, msg.room_name),
-                            content: msg.content,
-                            timestamp: DateTime::from_timestamp(msg.timestamp, 0)
-                                .unwrap_or_else(|| Utc::now()),
-                            platform: "whatsapp".to_string(),
-                        })
-                        .collect();
-                    
-                    tracing::debug!(
-                        "Fetched {} WhatsApp messages from the last {} hours for digest",
-                        whatsapp_infos.len(),
-                        hours_since_prev
-                    );
+            if state.user_repository.get_proactive_whatsapp(user_id)? {
+                match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp).await {
+                    Ok(whatsapp_messages) => {
+                        // Convert WhatsAppMessage to MessageInfo and add to messages
+                        let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
+                            .map(|msg| MessageInfo {
+                                sender: format!("{} ({})", msg.sender_display_name, msg.room_name),
+                                content: msg.content,
+                                timestamp: DateTime::from_timestamp(msg.timestamp, 0)
+                                    .unwrap_or_else(|| Utc::now()),
+                                platform: "whatsapp".to_string(),
+                            })
+                            .collect();
+                        
+                        tracing::debug!(
+                            "Fetched {} WhatsApp messages from the last {} hours for digest",
+                            whatsapp_infos.len(),
+                            hours_since_prev
+                        );
 
-                    // Extend messages with WhatsApp messages
-                    messages.extend(whatsapp_infos);
+                        // Extend messages with WhatsApp messages
+                        messages.extend(whatsapp_infos);
 
-                    // Sort all messages by timestamp (most recent first)
-                    messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-                }
-                Err(e) => {
-                    tracing::error!("Failed to fetch WhatsApp messages for digest: {}", e);
+                        // Sort all messages by timestamp (most recent first)
+                        messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to fetch WhatsApp messages for digest: {}", e);
+                    }
                 }
             }
 
