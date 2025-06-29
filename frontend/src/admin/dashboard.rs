@@ -852,7 +852,6 @@ pub fn admin_dashboard() -> Html {
                                                 <th>{"Phone"}</th>
                                                 <th>{"Overage Credits"}</th>
                                                 <th>{"Daily Credits"}</th>
-                                                <th>{"Notifications Left"}</th>
                                                 <th>{"Tier"}</th>
                                                 <th>{"Verified"}</th>
                                                 <th>{"Notify"}</th>
@@ -912,7 +911,6 @@ pub fn admin_dashboard() -> Html {
                                                                 <td>{&user.phone_number}</td>
                                                                 <td>{format!("{:.2}€", user.credits)}</td>
                                                                 <td>{format!("{:.2}€", user.credits_left)}</td>
-                                                                <td>{user.msgs_left}</td>
                                                                 <td>
                                                                     <span class={classes!(
                                                                         "tier-badge",
@@ -1029,7 +1027,7 @@ pub fn admin_dashboard() -> Html {
                                                                             }}
                                                                             class="iq-button"
                                                                         >
-                                                                            {"Add 1€ credits"}
+                                                                            {"+1€ Credits"}
                                                                         </button>
                                                                         <button 
                                                                             onclick={{
@@ -1077,7 +1075,104 @@ pub fn admin_dashboard() -> Html {
                                                                             }}
                                                                             class="iq-button reset"
                                                                         >
-                                                                            {"Reset credits"}
+                                                                            {"Reset Credits"}
+                                                                        </button>
+
+                                                                        <button 
+                                                                            onclick={{
+                                                                                let users = users.clone();
+                                                                                let error = error.clone();
+                                                                                let user_id = user.id;
+                                                                                Callback::from(move |_| {
+                                                                                    let users = users.clone();
+                                                                                    let error = error.clone();
+                                                                                    wasm_bindgen_futures::spawn_local(async move {
+                                                                                        if let Some(token) = window()
+                                                                                            .and_then(|w| w.local_storage().ok())
+                                                                                            .flatten()
+                                                                                            .and_then(|storage| storage.get_item("token").ok())
+                                                                                            .flatten()
+                                                                                        {
+                                                                                            match Request::post(&format!("{}/api/admin/monthly-credits/{}/{}", config::get_backend_url(), user_id, 10.0))
+                                                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                                                .send()
+                                                                                                .await
+                                                                                            {
+                                                                                                Ok(response) => {
+                                                                                                    if response.ok() {
+                                                                                                        // Refresh the users list
+                                                                                                        if let Ok(response) = Request::get(&format!("{}/api/admin/users", config::get_backend_url()))
+                                                                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                                                                            .send()
+                                                                                                            .await
+                                                                                                        {
+                                                                                                            if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
+                                                                                                                users.set(updated_users);
+                                                                                                            }
+                                                                                                        }
+                                                                                                    } else {
+                                                                                                        error.set(Some("Failed to add monthly credits".to_string()));
+                                                                                                    }
+                                                                                                }
+                                                                                                Err(_) => {
+                                                                                                    error.set(Some("Failed to send request".to_string()));
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    });
+                                                                                })
+                                                                            }}
+                                                                            class="iq-button"
+                                                                        >
+                                                                            {"+10 Messages"}
+                                                                        </button>
+                                                                        <button 
+                                                                            onclick={{
+                                                                                let users = users.clone();
+                                                                                let error = error.clone();
+                                                                                let user_id = user.id;
+                                                                                Callback::from(move |_| {
+                                                                                    let users = users.clone();
+                                                                                    let error = error.clone();
+                                                                                    wasm_bindgen_futures::spawn_local(async move {
+                                                                                        if let Some(token) = window()
+                                                                                            .and_then(|w| w.local_storage().ok())
+                                                                                            .flatten()
+                                                                                            .and_then(|storage| storage.get_item("token").ok())
+                                                                                            .flatten()
+                                                                                        {
+                                                                                            match Request::post(&format!("{}/api/admin/monthly-credits/{}/{}", config::get_backend_url(), user_id, -10.0))
+                                                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                                                .send()
+                                                                                                .await
+                                                                                            {
+                                                                                                Ok(response) => {
+                                                                                                    if response.ok() {
+                                                                                                        // Refresh the users list
+                                                                                                        if let Ok(response) = Request::get(&format!("{}/api/admin/users", config::get_backend_url()))
+                                                                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                                                                            .send()
+                                                                                                            .await
+                                                                                                        {
+                                                                                                            if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
+                                                                                                                users.set(updated_users);
+                                                                                                            }
+                                                                                                        }
+                                                                                                    } else {
+                                                                                                        error.set(Some("Failed to remove monthly credits".to_string()));
+                                                                                                    }
+                                                                                                }
+                                                                                                Err(_) => {
+                                                                                                    error.set(Some("Failed to send request".to_string()));
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    });
+                                                                                })
+                                                                            }}
+                                                                            class="iq-button reset"
+                                                                        >
+                                                                            {"-10 Messages"}
                                                                         </button>
                                                                         {
                                                                             if !user.verified {
@@ -1136,55 +1231,6 @@ pub fn admin_dashboard() -> Html {
                                                                                 html! {}
                                                                             }
                                                                         }
-                                                                        <button 
-                                                                            onclick={{
-                                                                                let users = users.clone();
-                                                                                let error = error.clone();
-                                                                                let user_id = user.id;
-                                                                                Callback::from(move |_| {
-                                                                                    let users = users.clone();
-                                                                                    let error = error.clone();
-                                                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                                                        if let Some(token) = window()
-                                                                                            .and_then(|w| w.local_storage().ok())
-                                                                                            .flatten()
-                                                                                            .and_then(|storage| storage.get_item("token").ok())
-                                                                                            .flatten()
-                                                                                        {
-                                                                                            match Request::post(&format!("{}/api/admin/set-preferred-number-default/{}", config::get_backend_url(), user_id))
-                                                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                                                .send()
-                                                                                                .await
-                                                                                            {
-                                                                                                Ok(response) => {
-                                                                                                    if response.ok() {
-                                                                                                        // Refresh the users list after setting preferred number
-                                                                                                        if let Ok(response) = Request::get(&format!("{}/api/admin/users", config::get_backend_url()))
-                                                                                                            .header("Authorization", &format!("Bearer {}", token))
-                                                                                                            .send()
-                                                                                                            .await
-                                                                                                        {
-                                                                                                            if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                                users.set(updated_users);
-                                                                                                                error.set(None);
-                                                                                                            }
-                                                                                                        }
-                                                                                                    } else {
-                                                                                                        error.set(Some("Failed to set preferred number".to_string()));
-                                                                                                    }
-                                                                                                }
-                                                                                                Err(_) => {
-                                                                                                    error.set(Some("Failed to send request".to_string()));
-                                                                                                }
-                                                                                            }
-                                                                                        }
-                                                                                    });
-                                                                                })
-                                                                            }}
-                                                                            class="iq-button"
-                                                                        >
-                                                                            {"Set Default Number"}
-                                                                        </button>
                                                                         <button 
                                                                             onclick={{
                                                                                 let users = users.clone();
@@ -1308,198 +1354,6 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                                                                                 Some("tier 1") => "Remove Subscription",
                                                                                 _ => "Set Tier 2"
                                                                             }}
-                                                                        </button>
-                                                                        <button 
-                                                                            onclick={{
-                                                                                let users = users.clone();
-                                                                                let error = error.clone();
-                                                                                let user_id = user.id;
-                                                                                Callback::from(move |_| {
-                                                                                    let users = users.clone();
-                                                                                    let error = error.clone();
-                                                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                                                        if let Some(token) = window()
-                                                                                            .and_then(|w| w.local_storage().ok())
-                                                                                            .flatten()
-                                                                                            .and_then(|storage| storage.get_item("token").ok())
-                                                                                            .flatten()
-                                                                                        {
-                                                                                            match Request::post(&format!("{}/api/admin/messages/{}/10", config::get_backend_url(), user_id))
-                                                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                                                .send()
-                                                                                                .await
-                                                                                            {
-                                                                                                Ok(response) => {
-                                                                                                    if response.ok() {
-                                                                                                        // Refresh the users list
-                                                                                                        if let Ok(response) = Request::get(&format!("{}/api/admin/users", config::get_backend_url()))
-                                                                                                            .header("Authorization", &format!("Bearer {}", token))
-                                                                                                            .send()
-                                                                                                            .await
-                                                                                                        {
-                                                                                                            if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                                users.set(updated_users);
-                                                                                                            }
-                                                                                                        }
-                                                                                                    } else {
-                                                                                                        error.set(Some("Failed to add messages".to_string()));
-                                                                                                    }
-                                                                                                }
-                                                                                                Err(_) => {
-                                                                                                    error.set(Some("Failed to send request".to_string()));
-                                                                                                }
-                                                                                            }
-                                                                                        }
-                                                                                    });
-                                                                                })
-                                                                            }}
-                                                                            class="iq-button"
-                                                                        >
-                                                                            {"Add 10 Messages"}
-                                                                        </button>
-                                                                        <button 
-                                                                            onclick={{
-                                                                                let users = users.clone();
-                                                                                let error = error.clone();
-                                                                                let user_id = user.id;
-                                                                                Callback::from(move |_| {
-                                                                                    let users = users.clone();
-                                                                                    let error = error.clone();
-                                                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                                                        if let Some(token) = window()
-                                                                                            .and_then(|w| w.local_storage().ok())
-                                                                                            .flatten()
-                                                                                            .and_then(|storage| storage.get_item("token").ok())
-                                                                                            .flatten()
-                                                                                        {
-                                                                                            match Request::post(&format!("{}/api/admin/messages/{}/{}", config::get_backend_url(), user_id, -10))
-                                                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                                                .send()
-                                                                                                .await
-                                                                                            {
-                                                                                                Ok(response) => {
-                                                                                                    if response.ok() {
-                                                                                                        // Refresh the users list
-                                                                                                        if let Ok(response) = Request::get(&format!("{}/api/admin/users", config::get_backend_url()))
-                                                                                                            .header("Authorization", &format!("Bearer {}", token))
-                                                                                                            .send()
-                                                                                                            .await
-                                                                                                        {
-                                                                                                            if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                                users.set(updated_users);
-                                                                                                            }
-                                                                                                        }
-                                                                                                    } else {
-                                                                                                        error.set(Some("Failed to remove messages".to_string()));
-                                                                                                    }
-                                                                                                }
-                                                                                                Err(_) => {
-                                                                                                    error.set(Some("Failed to send request".to_string()));
-                                                                                                }
-                                                                                            }
-                                                                                        }
-                                                                                    });
-                                                                                })
-                                                                            }}
-                                                                            class="iq-button reset"
-                                                                        >
-                                                                            {"Remove 10 Messages"}
-                                                                        </button>
-                                                                        <button 
-                                                                            onclick={{
-                                                                                let users = users.clone();
-                                                                                let error = error.clone();
-                                                                                let user_id = user.id;
-                                                                                Callback::from(move |_| {
-                                                                                    let users = users.clone();
-                                                                                    let error = error.clone();
-                                                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                                                        if let Some(token) = window()
-                                                                                            .and_then(|w| w.local_storage().ok())
-                                                                                            .flatten()
-                                                                                            .and_then(|storage| storage.get_item("token").ok())
-                                                                                            .flatten()
-                                                                                        {
-                                                                                            match Request::post(&format!("{}/api/admin/monthly-credits/{}/{}", config::get_backend_url(), user_id, 10.0))
-                                                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                                                .send()
-                                                                                                .await
-                                                                                            {
-                                                                                                Ok(response) => {
-                                                                                                    if response.ok() {
-                                                                                                        // Refresh the users list
-                                                                                                        if let Ok(response) = Request::get(&format!("{}/api/admin/users", config::get_backend_url()))
-                                                                                                            .header("Authorization", &format!("Bearer {}", token))
-                                                                                                            .send()
-                                                                                                            .await
-                                                                                                        {
-                                                                                                            if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                                users.set(updated_users);
-                                                                                                            }
-                                                                                                        }
-                                                                                                    } else {
-                                                                                                        error.set(Some("Failed to add monthly credits".to_string()));
-                                                                                                    }
-                                                                                                }
-                                                                                                Err(_) => {
-                                                                                                    error.set(Some("Failed to send request".to_string()));
-                                                                                                }
-                                                                                            }
-                                                                                        }
-                                                                                    });
-                                                                                })
-                                                                            }}
-                                                                            class="iq-button"
-                                                                        >
-                                                                            {"Add 10€ Monthly Credits"}
-                                                                        </button>
-                                                                        <button 
-                                                                            onclick={{
-                                                                                let users = users.clone();
-                                                                                let error = error.clone();
-                                                                                let user_id = user.id;
-                                                                                Callback::from(move |_| {
-                                                                                    let users = users.clone();
-                                                                                    let error = error.clone();
-                                                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                                                        if let Some(token) = window()
-                                                                                            .and_then(|w| w.local_storage().ok())
-                                                                                            .flatten()
-                                                                                            .and_then(|storage| storage.get_item("token").ok())
-                                                                                            .flatten()
-                                                                                        {
-                                                                                            match Request::post(&format!("{}/api/admin/monthly-credits/{}/{}", config::get_backend_url(), user_id, -10.0))
-                                                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                                                .send()
-                                                                                                .await
-                                                                                            {
-                                                                                                Ok(response) => {
-                                                                                                    if response.ok() {
-                                                                                                        // Refresh the users list
-                                                                                                        if let Ok(response) = Request::get(&format!("{}/api/admin/users", config::get_backend_url()))
-                                                                                                            .header("Authorization", &format!("Bearer {}", token))
-                                                                                                            .send()
-                                                                                                            .await
-                                                                                                        {
-                                                                                                            if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                                users.set(updated_users);
-                                                                                                            }
-                                                                                                        }
-                                                                                                    } else {
-                                                                                                        error.set(Some("Failed to remove monthly credits".to_string()));
-                                                                                                    }
-                                                                                                }
-                                                                                                Err(_) => {
-                                                                                                    error.set(Some("Failed to send request".to_string()));
-                                                                                                }
-                                                                                            }
-                                                                                        }
-                                                                                    });
-                                                                                })
-                                                                            }}
-                                                                            class="iq-button reset"
-                                                                        >
-                                                                            {"Remove 10€ Monthly Credits"}
                                                                         </button>
                                                                         {
                                                                             // Only show migrate button for users with subscription

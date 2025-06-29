@@ -787,20 +787,6 @@ pub async fn handle_telegram_message(
         }
     }
 
-    // Check if we should process this notification based on messages left
-    if user.msgs_left <= 0 {
-        tracing::info!(
-            "User {} has no notification messages left (room: {})",
-            user_id,
-            room_name
-        );
-        return;
-    }
-    tracing::info!(
-        "User {} has {} messages left for notifications",
-        user_id,
-        user.msgs_left
-    );
 
 
     // Extract message content
@@ -903,14 +889,6 @@ pub async fn handle_telegram_message(
                     }
                 }
 
-                // Send notification immediately
-                send_telegram_notification(
-                    &state,
-                    user_id,
-                    &chat_name,
-                    &content,
-                    &format!("Matched waiting check: {}", waiting_check.content)
-                ).await;
                 return;
             }
 
@@ -924,14 +902,6 @@ pub async fn handle_telegram_message(
                sender_name.to_lowercase().contains(&priority_sender.sender.to_lowercase()) {
                 tracing::info!("Fast check: Priority sender matched for user {}: '{}'", user_id, priority_sender.sender);
                 
-                // Send notification immediately
-                send_telegram_notification(
-                    &state,
-                    user_id,
-                    &chat_name,
-                    &content,
-                    &format!("Message from priority sender: {}", priority_sender.sender)
-                ).await;
                 return;
             }
         }
@@ -944,13 +914,6 @@ pub async fn handle_telegram_message(
                 tracing::info!("Fast check: Keyword matched for user {}: '{}'", user_id, keyword.keyword);
                 
                 // Send notification immediately
-                send_telegram_notification(
-                    &state,
-                    user_id,
-                    &chat_name,
-                    &content,
-                    &format!("Matched keyword: {}", keyword.keyword)
-                ).await;
                 return;
             }
         }
@@ -1033,13 +996,6 @@ pub async fn handle_telegram_message(
                 */
 
                 // Send notification
-                send_telegram_notification(
-                    &state,
-                    user_id,
-                    &chat_name,
-                    &content,
-                    &reason
-                ).await;
             } else {
                 tracing::info!("LLM determined message not important enough for notification");
             }
@@ -1248,152 +1204,6 @@ async fn evaluate_message_with_llm(
 
 use tracing::{debug, error};
 
-async fn send_telegram_notification(
-    state: &Arc<AppState>,
-    user_id: i32,
-    chat_name: &str,
-    content: &str,
-    reason: &str,
-) {
-    // Get user info
-    let user = match state.user_core.find_by_id(user_id) {
-        Ok(Some(user)) => user,
-        Ok(None) => {
-            tracing::error!("User {} not found for notification", user_id);
-            return;
-        }
-        Err(e) => {
-            tracing::error!("Failed to get user {}: {}", user_id, e);
-            return;
-        }
-    };
-
-    // Get user settings (assuming state has a user_settings repository or similar)
-    let user_settings = match state.user_core.get_user_settings(user_id) {
-        Ok(settings) => settings,
-        Err(e) => {
-            tracing::error!("Failed to get settings for user {}: {}", user_id, e);
-            return;
-        }
-    };
-
-    // Get the user's preferred number or default
-    let sender_number = match user.preferred_number.clone() {
-        Some(number) => {
-            tracing::info!("Using user's preferred number: {}", number);
-            number
-        }
-        None => {
-            let number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set");
-            tracing::info!("Using default SHAZAM_PHONE_NUMBER: {}", number);
-            number
-        }
-    };
-
-    // Get the conversation for the user
-    let conversation = match state.user_conversations.get_conversation(&user, sender_number).await {
-        Ok(conv) => conv,
-        Err(e) => {
-            tracing::error!("Failed to ensure conversation exists: {}", e);
-            return;
-        }
-    };
-
-    // Check if this is the final message
-    let is_final_message = user.msgs_left <= 1;
-    // Format notification message
-    let notification = format!("Telegram from {}: {}", chat_name, content);
-
-    // Append final message notice if needed
-    let final_notification = if is_final_message {
-        format!(
-            "{}\n\nNote: This is your final proactive message for this month.",
-            notification
-        )
-    } else {
-        notification
-    };
-
-    // Check user's notification preference from settings
-    let notification_type = user_settings.notification_type.as_deref().unwrap_or("sms");
-    match notification_type {
-        "call" => {
-            // For calls, we need a brief intro and detailed message
-            let notification_first_message = "Hello, I have an important Telegram message to tell you about.".to_string();
-
-            // Create dynamic variables (optional, can be customized based on needs)
-            let mut dynamic_vars = std::collections::HashMap::new();
-
-            match crate::api::elevenlabs::make_notification_call(
-                &state.clone(),
-                user.phone_number.clone(),
-                user.preferred_number
-                    .unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set")),
-                "telegram".to_string(), // Notification type
-                notification_first_message,
-                final_notification.clone(),
-                user.id.to_string(),
-                user_settings.timezone,
-            ).await {
-                Ok(mut response) => {
-                    // Add dynamic variables to the client data
-                    if let Some(client_data) = response.get_mut("client_data") {
-                        if let Some(obj) = client_data.as_object_mut() {
-                            obj.extend(dynamic_vars.into_iter().map(|(k, v)| (k, serde_json::Value::String(v))));
-                        }
-                    }
-                    debug!("Successfully initiated call notification for user {} with chat name {}", user.id, chat_name);
-                    // Decrease messages left after successful call
-                    match state.user_repository.decrease_messages_left(user_id) {
-                        Ok(msgs_left) => {
-                            tracing::info!("User {} has {} messages left after decrease", user_id, msgs_left);
-                            println!("Messages left after decrease: {}", msgs_left);
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to decrease messages left for user {}: {}", user_id, e);
-                            println!("Error decreasing messages left for user {}", user_id);
-                        }
-                    }
-                }
-                Err((_, json_err)) => {
-                    error!("Failed to initiate call notification: {:?}", json_err);
-                    println!("Failed to send call notification for user {}", user_id);
-                }
-            }
-        }
-        _ => {
-            // Default to Telegram/SMS notification
-            match crate::api::twilio_utils::send_conversation_message(
-                &conversation.conversation_sid,
-                &conversation.twilio_number,
-                &final_notification,
-                true,
-                None,
-                &user,
-            ).await {
-                Ok(_) => {
-                    tracing::info!("Successfully sent Telegram notification to user {} (reason: {})", user_id, reason);
-                    println!("SMS notification sent successfully for user {}", user_id);
-                    // Decrease messages left after successful message
-                    match state.user_repository.decrease_messages_left(user_id) {
-                        Ok(msgs_left) => {
-                            tracing::info!("User {} has {} messages left after decrease", user_id, msgs_left);
-                            println!("Messages left after decrease: {}", msgs_left);
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to decrease messages left for user {}: {}", user_id, e);
-                            println!("Error decreasing messages left for user {}", user_id);
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("Failed to send Telegram notification: {}", e);
-                    println!("Failed to send SMS notification for user {}", user_id);
-                }
-            }
-        }
-    }
-}
 
 pub async fn search_telegram_rooms(
     state: &Arc<AppState>,

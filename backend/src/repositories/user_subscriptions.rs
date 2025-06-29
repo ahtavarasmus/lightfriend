@@ -131,15 +131,6 @@ impl crate::repositories::user_repository::UserRepository {
         Ok(session_id)
     }
 
-    // Set the user's subscription tier
-    pub fn update_proactive_messages_left(&self, user_id: i32, new_count: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::msgs_left.eq(new_count))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
     pub fn update_sub_credits(&self, user_id: i32, new_credits: f32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table.find(user_id))
@@ -166,51 +157,6 @@ impl crate::repositories::user_repository::UserRepository {
         Ok(user.0.map_or(false, |t| t == tier))
     }
 
-    // Helper method to ensure msg discount tier users always have messages
-    pub fn ensure_msg_tier_messages(&self, user_id: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        let (current_msgs, discount_tier) = users::table
-            .find(user_id)
-            .select((users::msgs_left, users::discount_tier))
-            .first::<(i32, Option<String>)>(&mut conn)?;
-            
-        if discount_tier.as_deref() == Some("msg") && current_msgs < 100 {
-            diesel::update(users::table.find(user_id))
-                .set(users::msgs_left.eq(100))
-                .execute(&mut conn)?;
-        }
-        
-        Ok(())
-    }
-
-    pub fn decrease_messages_left(&self, user_id: i32) -> Result<i32, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-                // Get current messages left and discount tier
-        let (current_msgs, discount_tier) = users::table
-            .find(user_id)
-            .select((users::msgs_left, users::discount_tier))
-            .first::<(i32, Option<String>)>(&mut conn)?;
-            
-        // If user has "msg" discount tier, return current messages without decreasing
-        if discount_tier.as_deref() == Some("msg") {
-            // ensure msg tier users have messages
-            self.ensure_msg_tier_messages(user_id)?;
-            return Ok(current_msgs);
-        }
-            
-        // Only decrease if greater than 0
-        if current_msgs > 0 {
-            let new_msgs = current_msgs - 1;
-            diesel::update(users::table.find(user_id))
-                .set(users::msgs_left.eq(new_msgs))
-                .execute(&mut conn)?;
-            Ok(new_msgs)
-        } else {
-            Ok(0)
-        }
-    }
 
 }
 

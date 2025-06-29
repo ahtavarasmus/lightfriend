@@ -387,37 +387,6 @@ pub async fn update_monthly_credits(
     })))
 }
 
-pub async fn update_user_messages(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Path((user_id, amount)): axum::extract::Path<(i32, i32)>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Get current user
-    let user = state.user_core.find_by_id(user_id)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
-        ))?
-        .ok_or_else(|| (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "User not found"}))
-        ))?;
-
-    // Calculate new messages count, ensuring it doesn't go below 0
-    let new_msgs = (user.msgs_left as i32 + amount).max(0);
-
-    // Update messages count
-    state.user_repository.update_proactive_messages_left(user_id, new_msgs)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to update messages: {}", e)}))
-        ))?;
-
-    println!("successfully updated messages for user");
-    Ok(Json(json!({
-        "message": "Messages updated successfully",
-        "new_count": new_msgs
-    })))
-}
 
 pub async fn update_subscription_tier(
     State(state): State<Arc<AppState>>,
@@ -617,36 +586,6 @@ pub async fn test_sms(
                 "details": response.message
             }))
         ))
-    }
-}
-
-pub async fn set_preferred_number_default(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Path(user_id): axum::extract::Path<i32>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    
-
-    // Get the user's phone number
-    let user = state.user_core.find_by_id(user_id)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)}))
-        ))?
-        .ok_or_else(|| (
-            StatusCode::NOT_FOUND,
-            Json(json!({"error": "User not found"}))
-        ))?;
-
-    // Set the preferred number
-    match state.user_core.set_preferred_number_to_default(user_id, &user.phone_number) {
-        Ok(preferred_number) => Ok(Json(json!({
-            "message": "Preferred number set successfully",
-            "preferred_number": preferred_number
-        }))),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to set preferred number: {}", e)}))
-        )),
     }
 }
 
