@@ -383,7 +383,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
 
             // Generate the digest
             let digest_message = match generate_digest(digest_data).await {
-                Ok(digest) => digest,
+                Ok(digest) => format!("Good morning! {}",digest),
                 Err(_) => format!(
                     "Good morning! Here's your morning digest covering the last {} hours. Next digest in {} hours.",
                     hours_since_prev, hours_to_next
@@ -583,7 +583,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
 
             // Generate the digest
             let digest_message = match generate_digest(digest_data).await {
-                Ok(digest) => digest,
+                Ok(digest) => format!("Hello! {}",digest),
                 Err(_) => format!(
                     "Hello! Here's your daily digest covering the last {} hours. Next digest in {} hours.",
                     hours_since_prev, hours_to_next
@@ -793,7 +793,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
 
             // Generate the digest
             let digest_message = match generate_digest(digest_data).await {
-                Ok(digest) => digest,
+                Ok(digest) => format!("Good evening! {}",digest),
                 Err(_) => format!(
                     "Hello! Here's your evening digest covering the last {} hours. Next digest in {} hours.",
                     hours_since_prev, hours_to_next
