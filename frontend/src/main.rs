@@ -209,6 +209,7 @@ pub fn pricing_wrapper() -> Html {
                 sub_tier={profile.sub_tier.clone()}
                 is_logged_in={true}
                 phone_number={profile.phone_number.clone()}
+                verified={profile.verified.clone()}
             />
         }
     } else {
@@ -219,6 +220,7 @@ pub fn pricing_wrapper() -> Html {
                 sub_tier={None::<String>}
                 is_logged_in={false}
                 phone_number={None::<String>}
+                verified=false
             />
         }
     }

@@ -65,8 +65,8 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
                     .and_then(|storage| storage.get_item("token").ok())
                     .flatten()
                 {
-                    let endpoint = if subscription_type == "hard_mode" {
-                        format!("{}/api/stripe/hard-mode-subscription-checkout/{}", config::get_backend_url(), user_id)
+                    let endpoint = if subscription_type == "basic" {
+                        format!("{}/api/stripe/basic-subscription-checkout/{}", config::get_backend_url(), user_id)
                     } else {
                         format!("{}/api/stripe/subscription-checkout/{}", config::get_backend_url(), user_id)
                     };
@@ -308,7 +308,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <div class="pricing-card subscription premium">
                     <div class="premium-tag">{"Save 100+ Hours Monthly*"}</div>
                     <div class="card-header">
-                        <h3>{"Freedom Plan"}</h3>
+                        <h3>{"Monitoring Plan"}</h3>
                         <p class="best-for">{"Your personal AI assistant that helps you stay connected while maintaining peace of mind."}</p>
                         <div class="price">
                             {
@@ -363,7 +363,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                     <CheckoutButton 
                                         user_id={props.user_id} 
                                         user_email={props.user_email.clone()} 
-                                        subscription_type="smart"
+                                        subscription_type="monitoring_plan"
                                     />
                                 }
                             } else {
@@ -377,7 +377,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                     e.prevent_default();
                                     if let Some(window) = web_sys::window() {
                                         if let Ok(Some(storage)) = window.local_storage() {
-                                            let _ = storage.set_item("selected_plan", "smart");
+                                            let _ = storage.set_item("selected_plan", "monitoring_plan");
                                             let _ = window.location().set_href("/register");
                                         }
                                     }

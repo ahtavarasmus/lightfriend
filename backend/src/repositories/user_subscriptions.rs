@@ -139,6 +139,7 @@ impl crate::repositories::user_repository::UserRepository {
             .execute(&mut conn)?;
         Ok(())
     }
+
     pub fn update_sub_credits(&self, user_id: i32, new_credits: f32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::update(users::table.find(user_id))

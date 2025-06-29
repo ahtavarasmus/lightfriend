@@ -62,8 +62,16 @@ pub async fn check_user_credits(
         "notification" => notification_cost,
         _ => return Err("Invalid event type".to_string()),
     };
+
+    let required_credits_left= match event_type {
+        "message" => 1.00,
+        "voice" => 0.00,
+        "notification" => 1.00 / 3.00,
+        _ => return Err("Invalid event type".to_string()),
+    };
+
     
-    if (user.credits_left < 0.0 || user.credits_left < required_credits) && (user.credits < 0.0 || user.credits < required_credits) {
+    if (user.credits_left < 0.00 || user.credits_left < required_credits_left) && (user.credits < 0.0 || user.credits < required_credits) {
         // Check if enough time has passed since the last notification (24 hours)
         let current_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -195,29 +203,23 @@ pub fn deduct_user_credits(
         _ => return Err("Invalid event type".to_string()),
     };
 
+    let cost_credits_left = match event_type {
+        "message" => 1.00,
+        "voice" => voice_seconds.unwrap_or(0) as f32 / 60.00,
+        "notification" => 1.00 / 3.00,
+        _ => return Err("Invalid event type".to_string()),
+    };
+
     // Deduct credits based on available credits_left
-    if user.credits_left > cost {
+    if user.credits_left >= cost_credits_left {
         // Deduct from credits_left only
-        if let Err(e) = state.user_repository.update_user_credits_left(user_id, user.credits_left - cost) {
-            eprintln!("Failed to update user credits_left: {}", e);
-            return Err("Failed to process credits".to_string());
-        }
-    } else if user.credits_left > 0.0 {
-        // Use remaining credits_left and deduct rest from regular credits
-        let new_credits = user.credits - cost + user.credits_left;
-        
-        // Update both credits and credits_left
-        if let Err(e) = state.user_repository.update_user_credits(user_id, new_credits) {
-            eprintln!("Failed to update user credits: {}", e);
-            return Err("Failed to process credits".to_string());
-        }
-        if let Err(e) = state.user_repository.update_user_credits_left(user_id, 0.0) {
+        if let Err(e) = state.user_repository.update_user_credits_left(user_id, (user.credits_left - cost_credits_left).max(0.0)) {
             eprintln!("Failed to update user credits_left: {}", e);
             return Err("Failed to process credits".to_string());
         }
     } else {
         // Deduct from regular credits only
-        let new_credits = user.credits - cost;
+        let new_credits = (user.credits - cost).max(0.0);
         if let Err(e) = state.user_repository.update_user_credits(user_id, new_credits) {
             eprintln!("Failed to update user credits: {}", e);
             return Err("Failed to process credits".to_string());

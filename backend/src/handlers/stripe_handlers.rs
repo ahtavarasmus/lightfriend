@@ -30,12 +30,12 @@ pub struct BuyCreditsRequest {
     pub amount_dollars: f32,
 }
 
-pub async fn create_hard_mode_subscription_checkout(
+pub async fn create_basic_subscription_checkout(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Path(user_id): Path<i32>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    println!("Starting create_hard_mode_subscription_checkout for user_id: {}", user_id);
+    println!("Starting create_subscription_checkout for user_id: {}", user_id);
 
     // Validate user_id
     if user_id <= 0 {
@@ -110,16 +110,15 @@ pub async fn create_hard_mode_subscription_checkout(
 
     // Select price ID based on user's phone number
     let price_id = if user.phone_number.starts_with("+1") {
-        std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_US")
+        std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_US")
     } else if user.phone_number.starts_with("+358") {
-        std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_FI")
+        std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_FI")
     } else if user.phone_number.starts_with("+44") {
-        std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_UK")
+        std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_UK")
     } else if user.phone_number.starts_with("+61") {
-        std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_AU")
+        std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_AU")
     } else {
-        // Default to Finland/UK price for other countries
-        std::env::var("STRIPE_SUBSCRIPTION_HARD_MODE_PRICE_ID_FI")
+        std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_OTHER")
     }.expect("Stripe price ID not found for region");
     
     let checkout_session = CheckoutSession::create(
@@ -149,10 +148,6 @@ pub async fn create_hard_mode_subscription_checkout(
                 address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
                 name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto),
                 shipping: None,
-            }),
-            payment_intent_data: Some(stripe::CreateCheckoutSessionPaymentIntentData {
-                setup_future_usage: Some(stripe::CreateCheckoutSessionPaymentIntentDataSetupFutureUsage::OffSession),
-                ..Default::default()
             }),
             ..Default::default()
         },
@@ -254,16 +249,16 @@ pub async fn create_subscription_checkout(
 
     // Select price ID based on user's phone number
     let price_id = if user.phone_number.starts_with("+1") {
-        std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_US")
+        std::env::var("STRIPE_SUBSCRIPTION_MONITORING_PRICE_ID_US")
     } else if user.phone_number.starts_with("+358") {
-        std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_FI")
+        std::env::var("STRIPE_SUBSCRIPTION_MONITORING_PRICE_ID_FI")
     } else if user.phone_number.starts_with("+44") {
-        std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_UK")
+        std::env::var("STRIPE_SUBSCRIPTION_MONITORING_PRICE_ID_UK")
     } else if user.phone_number.starts_with("+61") {
-        std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_AU")
+        std::env::var("STRIPE_SUBSCRIPTION_MONITORING_PRICE_ID_AU")
     } else {
-        // Default to Finland/UK price for other countries
-        std::env::var("STRIPE_SUBSCRIPTION_WORLD_PRICE_ID_FI")
+        // Default to other price for other countries
+        std::env::var("STRIPE_SUBSCRIPTION_MONITORING_PRICE_ID_OTHER")
     }.expect("Stripe price ID not found for region");
     
     let checkout_session = CheckoutSession::create(
@@ -293,10 +288,6 @@ pub async fn create_subscription_checkout(
                 address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
                 name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto),
                 shipping: None,
-            }),
-            payment_intent_data: Some(stripe::CreateCheckoutSessionPaymentIntentData {
-                setup_future_usage: Some(stripe::CreateCheckoutSessionPaymentIntentDataSetupFutureUsage::OffSession),
-                ..Default::default()
             }),
             ..Default::default()
         },
@@ -608,7 +599,7 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
     }
 
     // Tier 1 Plans (Hard Mode and Basic Daily)
-    for country in ["US", "FI", "UK", "AU"] {
+    for country in ["US", "FI", "UK", "AU", "OTHER"] {
         // Check Hard Mode price IDs (older subscriptions)
         check_price_id!(
             country,
@@ -616,16 +607,24 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
             "tier 1"
         );
         
-        // Check Basic Daily price IDs
+        // Check Basic Daily price IDs (older subscriptions)
+
         check_price_id!(
             country,
             format!("STRIPE_SUBSCRIPTION_BASIC_DAILY_PRICE_ID_{}", country),
             "tier 1"
         );
+
+        // Check Basic price IDs
+        check_price_id!(
+            country,
+            format!("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_{}", country),
+            "tier 1"
+        );
     }
 
     // Tier 2 Plans (World and Escape Daily) 
-    for country in ["US", "FI", "UK", "AU"] {
+    for country in ["US", "FI", "UK", "AU", "OTHER"] {
         // Check World price IDs (older subscriptions)
         check_price_id!(
             country,
@@ -633,10 +632,18 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
             "tier 2"
         );
         
-        // Check Escape Daily price IDs
+        // Check Escape Daily price IDs (older subscriptions)
+
         check_price_id!(
             country,
             format!("STRIPE_SUBSCRIPTION_ESCAPE_DAILY_PRICE_ID_{}", country),
+            "tier 2"
+        );
+
+        // Check Monitoring price IDs
+        check_price_id!(
+            country,
+            format!("STRIPE_SUBSCRIPTION_MONITORING_PRICE_ID_{}", country),
             "tier 2"
         );
     }
@@ -698,18 +705,6 @@ pub async fn stripe_webhook(
                 };
 
                 if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
-                    // Save the default payment method if it exists
-                    if let Some(default_payment_method) = subscription.default_payment_method {
-                        let payment_method_id = match default_payment_method {
-                            stripe::Expandable::Id(id) => id,
-                            stripe::Expandable::Object(pm) => pm.id,
-                        };
-                        
-                        tracing::info!("Saving default payment method ID: {}", payment_method_id);
-                        if let Err(e) = state.user_repository.set_stripe_payment_method_id(user.id, &payment_method_id) {
-                            tracing::error!("Failed to save payment method ID: {}", e);
-                        }
-                    }
 
                     if let Some(price_id) = subscription.items.data.first()
                         .and_then(|item| item.price.as_ref())
@@ -728,30 +723,11 @@ pub async fn stripe_webhook(
                             tracing::error!("Failed to update subscription tier: {}", e);
                         }
 
-                        // Determine daily credit limit based on subscription country
-                        let daily_credits = match sub_info.country {
-                            Some("US") => 10.0,  // US
-                            Some("FI") => 4.0,   // Finland
-                            Some("UK") => 4.0,   // UK
-                            Some("AU") => 3.0,   // Australia
-                            _ => 4.0,            // Default to Finland/UK limit
-                        };
-
                         // Update the credits to the daily limit
-                        if let Err(e) = state.user_repository.update_sub_credits(user.id, daily_credits) {
+                        if let Err(e) = state.user_repository.update_sub_credits(user.id, 40.0) {
                             tracing::error!("Failed to update subscription credits: {}", e);
                         } else {
-                            tracing::info!("Set daily credits to {} for user {} based on subscription country {:?}", 
-                                daily_credits, user.id, sub_info.country);
-                        }
-
-                        // If this is an Escape plan subscription (tier 2), set proactive messages to 80
-                        if sub_info.tier == "tier 2" {
-                            if let Err(e) = state.user_repository.update_proactive_messages_left(user.id, 80) {
-                                tracing::error!("Failed to update proactive messages: {}", e);
-                            } else {
-                                tracing::info!("Set proactive messages to 80 for Escape plan user {}", user.id);
-                            }
+                            tracing::info!("Set daily credits to 40 for user {}", user.id);
                         }
 
                         tracing::info!("Updated subscription info for user {}: country={:#?}, tier={}", 
@@ -769,7 +745,6 @@ pub async fn stripe_webhook(
                     stripe::Expandable::Object(customer) => customer.id,
                 };
                 
-
                 if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
                     // Clear subscription tier and country
                     if let Err(e) = state.user_repository.set_subscription_tier(user.id, None) {

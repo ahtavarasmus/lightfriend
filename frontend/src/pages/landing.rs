@@ -256,8 +256,8 @@ pub fn landing() -> Html {
         </section>
 
         <section class="how-it-works">
-            <h2>{"Smart Monitoring, Peace of Mind"}</h2>
-            <p>{"Whether you use a smartphone or dumbphone, Lightfriend keeps you focused while catching what matters."}</p>
+            <h2>{"Off Load Monitoring"}</h2>
+            <p>{"Whether you use a smartphone or dumbphone, Lightfriend lets you stay focused while catching what matters."}</p>
             <div class="steps-grid">
                 <div class="step">
                     <h3>{"Connect Your Apps"}</h3>

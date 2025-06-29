@@ -247,7 +247,6 @@ pub fn Billing() -> Html {
                         }
                     }
                 .success-message {
-                    background-color: rgba(76, 175, 80, 0.1);
                     border: 1px solid rgba(76, 175, 80, 0.3);
                     border-radius: 8px;
                     padding: 1rem;
