@@ -18,20 +18,20 @@ use gloo_timers::callback::Timeout;
 
 #[function_component(Landing)]
 pub fn landing() -> Html {
-
     let current_phone_word = use_state(|| 0);
 
-    // Simple word rotation timer
+
+    // Scroll to top only on initial mount
     {
-        let current_phone_word = current_phone_word.clone();
-        use_effect(move || {
-            let timeout = Timeout::new(3000, move || {
-                let next_index = (*current_phone_word + 1) % 4;
-                current_phone_word.set(next_index);
-            });
-            timeout.forget();
-            || {}
-        });
+        use_effect_with_deps(
+            move |_| {
+                if let Some(window) = web_sys::window() {
+                    window.scroll_to_with_x_and_y(0.0, 0.0);
+                }
+                || ()
+            },
+            (), // Empty dependencies array means this effect runs only once on mount
+        );
     }
 
 
@@ -48,8 +48,8 @@ pub fn landing() -> Html {
                 let scroll_pos = window_clone.scroll_y().unwrap();
                 let window_height = window_clone.inner_height().unwrap().as_f64().unwrap();
                 
-                let sticky_scroll = scroll_pos - (window_height * 0.8);  // Increased to 0.5 to delay appearance
-                let sticky_duration = window_height * 4.0;  // Keep this the same
+                let sticky_scroll = scroll_pos - (window_height*2.3 * 0.8);  // Increased to 0.5 to delay appearance
+                let sticky_duration = window_height*2.3 * 4.0;  // Keep this the same
                 
                 // Calculate intro section opacity based on scroll position
                 if sticky_scroll > sticky_duration * 0.6 {  // Changed from 0.75 to 0.6 to start fading earlier
@@ -67,14 +67,14 @@ pub fn landing() -> Html {
                 let current_classes = intro_section.class_name();
                 let base_classes = "intro-section";
                 
-                if scroll_pos > window_height * 0.6 {  // Increased to 0.6 to start transition later
+                if scroll_pos > window_height*2.3 * 0.6 {  // Increased to 0.6 to start transition later
                     if !current_classes.contains("visible") {
 
                         intro_section.set_class_name(&format!("{} visible", base_classes));
                     }
                     
                     // Calculate relative scroll position within the sticky section
-                    let sticky_scroll = scroll_pos - (window_height * 0.6);  // Increased to match the above change
+                    let sticky_scroll = scroll_pos - (window_height*2.3 * 0.6);  // Increased to match the above change
                     let sticky_duration = window_height * 1.5; // Reduced to 1.5 for shorter duration
                     
                     // Handle image transitions based on sticky scroll position
@@ -163,7 +163,7 @@ pub fn landing() -> Html {
                 <div class="hero-content">
                     <div class="hero-header">
                         <p class="hero-subtitle">
-                            {"Access your digital life without a smartphone"}
+                            {"Let lightfriend monitor the situation. Smart notifications let you skip distractions or revive that dumbphone."}
                         </p>
                     </div>
                     <div class="hero-cta-group">
@@ -178,73 +178,74 @@ pub fn landing() -> Html {
         </header>        
 
 
-
-            <section class="intro-section">
-                <div class="intro-content">
-                    <div class="intro-text">
-                        <h2>{"Everything just a call or text away"}</h2>
-
-
-                        <p>{"Need your calendar? A WhatsApp reply? Just call or text LightFriend."}</p>
-                        <ul class="feature-list">
-                            <li><img src="/assets/whatsapplogo.png" alt="WhatsApp" class="feature-logo" /> {"WhatsApp"}</li>
-                            <li>{"📧 Emails, 📅 Calendar & ✅ Tasks"}</li>
-                            <li><img src="/assets/perplexitylogo.png" loading="lazy" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI search & ☀️ Weather "}</li>
-                            <li>{"📸 Photo Analysis, Translation & 📱 Qr Code Reader (US & AUS only)"}</li>
-                        </ul>
-                        <div class="demo-link-container">
-                            <a href="https://www.youtube.com/shorts/KrVdJbHPB-o" target="_blank" rel="noopener noreferrer" class="demo-link">
-                                {"▶️ See It in Action"}
-                            </a>
-                            <a href="/faq#try-service" class="faq-link">
-                                {"Try demo chat"}
-                            </a>
-                        </div>
-                    </div>
-                    <div class="sticky-image">
-                        <img src="/assets/whatsappexample.png" alt="WhatsApp example interface" loading="lazy" class="example-image whatsapp-image" />
-                        <img src="/assets/calendarexample1.webp" alt="Calendar example interface" loading="lazy" class="example-image email-image" />
-                        <img src="/assets/phone_translation_example.png" alt="Photo example interface" loading="lazy" class="example-image calendar-image" />
-                    </div>
-                </div>
-            </section>
-
-
-        <section class="main-features">
-            // Add mobile-only intro content first
-            <div class="intro-mobile">
+            <div class="feature-block proactive">
                 <div class="feature-content">
-                    <h2>{"Everything just a call or text away"}</h2>
-                    <p>{"Need your calendar? A WhatsApp reply? Just call or text LightFriend."}</p>
+                    <h2>{"Filter the Noise"}</h2>
+                    <p>{"Lightfriend sends instant SMS/call alerts ONLY for critical messages, emails or events."}</p>
                     <ul class="feature-list">
-                        <li><img src="/assets/whatsapplogo.png" loading="lazy" alt="WhatsApp" class="feature-logo" /> {"WhatsApp"}</li>
-                        <li>{"📧 Emails, 📅 Calendar & ✅ Tasks"}</li>
-                        <li><img src="/assets/perplexitylogo.png" loading="lazy" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI search & ☀️ Weather "}</li>
-                        <li>{"📸 Photo Analysis, Translation & 📱Qr Code Reader (US & AUS only)"}</li>
+                        <li>{"🔔 Instant SMS/Call Alerts for Critical WhatsApp Messages or Emails"}</li>
+                        <li>{"⏰ Scheduled SMS Summaries of received messages and upcoming events"}</li>
+                        <li>{"⭐ Priority Sender Notifications"}</li>
+                        <li>{"🔍 Set Waiting Checks for Specific Content"}</li>
                     </ul>
+                </div>
+                <div class="cta-image-container">
+                    <div class="feature-image">
+                        <img src="/assets/notifications.png" loading="lazy"  alt="Person receiving a meaningful notification" />
+                    </div>
                     <div class="demo-link-container">
                         <a href="https://www.youtube.com/shorts/KrVdJbHPB-o" target="_blank" rel="noopener noreferrer" class="demo-link">
                             {"▶️ See It in Action"}
+                        </a>
+                        <a href="/faq#try-service" class="faq-link">
+                            {"Try Demo Chat"}
                         </a>
                     </div>
                 </div>
             </div>
 
-            <div class="feature-block proactive">
-                <div class="feature-content">
-                    <h2>{"Only What Matters"}</h2>
-                    <p>{"LightFriend filters the noise, pinging you only for important stuff, like that urgent email or a friend’s text from WhatsApp."}</p>
-                    <ul class="feature-list">
-                        <li>{"Smart alerts for key messages"}</li>
-                        <li>{"Custom filters for your priorities"}</li>
-                        <li>{"No spam, no distractions"}</li>
-                    </ul>
-                </div>
-                <div class="feature-image">
-                    <img src="/assets/notifications.png" loading="lazy"  alt="Person receiving a meaningful notification" />
-                </div>
-            </div>
+            <section class="intro-section">
+                <div class="intro-content">
+                    <div class="intro-text">
+                        <h2>{"Ask Anything, Anytime"}</h2>
+                        <p>{"Voice call or text from any phone (even dumbphone) to ask about your stuff, search the web with Perplexity or analyze photos."}</p>
+                        <ul class="feature-list">
+                            <li><img src="/assets/perplexitylogo.png" loading="lazy" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI Web Search & ☀️ Weather"}</li>
+                            <li>{"📧 Check or Create Messages, Emails, Events & Tasks"}</li>
+                            <li>{"📸 Photo Analysis, Translation & 📱 QR Code Reader (US & AUS only)"}</li>
+                        </ul>
+                    </div>
 
+                        <div class="sticky-image">
+                            <img src="/assets/whatsappexample.png" alt="WhatsApp example interface" loading="lazy" class="example-image whatsapp-image" />
+                            <img src="/assets/calendarexample1.webp" alt="Calendar example interface" loading="lazy" class="example-image email-image" />
+                            <img src="/assets/phone_translation_example.png" alt="Photo example interface" loading="lazy" class="example-image calendar-image" />
+                        </div>
+                </div>
+
+            </section>
+
+
+        <section class="main-features">
+
+            // Add mobile-only intro content first
+            <div class="intro-mobile">
+                    <div class="feature-content">
+                        <h2>{"Ask Anything, Anytime"}</h2>
+                        <p>{"Voice call or text from any phone (even dumbphone) to ask about your stuff, search the web with Perplexity or analyze photos."}</p>
+                        <ul class="feature-list">
+                            <li><img src="/assets/perplexitylogo.png" loading="lazy" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI Web Search & ☀️ Weather"}</li>
+                            <li>{"📧 Check or Create Messages, Emails, Events & Tasks"}</li>
+                            <li>{"📸 Photo Analysis, Translation & 📱 QR Code Reader (US & AUS only)"}</li>
+                        </ul>
+                    </div>
+
+                        <div class="sticky-image">
+                            <img src="/assets/whatsappexample.png" alt="WhatsApp example interface" loading="lazy" class="example-image whatsapp-image" />
+                            <img src="/assets/calendarexample1.webp" alt="Calendar example interface" loading="lazy" class="example-image email-image" />
+                            <img src="/assets/phone_translation_example.png" alt="Photo example interface" loading="lazy" class="example-image calendar-image" />
+                        </div>
+            </div>
             <div class="section-header">
                 <div class="section-intro">
                     <Link<Route> to={Route::Pricing} classes="forward-link">
@@ -255,32 +256,32 @@ pub fn landing() -> Html {
         </section>
 
         <section class="how-it-works">
-            <h2>{"Break Free Without Vanishing"}</h2>
-            <p>{"LightFriend makes going dumbphone stupidly easy."}</p>
+            <h2>{"Smart Monitoring, Peace of Mind"}</h2>
+            <p>{"Whether you use a smartphone or dumbphone, Lightfriend keeps you focused while catching what matters."}</p>
             <div class="steps-grid">
                 <div class="step">
-                    <h3>{"Link Your Stuff"}</h3>
-                    <p>{"Connect your email, calendar, and messages via our secure web portal."}</p>
+                    <h3>{"Connect Your Apps"}</h3>
+                    <p>{"Link your messaging apps, email, and calendar through our secure portal and let Lightfriend monitor them."}</p>
                 </div>
                 <div class="step">
-                    <h3>{"Use Any Basic Phone"}</h3>
-                    <p>{"Text or call LightFriend to get what you need, anywhere, anytime."}</p>
+                    <h3>{"Set Your Priorities"}</h3>
+                    <p>{"Choose what's important - schedule summaries, set waiting checks or priority senders."}</p>
                 </div>
                 <div class="step">
-                    <h3>{"Live Free"}</h3>
-                    <p>{"Stay connected without the apps that suck you in. Just you, living."}</p>
+                    <h3>{"Stay Present"}</h3>
+                    <p>{"Focus on life knowing LightFriend will alert you about important messages. Perfect for both smartphone and dumbphone users."}</p>
                 </div>
             </div>
         </section>
 
         <footer class="footer-cta">
             <div class="footer-content">
-                <h2>{"Ready to Take Your Life Back?"}</h2>
-                <p class="subtitle">{"LightFriend lets you quit the scroll without disappearing. Join the dumbphone revolution."}</p>
+                <h2>{"Ready for Digital Peace?"}</h2>
+                <p class="subtitle">{"Stop checking your phone constantly. Let LightFriend monitor your messages and notify you only about what matters."}</p>
                 <Link<Route> to={Route::Pricing} classes="forward-link">
-                    <button class="hero-cta">{"Start Living Today"}</button>
+                    <button class="hero-cta">{"Start Monitoring Today"}</button>
                 </Link<Route>>
-                <p class="disclaimer">{"Works with any basic phone. No smartphone needed."}</p>
+                <p class="disclaimer">{"Works with both smartphones and basic phones - even on Nokia 3310. Customize notifications to your needs."}</p>
                 <div class="development-links">
                     <p>{"Source code on "}
                         <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">{"GitHub"}</a>
@@ -345,6 +346,13 @@ pub fn landing() -> Html {
                             border-radius: 24px;
                             padding: 2rem;
                         }
+
+                        .intro-mobile p {
+                            color: #999;
+                            font-size: 1.1rem;
+                            line-height: 1.6;
+                            margin-bottom: 2rem;
+                        }
                     }
 
                     @media (min-width: 769px) {
@@ -382,18 +390,7 @@ pub fn landing() -> Html {
 
                     @media (max-width: 768px) {
                         .intro-section {
-                            padding: 0;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            overflow: hidden;
-                            height: 100vh;
-                            position: fixed;
-                        }
-
-                        .intro-section.visible {
-                            background: rgba(26, 26, 26, 0.4);
-                            backdrop-filter: blur(5px);
+                            display: none; /* Hide on mobile */
                         }
 
                         .intro-content {
@@ -446,6 +443,16 @@ pub fn landing() -> Html {
                         display: flex;
                         align-items: center;
                         gap: 4rem;
+                        position: relative;
+                        padding: 0 2rem;
+                    }
+                    .cta-image-container {
+                        max-width: 300px;
+                        margin: 0 auto;
+                        display: flex;
+                        flex-direction: column;
+                        align-items: center;
+                        gap: 1rem;
                         position: relative;
                         padding: 0 2rem;
                     }
@@ -1706,12 +1713,14 @@ pub fn landing() -> Html {
     border: 1px solid rgba(30, 144, 255, 0.15);
     border-radius: 24px;
     padding: 3rem;
+    z-index: 3;
     transition: transform 1.8s cubic-bezier(0.4, 0, 0.2, 1), 
                 border-color 1.8s ease, 
                 box-shadow 1.8s ease;
-    position: relative;
     overflow: hidden;
-
+    position: relative;
+    margin: 10%;
+    margin-bottom: 180vh; /* Increased to give more space for the transition */
 }
 
 .feature-block:hover {
@@ -1823,6 +1832,7 @@ pub fn landing() -> Html {
                         flex-direction: column;
                         padding: 2rem;
                         gap: 2rem;
+                        margin-bottom: 50vh; /* Increased to give more space for the transition */
                     }
 
                     .feature-image {
@@ -1997,7 +2007,6 @@ pub fn landing() -> Html {
                         position: relative;
                         background: transparent;
                         z-index: 1;
-                        margin-bottom: 200vh; /* Increased to give more space for the transition */
                     }
 
                     .landing-page {

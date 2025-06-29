@@ -331,7 +331,7 @@ pub fn critical_section() -> Html {
                     </button>
                 </div>
                 <div class="flow-description">
-                    {"Get immediate notifications for critical messages that can't wait for the daily digest"}
+                    {"Get immediate notifications for critical messages that can't wait for the daily digest."}
                 </div>
                 <div class="info-section" style={if *show_info { "display: block" } else { "display: none" }}>
                     <h4>{"How It Works"}</h4>

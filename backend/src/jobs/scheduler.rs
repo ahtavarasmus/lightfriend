@@ -227,6 +227,10 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                 email.subject.as_deref().unwrap_or("No subject"),
                                                 email.body.as_deref().unwrap_or("No content").chars().take(200).collect::<String>()
                                             );
+                                            let first_message = format!("Hello, you have a critical email from {} with subject: {}", 
+                                                        email.from.as_deref().unwrap_or("Unknown"),
+                                                        email.subject.as_deref().unwrap_or("No subject")
+                                                    );
                                             
                                             // Spawn a new task for sending notification
                                             let state_clone = state.clone();
@@ -236,7 +240,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                     user.id,
                                                     &message,
                                                     "email".to_string(),
-                                                    Some("Hello, I have a critical Email to tell you about.".to_string()),
+                                                    Some(first_message),
                                                 ).await;
                                             });
                                             continue;
@@ -263,7 +267,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
                                     // Check message importance based on waiting checks and criticality
                                     match crate::proactive::utils::check_message_importance(&emails_content, waiting_checks).await {
-                                        Ok((waiting_check_id, is_critical, message)) => {
+                                        Ok((waiting_check_id, is_critical, message, first_message)) => {
                                             if is_critical {
                                                 tracing::info!(
                                                     "Email critical check passed for user {}: {}",
@@ -279,7 +283,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                         user.id,
                                                         &message_clone,
                                                         "email".to_string(),
-                                                        Some("Hello, I have a critical Email to tell you about.".to_string()),
+                                                        Some(first_message),
                                                     ).await;
                                                 });
 
@@ -308,7 +312,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                         user.id,
                                                         &message_clone,
                                                         "email".to_string(),
-                                                        Some("Hello, I have a critical Email to tell you about.".to_string()),
+                                                        Some(first_message),
                                                     ).await;
                                                 });
 

@@ -95,6 +95,19 @@ pub fn faq() -> Html {
     let is_typing = use_state(|| false);
     let current_demo_index = use_state(|| 0);
 
+    // Scroll to top only on initial mount
+    {
+        use_effect_with_deps(
+            move |_| {
+                if let Some(window) = web_sys::window() {
+                    window.scroll_to_with_x_and_y(0.0, 0.0);
+                }
+                || ()
+            },
+            (), // Empty dependencies array means this effect runs only once on mount
+        );
+    }
+
     // Define demo conversations
     let demo_conversations = [
         ("Check my WhatsApp messages", "You have 3 new WhatsApp messages:\n\n📱 Mom: \"Don't forget dinner at 7pm\"\n📱 Sarah: \"Great job on the presentation!\"\n📱 Work Group: \"Meeting moved to 3pm tomorrow\""),

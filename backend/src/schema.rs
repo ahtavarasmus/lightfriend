@@ -294,6 +294,7 @@ diesel::table! {
         day_digest -> Nullable<Text>,
         evening_digest -> Nullable<Text>,
         critical_enabled -> Bool,
+        number_of_digests_locked -> Integer,
     }
 }
 

@@ -555,6 +555,7 @@ pub struct UserSettings {
     pub day_digest: Option<String>, // whether and when to send day digest, time is in UTC as rfc
     pub evening_digest: Option<String>, // whether and when to send user evening digest noti, time is in UTC rfc
     pub critical_enabled: bool, // whether to inform users about their critical messages immediately
+    pub number_of_digests_locked: i32, // if user wants to change some of the digests for base messages we can lock some digests
 }
 
 #[derive(Insertable)]
@@ -569,6 +570,7 @@ pub struct NewUserSettings {
     pub sub_country: Option<String>,
     pub save_context: Option<i32>,
     pub info: Option<String>,
+    pub number_of_digests_locked: i32,
 }
 
 #[derive(Queryable, Selectable, Insertable)]

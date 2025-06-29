@@ -104,6 +104,20 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
 pub fn pricing(props: &PricingProps) -> Html {
     let selected_country = use_state(|| "US".to_string());
     let country_name = use_state(|| String::new());
+
+    // Scroll to top only on initial mount
+    {
+        use_effect_with_deps(
+            move |_| {
+                if let Some(window) = web_sys::window() {
+                    window.scroll_to_with_x_and_y(0.0, 0.0);
+                }
+                || ()
+            },
+            (), // Empty dependencies array means this effect runs only once on mount
+        );
+    }
+
     
     // Detect user's country on component mount
     {
@@ -246,9 +260,17 @@ pub fn pricing(props: &PricingProps) -> Html {
                     {
                         if props.is_logged_in {
                             if !props.verified {
+                                let onclick = {
+                                    Callback::from(move |e: MouseEvent| {
+                                        e.prevent_default();
+                                        if let Some(window) = web_sys::window() {
+                                            let _ = window.location().set_href("/verify");
+                                        }
+                                    })
+                                };
                                 html! {
-                                    <button class="iq-button disabled" disabled=true>
-                                        <b>{"Please verify your account first"}</b>
+                                    <button class="iq-button verify-required" {onclick}>
+                                        <b>{"Verify Account to Subscribe"}</b>
                                     </button>
                                 }
                             } else if props.sub_tier.is_none() {
@@ -287,7 +309,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     <div class="premium-tag">{"Save 100+ Hours Monthly*"}</div>
                     <div class="card-header">
                         <h3>{"Freedom Plan"}</h3>
-                        <p class="best-for">{"Your personal AI assistant that helps you stay connected while maintaining digital peace of mind."}</p>
+                        <p class="best-for">{"Your personal AI assistant that helps you stay connected while maintaining peace of mind."}</p>
                         <div class="price">
                             {
                                 if *selected_country == "Other" {
@@ -310,8 +332,8 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <div class="includes">
                             <p>{"Subscription includes:"}</p>
                             <ul class="quota-list">
-                                <li>{"📊 Daily digest summaries (morning, day, evening)"}</li>
                                 <li>{"🔔 24/7 monitoring for critical messages"}</li>
+                                <li>{"📊 Daily digest summaries (morning, day, evening)"}</li>
                                 <li>{"⚡ Up to 5 custom waiting checks"}</li>
                                 <li>{"⭐ Priority sender notifications"}</li>
                                 <li>{"📱 40 questions/messages per month"}</li>
@@ -323,9 +345,17 @@ pub fn pricing(props: &PricingProps) -> Html {
                     {
                         if props.is_logged_in {
                             if !props.verified {
+                                let onclick = {
+                                    Callback::from(move |e: MouseEvent| {
+                                        e.prevent_default();
+                                        if let Some(window) = web_sys::window() {
+                                            let _ = window.location().set_href("/verify");
+                                        }
+                                    })
+                                };
                                 html! {
-                                    <button class="iq-button disabled" disabled=true>
-                                        <b>{"Please verify your account first"}</b>
+                                    <button class="iq-button verify-required" {onclick}>
+                                        <b>{"Verify Account to Subscribe"}</b>
                                     </button>
                                 }
                             } else if props.sub_tier.is_none() {
@@ -363,7 +393,7 @@ pub fn pricing(props: &PricingProps) -> Html {
 
             <div class="topup-pricing">
                 <h2>{format!("Overage Rates for {}", *selected_country)}</h2>
-                <p>{"When you exceed your daily limit, these rates apply. Enable auto-top-up to automatically add credits when you run low. Unused credits carry over indefinitely."}</p>
+                <p>{"When you exceed your quota, these rates apply. Enable auto-top-up to automatically add credits when you run low. Unused credits carry over indefinitely. These are used to answer user initiated questions and for sending notifications from priority senders. All other types of alerts are included."}</p>
                 <div class="topup-packages">
                     <div class="pricing-card main">
                         <div class="card-header">
@@ -372,6 +402,13 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 <div class="price">
                                     <span class="amount">{format!("€{:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0))}</span>
                                     <span class="period">{" per message"}</span>
+                                </div>
+                            </div>
+                            <div class="package-row">
+                                <h3>{"Additional Priority Sender Notifications:"}</h3>
+                                <div class="price">
+                                    <span class="amount">{format!("€{:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0)/&3.0)}</span>
+                                    <span class="period">{" per notification"}</span>
                                 </div>
                             </div>
                         </div>
@@ -391,17 +428,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                             </div>
                         }
                     } else {
-                        html! {
-                            <div class="topup-toggle">
-                                <p>{"Sign up to enable auto-top-up and never run out of messages!"}</p>
-                                <button class="iq-button signup-button" onclick={Callback::from(move |e: MouseEvent| {
-                                    e.prevent_default();
-                                    if let Some(window) = web_sys::window() {
-                                        let _ = window.location().set_href("/register");
-                                    }
-                                })}><b>{"Sign Up Now"}</b></button>
-                            </div>
-                        }
+                        html! {}
                     }
                 }
             </div>
@@ -409,66 +436,88 @@ pub fn pricing(props: &PricingProps) -> Html {
             <div class="feature-comparison">
                 <h2>{"Included Features"}</h2>
                 <table>
+                    <thead>
+                        <tr>
+                            <th>{"Feature"}</th>
+                            <th>{"Basic Plan"}</th>
+                            <th>{"Freedom Plan"}</th>
+                        </tr>
+                    </thead>
                     <tbody>
                         <tr>
-                            <td>{"Daily Digests"}</td>
-                            <td>{"Morning, Day, and Evening summaries"}</td>
-                        </tr>
-                        <tr>
-                            <td>{"Critical Message Monitoring"}</td>
-                            <td>{"24/7 automated monitoring"}</td>
-                        </tr>
-                        <tr>
-                            <td>{"Custom Waiting Checks"}</td>
-                            <td>{"Up to 5 simultaneous checks"}</td>
-                        </tr>
-                        <tr>
-                            <td>{"Base Messages"}</td>
-                            <td>{"40 messages/month"}</td>
-                        </tr>
-                        <tr>
-                            <td>{"Priority Sender Notifications"}</td>
-                            <td>{"Using message credits or unused digest slots"}</td>
-                        </tr>
-                        <tr>
-                            <td>{"Additional Messages"}</td>
-                            <td>{"Available through credit purchase"}</td>
-                        </tr>
-                        <tr>
-                            <td>{"Internet Search"}</td>
-                            <td>{"✅ Powered by Perplexity"}</td>
-                        </tr>
-                        <tr>
-                            <td>{"Weather Updates"}</td>
+                            <td>{"Morning, Day and Evening Digests"}</td>
+                            <td>{"❌"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
-                            <td>{"Photo Analysis & Translation"}</td>
-                            <td>{"✅ (US & AUS only)"}</td>
+                            <td>{"24/7 Critical Message Monitoring"}</td>
+                            <td>{"❌"}</td>
+                            <td>{"✅"}</td>
                         </tr>
                         <tr>
-                            <td>{"QR Code Scanning"}</td>
-                            <td>{"✅ (US & AUS only)"}</td>
+                            <td>{"Custom Waiting Checks"}</td>
+                            <td>{"❌"}</td>
+                            <td>{"✅"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"Base Messages(40/Month)"}</td>
+                            <td>{"✅"}</td>
+                            <td>{"✅"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"Priority Sender Notifications"}</td>
+                            <td>{"❌"}</td>
+                            <td>{"✅"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"Buy Additional Messages"}</td>
+                            <td>{"✅"}</td>
+                            <td>{"✅"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"Perplexity AI Web Search"}</td>
+                            <td>{"✅"}</td>
+                            <td>{"✅"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"Weather Search"}</td>
+                            <td>{"✅"}</td>
+                            <td>{"✅"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"Photo Analysis & Translation (US & AUS only)"}</td>
+                            <td>{"✅"}</td>
+                            <td>{"✅"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"QR Code Scanning (US & AUS only)"}</td>
+                            <td>{"✅"}</td>
+                            <td>{"✅ "}</td>
                         </tr>
                         <tr>
                             <td>{"WhatsApp Integration"}</td>
+                            <td>{"❌"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
                             <td>{"Email Integration"}</td>
+                            <td>{"❌"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
                             <td>{"Calendar Integration"}</td>
+                            <td>{"❌"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
                             <td>{"Task Management"}</td>
+                            <td>{"❌"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
                             <td>{"Priority Support"}</td>
-                            <td>{"✅ 24-hour response time"}</td>
+                            <td>{"✅"}</td>
+                            <td>{"✅"}</td>
                         </tr>
                     </tbody>
                 </table>
@@ -481,14 +530,14 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <div class="option-card">
                             <h3>{"Request New Number"}</h3>
                             <p>{"Need a phone number? We can provide numbers in select countries like US, Finland, UK, and Australia. Due to regulatory restrictions, we cannot provide numbers in many countries including Germany, India, most African countries, and parts of Asia. If your country isn't listed in the pricing above, contact us to check availability."}</p>
-                            <a href="mailto:rasmus@ahtava.com?subject=Request New Phone Number">
+                            <a href={format!("mailto:rasmus@ahtava.com?subject=Country%20Availability%20Inquiry%20for%20{}&body=Hey,%0A%0AIs%20the%20service%20available%20in%20{}%3F%0A%0AThanks,%0A",(*country_name).clone(), (*country_name).clone())}>
                                 <button class="iq-button signup-button">{"Check Number Availability"}</button>
                             </a>
                         </div>
                         <div class="option-card">
                             <h3>{"Bring Your Own Number"}</h3>
                             <p>{"Use your own Twilio number to get 50% off any plan and enable service in ANY country. Perfect for regions where we can't directly provide numbers (like Germany, India, African countries). This option lets you use our service worldwide while managing your own number through Twilio."}</p>
-                            <a href="mailto:rasmus@ahtava.com?subject=Bring Your Own Twilio Number">
+                            <a href={format!("mailto:rasmus@ahtava.com?subject=Bring%20my%20own%20Twilio%20number%20from%20{}&body=Hey,%0A%0AI'm%20interested%20in%20bringing%20my%20own%20Twilio%20number%20from%20{}.%0A%0AThanks,%0A", (*selected_country).clone(), (*selected_country).clone())}>
                                 <button class="iq-button signup-button">{"Contact Us to Set Up"}</button>
                             </a>
                         </div>
@@ -505,7 +554,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     </details>
                     <details>
                         <summary>{"What counts as a message?"}</summary>
-                        <p>{"Each question or request you send counts as one message. AI clarification responses don't count against your limit. Daily digests and critical notifications are included in your plan and don't use message credits. Priority sender notifications use either unused digest slots or purchased credits."}</p>
+                        <p>{"Each question you send and each minute of voice calling you initiate counts as one message. AI clarification responses don't count against your limit. Daily digests and critical notifications are included in your plan and don't use message credits. Priority sender notifications use either unused digest slots, your message quota or purchased credits."}</p>
                     </details>
                     <details>
                         <summary>{"How do credits work?"}</summary>

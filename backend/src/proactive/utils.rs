@@ -38,12 +38,13 @@ struct MatchResponse {
     waiting_check_id: Option<i32>,
     is_critical: bool,
     what_to_inform: String,
+    first_message: String,
 }
 
 pub async fn check_message_importance(
     message: &str,
     waiting_checks: Vec<WaitingCheck>,
-) -> Result<(Option<i32>, bool, String), Box<dyn std::error::Error>> {
+) -> Result<(Option<i32>, bool, String, String), Box<dyn std::error::Error>> {
     let client = create_openai_client()?;
 
     let waiting_checks_str = waiting_checks
@@ -62,7 +63,7 @@ pub async fn check_message_importance(
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
             content: chat_completion::Content::Text(
-                "You are an AI that analyzes messages to determine if they match any waiting checks or if they are otherwise critical and require immediate attention. A message is considered critical ONLY if it absolutely cannot wait to be mentioned in the next scheduled notification summary - it must be something that requires truly immediate attention like emergencies, extremely time-sensitive matters, or critical updates that would be problematic if delayed until the next summary. Most normal updates, even if important, should wait for the scheduled summary unless they are genuinely urgent and time-critical. When reporting critical messages, provide an extremely concise SMS-friendly message (ideally under 160 characters) that clearly states what requires immediate attention.".to_string(),
+                "You are an AI that analyzes messages to determine if they match any waiting checks or if they are otherwise critical and require immediate attention. A message is considered critical ONLY if it absolutely cannot wait to be mentioned in the next scheduled notification summary - it must be something that requires truly immediate attention like emergencies, extremely time-sensitive matters, or critical updates that would be problematic if delayed until the next summary. Most normal updates, even if important, should wait for the scheduled summary unless they are genuinely urgent and time-critical. When reporting critical messages:\n1. Provide an extremely concise SMS-friendly message (ideally under 160 characters) that clearly states what requires immediate attention\n2. Generate a brief, attention-grabbing first message (under 100 characters) that would be suitable as an AI voice assistant's opening line in a phone call about this update. This first message should give a quick context about the type of urgent matter without all the details.".to_string(),
             ),
             name: None,
             tool_calls: None,
@@ -105,6 +106,14 @@ pub async fn check_message_importance(
             ..Default::default()
         }),
     );
+    properties.insert(
+        "first_message".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Brief, attention-grabbing first message (under 100 chars) suitable as an AI voice assistant's opening line in a phone call. Should give quick context about the type of urgent matter.".to_string()),
+            ..Default::default()
+        }),
+    );
 
     let tools = vec![chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
@@ -140,29 +149,30 @@ pub async fn check_message_importance(
                         match serde_json::from_str::<MatchResponse>(args) {
                             Ok(response) => {
                                 tracing::debug!(
-                                    "Message analysis result: check_id={:?}, critical={}, message={}",
+                                    "Message analysis result: check_id={:?}, critical={}, message={}, first_message={}",
                                     response.waiting_check_id,
                                     response.is_critical,
-                                    response.what_to_inform
+                                    response.what_to_inform,
+                                    response.first_message
                                 );
-                                Ok((response.waiting_check_id, response.is_critical, response.what_to_inform))
+                                Ok((response.waiting_check_id, response.is_critical, response.what_to_inform, response.first_message))
                             }
                             Err(e) => {
                                 tracing::error!("Failed to parse message analysis response: {}", e);
-                                Ok((None, false, "".to_string()))
+                                Ok((None, false, "".to_string(), "".to_string()))
                             }
                         }
                     } else {
                         tracing::error!("No arguments found in tool call");
-                        Ok((None, false, "".to_string()))
+                        Ok((None, false, "".to_string(), "".to_string()))
                     }
                 } else {
                     tracing::error!("No tool calls found");
-                    Ok((None, false, "".to_string()))
+                    Ok((None, false, "".to_string(), "".to_string()))
                 }
             } else {
                 tracing::error!("No tool calls section in response");
-                Ok((None, false, "".to_string()))
+                Ok((None, false, "".to_string(), "".to_string()))
             }
         }
         Err(e) => {

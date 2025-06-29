@@ -739,7 +739,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                 </div>
                 <div class="flow-description">
                     {
-                        "Get notified about messages from your monitored contacts"
+                        "Get notified about messages from your monitored contacts. Note: Check info for notification quotas."
                     }
                 </div>
                 <div class="info-section" style={if *show_info { "display: block" } else { "display: none" }}>
@@ -749,6 +749,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                             <li>{"Lightfriend will notify you about messages from your monitored contacts"}</li>
                             <li>{"For WhatsApp, enter the contact's name or phone number"}</li>
                             <li>{"For Email, enter the contact's email address"}</li>
+                            <li>{"Note: Priority sender notifications will use either unused daily digest message slots, or if they are used, each notification will use one third of a base message."}</li>
                         </ul>
                     </div>
                 </div>

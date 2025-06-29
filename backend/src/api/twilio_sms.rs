@@ -235,6 +235,18 @@ pub async fn process_sms(
             );
         }
     };
+
+    // Check if user has sufficient credits before processing the message
+    if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "message", None).await {
+        tracing::warn!("User {} has insufficient credits: {}", user.id, e);
+        return (
+            StatusCode::PAYMENT_REQUIRED,
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            axum::Json(TwilioResponse {
+                message: e,
+            })
+        );
+    }
     tracing::info!("Found user with ID: {} for phone number: {}", user.id, payload.from);
     
     // Log media information for admin user

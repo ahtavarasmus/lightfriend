@@ -114,6 +114,7 @@ impl UserCore {
                     sub_country: None,
                     info: None,
                     save_context: Some(5),
+                    number_of_digests_locked: 0,
                 };
                 
                 diesel::insert_into(user_settings::table)
@@ -151,6 +152,7 @@ impl UserCore {
                 sub_country: None,
                 info: None,
                 save_context: Some(5),
+                number_of_digests_locked: 0,
             };
             
             diesel::insert_into(user_settings::table)

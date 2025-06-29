@@ -861,26 +861,44 @@ pub async fn handle_whatsapp_message(
            sender_name.to_lowercase().contains(&priority_sender.sender.to_lowercase()) {
             tracing::info!("Fast check: Priority sender matched for user {}: '{}'", user_id, priority_sender.sender);
             
-            // Spawn a new task for sending notification
-            let state_clone = state.clone();
-            let content_clone = content.clone();
-            let message= format!("WhatsApp from {}: {}", priority_sender.sender, content_clone);
-            tokio::spawn(async move {
-                crate::proactive::utils::send_notification(
-                    &state_clone,
-                    user_id,
-                    &message,
-                    "whatsapp".to_string(),
-                    Some("Hello, I have an important WhatsApp message to tell you about.".to_string()),
-                ).await;
-            });
-            return;
+            // Check if user has enough credits for notification
+            match crate::utils::usage::check_user_credits(&state, &user, "notification", None).await {
+                Ok(()) => {
+                    // User has enough credits, proceed with notification
+                    let state_clone = state.clone();
+                    let content_clone = content.clone();
+                    let message = format!("WhatsApp from {}: {}", priority_sender.sender, content_clone);
+                    let first_message = format!("Hello, you have an important WhatsApp message from {}.", priority_sender.sender);
+                    
+                    // Spawn a new task for sending notification
+                    tokio::spawn(async move {
+                        // Send the notification
+                        crate::proactive::utils::send_notification(
+                            &state_clone,
+                            user_id,
+                            &message,
+                            "whatsapp".to_string(),
+                            Some(first_message),
+                        ).await;
+                        
+                        // Deduct credits after successful notification
+                        if let Err(e) = crate::utils::usage::deduct_user_credits(&state_clone, user_id, "notification", None) {
+                            tracing::error!("Failed to deduct notification credits for user {}: {}", user_id, e);
+                        }
+                    });
+                    return;
+                }
+                Err(e) => {
+                    tracing::warn!("User {} does not have enough credits for notification: {}", user_id, e);
+                    return;
+                }
+            }
         }
     }
 
     // Check message importance based on waiting checks and criticality
     match crate::proactive::utils::check_message_importance(&content, waiting_checks).await {
-        Ok((waiting_check_id, is_critical, message)) => {
+        Ok((waiting_check_id, is_critical, message, first_message)) => {
             if is_critical {
                 tracing::info!(
                     "Message critical check passed for user {}: {}",
@@ -895,7 +913,7 @@ pub async fn handle_whatsapp_message(
                         user_id,
                         &message,
                         "whatsapp".to_string(),
-                        Some("Hello, I have an important WhatsApp message to tell you about.".to_string()),
+                        Some(first_message),
                     ).await;
                 });
             } else if let Some(check_id) = waiting_check_id {
@@ -922,7 +940,7 @@ pub async fn handle_whatsapp_message(
                         user_id,
                         &message,
                         "whatsapp".to_string(),
-                        Some("Hello, I have an important WhatsApp message to tell you about.".to_string()),
+                        Some(first_message),
                     ).await;
                 });
             } else {

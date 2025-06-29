@@ -200,7 +200,7 @@ pub async fn fetch_assistant(
                         conversation_config_override.tts.voice_id = us_voice_id.clone();
                     }
                 }
-            } else if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "voice").await {
+            } else if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "voice", None).await {
                 // Get conversation for the user
                 let conversation = match state.user_conversations.get_conversation(
                     &user, 
@@ -2259,7 +2259,7 @@ pub async fn handle_email_response_tool_call(
     };
 
     // Verify user has sufficient credits for email response
-    if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "email").await {
+    if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "email", None).await {
         return Err((
             StatusCode::FORBIDDEN,
             Json(json!({
