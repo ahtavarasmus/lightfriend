@@ -189,18 +189,9 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
     };
 
     html! {
-        <div class="filter-section waiting-checks">
+        <>
             <style>
                 {r#"
-                    .waiting-checks {
-                        background: rgba(30, 30, 30, 0.7);
-                        border: 1px solid rgba(245, 158, 11, 0.1);
-                        border-radius: 16px;
-                        padding: 1.5rem;
-                        backdrop-filter: blur(10px);
-                        margin-top: 2rem;
-                    }
-
                     .filter-header {
                         display: flex;
                         flex-direction: column;
@@ -382,12 +373,12 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
                     }
 
                     .service-type-badge.email {
-                        color: #F59E0B;
+                        color: #1E90FF;
                         border: 1px solid rgba(245, 158, 11, 0.2);
                     }
 
                     .service-type-badge.messaging {
-                        color: #EC4899;
+                        color: #25D366;
                         border: 1px solid rgba(236, 72, 153, 0.2);
                     }
 
@@ -544,6 +535,7 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
             </style>
             <div class="filter-header">
                 <div class="filter-title">
+                    <i class="fas fa-hourglass-half" style="color: #4ECDC4;"></i>
                     <h3>{"Waiting Checks"}</h3>
                     <button 
                         class="info-button" 
@@ -556,9 +548,7 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
                     </button>
                 </div>
                 <div class="flow-description">
-                    {
-                        "Get notified when your waiting checks are found in messages"
-                    }
+                    {"Set up notifications for when you're waiting for responses or updates."}
                 </div>
                 <div class="info-section" style={if *show_info { "display: block" } else { "display: none" }}>
                     <h4>{"How It Works"}</h4>
@@ -650,6 +640,6 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
             }
             </ul>
         </div>
-        </div>
+        </>
     }
 }

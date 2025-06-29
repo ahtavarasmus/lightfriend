@@ -138,49 +138,12 @@ pub fn connect(props: &ConnectProps) -> Html {
 
 let group_states = use_state(|| {
     let mut map = std::collections::HashMap::new();
-    map.insert("search", ServiceGroupState { expanded: false, service_count: 4, connected_count: 2 });
-    map.insert("calendar", ServiceGroupState { expanded: false, service_count: 1, connected_count: 0 });
-    map.insert("memory", ServiceGroupState { expanded: false, service_count: 1, connected_count: 0 });
-    map.insert("email", ServiceGroupState { expanded: false, service_count: 1, connected_count: 0 });
-    map.insert("messaging", ServiceGroupState { expanded: false, service_count: 2, connected_count: 0 });
-    map.insert("management", ServiceGroupState { expanded: false, service_count: 2, connected_count: 2 });
+    map.insert("tools", ServiceGroupState { expanded: false, service_count: 4, connected_count: 2 });
+    map.insert("apps", ServiceGroupState { expanded: false, service_count: 4, connected_count: 0 });
+    map.insert("proactive", ServiceGroupState { expanded: false, service_count: 4, connected_count: 0 });
     map
 });
 
-// Update messaging connected count when WhatsApp status changes
-{
-    let group_states = group_states.clone();
-    let whatsapp_connected = whatsapp_connected.clone();
-    use_effect_with_deps(
-        move |whatsapp_connected| {
-            let mut new_states = (*group_states).clone();
-            if let Some(state) = new_states.get_mut("messaging") {
-                state.connected_count = if **whatsapp_connected { 1 } else { 0 };
-            }
-            group_states.set(new_states);
-            || ()
-        },
-        whatsapp_connected,
-    );
-}
-
-    // Update email connected count when status changes
-    {
-        let group_states = group_states.clone();
-        let email_connected = email_connected.clone();
-        use_effect_with_deps(
-            move |email_connected| {
-                let mut new_states = (*group_states).clone();
-                if let Some(state) = new_states.get_mut("email") {
-                    state.connected_count = if **email_connected { 1 } else { 0 };
-                    state.expanded = false; 
-                }
-                group_states.set(new_states);
-                || ()
-            },
-            email_connected,
-        );
-    }
 
     // Predefined providers (you can expand this list)
     let providers = vec![
@@ -235,13 +198,227 @@ let group_states = use_state(|| {
             html! {
                 <div class="connect-section">
 
-                    // Information Search Services
+                    // Apps 
+                    <div class="service-group">
+                        <h3 class="service-group-title"
+                            onclick={let group_states = group_states.clone();
+                                Callback::from(move |_| {
+                                    let mut new_states = (*group_states).clone();
+                                    if let Some(state) = new_states.get_mut("apps") {
+                                        state.expanded = !state.expanded;
+                                    }
+                                    group_states.set(new_states);
+                                })
+                            }
+                        >
+                            <i class="fa-solid fa-plug"></i>
+                            {"Apps"}
+                            <div class="group-summary">
+                                <span class="service-count">
+                                    {format!("{}/4 Connected", 
+                                        (if *calendar_connected { 1 } else { 0 }) +
+                                        (if *memory_connected { 1 } else { 0 }) +
+                                        (if *email_connected { 1 } else { 0 }) +
+                                        (if *whatsapp_connected { 1 } else { 0 })
+                                    )}
+                                </span>
+                                <i class={if group_states.get("apps").map(|s| s.expanded).unwrap_or(false) {
+                                    "fas fa-chevron-up"
+                                } else {
+                                    "fas fa-chevron-down"
+                                }}></i>
+                            </div>
+                        </h3>
+                        <div class={classes!(
+                            "service-list",
+                            if group_states.get("apps").map(|s| s.expanded).unwrap_or(false) {
+                                "expanded"
+                            } else {
+                                "collapsed"
+                            }
+                        )}>
+                            <CalendarConnect 
+                                user_id={props.user_id} 
+                                sub_tier={props.sub_tier.clone()} 
+                                discount={props.discount}
+                                on_connection_change={{
+                                    let group_states = group_states.clone();
+                                    Some(Callback::from(move |connected: bool| {
+                                        let mut new_states = (*group_states).clone();
+                                        if let Some(state) = new_states.get_mut("calendar") {
+                                            state.connected_count = if connected { 1 } else { 0 };
+                                        }
+                                        group_states.set(new_states);
+                                    }))
+                                }}
+                            />
+
+                            <TasksConnect 
+                                user_id={props.user_id}
+                                sub_tier={props.sub_tier.clone()}
+                                discount={props.discount}
+                            />
+
+                            <EmailConnect 
+                                user_id={props.user_id}
+                                sub_tier={props.sub_tier.clone()}
+                                discount={props.discount}
+                            />
+                            <WhatsappConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount}/>
+
+                            <TelegramConnect 
+                                user_id={props.user_id} 
+                                sub_tier={props.sub_tier.clone()} 
+                                discount={props.discount}
+                            />
+                        </div>
+                    </div>
+
+                    // Proactive Services
+                    <div class="service-group">
+                        <h3 class="service-group-title"
+                            onclick={let group_states = group_states.clone();
+                                Callback::from(move |_| {
+                                    let mut new_states = (*group_states).clone();
+                                    if let Some(state) = new_states.get_mut("proactive") {
+                                        state.expanded = !state.expanded;
+                                    }
+                                    group_states.set(new_states);
+                                })
+                            }
+                        >
+                            <i class="fa-solid fa-robot"></i>
+                            {"Proactive Services"}
+                            <div class="group-summary">
+                                <span class="service-count">
+                                    {format!("{}/4 Available", 
+                                        if *email_connected || *calendar_connected || *whatsapp_connected { 4 } else { 0 }
+                                    )}
+                                </span>
+                                <i class={if group_states.get("proactive").map(|s| s.expanded).unwrap_or(false) {
+                                    "fas fa-chevron-up"
+                                } else {
+                                    "fas fa-chevron-down"
+                                }}></i>
+                            </div>
+                        </h3>
+                        <div class={classes!(
+                            "service-list",
+                            if group_states.get("proactive").map(|s| s.expanded).unwrap_or(false) {
+                                "expanded"
+                            } else {
+                                "collapsed"
+                            }
+                        )}>
+                            // Critical Section
+                            <div class={classes!(
+                                "service-item",
+                                if !(*email_connected || *calendar_connected || *whatsapp_connected) { "inactive" } else { "" }
+                            )}>
+                                {
+                                    if !(*email_connected || *calendar_connected || *whatsapp_connected) {
+                                        html! {
+                                            <div class="feature-overlay">
+                                                <div class="overlay-content" style="color: #999;">
+                                                    <i class="fas fa-lock"></i>
+                                                    <p>{"Connect Email, Calendar, or WhatsApp to use Critical Notifications"}</p>
+                                                </div>
+                                            </div>
+                                        }
+                                    } else {
+                                        html! {
+                                            <crate::proactive::critical::CriticalSection/>
+                                        }
+                                    }
+                                }
+                            </div>
+
+                            // Digest Section
+                            <div class={classes!(
+                                "service-item",
+                                if !(*email_connected || *calendar_connected || *whatsapp_connected) { "inactive" } else { "" }
+                            )}>
+                                {
+                                    if !(*email_connected || *calendar_connected || *whatsapp_connected) {
+                                        html! {
+                                            <div class="feature-overlay">
+                                                <div class="overlay-content" style="color: #999;">
+                                                    <i class="fas fa-lock"></i>
+                                                    <p>{"Connect Email, Calendar, or WhatsApp to use Digest"}</p>
+                                                </div>
+                                            </div>
+                                        }
+                                    } else {
+                                        html! {
+                                            <crate::proactive::digest::DigestSection/>
+                                        }
+                                    }
+                                }
+                            </div>
+
+                            // Waiting Checks Section
+                            <div class={classes!(
+                                "service-item",
+                                if !(*email_connected || *whatsapp_connected) { "inactive" } else { "" }
+                            )}>
+                                {
+                                    if !(*email_connected || *whatsapp_connected) {
+                                        html! {
+                                            <div class="feature-overlay">
+                                                <div class="overlay-content" style="color: #999;">
+                                                    <i class="fas fa-lock"></i>
+                                                    <p>{"Connect Email or WhatsApp to use Waiting Checks"}</p>
+                                                </div>
+                                            </div>
+                                        }
+                                    } else {
+                                        html! {
+                                            <crate::proactive::waiting_checks::WaitingChecksSection
+                                                service_type={"whatsapp".to_string()}
+                                                checks={Vec::new()}
+                                                on_change={Callback::from(|_| ())}
+                                            />
+                                        }
+                                    }
+                                }
+                            </div>
+
+                            // Monitored Contacts Section
+                            <div class={classes!(
+                                "service-item",
+                                if !(*email_connected || *whatsapp_connected) { "inactive" } else { "" }
+                            )}>
+                                {
+                                    if !(*email_connected || *whatsapp_connected) {
+                                        html! {
+                                            <div class="feature-overlay">
+                                                <div class="overlay-content" style="color: #999;">
+                                                    <i class="fas fa-lock"></i>
+                                                    <p>{"Connect WhatsApp or Email to use Monitored Contacts"}</p>
+                                                </div>
+                                            </div>
+                                        }
+                                    } else {
+                                        html! {
+                                            <crate::proactive::constant_monitoring::MonitoredContactsSection
+                                                service_type={"whatsapp".to_string()}
+                                                contacts={Vec::new()}
+                                                on_change={Callback::from(|_| ())}
+                                            />
+                                        }
+                                    }
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    // Tools 
                     <div class="service-group">
                         <h3 class="service-group-title" 
                             onclick={let group_states = group_states.clone();
                                 Callback::from(move |_| {
                                     let mut new_states = (*group_states).clone();
-                                    if let Some(state) = new_states.get_mut("search") {
+                                    if let Some(state) = new_states.get_mut("tools") {
                                         state.expanded = !state.expanded;
                                     }
                                     group_states.set(new_states);
@@ -249,11 +426,11 @@ let group_states = use_state(|| {
                             }
 
                         >
-                            <i class="fa-solid fa-globe"></i>
-                            {"Internet Search"}
+                            <i class="fa-solid fa-hammer"></i>
+                            {"Tools"}
                             <div class="group-summary">
-                                <span class="service-count">{"4 tools ready!"}</span>
-                                <i class={if group_states.get("search").map(|s| s.expanded).unwrap_or(false) {
+                                <span class="service-count">{"6 tools ready!"}</span>
+                                <i class={if group_states.get("tools").map(|s| s.expanded).unwrap_or(false) {
                                     "fas fa-chevron-up"
                                 } else {
                                     "fas fa-chevron-down"
@@ -262,7 +439,7 @@ let group_states = use_state(|| {
                         </h3>
 <div class={classes!(
                             "service-list",
-                            if group_states.get("search").map(|s| s.expanded).unwrap_or(false) {
+                            if group_states.get("tools").map(|s| s.expanded).unwrap_or(false) {
                                 "expanded"
                             } else {
                                 "collapsed"
@@ -292,48 +469,6 @@ let group_states = use_state(|| {
                                     {"Get instant weather updates and forecasts for any location through SMS or voice calls. Provides current conditions."}
                                 </p>
                             </div>
-
-                            /*
-                            // Shazam
-                            <div class="service-item">
-                                <div class="service-header">
-                                    <div class="service-name">
-                                        {"🎵 Shazam"}
-                                    </div>
-                                    <button class="info-button" onclick={Callback::from(|_| {
-                                        if let Some(element) = web_sys::window()
-                                            .and_then(|w| w.document())
-                                            .and_then(|d| d.get_element_by_id("shazam-info"))
-                                        {
-                                            let display = element.get_attribute("style")
-                                                .unwrap_or_else(|| "display: none".to_string());
-                                            
-                                            if display.contains("none") {
-                                                let _ = element.set_attribute("style", "display: block");
-                                            } else {
-                                                let _ = element.set_attribute("style", "display: none");
-                                            }
-                                        }
-                                    })}>
-                                        {"ⓘ"}
-                                    </button>
-                                </div>
-                                <p class="service-description">
-                                    {"Identify any song by calling your lightfriend and playing the music. Once identified, you'll receive the song details via SMS."}
-                                </p>
-                                <div id="shazam-info" class="info-section" style="display: none">
-                                    <h4>{"How It Works"}</h4>
-                                    <div class="info-subsection">
-                                        <ul>
-                                            <li>{"1. Send either 's' or ask something related to shazam"}</li>
-                                            <li>{"2. Answer the incoming call from other number"}</li>
-                                            <li>{"3. Put the on speaker phone and let it listen to the music"}</li>
-                                            <li>{"4. once every 15s of music, lightfriend will try to identify the song and send you the details by sms. Overall it tries to identify the audio 4 times in the 1 minute call. If no message is received, lightfriend couldn't identify the music."}</li>
-                                        </ul>
-                                    </div>
-                                </div>
-                            </div>
-                            */
 
                             // QR Code Scanner
                             <div class="service-item">
@@ -416,43 +551,6 @@ let group_states = use_state(|| {
                                 </div>
                             </div>
 
-                        </div>
-                    </div>
-
-
-
-                    // Management Tools
-                    <div class="service-group">
-                        <h3 class="service-group-title"
-                            onclick={let group_states = group_states.clone();
-                                Callback::from(move |_| {
-                                    let mut new_states = (*group_states).clone();
-                                    if let Some(state) = new_states.get_mut("management") {
-                                        state.expanded = !state.expanded;
-                                    }
-                                    group_states.set(new_states);
-                                })
-                            }
-                        >
-                            <i class="fa-solid fa-plus"></i>
-                            {"Management tools"}
-                            <div class="group-summary">
-                                <span class="service-count">{"2 tools ready!"}</span>
-                                <i class={if group_states.get("management").map(|s| s.expanded).unwrap_or(false) {
-                                    "fas fa-chevron-up"
-                                } else {
-                                    "fas fa-chevron-down"
-                                }}></i>
-                            </div>
-                        </h3>
-                        <div class={classes!(
-                            "service-list",
-                            if group_states.get("management").map(|s| s.expanded).unwrap_or(false) {
-                                "expanded"
-                            } else {
-                                "collapsed"
-                            }
-                        )}>
                             // Waiting Checks
                             <div class="service-item">
                                 <div class="service-header">
@@ -534,331 +632,6 @@ let group_states = use_state(|| {
                         </div>
                     </div>
 
-                    // Calendar Services
-                    <div class="service-group">
-                        <h3 class="service-group-title"
-                            onclick={let group_states = group_states.clone();
-                                Callback::from(move |_| {
-                                    let mut new_states = (*group_states).clone();
-                                    if let Some(state) = new_states.get_mut("calendar") {
-                                        state.expanded = !state.expanded;
-                                    }
-                                    group_states.set(new_states);
-                                })
-                            }
-                        >
-                            <i class="fas fa-calendar"></i>
-                            {"Calendar"}
-                            <div class="group-summary">
-                                <span class="service-count">
-                                    {format!("{}/1 Connected", 
-                                        if *calendar_connected { 1 } else { 0 }
-                                    )}
-                                </span>
-                                <i class={if group_states.get("calendar").map(|s| s.expanded).unwrap_or(false) {
-                                    "fas fa-chevron-up"
-                                } else {
-                                    "fas fa-chevron-down"
-                                }}></i>
-                            </div>
-                        </h3>
-                        <div class={classes!(
-                            "service-list",
-                            if group_states.get("calendar").map(|s| s.expanded).unwrap_or(false) {
-                                "expanded"
-                            } else {
-                                "collapsed"
-                            }
-                        )}>
-                            <CalendarConnect 
-                                user_id={props.user_id} 
-                                sub_tier={props.sub_tier.clone()} 
-                                discount={props.discount}
-                                on_connection_change={{
-                                    let group_states = group_states.clone();
-                                    Some(Callback::from(move |connected: bool| {
-                                        let mut new_states = (*group_states).clone();
-                                        if let Some(state) = new_states.get_mut("calendar") {
-                                            state.connected_count = if connected { 1 } else { 0 };
-                                        }
-                                        group_states.set(new_states);
-                                    }))
-                                }}
-                            />
-                        </div>
-                    </div>
-                    <div class="service-group">
-                        <h3 class="service-group-title"
-                            onclick={let group_states = group_states.clone();
-                                Callback::from(move |_| {
-                                    let mut new_states = (*group_states).clone();
-                                    if let Some(state) = new_states.get_mut("memory") {
-                                        state.expanded = !state.expanded;
-                                    }
-                                    group_states.set(new_states);
-                                })
-                            }
-                        >
-                            <i class="fa-solid fa-database"></i>
-                            {"Memory"}
-                            <div class="group-summary">
-                                <span class="service-count">
-                                    {format!("{}/1 Connected", 
-                                        if *memory_connected { 1 } else { 0 }
-                                    )}
-                                </span>
-                                <i class={if group_states.get("memory").map(|s| s.expanded).unwrap_or(false) {
-                                    "fas fa-chevron-up"
-                                } else {
-                                    "fas fa-chevron-down"
-                                }}></i>
-                            </div>
-                        </h3>
-                        <div class={classes!(
-                            "service-list",
-                            if group_states.get("memory").map(|s| s.expanded).unwrap_or(false) {
-                                "expanded"
-                            } else {
-                                "collapsed"
-                            }
-                        )}>
-                            <TasksConnect 
-                                user_id={props.user_id}
-                                sub_tier={props.sub_tier.clone()}
-                                discount={props.discount}
-                            />
-                        </div>
-                    </div>
-
-
-                    // Email Services
-                    <div class="service-group">
-                        <h3 class="service-group-title"
-                            onclick={let group_states = group_states.clone();
-
-                                Callback::from(move |_| {
-                                    let mut new_states = (*group_states).clone();
-                                    if let Some(state) = new_states.get_mut("email") {
-                                        state.expanded = !state.expanded;
-
-                                    }
-                                    group_states.set(new_states);
-                                })
-                            }
-                        >
-                            <i class="fas fa-envelope"></i>
-                            {"Email"}
-                            <div class="group-summary">
-                                <span class="service-count">
-                                    {format!("{}/1 Connected", 
-                                        if let Some(state) = group_states.get("email") {
-                                            state.connected_count
-                                        } else {
-                                            0
-                                        }
-                                    )}
-                                </span>
-                                <i class={if group_states.get("email").map(|s| s.expanded).unwrap_or(false) {
-                                    "fas fa-chevron-up"
-                                } else {
-                                    "fas fa-chevron-down"
-                                }}></i>
-                            </div>
-                        </h3>
-                        <div class={classes!(
-                            "service-list",
-                            if group_states.get("email").map(|s| s.expanded).unwrap_or(false) {
-                                "expanded"
-                            } else {
-                                "collapsed"
-                            }
-                        )}>
-                            <EmailConnect 
-                                user_id={props.user_id}
-                                sub_tier={props.sub_tier.clone()}
-                                discount={props.discount}
-                            />
-                        </div>
-                    </div>
-
-                    
-
-                    // Messaging Services 
-                    <div class="service-group">
-                        <h3 class="service-group-title"
-                            onclick={let group_states = group_states.clone();
-                                Callback::from(move |_| {
-                                    let mut new_states = (*group_states).clone();
-                                    if let Some(state) = new_states.get_mut("messaging") {
-                                        state.expanded = !state.expanded;
-                                    }
-                                    group_states.set(new_states);
-                                })
-                            }
-                        >
-                            <i class="fas fa-comments"></i>
-                            {"Messaging"}
-                            <div class="group-summary">
-                                <span class="service-count">
-                                    {format!("{}/1 Connected", 
-                                        if let Some(state) = group_states.get("messaging") {
-                                            state.connected_count
-                                        } else {
-                                            0
-                                        }
-                                    )}
-                                </span>
-                                <i class={if group_states.get("messaging").map(|s| s.expanded).unwrap_or(false) {
-                                    "fas fa-chevron-up"
-                                } else {
-                                    "fas fa-chevron-down"
-                                }}></i>
-                            </div>
-                        </h3>
-                        <div class={classes!(
-                            "service-list",
-                            if group_states.get("messaging").map(|s| s.expanded).unwrap_or(false) {
-                                "expanded"
-                            } else {
-                                "collapsed"
-                            }
-                        )}>
-
-                            <WhatsappConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount}/>
-                            {
-                                if props.user_id == 1 {
-                                    html! {
-                                        <TelegramConnect 
-                                            user_id={props.user_id} 
-                                            sub_tier={props.sub_tier.clone()} 
-                                            discount={props.discount}
-                                        />
-                                    }
-                                } else {
-                                    html! {
-                                        <div class="service-item coming-soon">
-                                            <div class="service-header">
-                                                <div class="service-name">
-                                                    <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" alt="Telegram" width="24" height="24"/>
-                                                    {"Telegram"}
-                                                    <span class="coming-soon-tag">{"Coming Soon"}</span>
-                                                </div>
-                                            </div>
-                                            <p class="service-description">
-                                                {"Send and receive Telegram messages through SMS or voice calls."}
-                                            </p>
-                                            <button class="connect-button" disabled=true>
-                                                {"Connect"}
-                                            </button>
-                                        </div>
-                                    }
-                                }
-                            }
-                        </div>
-
-                    </div>
-
-                    // Waiting Checks Section (with inactive state when services not connected)
-                    <div class={classes!(
-                        "feature-section",
-                        if !(*email_connected || *whatsapp_connected) { "inactive" } else { "" }
-                    )}>
-                        {
-                            if !(*email_connected || *whatsapp_connected) {
-                                html! {
-                                    <div class="feature-overlay">
-                                        <div class="overlay-content" style="color: #999;">
-                                            <i class="fas fa-lock"></i>
-                                            <p>{"Connect Email or WhatsApp to use Waiting Checks"}</p>
-                                        </div>
-                                    </div>
-                                }
-                            } else {
-                                html! {
-                                    <crate::proactive::waiting_checks::WaitingChecksSection
-                                        service_type={"whatsapp".to_string()}
-                                        checks={Vec::new()}
-                                        on_change={Callback::from(|_| ())}
-
-                                    />
-                                }
-                            }
-                        }
-                        
-                    </div>
-
-                    // Monitored Contacts Section (with inactive state when WhatsApp not connected)
-                    <div class={classes!(
-                        "feature-section",
-                        if !*whatsapp_connected { "inactive" } else { "" }
-                    )}>
-                        {
-                            if !*whatsapp_connected {
-                                html! {
-                                    <div class="feature-overlay">
-                                        <div class="overlay-content" style="color: #999;">
-                                            <i class="fas fa-lock"></i>
-                                            <p>{"Connect WhatsApp to use Monitored Contacts"}</p>
-                                        </div>
-                                    </div>
-                                }
-                            } else {
-                                html! {
-                                    <crate::proactive::constant_monitoring::MonitoredContactsSection
-                                        service_type={"whatsapp".to_string()}
-                                        contacts={Vec::new()}
-                                        on_change={Callback::from(|_| ())}
-                                    />
-                                }
-                            }
-                        }
-                    </div>
-
-                    // Digest Section (with inactive state when no services connected)
-                    <div class={classes!(
-                        "feature-section",
-                        if !(*email_connected || *calendar_connected || *whatsapp_connected) { "inactive" } else { "" }
-                    )}>
-                        {
-                            if !(*email_connected || *calendar_connected || *whatsapp_connected) {
-                                html! {
-                                    <div class="feature-overlay">
-                                        <div class="overlay-content" style="color: #999;">
-                                            <i class="fas fa-lock"></i>
-                                            <p>{"Connect Email, Calendar, or WhatsApp to use Digest"}</p>
-                                        </div>
-                                    </div>
-                                }
-                            } else {
-                                html! {
-                                    <crate::proactive::digest::DigestSection/>
-                                }
-                            }
-                        }
-                    </div>
-
-                    // Critical Section (with inactive state when no services connected)
-                    <div class={classes!(
-                        "feature-section",
-                        if !(*email_connected || *calendar_connected || *whatsapp_connected) { "inactive" } else { "" }
-                    )}>
-                        {
-                            if !(*email_connected || *calendar_connected || *whatsapp_connected) {
-                                html! {
-                                    <div class="feature-overlay">
-                                        <div class="overlay-content" style="color: #999;">
-                                            <i class="fas fa-lock"></i>
-                                            <p>{"Connect Email, Calendar, or WhatsApp to use Critical Notifications"}</p>
-                                        </div>
-                                    </div>
-                                }
-                            } else {
-                                html! {
-                                    <crate::proactive::critical::CriticalSection/>
-                                }
-                            }
-                        }
-                    </div>
 
                     if let Some(err) = (*error).as_ref() {
                         <div class="error-message">
@@ -883,41 +656,24 @@ let group_states = use_state(|| {
     font-size: 0.8rem;
 }
 
-/* Internet Search */
+/* Apps */
 .service-group:nth-child(1) .service-count {
     background: rgba(96, 165, 250, 0.1);
     color: #60A5FA;
 }
 
-/* Calendar */
+/* Monitoring */
 .service-group:nth-child(2) .service-count {
-    background: rgba(167, 139, 250, 0.1);
-    color: #A78BFA;
-}
-
-/* Memory */
-.service-group:nth-child(3) .service-count {
     background: rgba(52, 211, 153, 0.1);
     color: #34D399;
 }
 
-/* Email */
-.service-group:nth-child(4) .service-count {
-    background: rgba(245, 158, 11, 0.1);
-    color: #F59E0B;
+/* Tools */
+.service-group:nth-child(3) .service-count {
+    background: rgba(169, 169, 169, 0.1);
+    color: #A9A9A9;
 }
 
-/* Messaging */
-.service-group:nth-child(5) .service-count {
-    background: rgba(236, 72, 153, 0.1);
-    color: #EC4899;
-}
-
-/* Management */
-.service-group:nth-child(6) .service-count {
-    background: rgba(34, 211, 238, 0.1);
-    color: #22D3EE;
-}
 
 .service-group-title {
     cursor: pointer;
@@ -982,7 +738,7 @@ let group_states = use_state(|| {
     transition: all 0.3s ease;
 }
 
-/* Internet Search - Blue */
+/* Apps - Blue */
 .service-group:nth-child(1) .service-group-title {
     color: #60A5FA;
 }
@@ -990,45 +746,22 @@ let group_states = use_state(|| {
     background: rgba(96, 165, 250, 0.1);
 }
 
-/* Calendar - Purple */
+/* Monitoring - Green */
 .service-group:nth-child(2) .service-group-title {
-    color: #A78BFA;
+    color: #34D399; /* Adjusted to a green shade to match the hover rgba(52, 211, 153, 0.1) */
 }
 .service-group:nth-child(2) .service-group-title:hover {
-    background: rgba(167, 139, 250, 0.1);
-}
-
-/* Memory - Green */
-.service-group:nth-child(3) .service-group-title {
-    color: #34D399;
-}
-.service-group:nth-child(3) .service-group-title:hover {
     background: rgba(52, 211, 153, 0.1);
 }
 
-/* Email - Orange */
-.service-group:nth-child(4) .service-group-title {
-    color: #F59E0B;
+/* Tools - Silver */
+.service-group:nth-child(3) .service-group-title {
+    color: #A9A9A9;
 }
-.service-group:nth-child(4) .service-group-title:hover {
-    background: rgba(245, 158, 11, 0.1);
-}
-
-/* Messaging - Pink */
-.service-group:nth-child(5) .service-group-title {
-    color: #EC4899;
-}
-.service-group:nth-child(5) .service-group-title:hover {
-    background: rgba(236, 72, 153, 0.1);
+.service-group:nth-child(3) .service-group-title:hover {
+    background: rgba(169, 169, 169, 0.1);
 }
 
-/* Management - Cyan */
-.service-group:nth-child(6) .service-group-title {
-    color: #22D3EE;
-}
-.service-group:nth-child(6) .service-group-title:hover {
-    background: rgba(34, 211, 238, 0.1);
-}
 
 .service-group-title:hover {
     background: rgba(30, 144, 255, 0.1);
@@ -1534,7 +1267,7 @@ let group_states = use_state(|| {
                             border: 1px solid rgba(30, 144, 255, 0.2);
                             border-radius: 12px;
                             padding: 1.5rem;
-                            margin-top: 1rem;
+                            margin-bottom: 1rem;
                         }
 
                         .filter-section.inactive {

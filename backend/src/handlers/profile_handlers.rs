@@ -227,7 +227,7 @@ pub struct PreferredNumberRequest {
 pub async fn update_preferred_number(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
-    Json(_request): Json<PreferredNumberRequest>,
+    Json(request): Json<PreferredNumberRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Get user and settings to check their subscription status
     let user = state.user_core.find_by_id(auth_user.user_id)
@@ -248,15 +248,21 @@ pub async fn update_preferred_number(
             Json(json!({"error": format!("No dedicated phone number found for user {}", auth_user.user_id)}))
         ))?
     } else {
-        // If no subscription, use the default allowed numbers
+        // If no discount_tier, validate the requested number is allowed
         let allowed_numbers = vec![
             std::env::var("USA_PHONE").expect("USA_PHONE must be set in environment"),
             std::env::var("FIN_PHONE").expect("FIN_PHONE must be set in environment"),
             std::env::var("AUS_PHONE").expect("AUS_PHONE must be set in environment"),
             std::env::var("GB_PHONE").expect("GB_PHONE must be set in environment"),
         ];
-        // Use the first available number as default
-        allowed_numbers[0].clone()
+        
+        if !allowed_numbers.contains(&request.preferred_number) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Invalid preferred number. Must be one of the allowed Twilio numbers"}))
+            ));
+        }
+        request.preferred_number.clone()
     };
 
     // Update preferred number
@@ -802,39 +808,8 @@ pub async fn update_digests(
     auth_user: AuthUser,
     Json(request): Json<UpdateDigestsRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Validate time format (HH:MM)
-    let validate_time = |time: &Option<String>, name: &str| -> Result<(), (StatusCode, Json<serde_json::Value>)> {
-        if let Some(time_str) = time {
-            let parts: Vec<&str> = time_str.split(':').collect();
-            if parts.len() != 2 {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": format!("Invalid {} digest time format. Expected HH:MM", name)}))
-                ));
-            }
-            
-            if let (Ok(hour), Ok(minute)) = (parts[0].parse::<i32>(), parts[1].parse::<i32>()) {
-                if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
-                    return Err((
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({"error": format!("{} digest time must be valid 24-hour time (00:00-23:59)", name)}))
-                    ));
-                }
-            } else {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": format!("Invalid {} digest time format", name)}))
-                ));
-            }
-        }
-        Ok(())
-    };
 
-    // Validate all times
-    validate_time(&request.morning_digest_time, "Morning")?;
-    validate_time(&request.day_digest_time, "Day")?;
-    validate_time(&request.evening_digest_time, "Evening")?;
-
+    println!("updating: {:#?}, {:#?}, {:#?}", &request.morning_digest_time, &request.day_digest_time, &request.evening_digest_time);
     match state.user_core.update_digests(
         auth_user.user_id,
         request.morning_digest_time.as_deref(),

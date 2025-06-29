@@ -277,18 +277,9 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
     };
 
     html! {
-        <div class="filter-section waiting-checks">
+        <>
             <style>
                 {r#"
-                    .waiting-checks {
-                        background: rgba(30, 30, 30, 0.7);
-                        border: 1px solid rgba(245, 158, 11, 0.1);
-                        border-radius: 16px;
-                        padding: 1.5rem;
-                        backdrop-filter: blur(10px);
-                        margin-top: 2rem;
-                    }
-
                     .filter-header {
                         display: flex;
                         flex-direction: column;
@@ -304,8 +295,14 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
 
                     .filter-title h3 {
                         margin: 0;
-                        color: #F59E0B;
+                        color: white;
+                        text-decoration: none;
                         font-size: 1.2rem;
+                        font-weight: 600;
+                        background: linear-gradient(45deg, #fff, #34D399);
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                        transition: opacity 0.3s ease;
                     }
 
                     .status-badge {
@@ -508,12 +505,12 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     }
 
                     .service-type-badge.email {
-                        color: #F59E0B;
+                        color: #1E90FF;
                         border: 1px solid rgba(245, 158, 11, 0.2);
                     }
 
                     .service-type-badge.messaging {
-                        color: #EC4899;
+                        color: #25D366;
                         border: 1px solid rgba(236, 72, 153, 0.2);
                     }
 
@@ -726,6 +723,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
             </style>
             <div class="filter-header">
                 <div class="filter-title">
+                    <i class="fas fa-user-check" style="color: #4ECDC4;"></i>
                     <h3>{"Monitored Contacts"}</h3>
                     <button 
                         class="info-button" 
@@ -897,6 +895,6 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
             }
             </ul>
         </div>
-        </div>
+        </>
     }
 }

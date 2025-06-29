@@ -96,17 +96,9 @@ pub fn critical_section() -> Html {
     };
 
     html! {
-        <div class="filter-section waiting-checks">
+        <>
             <style>
                 {r#"
-                    .waiting-checks {
-                        background: rgba(30, 30, 30, 0.7);
-                        border: 1px solid rgba(245, 158, 11, 0.1);
-                        border-radius: 16px;
-                        padding: 1.5rem;
-                        backdrop-filter: blur(10px);
-                        margin-top: 2rem;
-                    }
 
                     .filter-header {
                         display: flex;
@@ -121,9 +113,15 @@ pub fn critical_section() -> Html {
                         gap: 1rem;
                     }
 
-                    .filter-title h3 {
+                    .filter-title.critical h3 {
                         margin: 0;
-                        color: #F59E0B;
+                        color: white;
+                        text-decoration: none;
+                        font-weight: 600;
+                        background: linear-gradient(45deg, #fff, #F59E0B);
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                        transition: opacity 0.3s ease;
                         font-size: 1.2rem;
                     }
 
@@ -205,11 +203,6 @@ pub fn critical_section() -> Html {
 
                     /* Mobile responsiveness */
                     @media (max-width: 480px) {
-                        .waiting-checks {
-                            padding: 1rem;
-                            margin-top: 1rem;
-                        }
-
                         .filter-header {
                             margin-bottom: 1rem;
                         }
@@ -318,7 +311,7 @@ pub fn critical_section() -> Html {
                 "#}
             </style>
             <div class="filter-header">
-                <div class="filter-title">
+                <div class="filter-title critical">
                     <h3>{"Critical Notifications"}</h3>
                     <button 
                         class="info-button" 
@@ -331,8 +324,9 @@ pub fn critical_section() -> Html {
                     </button>
                 </div>
                 <div class="flow-description">
-                    {"Get immediate notifications for critical messages that can't wait for the daily digest."}
+                    {"Get instant notifications for critical messages."}
                 </div>
+
                 <div class="info-section" style={if *show_info { "display: block" } else { "display: none" }}>
                     <h4>{"How It Works"}</h4>
                     <div class="info-subsection">
@@ -361,8 +355,7 @@ pub fn critical_section() -> Html {
                     </span>
                 </div>
             </div>
-
-        </div>
+        </>
     }
 }
 

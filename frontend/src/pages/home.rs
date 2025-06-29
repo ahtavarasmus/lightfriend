@@ -392,12 +392,8 @@ pub fn Home() -> Html {
                             }
                             
                         </div>
-                        
-                        <p class="instruction-text">
-                            {"Select the best number for you above. No local number? Check Pricing page!"}
                             <br/>
                             <br/>
-                        </p>
 
 
                     <div class="dashboard-tabs">
@@ -1615,7 +1611,7 @@ pub fn Home() -> Html {
                     }
 
                     .tab-button.active {
-                        color: #1E90FF;
+                        color: white;
                     }
 
                     .tab-button.active::after {

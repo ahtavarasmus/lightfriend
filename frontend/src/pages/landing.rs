@@ -1400,26 +1400,6 @@ pub fn landing() -> Html {
                         font-size: 1.1rem;
                     }
 
-                    .demo-link {
-                        display: inline-flex;
-                        align-items: center;
-                        gap: 0.5rem;
-                        padding: 0.8rem 1.5rem;
-                        background: linear-gradient(45deg, #1E90FF, #4169E1);
-                        color: white;
-                        text-decoration: none;
-                        border-radius: 8px;
-                        font-size: 1rem;
-                        transition: all 0.3s ease;
-                        border: none;
-                        cursor: pointer;
-                    }
-
-                    .demo-link:hover {
-                        transform: translateY(-2px);
-                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
-                    }
-
                     /* Add responsive styles for the video demo */
                     @media (max-width: 768px) {
                         .video-demo {
@@ -1814,7 +1794,11 @@ pub fn landing() -> Html {
                     align-items: center;
                     gap: 0.5rem;
                     padding: 0.8rem 1.5rem;
-                    background: linear-gradient(45deg, #1E90FF, #4169E1);
+                    background: linear-gradient(
+                        45deg,
+                        #7EB2FF,
+                        #4169E1
+                    );
                     color: white;
                     text-decoration: none;
                     border-radius: 8px;
