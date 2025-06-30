@@ -10,37 +10,79 @@ use crate::tool_call_utils::utils::create_openai_client;
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc, Duration};
 
-// Response from waiting check match analysis
-#[derive(Debug, Deserialize)]
+
+/// Definition of a **critical** message: something that will cause human‑safety risk,
+/// major financial/data loss, legal breach, or production outage if it waits >2 h.
+/// The model must default to *non‑critical* when uncertain.
+const CRITICAL_PROMPT: &str = r#"You are an AI that decides whether an incoming user message is **critical** — i.e. it must be surfaced within **two hours** and cannot wait for the next scheduled summary.
+
+A message is **critical** if delaying action beyond 2 h risks:
+• Direct harm to people
+• Severe data loss or major financial loss
+• Production system outage or security breach
+• Hard legal/compliance deadline expiring in ≤2 h
+• The sender explicitly says it must be handled immediately (e.g. \"ASAP\", \"emergency\", \"right now\") or gives a ≤2 h deadline.
+
+Everything else — vague urgency, routine updates, or unclear requests — is **NOT** critical.
+If unsure, choose **not critical**.
+
+**Process**
+1. Detect the message language; translate internally to English before reasoning.
+2. Apply the criteria strictly.
+3. Output JSON with fields:
+   – `is_critical` (bool, REQUIRED)
+   – `what_to_inform` (≤160 chars, REQUIRED when critical, else empty) – one concise SMS sentence.
+   – `first_message` (≤100 chars, REQUIRED when critical, else empty) – attention‑grab opening for voice assistant.
+"#;
+
+/// Prompt for matching incoming messages against the user’s *waiting checks*.
+/// A waiting check represents something the user explicitly asked to be notified
+/// about (e.g. \"Tell me when the shipment arrives\").
+const WAITING_CHECK_PROMPT: &str = r#"You are an AI that determines whether an incoming message *definitively* satisfies **one** of the outstanding waiting checks listed below.
+
+**Match rules**
+• Use semantic reasoning (synonyms, paraphrases, context) and translate non‑English text internally before evaluation.
+• A match must be *unambiguous*: the message clearly fulfils the user’s condition. Ambiguous or partial matches DO NOT count.
+• If multiple checks could match, choose the single *best* match (highest confidence). Return `null` if none match.
+
+If a match is found you MUST additionally craft two short notifications:
+1. `sms_message` (≤160 chars) – a concise SMS describing the event.
+2. `first_message` (≤100 chars) – an attention‑grabbing first sentence a voice assistant would speak on a call.
+
+Return JSON with:
+• `waiting_check_id` – integer ID of the matched check, or null
+• `sms_message` – string (required when matched, else empty)
+• `first_message` – string (required when matched, else empty)
+• `match_explanation` – ≤120 chars explaining why it matched (or empty when null)
+"#;
+
+
+#[derive(Debug, Serialize, Deserialize)]
 struct WaitingCheckMatchResponse {
     waiting_check_id: Option<i32>,
+    sms_message: Option<String>,
+    first_message: Option<String>,
     match_explanation: Option<String>,
 }
 
+/// Determine whether `message` satisfies **one** of the supplied `waiting_checks`.
+/// Returns `(waiting_check_id, sms_message, first_message)`.
 pub async fn check_waiting_check_match(
     message: &str,
-    waiting_checks: &[WaitingCheck],
-) -> Result<Option<i32>, Box<dyn std::error::Error>> {
+    waiting_checks: Vec<WaitingCheck>,
+) -> Result<(Option<i32>, String, String), Box<dyn std::error::Error>> {
     let client = create_openai_client()?;
 
     let waiting_checks_str = waiting_checks
         .iter()
-        .map(|check| {
-            format!(
-                "ID: {}, Content to watch for: {}",
-                check.id.unwrap_or(-1),
-                check.content,
-            )
-        })
-        .collect::<Vec<String>>()
+        .map(|check| format!("ID: {}, Content: {}", check.id.unwrap_or(-1), check.content))
+        .collect::<Vec<_>>()
         .join("\n");
 
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
-            content: chat_completion::Content::Text(
-                "You are an AI that analyzes messages to determine if they match any waiting checks. A match should be determined based on semantic meaning rather than exact text matching. Consider synonyms, paraphrasing, and contextual clues when determining matches.".to_string(),
-            ),
+            content: chat_completion::Content::Text(WAITING_CHECK_PROMPT.to_string()),
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -48,7 +90,7 @@ pub async fn check_waiting_check_match(
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
             content: chat_completion::Content::Text(format!(
-                "Analyze this message:\n\n{}\n\nAgainst these waiting checks:\n\n{}\n\nDetermine if the message matches any waiting check.",
+                "Incoming message:\n\n{}\n\nWaiting checks:\n\n{}\n\nReturn the best match or null.",
                 message, waiting_checks_str
             )),
             name: None,
@@ -57,20 +99,29 @@ pub async fn check_waiting_check_match(
         },
     ];
 
+    // JSON schema -----------------------------------------------------------
     let mut properties = std::collections::HashMap::new();
     properties.insert(
         "waiting_check_id".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::Number),
-            description: Some("The ID of the matched waiting check, if any. None if no match found.".to_string()),
+            description: Some("ID of the matched waiting check, or null".to_string()),
             ..Default::default()
         }),
     );
     properties.insert(
-        "match_explanation".to_string(),
+        "sms_message".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Optional explanation of why this was considered a match".to_string()),
+            description: Some("Concise SMS (≤160 chars) when matched, else empty".to_string()),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "first_message".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Voice‑assistant opening line (≤100 chars) when matched, else empty".to_string()),
             ..Default::default()
         }),
     );
@@ -78,63 +129,47 @@ pub async fn check_waiting_check_match(
     let tools = vec![chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
-            name: String::from("analyze_waiting_check_match"),
-            description: Some(String::from(
-                "Analyzes if a message matches any waiting checks"
-            )),
+            name: "analyze_waiting_check_match".to_string(),
+            description: Some("Determines whether the message matches a waiting check and drafts notifications".to_string()),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
-                required: Some(vec![
-                    String::from("waiting_check_id"),
-                ]),
+                required: Some(vec!["waiting_check_id".to_string()]),
             },
         },
     }];
 
-    let request = chat_completion::ChatCompletionRequest::new(
-        "openai/gpt-4o-mini".to_string(),
-        messages,
-    )
-    .tools(tools)
-    .tool_choice(chat_completion::ToolChoiceType::Required)
-    .max_tokens(200);
+    let request = chat_completion::ChatCompletionRequest::new("openai/gpt-4o-mini".to_string(), messages)
+        .tools(tools)
+        .tool_choice(chat_completion::ToolChoiceType::Required)
+        .temperature(0.2)
+        .max_tokens(200);
 
-    match client.chat_completion(request).await {
-        Ok(result) => {
-            if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
-                if let Some(first_call) = tool_calls.first() {
-                    if let Some(args) = &first_call.function.arguments {
-                        match serde_json::from_str::<WaitingCheckMatchResponse>(args) {
-                            Ok(response) => {
-                                if let Some(explanation) = response.match_explanation {
-                                    tracing::debug!("Match explanation: {}", explanation);
-                                }
-                                Ok(response.waiting_check_id)
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to parse waiting check match response: {}", e);
-                                Ok(None)
-                            }
-                        }
-                    } else {
-                        tracing::error!("No arguments found in tool call");
-                        Ok(None)
-                    }
-                } else {
-                    tracing::error!("No tool calls found");
-                    Ok(None)
-                }
-            } else {
-                tracing::error!("No tool calls section in response");
-                Ok(None)
-            }
-        }
-        Err(e) => {
-            tracing::error!("Failed to check waiting check match: {}", e);
-            Err(e.into())
-        }
+    let result = client.chat_completion(request).await?;
+    let tool_call = result.choices[0]
+        .message
+        .tool_calls
+        .as_ref()
+        .and_then(|tc| tc.first())
+        .ok_or("No tool call in waiting‑check response")?;
+
+    let args = tool_call
+        .function
+        .arguments
+        .as_ref()
+        .ok_or("No arguments in waiting‑check tool call")?;
+
+    let response: WaitingCheckMatchResponse = serde_json::from_str(args)?;
+
+    if let Some(explanation) = &response.match_explanation {
+        tracing::debug!("Waiting‑check match explanation: {}", explanation);
     }
+
+    // Provide empty strings when Not matched
+    let sms = response.sms_message.unwrap_or_default();
+    let first = response.first_message.unwrap_or_default();
+
+    Ok((response.waiting_check_id, sms, first))
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -160,36 +195,6 @@ struct CalendarEvent {
     description: Option<String>,
 }
 
-/// Stricter system prompt that defines exactly **when** a message counts as critical.
-const CRITICAL_PROMPT: &str = r#"You are an AI that determines whether an incoming user message is **critical**—i.e. it absolutely must be surfaced **within two hours** and cannot wait for the next scheduled summary.
-
-Definition of **critical**
-• Inaction within **two hours** will cause direct human‑safety risk, severe data loss, major financial loss, outage to production systems, or breach of a legal/compliance deadline.
-• The sender explicitly requests immediate action using words such as "help immediately", "urgent", "ASAP", "emergency", "right now", or gives a hard deadline within 2 hours.
-
-Everything else—including vague phrases like "pressing issue", "lots to do", or unclear complaints—is **NOT** critical.
-If you are uncertain, default to **not critical**.
-
-**Steps**
-1. Detect the language of the message. If it is not English, translate it **internally** before evaluation (do **not** output the translation).
-2. Apply the checklist above. If **any** item fails, set `is_critical=false`.
-3. Return a JSON object with fields:
-   • `is_critical` (boolean, **required**)
-   • `what_to_inform` (string ≤160 chars, required when `is_critical=true`, otherwise empty)
-   • `first_message` (string ≤100 chars, required when `is_critical=true`, otherwise empty)
-
-**Formatting**
-• `what_to_inform`: one concise English SMS sentence (≤160 chars), no line breaks, no emojis.
-• `first_message`: ≤100 chars, start with an attention‑grabbing verb, give context without repeating `what_to_inform`.
-
-**Non‑critical examples**
-- "I'll need your feedback on the draft tomorrow."
-- "Tengo un problema con mi laptop pero puede esperar."
-
-**Critical examples**
-- "Production database is down – 500 errors on all signup calls, need fix ASAP."
-- "Fire alarm keeps ringing in the main office, what do we do?"
-- "Legal deadline is in 90 minutes – contract must be signed now.""#;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct MatchResponse {

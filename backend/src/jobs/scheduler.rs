@@ -235,25 +235,56 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             });
                                             continue;
                                         }
-                                        // Add email to content string for importance checking
-                                        emails_content.push_str(&format!(
+                                        // Format email content for checking
+                                        let email_content = format!(
                                             "From: {}\nSubject: {}\nDate: {}\nBody: {}\n---\n",
                                             email.from.as_deref().unwrap_or("Unknown"),
                                             email.subject.as_deref().unwrap_or("No subject"),
                                             email.date_formatted.as_deref().unwrap_or("Unknown date"),
                                             email.body.as_deref().unwrap_or("No content")
-                                        ));
-                                    }
+                                        );
 
+                                        // Check waiting checks first if they exist
+                                        let waiting_checks = match state.user_repository.get_waiting_checks(user.id, "imap") {
+                                            Ok(checks) => checks,
+                                            Err(e) => {
+                                                tracing::error!("Failed to get waiting checks for user {}: {}", user.id, e);
+                                                Vec::new()
+                                            }
+                                        };
 
-
-                                    let waiting_checks = match state.user_repository.get_waiting_checks(user.id, "imap") {
-                                        Ok(checks) => checks,
-                                        Err(e) => {
-                                            tracing::error!("Failed to get waiting checks for user {}: {}", user.id, e);
-                                            Vec::new()
+                                        if !waiting_checks.is_empty() {
+                                            match crate::proactive::utils::check_waiting_check_match(&email_content, waiting_checks).await {
+                                                Ok((waiting_check_id, sms_message, first_message)) => {
+                                                    if let Some(check_id) = waiting_check_id {
+                                                        tracing::info!(
+                                                            "Waiting check {} matched for user {}: {}",
+                                                            check_id, user.id, sms_message
+                                                        );
+                                                        
+                                                        // Spawn a new task for sending waiting check match notification
+                                                        let state_clone = state.clone();
+                                                        tokio::spawn(async move {
+                                                            crate::proactive::utils::send_notification(
+                                                                &state_clone,
+                                                                user.id,
+                                                                &sms_message,
+                                                                "email".to_string(),
+                                                                Some(first_message),
+                                                            ).await;
+                                                        });
+                                                        continue;
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    tracing::error!("Failed to check waiting check match: {}", e);
+                                                }
+                                            }
                                         }
-                                    };
+
+                                        // Add email to content string for importance checking
+                                        emails_content.push_str(&email_content);
+                                    }
 
                                     // Check message importance based on waiting checks and criticality
                                     match crate::proactive::utils::check_message_importance(&emails_content).await {

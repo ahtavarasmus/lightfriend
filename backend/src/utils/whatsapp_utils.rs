@@ -803,6 +803,7 @@ pub async fn handle_whatsapp_message(
         .to_string();
 
 
+    // Get waiting checks and check for matches
     let waiting_checks = match state.user_repository.get_waiting_checks(user_id, "whatsapp") {
         Ok(checks) => checks,
         Err(e) => {
@@ -810,6 +811,49 @@ pub async fn handle_whatsapp_message(
             Vec::new()
         }
     };
+
+    // If there are waiting checks, check for matches
+    if !waiting_checks.is_empty() {
+        match crate::proactive::utils::check_waiting_check_match(&content, waiting_checks).await {
+            Ok((waiting_check_id, sms_message, first_message)) => {
+                if let Some(id) = waiting_check_id {
+                    tracing::info!("Waiting check matched for user {}: check_id {}", user_id, id);
+                    
+                    // Check if user has enough credits for notification
+                    match crate::utils::usage::check_user_credits(&state, &user, "notification", None).await {
+                        Ok(()) => {
+                            // User has enough credits, proceed with notification
+                            let state_clone = state.clone();
+                            
+                            // Spawn a new task for sending notification
+                            tokio::spawn(async move {
+                                // Send the notification
+                                crate::proactive::utils::send_notification(
+                                    &state_clone,
+                                    user_id,
+                                    &sms_message,
+                                    "whatsapp".to_string(),
+                                    Some(first_message),
+                                ).await;
+                                
+                                // Deduct credits after successful notification
+                                if let Err(e) = crate::utils::usage::deduct_user_credits(&state_clone, user_id, "notification", None) {
+                                    tracing::error!("Failed to deduct notification credits for user {}: {}", user_id, e);
+                                }
+                            });
+                            return;
+                        }
+                        Err(e) => {
+                            tracing::warn!("User {} does not have enough credits for waiting check notification: {}, continuing though", user_id, e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!("Failed to check waiting check match: {}", e);
+            }
+        }
+    }
 
     let priority_senders = match state.user_repository.get_priority_senders(user_id, "whatsapp") {
         Ok(senders) => senders,
