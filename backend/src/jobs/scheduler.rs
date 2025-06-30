@@ -256,8 +256,8 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     };
 
                                     // Check message importance based on waiting checks and criticality
-                                    match crate::proactive::utils::check_message_importance(&emails_content, waiting_checks).await {
-                                        Ok((waiting_check_id, is_critical, message, first_message)) => {
+                                    match crate::proactive::utils::check_message_importance(&emails_content).await {
+                                        Ok((is_critical, message, first_message)) => {
                                             if is_critical {
                                                 tracing::info!(
                                                     "Email critical check passed for user {}: {}",
@@ -276,40 +276,10 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                         Some(first_message),
                                                     ).await;
                                                 });
-
-                                            } else if let Some(check_id) = waiting_check_id {
-                                                tracing::info!(
-                                                    "Email waiting check matched for user {} (check_id: {:?}): {}",
-                                                    user.id, check_id, message
-                                                );
-
-                                                // Delete the waiting check since it has been matched
-                                                match state.user_repository.delete_waiting_check_by_id(user.id, check_id) {
-                                                    Ok(_) => {
-                                                        tracing::info!("Successfully deleted waiting check {} for user {}", check_id, user.id);
-                                                    },
-                                                    Err(e) => {
-                                                        tracing::error!("Failed to delete waiting check {} for user {}: {}", check_id, user.id, e);
-                                                    }
-                                                }
-
-                                                // Spawn a new task for sending critical message notification
-                                                let state_clone = state.clone();
-                                                let message_clone= message.clone();
-                                                tokio::spawn(async move {
-                                                    crate::proactive::utils::send_notification(
-                                                        &state_clone,
-                                                        user.id,
-                                                        &message_clone,
-                                                        "email".to_string(),
-                                                        Some(first_message),
-                                                    ).await;
-                                                });
-
                                             } else {
                                                 tracing::debug!(
-                                                    "Email not considered important for user {} (check_id: {:?}): {}",
-                                                    user.id, waiting_check_id, message
+                                                    "Email not considered important for user {}: {}",
+                                                    user.id, message
                                                 );
 
                                             }

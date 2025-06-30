@@ -10,6 +10,133 @@ use crate::tool_call_utils::utils::create_openai_client;
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc, Duration};
 
+// Response from waiting check match analysis
+#[derive(Debug, Deserialize)]
+struct WaitingCheckMatchResponse {
+    waiting_check_id: Option<i32>,
+    match_explanation: Option<String>,
+}
+
+pub async fn check_waiting_check_match(
+    message: &str,
+    waiting_checks: &[WaitingCheck],
+) -> Result<Option<i32>, Box<dyn std::error::Error>> {
+    let client = create_openai_client()?;
+
+    let waiting_checks_str = waiting_checks
+        .iter()
+        .map(|check| {
+            format!(
+                "ID: {}, Content to watch for: {}",
+                check.id.unwrap_or(-1),
+                check.content,
+            )
+        })
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    let messages = vec![
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::system,
+            content: chat_completion::Content::Text(
+                "You are an AI that analyzes messages to determine if they match any waiting checks. A match should be determined based on semantic meaning rather than exact text matching. Consider synonyms, paraphrasing, and contextual clues when determining matches.".to_string(),
+            ),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+        chat_completion::ChatCompletionMessage {
+            role: chat_completion::MessageRole::user,
+            content: chat_completion::Content::Text(format!(
+                "Analyze this message:\n\n{}\n\nAgainst these waiting checks:\n\n{}\n\nDetermine if the message matches any waiting check.",
+                message, waiting_checks_str
+            )),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        },
+    ];
+
+    let mut properties = std::collections::HashMap::new();
+    properties.insert(
+        "waiting_check_id".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::Number),
+            description: Some("The ID of the matched waiting check, if any. None if no match found.".to_string()),
+            ..Default::default()
+        }),
+    );
+    properties.insert(
+        "match_explanation".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Optional explanation of why this was considered a match".to_string()),
+            ..Default::default()
+        }),
+    );
+
+    let tools = vec![chat_completion::Tool {
+        r#type: chat_completion::ToolType::Function,
+        function: types::Function {
+            name: String::from("analyze_waiting_check_match"),
+            description: Some(String::from(
+                "Analyzes if a message matches any waiting checks"
+            )),
+            parameters: types::FunctionParameters {
+                schema_type: types::JSONSchemaType::Object,
+                properties: Some(properties),
+                required: Some(vec![
+                    String::from("waiting_check_id"),
+                ]),
+            },
+        },
+    }];
+
+    let request = chat_completion::ChatCompletionRequest::new(
+        "openai/gpt-4o-mini".to_string(),
+        messages,
+    )
+    .tools(tools)
+    .tool_choice(chat_completion::ToolChoiceType::Required)
+    .max_tokens(200);
+
+    match client.chat_completion(request).await {
+        Ok(result) => {
+            if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
+                if let Some(first_call) = tool_calls.first() {
+                    if let Some(args) = &first_call.function.arguments {
+                        match serde_json::from_str::<WaitingCheckMatchResponse>(args) {
+                            Ok(response) => {
+                                if let Some(explanation) = response.match_explanation {
+                                    tracing::debug!("Match explanation: {}", explanation);
+                                }
+                                Ok(response.waiting_check_id)
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to parse waiting check match response: {}", e);
+                                Ok(None)
+                            }
+                        }
+                    } else {
+                        tracing::error!("No arguments found in tool call");
+                        Ok(None)
+                    }
+                } else {
+                    tracing::error!("No tool calls found");
+                    Ok(None)
+                }
+            } else {
+                tracing::error!("No tool calls section in response");
+                Ok(None)
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to check waiting check match: {}", e);
+            Err(e.into())
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DigestData {
     pub messages: Vec<MessageInfo>,
@@ -33,38 +160,56 @@ struct CalendarEvent {
     description: Option<String>,
 }
 
+/// Stricter system prompt that defines exactly **when** a message counts as critical.
+const CRITICAL_PROMPT: &str = r#"You are an AI that determines whether an incoming user message is **critical**—i.e. it absolutely must be surfaced **within two hours** and cannot wait for the next scheduled summary.
+
+Definition of **critical**
+• Inaction within **two hours** will cause direct human‑safety risk, severe data loss, major financial loss, outage to production systems, or breach of a legal/compliance deadline.
+• The sender explicitly requests immediate action using words such as "help immediately", "urgent", "ASAP", "emergency", "right now", or gives a hard deadline within 2 hours.
+
+Everything else—including vague phrases like "pressing issue", "lots to do", or unclear complaints—is **NOT** critical.
+If you are uncertain, default to **not critical**.
+
+**Steps**
+1. Detect the language of the message. If it is not English, translate it **internally** before evaluation (do **not** output the translation).
+2. Apply the checklist above. If **any** item fails, set `is_critical=false`.
+3. Return a JSON object with fields:
+   • `is_critical` (boolean, **required**)
+   • `what_to_inform` (string ≤160 chars, required when `is_critical=true`, otherwise empty)
+   • `first_message` (string ≤100 chars, required when `is_critical=true`, otherwise empty)
+
+**Formatting**
+• `what_to_inform`: one concise English SMS sentence (≤160 chars), no line breaks, no emojis.
+• `first_message`: ≤100 chars, start with an attention‑grabbing verb, give context without repeating `what_to_inform`.
+
+**Non‑critical examples**
+- "I'll need your feedback on the draft tomorrow."
+- "Tengo un problema con mi laptop pero puede esperar."
+
+**Critical examples**
+- "Production database is down – 500 errors on all signup calls, need fix ASAP."
+- "Fire alarm keeps ringing in the main office, what do we do?"
+- "Legal deadline is in 90 minutes – contract must be signed now.""#;
+
 #[derive(Debug, Serialize, Deserialize)]
 struct MatchResponse {
-    waiting_check_id: Option<i32>,
     is_critical: bool,
     what_to_inform: String,
     first_message: String,
 }
 
+/// Checks whether a single message is critical.
+/// Returns `(is_critical, what_to_inform, first_message)`.
 pub async fn check_message_importance(
     message: &str,
-    waiting_checks: Vec<WaitingCheck>,
-) -> Result<(Option<i32>, bool, String, String), Box<dyn std::error::Error>> {
+) -> Result<(bool, String, String), Box<dyn std::error::Error>> {
+    // Build the chat payload ----------------------------------------------
     let client = create_openai_client()?;
-
-    let waiting_checks_str = waiting_checks
-        .iter()
-        .map(|check| {
-            format!(
-                "ID: {}, Content to watch for: {}",
-                check.id.unwrap_or(-1),
-                check.content,
-            )
-        })
-        .collect::<Vec<String>>()
-        .join("\n");
 
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
-            content: chat_completion::Content::Text(
-                "You are an AI that analyzes messages to determine if they match any waiting checks or if they are otherwise critical and require immediate attention. A message is considered critical ONLY if it absolutely cannot wait to be mentioned in the next scheduled notification summary - it must be something that requires truly immediate attention like emergencies, extremely time-sensitive matters, or critical updates that would be problematic if delayed until the next summary. Most normal updates, even if important, should wait for the scheduled summary unless they are genuinely urgent and time-critical. When reporting critical messages:\n1. Provide an extremely concise SMS-friendly message (ideally under 160 characters) that clearly states what requires immediate attention\n2. Generate a brief, attention-grabbing first message (under 100 characters) that would be suitable as an AI voice assistant's opening line in a phone call about this update. This first message should give a quick context about the type of urgent matter without all the details.".to_string(),
-            ),
+            content: chat_completion::Content::Text(CRITICAL_PROMPT.to_string()),
             name: None,
             tool_calls: None,
             tool_call_id: None,
@@ -72,8 +217,8 @@ pub async fn check_message_importance(
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
             content: chat_completion::Content::Text(format!(
-                "Analyze this message:\n\n{}\n\nAgainst these waiting checks:\n\n{}\n\nDetermine:\n1. If it matches any waiting check (return the ID if it does)\n2. If the message is otherwise critical and requires immediate attention",
-                message, waiting_checks_str
+                "Analyze this message and decide if it is critical:\n\n{}",
+                message
             )),
             name: None,
             tool_calls: None,
@@ -81,15 +226,8 @@ pub async fn check_message_importance(
         },
     ];
 
+    // JSON schema for the structured output -------------------------------
     let mut properties = std::collections::HashMap::new();
-    properties.insert(
-        "waiting_check_id".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Number),
-            description: Some("The ID of the matched waiting check, if any. None if no match found.".to_string()),
-            ..Default::default()
-        }),
-    );
     properties.insert(
         "is_critical".to_string(),
         Box::new(types::JSONSchemaDefine {
@@ -102,7 +240,7 @@ pub async fn check_message_importance(
         "what_to_inform".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Concise SMS-friendly message (under 160 chars) about what is it that requires immediate attention".to_string()),
+            description: Some("Concise SMS (≤160 chars) to send if the message is critical".to_string()),
             ..Default::default()
         }),
     );
@@ -110,7 +248,7 @@ pub async fn check_message_importance(
         "first_message".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Brief, attention-grabbing first message (under 100 chars) suitable as an AI voice assistant's opening line in a phone call. Should give quick context about the type of urgent matter.".to_string()),
+            description: Some("Brief voice‑assistant opening line (≤100 chars) if critical".to_string()),
             ..Default::default()
         }),
     );
@@ -118,30 +256,24 @@ pub async fn check_message_importance(
     let tools = vec![chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
-            name: String::from("analyze_message"),
-            description: Some(String::from(
-                "Analyzes if a message matches any waiting checks or is critical"
-            )),
+            name: "analyze_message".to_string(),
+            description: Some("Analyzes if a message is critical".to_string()),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
-                required: Some(vec![
-                    String::from("is_critical"),
-                    String::from("what_to_inform"),
-                    String::from("first_message"),
-                ]),
+                required: Some(vec!["is_critical".to_string()]),
             },
         },
     }];
 
-    let request = chat_completion::ChatCompletionRequest::new(
-        "openai/gpt-4o-mini".to_string(),
-        messages,
-    )
-    .tools(tools)
-    .tool_choice(chat_completion::ToolChoiceType::Required)
-    .max_tokens(200);
+    let request = chat_completion::ChatCompletionRequest::new("openai/gpt-4o-mini".to_string(), messages)
+        .tools(tools)
+        .tool_choice(chat_completion::ToolChoiceType::Required)
+        // Lower temperature for more deterministic classification
+        .temperature(0.2)
+        .max_tokens(200);
 
+    // ---------------------------------------------------------------------
     match client.chat_completion(request).await {
         Ok(result) => {
             if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
@@ -149,31 +281,25 @@ pub async fn check_message_importance(
                     if let Some(args) = &first_call.function.arguments {
                         match serde_json::from_str::<MatchResponse>(args) {
                             Ok(response) => {
-                                tracing::debug!(
-                                    "Message analysis result: check_id={:?}, critical={}, message={}, first_message={}",
-                                    response.waiting_check_id,
-                                    response.is_critical,
-                                    response.what_to_inform,
-                                    response.first_message
-                                );
-                                Ok((response.waiting_check_id, response.is_critical, response.what_to_inform, response.first_message))
+                                tracing::debug!(target: "critical_check", ?response, "Message analysis result");
+                                Ok((response.is_critical, response.what_to_inform, response.first_message))
                             }
                             Err(e) => {
                                 tracing::error!("Failed to parse message analysis response: {}", e);
-                                Ok((None, false, "".to_string(), "".to_string()))
+                                Ok((false, String::new(), String::new()))
                             }
                         }
                     } else {
                         tracing::error!("No arguments found in tool call");
-                        Ok((None, false, "".to_string(), "".to_string()))
+                        Ok((false, String::new(), String::new()))
                     }
                 } else {
                     tracing::error!("No tool calls found");
-                    Ok((None, false, "".to_string(), "".to_string()))
+                    Ok((false, String::new(), String::new()))
                 }
             } else {
                 tracing::error!("No tool calls section in response");
-                Ok((None, false, "".to_string(), "".to_string()))
+                Ok((false, String::new(), String::new()))
             }
         }
         Err(e) => {
@@ -182,6 +308,7 @@ pub async fn check_message_importance(
         }
     }
 }
+
 
 
 // Helper function to calculate hours until a target hour

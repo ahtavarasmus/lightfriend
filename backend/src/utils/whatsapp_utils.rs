@@ -860,8 +860,8 @@ pub async fn handle_whatsapp_message(
     }
 
     // Check message importance based on waiting checks and criticality
-    match crate::proactive::utils::check_message_importance(&content, waiting_checks).await {
-        Ok((waiting_check_id, is_critical, message, first_message)) => {
+    match crate::proactive::utils::check_message_importance(&content).await {
+        Ok((is_critical, message, first_message)) => {
             if is_critical {
                 tracing::info!(
                     "Message critical check passed for user {}: {}",
@@ -879,49 +879,10 @@ pub async fn handle_whatsapp_message(
                         Some(first_message),
                     ).await;
                 });
-            } else if let Some(check_id) = waiting_check_id {
-                tracing::info!(
-                    "Message waiting check matched for user {} (check_id: {:?}): {}",
-                    user_id, check_id, message
-                );
-
-                        // Only send notification if the message indicates urgency
-                        if !message.to_lowercase().contains("no urgent action needed") {
-                            // Delete the waiting check since it has been matched
-                            match state.user_repository.delete_waiting_check_by_id(user_id, check_id) {
-                                Ok(_) => {
-                                    tracing::info!("Successfully deleted waiting check {} for user {}", check_id, user_id);
-                                },
-                                Err(e) => {
-                                    tracing::error!("Failed to delete waiting check {} for user {}: {}", check_id, user_id, e);
-                                }
-                            }
-            
-                            // Spawn a new task for sending waiting check notification
-                            let state_clone = state.clone();
-                            tokio::spawn(async move {
-                                crate::proactive::utils::send_notification(
-                                    &state_clone,
-                                    user_id,
-                                    &message,
-                                    "whatsapp".to_string(),
-                                    Some(first_message),
-                                ).await;
-                            });
-                        } else {
-                            tracing::info!(
-                                "Skipping notification for non-urgent waiting check {} for user {}",
-                                check_id, user_id
-                            );
-                            // Still delete the waiting check since it was matched
-                            if let Err(e) = state.user_repository.delete_waiting_check_by_id(user_id, check_id) {
-                        tracing::error!("Failed to delete waiting check {} for user {}: {}", check_id, user_id, e);
-                    }
-                        }
             } else {
                 tracing::debug!(
-                    "Message not considered important for user {} (check_id: {:?}): {}",
-                    user_id, waiting_check_id, message
+                    "Message not considered important for user {}: {}",
+                    user_id, message
                 );
             }
         }
