@@ -253,34 +253,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             }
                                         };
 
-                                        if !waiting_checks.is_empty() {
-                                            match crate::proactive::utils::check_waiting_check_match(&email_content, waiting_checks).await {
-                                                Ok((waiting_check_id, sms_message, first_message)) => {
-                                                    if let Some(check_id) = waiting_check_id {
-                                                        tracing::info!(
-                                                            "Waiting check {} matched for user {}: {}",
-                                                            check_id, user.id, sms_message
-                                                        );
-                                                        
-                                                        // Spawn a new task for sending waiting check match notification
-                                                        let state_clone = state.clone();
-                                                        tokio::spawn(async move {
-                                                            crate::proactive::utils::send_notification(
-                                                                &state_clone,
-                                                                user.id,
-                                                                &sms_message,
-                                                                "email".to_string(),
-                                                                Some(first_message),
-                                                            ).await;
-                                                        });
-                                                        continue;
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    tracing::error!("Failed to check waiting check match: {}", e);
-                                                }
-                                            }
-                                        }
 
                                         // Add email to content string for importance checking
                                         emails_content.push_str(&email_content);
