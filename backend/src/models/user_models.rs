@@ -5,24 +5,16 @@ use crate::schema::conversations;
 use crate::schema::waiting_checks;
 use crate::schema::priority_senders;
 use crate::schema::keywords;
-use crate::schema::importance_priorities;
 use crate::schema::usage_logs;
-use crate::schema::subscriptions;
-use crate::schema::unipile_connection;
 use crate::schema::google_calendar;
-use crate::schema::gmail;
 use crate::schema::bridges;
 use crate::schema::imap_connection;
 use crate::schema::processed_emails;
 use crate::schema::email_judgments;
 use crate::schema::google_tasks;
 use crate::schema::task_notifications;
-use crate::schema::proactive_settings;
 use crate::schema::calendar_notifications;
 use crate::schema::user_settings;
-use crate::schema::ideas;
-use crate::schema::idea_upvotes;
-use crate::schema::idea_email_subscriptions;
 use crate::schema::temp_variables;
 use crate::schema::message_history;
 
@@ -49,7 +41,6 @@ pub struct User {
     pub matrix_username: Option<String>,
     pub encrypted_matrix_access_token: Option<String>,
     pub sub_tier: Option<String>,
-    pub msgs_left: i32, // proactive messages for the monthly sub, resets every month to bought amount
     pub matrix_device_id: Option<String>,
     pub credits_left: f32, // free credits that reset every month while in the monthly sub. will always be consumed before one time credits
     pub encrypted_matrix_password: Option<String>,
@@ -59,7 +50,8 @@ pub struct User {
     pub discount_tier: Option<String>, // could be None, "msg", "voice" or "full"
     pub free_reply: bool, // flag that gets set when previous message needs more information to finish the reply
     pub confirm_send_event: Option<String>, // flag for if sending event needs confirmation. can be "whatsapp", "email" or "calendar"
-    pub waiting_checks_count: i32, // how many waiting checks the user currently has(max 3 is possible)
+    pub waiting_checks_count: i32, // how many waiting checks the user currently has(max 5 is possible)
+    pub next_billing_date_timestamp: Option<i32>, // when is user next billed for their subscription
 }
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -90,38 +82,6 @@ pub struct NewTempVariable {
     pub confirm_send_event_duration: Option<String>,
     pub confirm_send_event_id: Option<String>,
     pub confirm_send_event_image_url: Option<String>,
-}
-
-
-#[derive(Queryable, Selectable, Insertable, Debug)]
-#[diesel(table_name = proactive_settings)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct ProactiveSettings {
-    pub id: Option<i32>,
-    pub user_id: i32,
-    pub imap_proactive: bool,
-    pub imap_general_checks: Option<String>,
-    pub proactive_calendar: bool,
-    pub created_at: i32,
-    pub updated_at: i32,
-    pub proactive_calendar_last_activated: i32,
-    pub proactive_email_last_activated: i32,
-    pub proactive_whatsapp: bool,
-    pub whatsapp_general_checks: Option<String>,
-    pub whatsapp_keywords_active: bool,
-    pub whatsapp_priority_senders_active: bool,
-    pub whatsapp_waiting_checks_active: bool,
-    pub whatsapp_general_importance_active: bool,
-    pub email_keywords_active: bool,
-    pub email_priority_senders_active: bool,
-    pub email_waiting_checks_active: bool,
-    pub email_general_importance_active: bool,
-    pub proactive_telegram: bool,
-    pub telegram_general_checks: Option<String>,
-    pub telegram_keywords_active: bool,
-    pub telegram_priority_senders_active: bool,
-    pub telegram_waiting_checks_active: bool,
-    pub telegram_general_importance_active: bool,
 }
 
 
@@ -244,34 +204,6 @@ pub struct NewBridge {
 }
 
 #[derive(Queryable, Selectable, Insertable)]
-#[diesel(table_name = subscriptions)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct Subscription {
-    pub id: Option<i32>, // Assuming auto-incrementing primary key
-    pub user_id: i32, // App's user ID
-    pub paddle_subscription_id: String,
-    pub paddle_customer_id: String,
-    pub stage: String,
-    pub status: String,
-    pub next_bill_date: i32,
-    pub is_scheduled_to_cancel: Option<bool>,
-}
-
-
-#[derive(Insertable)]
-#[diesel(table_name = subscriptions)]
-pub struct NewSubscription {
-    pub user_id: i32, 
-    pub paddle_subscription_id: String,
-    pub paddle_customer_id: String,
-    pub stage: String,
-    pub status: String,
-    pub next_bill_date: i32,
-    pub is_scheduled_to_cancel: Option<bool>,
-}
-
-
-#[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = usage_logs)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct UsageLog {
@@ -332,32 +264,6 @@ pub struct NewConversation {
     pub user_number: String,
 }
 
-// unipile connection, turned out to be disgustingly expensive wtf 5e/month FOR ONE CONNECTION WTF FOR ONE USER
-#[derive(Queryable, Selectable, Insertable)]
-#[diesel(table_name = unipile_connection)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct UnipileConnection {
-    pub id: Option<i32>,
-    pub user_id: i32,
-    pub account_type: String, // LINKEDIN, GMAIL, WHATSAPP,..
-    pub account_id: String,
-    pub status: String, // OK, CREDENTIALS, 
-    pub last_update: i32,
-    pub created_on: i32,
-    pub description: String,
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = unipile_connection)]
-pub struct NewUnipileConnection {
-    pub user_id: i32,
-    pub account_type: String,
-    pub account_id: String,
-    pub status: String,
-    pub last_update: i32,
-    pub created_on: i32,
-    pub description: String,
-}
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = google_tasks)]
@@ -433,33 +339,6 @@ pub struct NewCalendarNotification {
     pub notification_time: i32,
 }
 
-#[derive(Queryable, Selectable, Insertable)]
-#[diesel(table_name = gmail)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct Gmail {
-    pub id: Option<i32>,
-    pub user_id: i32,
-    pub encrypted_access_token: String,
-    pub encrypted_refresh_token: String,
-    pub status: String,
-    pub last_update: i32,
-    pub created_on: i32,
-    pub description: String,
-    pub expires_in: i32,
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = gmail)]
-pub struct NewGmail {
-    pub user_id: i32,
-    pub encrypted_access_token: String,
-    pub encrypted_refresh_token: String,
-    pub status: String,
-    pub last_update: i32,
-    pub created_on: i32,
-    pub description: String,
-    pub expires_in: i32,
-}
 
 #[derive(Queryable, Selectable, Insertable)]
 #[diesel(table_name = waiting_checks)]
@@ -519,24 +398,6 @@ pub struct NewKeyword {
     pub service_type: String, // like email, whatsapp, .. 
 }
 
-#[derive(Queryable, Selectable, Insertable)]
-#[diesel(table_name = importance_priorities)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct ImportancePriority {
-    pub id: Option<i32>,
-    pub user_id: i32,
-    pub threshold: i32,
-    pub service_type: String,// like email, whatsapp, .. 
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = importance_priorities)]
-pub struct NewImportancePriority {
-    pub user_id: i32,
-    pub threshold: i32,
-    pub service_type: String,// like email, whatsapp, .. 
-}
-
 #[derive(Queryable, Selectable, Insertable, Clone)]
 #[diesel(table_name = user_settings)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
@@ -570,62 +431,10 @@ pub struct NewUserSettings {
     pub sub_country: Option<String>,
     pub save_context: Option<i32>,
     pub info: Option<String>,
+    pub critical_enabled: bool,
     pub number_of_digests_locked: i32,
 }
 
-#[derive(Queryable, Selectable, Insertable)]
-#[diesel(table_name = ideas)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct Idea {
-    pub id: Option<i32>,
-    pub creator_id: String,
-    pub text: String,
-    pub created_at: i32,
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = ideas)]
-pub struct NewIdea {
-    pub creator_id: String,
-    pub text: String,
-    pub created_at: i32,
-}
-
-#[derive(Queryable, Selectable, Insertable)]
-#[diesel(table_name = idea_upvotes)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct IdeaUpvote {
-    pub id: Option<i32>,
-    pub idea_id: i32,
-    pub voter_id: String,
-    pub created_at: i32,
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = idea_upvotes)]
-pub struct NewIdeaUpvote {
-    pub idea_id: i32,
-    pub voter_id: String,
-    pub created_at: i32,
-}
-
-#[derive(Queryable, Selectable, Insertable)]
-#[diesel(table_name = idea_email_subscriptions)]
-#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct IdeaEmailSubscription {
-    pub id: Option<i32>,
-    pub idea_id: i32,
-    pub email: String,
-    pub created_at: i32,
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = idea_email_subscriptions)]
-pub struct NewIdeaEmailSubscription {
-    pub idea_id: i32,
-    pub email: String,
-    pub created_at: i32,
-}
 
 #[derive(Queryable, Selectable, Insertable, Debug)]
 #[diesel(table_name = message_history)]

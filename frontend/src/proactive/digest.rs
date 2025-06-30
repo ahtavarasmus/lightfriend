@@ -13,6 +13,7 @@ pub struct DigestsResponse {
     morning_digest_time: Option<String>,  // RFC3339 time string or None
     day_digest_time: Option<String>,      // RFC3339 time string or None
     evening_digest_time: Option<String>,  // RFC3339 time string or None
+    amount_affordable_with_messages: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -30,12 +31,17 @@ pub fn digest_section() -> Html {
     let show_info = use_state(|| false);
     let is_saving = use_state(|| false);
     let has_unsaved_changes = use_state(|| false);
+    let success_message = use_state(|| None::<String>);
+    let error_message = use_state(|| None::<String>);
+    let show_warning = use_state(|| false);
+    let amount_affordable = use_state(|| 0i32);
 
     // Load digest settings when component mounts
     {
         let morning_digest_time = morning_digest_time.clone();
         let day_digest_time = day_digest_time.clone();
         let evening_digest_time = evening_digest_time.clone();
+        let amount_affordable = amount_affordable.clone();
 
         use_effect_with_deps(
             move |_| {
@@ -59,6 +65,7 @@ pub fn digest_section() -> Html {
                                 morning_digest_time.set(digests.morning_digest_time);
                                 day_digest_time.set(digests.day_digest_time);
                                 evening_digest_time.set(digests.evening_digest_time);
+                                amount_affordable.set(digests.amount_affordable_with_messages);
                             }
                         }
                     });
@@ -75,6 +82,8 @@ pub fn digest_section() -> Html {
         let evening_digest_time = evening_digest_time.clone();
         let is_saving = is_saving.clone();
         let has_unsaved_changes = has_unsaved_changes.clone();
+        let success_message = success_message.clone();
+        let error_message = error_message.clone();
 
         Callback::from(move |_| {
             let morning = (*morning_digest_time).clone();
@@ -83,7 +92,12 @@ pub fn digest_section() -> Html {
 
             let is_saving = is_saving.clone();
             let has_unsaved_changes = has_unsaved_changes.clone();
+            let success_message = success_message.clone();
+            let error_message = error_message.clone();
 
+            // Clear any existing messages
+            success_message.set(None);
+            error_message.set(None);
 
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
@@ -110,8 +124,41 @@ pub fn digest_section() -> Html {
                     .await;
 
                     is_saving.set(false);
-                    if result.is_ok() {
-                        has_unsaved_changes.set(false);
+
+                    match result {
+                        Ok(response) => {
+                            if response.status() == 200 {
+                                match response.json::<serde_json::Value>().await {
+                                    Ok(data) => {
+                                        if let Some(msg) = data.get("message").and_then(|v| v.as_str()) {
+                                            has_unsaved_changes.set(false);
+                                            success_message.set(Some(msg.to_string()));
+                                        } else {
+                                            success_message.set(Some("Digest settings updated successfully".to_string()));
+                                        }
+                                    }
+                                    Err(_) => {
+                                        success_message.set(Some("Digest settings updated successfully".to_string()));
+                                    }
+                                }
+                            } else {
+                                match response.json::<serde_json::Value>().await {
+                                    Ok(error_data) => {
+                                        if let Some(error_msg) = error_data.get("error").and_then(|v| v.as_str()) {
+                                            error_message.set(Some(error_msg.to_string()));
+                                        } else {
+                                            error_message.set(Some("Failed to update digest settings".to_string()));
+                                        }
+                                    }
+                                    Err(_) => {
+                                        error_message.set(Some("Failed to update digest settings".to_string()));
+                                    }
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            error_message.set(Some("Failed to connect to server".to_string()));
+                        }
                     }
                 });
             }
@@ -120,9 +167,28 @@ pub fn digest_section() -> Html {
 
     let handle_time_change = {
         let has_unsaved_changes = has_unsaved_changes.clone();
+        let morning_digest_time = morning_digest_time.clone();
+        let day_digest_time = day_digest_time.clone();
+        let evening_digest_time = evening_digest_time.clone();
+        let amount_affordable = amount_affordable.clone();
+        let show_warning = show_warning.clone();
         
         Callback::from(move |_| {
             has_unsaved_changes.set(true);
+            
+            // Count active digests
+            let active_count = [
+                morning_digest_time.as_ref(),
+                day_digest_time.as_ref(),
+                evening_digest_time.as_ref(),
+            ].iter()
+            .filter(|time| time.is_some())
+            .count() as i32;
+
+            // Show warning if active digests exceed affordable messages
+            if active_count > *amount_affordable {
+                show_warning.set(true);
+            }
         })
     };
 
@@ -438,6 +504,96 @@ pub fn digest_section() -> Html {
                     height: 16px;
                     animation: spin 1s linear infinite;
                 }
+
+                .message {
+                    margin-top: 1rem;
+                    padding: 0.75rem;
+                    border-radius: 8px;
+                    font-size: 0.9rem;
+                    text-align: center;
+                }
+
+                .success-message {
+                    background: rgba(34, 197, 94, 0.1);
+                    color: #22C55E;
+                    border: 1px solid rgba(34, 197, 94, 0.2);
+                }
+
+                .error-message {
+                    background: rgba(239, 68, 68, 0.1);
+                    color: #EF4444;
+                    border: 1px solid rgba(239, 68, 68, 0.2);
+                }
+
+                .warning-modal {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0, 0, 0, 0.7);
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    z-index: 1000;
+                }
+
+                .warning-content {
+                    background: #1A1A1A;
+                    border: 1px solid rgba(245, 158, 11, 0.2);
+                    border-radius: 12px;
+                    padding: 1.5rem;
+                    max-width: 90%;
+                    width: 400px;
+                }
+
+                .warning-header {
+                    color: #F59E0B;
+                    font-size: 1.1rem;
+                    margin-bottom: 1rem;
+                }
+
+                .warning-message {
+                    color: #999;
+                    font-size: 0.9rem;
+                    margin-bottom: 1.5rem;
+                    line-height: 1.5;
+                }
+
+                .warning-buttons {
+                    display: flex;
+                    gap: 1rem;
+                    justify-content: flex-end;
+                }
+
+                .warning-button {
+                    padding: 0.5rem 1rem;
+                    border-radius: 6px;
+                    font-size: 0.9rem;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                }
+
+                .warning-button.confirm {
+                    background: #F59E0B;
+                    color: #000;
+                    border: none;
+                }
+
+                .warning-button.confirm:hover {
+                    background: #D97706;
+                }
+
+                .warning-button.cancel {
+                    background: transparent;
+                    color: #999;
+                    border: 1px solid #666;
+                }
+
+                .warning-button.cancel:hover {
+                    border-color: #999;
+                    color: #fff;
+                }
             "#}
         </style>
         <div class="filter-header">
@@ -609,6 +765,22 @@ pub fn digest_section() -> Html {
             </div>
         </div>
 
+        {if let Some(message) = (*success_message).clone() {
+            html! {
+                <div class="message success-message">
+                    {message}
+                </div>
+            }
+        } else if let Some(message) = (*error_message).clone() {
+            html! {
+                <div class="message error-message">
+                    {message}
+                </div>
+            }
+        } else {
+            html! {}
+        }}
+
         <button
             class={classes!("save-button", if *is_saving { "saving" } else { "" })}
             onclick={update_digests}
@@ -627,6 +799,55 @@ pub fn digest_section() -> Html {
                 }
             }}
         </button>
+
+        // Warning Modal
+        {if *show_warning {
+            html! {
+                <div class="warning-modal">
+                    <div class="warning-content">
+                        <div class="warning-header">
+                            {"Message Quota Warning"}
+                        </div>
+                        <div class="warning-message">
+                            {"Your message quota is not enough to fulfill this reservation. If you proceed, overage credits will be used when needed. Note that if you later reduce the number of digests, you will be compensated with monthly Messages instead of overage credits."}
+                        </div>
+                        <div class="warning-buttons">
+                            <button 
+                                class="warning-button cancel"
+                                onclick={Callback::from({
+                                    let show_warning = show_warning.clone();
+                                    let morning_digest_time = morning_digest_time.clone();
+                                    let day_digest_time = day_digest_time.clone();
+                                    let evening_digest_time = evening_digest_time.clone();
+                                    move |_| {
+                                        // Reset to previous state
+                                        morning_digest_time.set(None);
+                                        day_digest_time.set(None);
+                                        evening_digest_time.set(None);
+                                        show_warning.set(false);
+                                    }
+                                })}
+                            >
+                                {"Cancel"}
+                            </button>
+                            <button 
+                                class="warning-button confirm"
+                                onclick={Callback::from({
+                                    let show_warning = show_warning.clone();
+                                    move |_| {
+                                        show_warning.set(false);
+                                    }
+                                })}
+                            >
+                                {"Proceed Anyway"}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+        } else {
+            html! {}
+        }}
         </>
     }
 }

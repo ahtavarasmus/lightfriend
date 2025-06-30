@@ -723,11 +723,48 @@ pub async fn stripe_webhook(
                             tracing::error!("Failed to update subscription tier: {}", e);
                         }
 
-                        // Update the credits to the daily limit
-                        if let Err(e) = state.user_repository.update_sub_credits(user.id, 40.0) {
+                        let mut messages = 40.00;
+                        
+                        if sub_info.tier == "tier 2" {
+                            // Calculate days until next billing
+                            let days_until_billing = Some(subscription.current_period_end).map(|date| {
+                                let current_time = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_secs() as i32;
+                                (date - current_time as i64) / (24 * 60 * 60)
+                            }).unwrap_or(30); // Default to 30 days if we can't calculate
+
+                            // Get user's active digests and count them
+                            let amount_of_digests = match state.user_core.get_digests(user.id) {
+                                Ok((morning, day, evening)) => {
+                                    let mut count = 0;
+                                    if morning.is_some() { count += 1; }
+                                    if day.is_some() { count += 1; }
+                                    if evening.is_some() { count += 1; }
+                                    count as i64
+                                },
+                                Err(e) => {
+                                    tracing::error!("Failed to get user digests: {}", e);
+                                    0 // Default to 0 if there's an error
+                                }
+                            };
+
+                            messages = 120.00 - (days_until_billing * amount_of_digests) as f32;
+                        }
+
+
+                        if let Err(e) = state.user_repository.update_sub_credits(user.id, messages) {
                             tracing::error!("Failed to update subscription credits: {}", e);
                         } else {
                             tracing::info!("Set daily credits to 40 for user {}", user.id);
+                        }
+
+                        // Update next billing date
+                        if let Err(e) = state.user_core.update_next_billing_date(user.id, subscription.current_period_end as i32) {
+                            tracing::error!("Failed to update next billing date: {}", e);
+                        } else {
+                            tracing::info!("Updated next billing date for user {}: {}", user.id, subscription.current_period_end);
                         }
 
                         tracing::info!("Updated subscription info for user {}: country={:#?}, tier={}", 
@@ -880,6 +917,87 @@ pub async fn stripe_webhook(
     Ok(StatusCode::OK) // Return 200 OK for successful webhook processing
 }
 
+
+pub async fn fetch_next_billing_date(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(user_id): Path<i32>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    println!("Starting fetch_next_billing_date for user_id: {}", user_id);
+
+    // Check if user is accessing their own data or is an admin
+    if auth_user.user_id != user_id && !auth_user.is_admin {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Access denied"})),
+        ));
+    }
+
+    // Initialize Stripe client
+    let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY")
+        .expect("STRIPE_SECRET_KEY must be set in environment");
+    let client = Client::new(stripe_secret_key);
+    println!("Stripe client initialized");
+
+    // Get Stripe customer ID
+    let customer_id = state
+        .user_repository
+        .get_stripe_customer_id(user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)})),
+        ))?
+        .ok_or_else(|| (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "No Stripe customer ID found for user"})),
+        ))?;
+    println!("Found Stripe customer ID: {}", customer_id);
+
+    // List all subscriptions for the customer
+    let subscriptions = stripe::Subscription::list(
+        &client,
+        &stripe::ListSubscriptions {
+            customer: Some(customer_id.parse().unwrap()),
+            status: Some(stripe::SubscriptionStatusFilter::Active),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| {
+        println!("Failed to list subscriptions: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to fetch subscriptions: {}", e)})),
+        )
+    })?;
+
+    // Find the latest end date among all active subscriptions
+    let latest_end_date = subscriptions
+        .data
+        .iter()
+        .map(|sub| sub.current_period_end)
+        .max()
+        .ok_or_else(|| (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "No active subscriptions found"})),
+        ))?;
+
+    // Update the user's next billing date
+    state
+        .user_core
+        .update_next_billing_date(user_id, latest_end_date as i32)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to update next billing date: {}", e)})),
+        ))?;
+
+    println!("Successfully updated next billing date to {}", latest_end_date);
+
+    Ok(Json(json!({
+        "message": "Successfully updated next billing date",
+        "next_billing_date": latest_end_date
+    })))
+}
 
 pub async fn automatic_charge(
     State(state): State<Arc<AppState>>,

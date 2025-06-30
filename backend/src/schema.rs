@@ -47,20 +47,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    gmail (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        encrypted_access_token -> Text,
-        encrypted_refresh_token -> Text,
-        status -> Text,
-        last_update -> Integer,
-        created_on -> Integer,
-        description -> Text,
-        expires_in -> Integer,
-    }
-}
-
-diesel::table! {
     google_calendar (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -89,33 +75,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    idea_email_subscriptions (id) {
-        id -> Nullable<Integer>,
-        idea_id -> Integer,
-        email -> Text,
-        created_at -> Integer,
-    }
-}
-
-diesel::table! {
-    idea_upvotes (id) {
-        id -> Nullable<Integer>,
-        idea_id -> Integer,
-        voter_id -> Text,
-        created_at -> Integer,
-    }
-}
-
-diesel::table! {
-    ideas (id) {
-        id -> Nullable<Integer>,
-        creator_id -> Text,
-        text -> Text,
-        created_at -> Integer,
-    }
-}
-
-diesel::table! {
     imap_connection (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -128,15 +87,6 @@ diesel::table! {
         expires_in -> Integer,
         imap_server -> Nullable<Text>,
         imap_port -> Nullable<Integer>,
-    }
-}
-
-diesel::table! {
-    importance_priorities (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        threshold -> Integer,
-        service_type -> Text,
     }
 }
 
@@ -172,54 +122,11 @@ diesel::table! {
 }
 
 diesel::table! {
-    proactive_settings (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        imap_proactive -> Bool,
-        imap_general_checks -> Nullable<Text>,
-        proactive_calendar -> Bool,
-        created_at -> Integer,
-        updated_at -> Integer,
-        proactive_calendar_last_activated -> Integer,
-        proactive_email_last_activated -> Integer,
-        proactive_whatsapp -> Bool,
-        whatsapp_general_checks -> Nullable<Text>,
-        whatsapp_keywords_active -> Bool,
-        whatsapp_priority_senders_active -> Bool,
-        whatsapp_waiting_checks_active -> Bool,
-        whatsapp_general_importance_active -> Bool,
-        email_keywords_active -> Bool,
-        email_priority_senders_active -> Bool,
-        email_waiting_checks_active -> Bool,
-        email_general_importance_active -> Bool,
-        proactive_telegram -> Bool,
-        telegram_general_checks -> Nullable<Text>,
-        telegram_keywords_active -> Bool,
-        telegram_priority_senders_active -> Bool,
-        telegram_waiting_checks_active -> Bool,
-        telegram_general_importance_active -> Bool,
-    }
-}
-
-diesel::table! {
     processed_emails (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
         email_uid -> Text,
         processed_at -> Integer,
-    }
-}
-
-diesel::table! {
-    subscriptions (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        paddle_subscription_id -> Text,
-        paddle_customer_id -> Text,
-        stage -> Text,
-        status -> Text,
-        next_bill_date -> Integer,
-        is_scheduled_to_cancel -> Nullable<Bool>,
     }
 }
 
@@ -244,19 +151,6 @@ diesel::table! {
         confirm_send_event_duration -> Nullable<Text>,
         confirm_send_event_id -> Nullable<Text>,
         confirm_send_event_image_url -> Nullable<Text>,
-    }
-}
-
-diesel::table! {
-    unipile_connection (id) {
-        id -> Nullable<Integer>,
-        user_id -> Integer,
-        account_type -> Text,
-        account_id -> Text,
-        status -> Text,
-        last_update -> Integer,
-        created_on -> Integer,
-        description -> Text,
     }
 }
 
@@ -317,7 +211,6 @@ diesel::table! {
         matrix_username -> Nullable<Text>,
         encrypted_matrix_access_token -> Nullable<Text>,
         sub_tier -> Nullable<Text>,
-        msgs_left -> Integer,
         matrix_device_id -> Nullable<Text>,
         credits_left -> Float,
         encrypted_matrix_password -> Nullable<Text>,
@@ -328,6 +221,7 @@ diesel::table! {
         free_reply -> Bool,
         confirm_send_event -> Nullable<Text>,
         waiting_checks_count -> Integer,
+        next_billing_date_timestamp -> Nullable<Integer>,
     }
 }
 
@@ -345,17 +239,11 @@ diesel::table! {
 diesel::joinable!(bridges -> users (user_id));
 diesel::joinable!(calendar_notifications -> users (user_id));
 diesel::joinable!(conversations -> users (user_id));
-diesel::joinable!(gmail -> users (user_id));
-diesel::joinable!(idea_email_subscriptions -> ideas (idea_id));
-diesel::joinable!(idea_upvotes -> ideas (idea_id));
 diesel::joinable!(imap_connection -> users (user_id));
-diesel::joinable!(importance_priorities -> users (user_id));
 diesel::joinable!(keywords -> users (user_id));
 diesel::joinable!(message_history -> users (user_id));
 diesel::joinable!(priority_senders -> users (user_id));
-diesel::joinable!(proactive_settings -> users (user_id));
 diesel::joinable!(processed_emails -> users (user_id));
-diesel::joinable!(subscriptions -> users (user_id));
 diesel::joinable!(temp_variables -> users (user_id));
 diesel::joinable!(user_settings -> users (user_id));
 diesel::joinable!(waiting_checks -> users (user_id));
@@ -365,23 +253,15 @@ diesel::allow_tables_to_appear_in_same_query!(
     calendar_notifications,
     conversations,
     email_judgments,
-    gmail,
     google_calendar,
     google_tasks,
-    idea_email_subscriptions,
-    idea_upvotes,
-    ideas,
     imap_connection,
-    importance_priorities,
     keywords,
     message_history,
     priority_senders,
-    proactive_settings,
     processed_emails,
-    subscriptions,
     task_notifications,
     temp_variables,
-    unipile_connection,
     usage_logs,
     user_settings,
     users,

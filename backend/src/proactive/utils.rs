@@ -334,8 +334,8 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 hours_since_prev
             );
 
-            // Check if user has proactive WhatsApp enabled before fetching messages
-            if state.user_repository.get_proactive_whatsapp(user_id)? {
+            // Check if user has WhatsApp enabled before fetching messages
+            if let Some(bridge) = state.user_repository.get_whatsapp_bridge(user_id)? {
                 // Fetch WhatsApp messages
                 match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp).await {
                 Ok(whatsapp_messages) => {
@@ -536,7 +536,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             );
 
             // Fetch WhatsApp messages
-            if state.user_repository.get_proactive_whatsapp(user_id)? {
+            if let Some(bridge) = state.user_repository.get_whatsapp_bridge(user_id)? {
                 match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp).await {
                     Ok(whatsapp_messages) => {
                         // Convert WhatsAppMessage to MessageInfo and add to messages
@@ -746,7 +746,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             );
 
             // Fetch WhatsApp messages
-            if state.user_repository.get_proactive_whatsapp(user_id)? {
+            if let Some(bridge) = state.user_repository.get_whatsapp_bridge(user_id)? {
                 match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp).await {
                     Ok(whatsapp_messages) => {
                         // Convert WhatsAppMessage to MessageInfo and add to messages

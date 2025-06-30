@@ -51,7 +51,6 @@ pub struct UserResponse {
     pub notify: bool,
     pub preferred_number: Option<String>,
     pub sub_tier: Option<String>,
-    pub msgs_left: i32,
     pub credits_left: f32,
     pub discount: bool,
     pub discount_tier: Option<String>,

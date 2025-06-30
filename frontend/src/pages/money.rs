@@ -273,7 +273,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                         <b>{"Verify Account to Subscribe"}</b>
                                     </button>
                                 }
-                            } else if props.sub_tier.is_none() {
+                            } else if props.sub_tier.as_ref().is_none() {
                                 html! {
                                     <CheckoutButton 
                                         user_id={props.user_id} 
@@ -281,9 +281,24 @@ pub fn pricing(props: &PricingProps) -> Html {
                                         subscription_type="basic"
                                     />
                                 }
-                            } else {
+                            } else if props.sub_tier.as_ref().unwrap() == &"tier 1".to_string() {
                                 html! {
                                     <button class="iq-button current-plan" disabled=true><b>{"Current Plan"}</b></button>
+                                }
+                            } else {
+                                let onclick = {
+                                    Callback::from(move |e: MouseEvent| {
+                                        e.prevent_default();
+                                        if let Some(window) = web_sys::window() {
+                                            if let Ok(Some(storage)) = window.local_storage() {
+                                                let _ = storage.set_item("selected_plan", "basic");
+                                                let _ = window.location().set_href("/register");
+                                            }
+                                        }
+                                    })
+                                };
+                                html! {
+                                    <button onclick={onclick} class="iq-button signup-button"><b>{"Switch to Basic Plan"}</b></button>
                                 }
                             }
                         } else {
@@ -332,11 +347,15 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <div class="includes">
                             <p>{"Subscription includes:"}</p>
                             <ul class="quota-list">
-                                <li>{"🔔 24/7 monitoring for critical messages"}</li>
-                                <li>{"📊 Daily digest summaries (morning, day, evening)"}</li>
-                                <li>{"⚡ Up to 5 custom waiting checks"}</li>
+                                <li>{"🔔 24/7 monitoring for critical messages (included)"}</li>
+                                <li>{"📊 Daily digest summaries (up to 3 per day)"}</li>
+                                <li>{"⚡ Up to 5 custom waiting checks (included)"}</li>
                                 <li>{"⭐ Priority sender notifications"}</li>
-                                <li>{"📱 40 questions/messages per month"}</li>
+                                <li>{"📱 120 Messages per month for:"}</li>
+                                <li class="sub-item">{"   • Daily digests"}</li>
+                                <li class="sub-item">{"   • Voice calls (1 min = 1 message)"}</li>
+                                <li class="sub-item">{"   • Text queries to Lightfriend"}</li>
+                                <li class="sub-item">{"   • Priority sender notifications"}</li>
                                 <li>{"💳 Additional credits for more messages"}</li>
                                 <li>{"✨ Everything in Basic Plan included"}</li>
                             </ul>
@@ -358,7 +377,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                         <b>{"Verify Account to Subscribe"}</b>
                                     </button>
                                 }
-                            } else if props.sub_tier.is_none() {
+                            } else if props.sub_tier.as_ref().is_none() {
                                 html! {
                                     <CheckoutButton 
                                         user_id={props.user_id} 
@@ -366,9 +385,24 @@ pub fn pricing(props: &PricingProps) -> Html {
                                         subscription_type="monitoring_plan"
                                     />
                                 }
-                            } else {
+                            } else if props.sub_tier.as_ref().unwrap() == &"tier 2".to_string() {
                                 html! {
                                     <button class="iq-button current-plan" disabled=true><b>{"Current Plan"}</b></button>
+                                }
+                            } else {
+                                let onclick = {
+                                    Callback::from(move |e: MouseEvent| {
+                                        e.prevent_default();
+                                        if let Some(window) = web_sys::window() {
+                                            if let Ok(Some(storage)) = window.local_storage() {
+                                                let _ = storage.set_item("selected_plan", "monitoring_plan");
+                                                let _ = window.location().set_href("/register");
+                                            }
+                                        }
+                                    })
+                                };
+                                html! {
+                                    <button onclick={onclick} class="iq-button signup-button"><b>{"Upgrade Monitoring Plan"}</b></button>
                                 }
                             }
                         } else {
@@ -393,7 +427,7 @@ pub fn pricing(props: &PricingProps) -> Html {
 
             <div class="topup-pricing">
                 <h2>{format!("Overage Rates for {}", *selected_country)}</h2>
-                <p>{"When you exceed your quota, these rates apply. Enable auto-top-up to automatically add credits when you run low. Unused credits carry over indefinitely. These are used to answer user initiated questions and for sending notifications from priority senders. All other types of alerts are included."}</p>
+                <p>{"When you exceed your quota, these rates apply. Enable auto-top-up to automatically add credits when you run low. Unused credits carry over indefinitely. These are can used to answer user initiated questions, send notifications from priority senders and daily digests."}</p>
                 <div class="topup-packages">
                     <div class="pricing-card main">
                         <div class="card-header">
@@ -554,7 +588,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     </details>
                     <details>
                         <summary>{"What counts as a message?"}</summary>
-                        <p>{"Each question you send and each minute of voice calling you initiate counts as one message. AI clarification responses don't count against your limit. Daily digests and critical notifications are included in your plan and don't use message credits. Priority sender notifications use either unused digest slots, your message quota or purchased credits."}</p>
+                        <p>{"The Monitoring Plan includes 120 messages per month that can be used for: 1) Daily digests (up to 3 per day), 2) Voice calls (1 minute = 1 message), 3) Text queries to Lightfriend, or 4) Priority sender notifications. Critical message monitoring and up to 5 custom waiting checks are included and don't count against your message quota. AI clarification responses also don't count against your limit. The Basic Plan includes 40 messages per month for queries only."}</p>
                     </details>
                     <details>
                         <summary>{"How do credits work?"}</summary>
@@ -786,6 +820,19 @@ pub fn pricing(props: &PricingProps) -> Html {
                     color: #e0e0e0;
                     padding: 0.5rem 0;
                     font-size: 1.1rem;
+                }
+
+                .quota-list li.sub-item {
+                    padding-left: 2rem;
+                    font-size: 1rem;
+                    color: #b0b0b0;
+                    position: relative;
+                }
+
+                .quota-list li.sub-item::before {
+                    position: absolute;
+                    left: 1rem;
+                    color: #7EB2FF;
                 }
 
                 .feature-comparison {

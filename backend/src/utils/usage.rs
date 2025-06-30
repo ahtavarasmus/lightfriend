@@ -8,7 +8,7 @@ pub async fn check_user_credits(
     state: &Arc<AppState>,
     user: &crate::models::user_models::User,
     event_type: &str,
-    voice_seconds: Option<i32>,
+    amount: Option<i32>,
 ) -> Result<(), String> {
     // Get country from user settings or phone number
     let country = match state.user_core.get_user_settings(user.id) {
@@ -58,8 +58,9 @@ pub async fn check_user_credits(
     // Calculate cost based on event type
     let required_credits = match event_type {
         "message" => message_cost,
-        "voice" => voice_seconds.unwrap_or(0) as f32 * voice_second_cost,
+        "voice" => amount.unwrap_or(0) as f32 * voice_second_cost,
         "notification" => notification_cost,
+        "digest" => amount.unwrap_or(0) as f32 * message_cost,
         _ => return Err("Invalid event type".to_string()),
     };
 
@@ -67,6 +68,7 @@ pub async fn check_user_credits(
         "message" => 1.00,
         "voice" => 0.00,
         "notification" => 1.00 / 3.00,
+        "digest" => 1.00 * amount.unwrap_or(0) as f32,
         _ => return Err("Invalid event type".to_string()),
     };
 
@@ -83,7 +85,7 @@ pub async fn check_user_credits(
             Some(last_time) => (current_time - last_time) >= 24 * 3600 // 24 hours in seconds
         };
 
-        if should_notify {
+        if should_notify && event_type != "digest" {
             // Send notification about depleted credits and monthly quota
             if let Ok(conversation) = state.user_conversations.get_conversation(&user, user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))).await {
                 let conversation_sid = conversation.conversation_sid.clone();
@@ -140,7 +142,7 @@ pub fn deduct_user_credits(
     state: &Arc<AppState>,
     user_id: i32,
     event_type: &str,
-    voice_seconds: Option<i32>,
+    amount: Option<i32>,
 ) -> Result<(), String> {
     let user = match state.user_core.find_by_id(user_id) {
         Ok(Some(user)) => user,
@@ -198,15 +200,17 @@ pub fn deduct_user_credits(
     // Calculate cost based on event type
     let cost = match event_type {
         "message" => message_cost,
-        "voice" => voice_seconds.unwrap_or(0) as f32 * voice_second_cost,
+        "voice" => amount.unwrap_or(0) as f32 * voice_second_cost,
         "notification" => notification_cost,
+        "digest" => amount.unwrap_or(0) as f32 * message_cost,
         _ => return Err("Invalid event type".to_string()),
     };
 
     let cost_credits_left = match event_type {
         "message" => 1.00,
-        "voice" => voice_seconds.unwrap_or(0) as f32 / 60.00,
+        "voice" => amount.unwrap_or(0) as f32 / 60.00,
         "notification" => 1.00 / 3.00,
+        "digest" => 1.00 * amount.unwrap_or(0) as f32,
         _ => return Err("Invalid event type".to_string()),
     };
 

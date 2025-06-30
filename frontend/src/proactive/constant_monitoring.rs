@@ -16,8 +16,6 @@ pub struct WhatsAppRoom {
     pub last_activity_formatted: String,
 }
 
-use crate::pages::proactive::format_date_for_input;
-
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct MonitoredContact {
     pub sender: String,

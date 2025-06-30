@@ -3,7 +3,6 @@ use yew::prelude::*;
 use crate::auth::connect::Connect;
 use wasm_bindgen::prelude::*;
 use web_sys::{Element, HtmlElement, HtmlElement as HtmlElementTrait};
-use crate::pages::proactive::Proactive;
 use yew_router::prelude::*;
 use crate::Route;
 use yew_router::components::Link;
@@ -178,7 +177,7 @@ pub fn landing() -> Html {
         </header>        
 
 
-            <div class="feature-block proactive">
+            <div class="feature-block">
                 <div class="feature-content">
                     <h2>{"Filter the Noise"}</h2>
                     <p>{"Lightfriend sends instant SMS/call alerts ONLY for critical messages, emails or events."}</p>
@@ -3046,47 +3045,6 @@ pub fn landing() -> Html {
                         color: #7EB2FF;
                     }
 
-                    .proactive-tab .coming-soon {
-                        text-align: center;
-                        padding: 2rem;
-                        background: rgba(30, 144, 255, 0.05);
-                        border-radius: 12px;
-                        border: 1px solid rgba(30, 144, 255, 0.1);
-                        margin: 2rem 0;
-                    }
-
-                    .proactive-tab .coming-soon h3 {
-                        color: #7EB2FF;
-                        font-size: 1.5rem;
-                        margin-bottom: 1rem;
-                    }
-
-                    .proactive-tab .coming-soon p {
-                        color: #999;
-                        margin-bottom: 1.5rem;
-                    }
-
-                    .proactive-tab .coming-soon ul {
-                        list-style: none;
-                        padding: 0;
-                        text-align: left;
-                        max-width: 300px;
-                        margin: 0 auto;
-                    }
-
-                    .proactive-tab .coming-soon li {
-                        color: #999;
-                        padding: 0.5rem 0;
-                        padding-left: 1.5rem;
-                        position: relative;
-                    }
-
-                    .proactive-tab .coming-soon li::before {
-                        content: '•';
-                        position: absolute;
-                        left: 0.5rem;
-                        color: #1E90FF;
-                    }
 
                     .development-links {
                         margin-top: 2rem;

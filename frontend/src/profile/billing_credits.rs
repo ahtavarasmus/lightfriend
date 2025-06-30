@@ -2,7 +2,6 @@ use yew::prelude::*;
 use web_sys::{HtmlInputElement, window};
 use crate::config;
 use serde_json::{Value, json};
-use crate::profile::usage_graph::UsageGraph;
 use gloo_net::http::Request;
 use crate::profile::billing_models::{ // Import from the new file
     AutoTopupSettings, 

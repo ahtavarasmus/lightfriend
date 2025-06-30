@@ -8,7 +8,6 @@ use crate::config;
 use serde_json::json;
 use serde::{Deserialize, Serialize};
 
-use crate::pages::proactive::format_date_for_input;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct WaitingCheck {
@@ -33,25 +32,6 @@ pub struct PrioritySender {
     pub sender: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ImportancePriorityResponse {
-    pub user_id: i32,
-    pub threshold: i32,
-    pub service_type: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ImportancePriority {
-    pub threshold: i32,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct FilterSettings {
-    pub keywords: Vec<String>,
-    pub priority_senders: Vec<PrioritySender>,
-    pub waiting_checks: Vec<WaitingCheck>,
-    pub importance_priority: Option<ImportancePriority>,
-}
 
 #[function_component(WaitingChecksSection)]
 pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {

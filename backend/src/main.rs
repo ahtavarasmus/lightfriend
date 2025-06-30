@@ -36,12 +36,8 @@ mod handlers {
     pub mod billing_handlers;
     pub mod admin_handlers;
     pub mod stripe_handlers;
-    //pub mod composio_auth;
-    //pub mod unipile_auth;
     pub mod google_calendar_auth;
     pub mod google_calendar;
-    //pub mod gmail_auth;
-    //pub mod gmail;
     pub mod imap_auth;
     pub mod auth_middleware;
     pub mod imap_handlers;
@@ -52,7 +48,6 @@ mod handlers {
     pub mod google_tasks_auth;
     pub mod telegram_auth;
     pub mod telegram_handlers;
-    pub mod idea_widget;
 }
 
 mod utils {
@@ -91,7 +86,6 @@ mod api {
     pub mod elevenlabs;
     pub mod elevenlabs_webhook;
     pub mod shazam_call;
-    pub mod langfuse;
 }
 
 
@@ -439,52 +433,15 @@ async fn main() {
 
         .route("/api/filters/keyword/{service_type}", post(filter_handlers::create_keyword))
         .route("/api/filters/keyword/{service_type}/{keyword}", delete(filter_handlers::delete_keyword))
-        .route("/api/filters/keywords/{service_type}", get(filter_handlers::get_keywords))
 
-        .route("/api/filters/importance-priority/{service_type}", post(filter_handlers::create_importance_priority))
-        .route("/api/filters/importance-priority/{service_type}", delete(filter_handlers::delete_importance_priority))
-        .route("/api/filters/importance-priority/{service_type}", get(filter_handlers::get_importance_priority))
         .route("/api/filters/connected-services", get(filter_handlers::get_connected_services))
 
         // WhatsApp filter toggle routes
         // Generic filter toggle routes
-        .route("/api/filters/{service_type}/keywords/toggle", post(filter_handlers::toggle_keywords))
-        .route("/api/filters/{service_type}/priority-senders/toggle", post(filter_handlers::toggle_priority_senders))
-        .route("/api/filters/{service_type}/waiting-checks/toggle", post(filter_handlers::toggle_waiting_checks))
-        .route("/api/filters/{service_type}/general-importance/toggle", post(filter_handlers::toggle_general_importance))
-
-        .route("/api/filters/{service_type}/keywords", get(filter_handlers::get_keywords_state))
-
-        // Filter settings getter routes
-        .route("/api/filters/whatsapp/settings", get(filter_handlers::get_whatsapp_filter_settings))
-        .route("/api/filters/telegram/settings", get(filter_handlers::get_telegram_filter_settings))
-        .route("/api/filters/imap/settings", get(filter_handlers::get_email_filter_settings))
-
-        .route("/api/profile/imap-general-checks", post(profile_handlers::update_imap_general_checks))
-        .route("/api/profile/imap-general-checks", get(profile_handlers::get_imap_general_checks))
-        .route("/api/profile/whatsapp-general-checks", post(profile_handlers::update_whatsapp_general_checks))
-        .route("/api/profile/whatsapp-general-checks", get(profile_handlers::get_whatsapp_general_checks))
-        .route("/api/profile/telegram-general-checks", post(profile_handlers::update_telegram_general_checks))
-        .route("/api/profile/telegram-general-checks", get(profile_handlers::get_telegram_general_checks))
-        .route("/api/profile/imap-proactive", post(profile_handlers::update_imap_proactive))
-        .route("/api/profile/imap-proactive", get(profile_handlers::get_imap_proactive))
         .route("/api/profile/email-judgments", get(profile_handlers::get_email_judgments))
 
-        .route("/api/profile/calendar-proactive", get(profile_handlers::get_calendar_proactive))
-        .route("/api/profile/calendar-proactive", post(profile_handlers::update_calendar_proactive))
-        .route("/api/profile/whatsapp-proactive", get(profile_handlers::get_whatsapp_proactive))
-        .route("/api/profile/whatsapp-proactive", post(profile_handlers::update_whatsapp_proactive))
-        .route("/api/profile/telegram-proactive", get(profile_handlers::get_telegram_proactive))
-        .route("/api/profile/telegram-proactive", post(profile_handlers::update_telegram_proactive))
         .route("/api/profile/migrate-to-daily/{user_id}", post(profile_handlers::migrate_to_daily))
 
-        /*
-        // Idea widget routes
-        .route("/api/ideas", post(handlers::idea_widget::create_idea))
-        .route("/api/ideas", get(handlers::idea_widget::get_ideas))
-        .route("/api/ideas/{id}/upvote", post(handlers::idea_widget::upvote_idea))
-        .route("/api/ideas/{id}/subscribe", post(handlers::idea_widget::subscribe_email))
-        */
 
 
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));

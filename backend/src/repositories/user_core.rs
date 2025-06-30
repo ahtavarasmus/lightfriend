@@ -92,6 +92,7 @@ impl UserCore {
         Ok(())
     }
 
+
     // User settings operations
     pub fn get_user_settings(&self, user_id: i32) -> Result<UserSettings, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -114,6 +115,7 @@ impl UserCore {
                     sub_country: None,
                     info: None,
                     save_context: Some(5),
+                    critical_enabled: true,
                     number_of_digests_locked: 0,
                 };
                 
@@ -152,6 +154,7 @@ impl UserCore {
                 sub_country: None,
                 info: None,
                 save_context: Some(5),
+                critical_enabled: true,
                 number_of_digests_locked: 0,
             };
             
@@ -608,6 +611,29 @@ impl UserCore {
             .first::<bool>(&mut conn)?;
 
         Ok(critical_enabled)
+    }
+
+    pub fn update_next_billing_date(&self, user_id: i32, timestamp: i32) -> Result<(), DieselError> {
+        use crate::schema::users;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        diesel::update(users::table.find(user_id))
+            .set(users::next_billing_date_timestamp.eq(timestamp))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn get_next_billing_date(&self, user_id: i32) -> Result<Option<i32>, DieselError> {
+        use crate::schema::users;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let timestamp = users::table
+            .find(user_id)
+            .select(users::next_billing_date_timestamp)
+            .first::<Option<i32>>(&mut conn)?;
+
+        Ok(timestamp)
     }
 
 }

@@ -13,17 +13,13 @@ mod profile {
     pub mod billing_models;
     pub mod profile;
     pub mod settings;
-    pub mod usage_graph;
     pub mod timezone_detector;
-    pub mod imap_general_checks;
 }
 mod pages {
     pub mod home;
     pub mod landing;
     pub mod money;
     pub mod termsprivacy;
-    pub mod blog;
-    pub mod why;
     pub mod proactive;
     pub mod faq;
 }
@@ -32,8 +28,6 @@ mod proactive {
     pub mod email;
     pub mod calendar;
     pub mod common;
-    pub mod whatsapp_general_checks;
-    pub mod telegram_general_checks;
     pub mod waiting_checks;
     pub mod constant_monitoring;
     pub mod digest;

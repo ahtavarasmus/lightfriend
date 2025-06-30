@@ -35,7 +35,6 @@ pub struct UserProfile {
     pub timezone: Option<String>,
     pub timezone_auto: Option<bool>,
     pub sub_tier: Option<String>,
-    pub msgs_left: i32,
     pub credits_left: f32,
     pub discount: bool,
     pub notify: bool,

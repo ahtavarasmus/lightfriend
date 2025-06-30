@@ -288,7 +288,7 @@ let group_states = use_state(|| {
                             }
                         >
                             <i class="fa-solid fa-robot"></i>
-                            {"Proactive Services"}
+                            {"Monitoring"}
                             <div class="group-summary">
                                 <span class="service-count">
                                     {format!("{}/4 Available", 

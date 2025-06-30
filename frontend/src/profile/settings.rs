@@ -185,7 +185,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     charge_back_to: (*user_profile).charge_back_to,
                                     stripe_payment_method_id: (*user_profile).stripe_payment_method_id.clone(),
                                     sub_tier: (*user_profile).sub_tier.clone(),
-                                    msgs_left: (*user_profile).msgs_left,
                                     credits_left: (*user_profile).credits_left,
                                     discount: (*user_profile).discount,
                                     notify: (*user_profile).notify,

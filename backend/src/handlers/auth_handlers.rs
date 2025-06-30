@@ -86,7 +86,6 @@ pub async fn get_users(
             notify: settings.notify,
             preferred_number: user.preferred_number,
             sub_tier: user.sub_tier,
-            msgs_left: user.msgs_left,
             credits_left: user.credits_left,
             discount: user.discount,
             discount_tier: user.discount_tier,

@@ -142,7 +142,6 @@ pub struct ProfileResponse {
     timezone: Option<String>,
     timezone_auto: Option<bool>,
     sub_tier: Option<String>,
-    msgs_left: i32,
     credits_left: f32,
     discount: bool,
     agent_language: String,
@@ -198,7 +197,6 @@ pub async fn get_profile(
                 timezone: user_settings.timezone,
                 timezone_auto: user_settings.timezone_auto,
                 sub_tier: user.sub_tier,
-                msgs_left: user.msgs_left,
                 credits_left: user.credits_left,
                 discount: user.discount,
                 agent_language: user_settings.agent_language,
@@ -400,67 +398,7 @@ pub async fn update_profile(
     })))
 }
 
-#[derive(Deserialize)]
-pub struct ImapGeneralChecksRequest {
-    checks: Option<String>,
-}
 
-#[derive(Serialize)]
-pub struct ImapGeneralChecksResponse {
-    checks: String,
-}
-
-pub async fn get_imap_general_checks(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-) -> Result<Json<ImapGeneralChecksResponse>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_repository.get_imap_general_checks(auth_user.user_id) {
-        Ok(checks) => Ok(Json(ImapGeneralChecksResponse { checks })),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to get IMAP general checks: {}", e)}))
-        )),
-    }
-}
-
-#[derive(Deserialize)]
-pub struct ImapProactiveRequest {
-    proactive: bool,
-}
-
-pub async fn update_imap_proactive(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Json(request): Json<ImapProactiveRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_repository.update_imap_proactive(auth_user.user_id, request.proactive) {
-        Ok(_) => Ok(Json(json!({
-            "message": "IMAP proactive setting updated successfully"
-        }))),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to update IMAP proactive setting: {}", e)}))
-        )),
-    }
-}
-
-#[derive(Serialize)]
-pub struct ImapProactiveResponse {
-    proactive: bool,
-}
-
-pub async fn get_imap_proactive(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-) -> Result<Json<ImapProactiveResponse>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_repository.get_imap_proactive(auth_user.user_id) {
-        Ok(proactive) => Ok(Json(ImapProactiveResponse { proactive })),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to get IMAP proactive setting: {}", e)}))
-        )),
-    }
-}
 
 #[derive(Serialize)]
 pub struct EmailJudgmentResponse {
@@ -472,141 +410,7 @@ pub struct EmailJudgmentResponse {
     pub reason: String,
 }
 
-#[derive(Serialize)]
-pub struct CalendarProactiveResponse {
-    proactive: bool,
-}
 
-pub async fn get_calendar_proactive(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-) -> Result<Json<CalendarProactiveResponse>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_repository.get_proactive_calendar(auth_user.user_id) {
-        Ok(proactive) => Ok(Json(CalendarProactiveResponse { proactive })),
-        Err(e) => {
-            tracing::error!("Failed to get calendar proactive setting: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to get calendar proactive setting: {}", e)}))
-            ))
-        }
-    }
-}
-
-#[derive(Deserialize)]
-pub struct CalendarProactiveRequest {
-    proactive: bool,
-}
-
-pub async fn update_calendar_proactive(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Json(request): Json<CalendarProactiveRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_repository.update_proactive_calendar(auth_user.user_id, request.proactive) {
-        Ok(_) => Ok(Json(json!({
-            "message": "Calendar proactive setting updated successfully"
-        }))),
-        Err(e) => {
-            tracing::error!("Failed to update calendar proactive setting: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to update calendar proactive setting: {}", e)}))
-            ))
-        }
-    }
-}
-
-#[derive(Serialize)]
-pub struct WhatsappProactiveResponse {
-    proactive: bool,
-}
-
-pub async fn get_whatsapp_proactive(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-) -> Result<Json<WhatsappProactiveResponse>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_repository.get_proactive_whatsapp(auth_user.user_id) {
-        Ok(proactive) => Ok(Json(WhatsappProactiveResponse { proactive })),
-        Err(e) => {
-            tracing::error!("Failed to get WhatsApp proactive setting: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to get WhatsApp proactive setting: {}", e)}))
-            ))
-        }
-    }
-}
-
-#[derive(Serialize)]
-pub struct TelegramProactiveResponse {
-    proactive: bool,
-}
-
-pub async fn get_telegram_proactive(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-) -> Result<Json<TelegramProactiveResponse>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_repository.get_proactive_telegram(auth_user.user_id) {
-        Ok(proactive) => Ok(Json(TelegramProactiveResponse { proactive })),
-        Err(e) => {
-            tracing::error!("Failed to get Telegram proactive setting: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to get Telegram proactive setting: {}", e)}))
-            ))
-        }
-    }
-}
-
-#[derive(Deserialize)]
-pub struct WhatsappProactiveRequest {
-    proactive: bool,
-}
-
-pub async fn update_whatsapp_proactive(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Json(request): Json<WhatsappProactiveRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_repository.update_proactive_whatsapp(auth_user.user_id, request.proactive) {
-        Ok(_) => Ok(Json(json!({
-            "message": "WhatsApp proactive setting updated successfully"
-        }))),
-        Err(e) => {
-            tracing::error!("Failed to update WhatsApp proactive setting: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to update WhatsApp proactive setting: {}", e)}))
-            ))
-        }
-    }
-}
-
-
-#[derive(Deserialize)]
-pub struct TelegramProactiveRequest {
-    proactive: bool,
-}
-
-pub async fn update_telegram_proactive(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Json(request): Json<TelegramProactiveRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_repository.update_proactive_telegram(auth_user.user_id, request.proactive) {
-        Ok(_) => Ok(Json(json!({
-            "message": "Telegram proactive setting updated successfully"
-        }))),
-        Err(e) => {
-            tracing::error!("Failed to update Telegram proactive setting: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to update Telegram proactive setting: {}", e)}))
-            ))
-        }
-    }
-}
 
 pub async fn get_email_judgments(
     State(state): State<Arc<AppState>>,
@@ -637,119 +441,14 @@ pub async fn get_email_judgments(
     }
 }
 
-pub async fn update_imap_general_checks(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Json(request): Json<ImapGeneralChecksRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Convert Option<String> to Option<&str>
-    let checks_ref: Option<&str> = request.checks.as_deref();
-
-    // Update the IMAP general checks
-    match state.user_repository.update_imap_general_checks(auth_user.user_id, checks_ref) {
-        Ok(_) => Ok(Json(json!({
-            "message": "IMAP general checks updated successfully"
-        }))),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to update IMAP general checks: {}", e)}))
-        )),
-    }
-}
-
-#[derive(Deserialize)]
-pub struct WhatsappGeneralChecksRequest {
-    checks: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct WhatsappGeneralChecksResponse {
-    checks: String,
-}
-
-#[derive(Deserialize)]
-pub struct TelegramGeneralChecksRequest {
-    checks: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct TelegramGeneralChecksResponse {
-    checks: String,
-}
-
-pub async fn get_whatsapp_general_checks(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-) -> Result<Json<WhatsappGeneralChecksResponse>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_repository.get_whatsapp_general_checks(auth_user.user_id) {
-        Ok(checks) => Ok(Json(WhatsappGeneralChecksResponse { checks })),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to get WhatsApp general checks: {}", e)}))
-        )),
-    }
-}
-
-
-pub async fn get_telegram_general_checks(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-) -> Result<Json<TelegramGeneralChecksResponse>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_repository.get_telegram_general_checks(auth_user.user_id) {
-        Ok(checks) => Ok(Json(TelegramGeneralChecksResponse { checks })),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to get Telegram general checks: {}", e)}))
-        )),
-    }
-}
-
-
-pub async fn update_whatsapp_general_checks(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Json(request): Json<WhatsappGeneralChecksRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Convert Option<String> to Option<&str>
-    let checks_ref: Option<&str> = request.checks.as_deref();
-
-    // Update the WhatsApp general checks
-    match state.user_repository.update_whatsapp_general_checks(auth_user.user_id, checks_ref) {
-        Ok(_) => Ok(Json(json!({
-            "message": "WhatsApp general checks updated successfully"
-        }))),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to update WhatsApp general checks: {}", e)}))
-        )),
-    }
-}
-
-pub async fn update_telegram_general_checks(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Json(request): Json<TelegramGeneralChecksRequest>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    // Convert Option<String> to Option<&str>
-    let checks_ref: Option<&str> = request.checks.as_deref();
-
-    // Update the WhatsApp general checks
-    match state.user_repository.update_telegram_general_checks(auth_user.user_id, checks_ref) {
-        Ok(_) => Ok(Json(json!({
-            "message": "Telegram general checks updated successfully"
-        }))),
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to update Telegram general checks: {}", e)}))
-        )),
-    }
-}
 
 #[derive(Serialize)]
 pub struct DigestsResponse {
     morning_digest_time: Option<String>,
     day_digest_time: Option<String>,
     evening_digest_time: Option<String>,
+    amount_affordable_with_messages: i32,
+    amount_affordable_with_messages_and_credits: i32,
 }
 
 #[derive(Deserialize)]
@@ -784,23 +483,104 @@ pub async fn get_digests(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<DigestsResponse>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_core.get_digests(auth_user.user_id) {
-        Ok((morning_digest_time, day_digest_time, evening_digest_time)) => {
-            println!("{:#?}, {:#?}, {:#?}", morning_digest_time, day_digest_time, evening_digest_time);
-            Ok(Json(DigestsResponse {
-                morning_digest_time,
-                day_digest_time,
-                evening_digest_time,
-            }))
-        },
-        Err(e) => {
+    // Get current digest settings
+    let (morning_digest_time, day_digest_time, evening_digest_time) = state.user_core.get_digests(auth_user.user_id)
+        .map_err(|e| {
             tracing::error!("Failed to get digest settings: {}", e);
-            Err((
+            (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Failed to get digest settings: {}", e)}))
-            ))
+            )
+        })?;
+
+    // Count current active digests
+    let current_count = [morning_digest_time.as_ref(), day_digest_time.as_ref(), evening_digest_time.as_ref()]
+        .iter()
+        .filter(|&&x| x.is_some())
+        .count();
+
+    // Get next billing date
+    let mut next_billing_date = state.user_core.get_next_billing_date(auth_user.user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to get next billing date: {}", e)}))
+        ))?;
+
+    // If no next billing date found, fetch it from Stripe
+    if next_billing_date.is_none() {
+        if let Ok(Json(response)) = crate::handlers::stripe_handlers::fetch_next_billing_date(
+            State(state.clone()),
+            auth_user.clone(),
+            Path(auth_user.user_id)
+        ).await {
+            if let Some(date) = response.get("next_billing_date").and_then(|v| v.as_i64()) {
+                next_billing_date = Some(date as i32);
+            }
         }
     }
+
+    // Calculate days until next billing
+    let days_until_billing = next_billing_date.map(|date| {
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+        (date - current_time) / (24 * 60 * 60)
+    }).unwrap_or(30); // Default to 30 days if we can't calculate
+
+    // Get user for credit check
+    let user = state.user_core.find_by_id(auth_user.user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to get user: {}", e)}))
+        ))?
+        .ok_or_else(|| (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "User not found"}))
+        ))?;
+
+    // Calculate credits needed per digest
+    let credits_needed_per_digest = days_until_billing as i32;
+
+    // Calculate available slots (max 3 - current)
+    let available_slots = 3 - current_count as i32;
+
+    // Calculate how many additional digests user can afford with credits_left
+    let affordable_with_credits_left = if available_slots > 0 {
+        let max_affordable = (user.credits_left / credits_needed_per_digest as f32).floor() as i32;
+        std::cmp::min(max_affordable, available_slots)
+    } else {
+        0
+    };
+
+    // Calculate how many additional digests user can afford with total credits
+    let affordable_with_total_credits = if available_slots > 0 {
+        let mut max_affordable = 0;
+        for additional in 1..=available_slots {
+            let credits_needed = additional * credits_needed_per_digest;
+            if crate::utils::usage::check_user_credits(
+                &state,
+                &user,
+                "digest",
+                Some(credits_needed)
+            ).await.is_ok() {
+                max_affordable = additional;
+            } else {
+                break;
+            }
+        }
+        max_affordable
+    } else {
+        0
+    };
+
+    Ok(Json(DigestsResponse {
+        morning_digest_time,
+        day_digest_time,
+        evening_digest_time,
+        amount_affordable_with_messages: affordable_with_credits_left,
+        amount_affordable_with_messages_and_credits: affordable_with_total_credits,
+    }))
 }
 
 pub async fn update_digests(
@@ -808,6 +588,139 @@ pub async fn update_digests(
     auth_user: AuthUser,
     Json(request): Json<UpdateDigestsRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Get current digest settings
+    let (current_morning, current_day, current_evening) = state.user_core.get_digests(auth_user.user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to get current digest settings: {}", e)}))
+        ))?;
+
+    // Count current active digests
+    let current_count = [current_morning.as_ref(), current_day.as_ref(), current_evening.as_ref()]
+        .iter()
+        .filter(|&&x| x.is_some())
+        .count();
+
+    // Count new active digests
+    let new_count = [request.morning_digest_time.as_ref(), request.day_digest_time.as_ref(), request.evening_digest_time.as_ref()]
+        .iter()
+        .filter(|&&x| x.is_some())
+        .count();
+
+    // First check if we have the next billing date
+    let mut next_billing_date = state.user_core.get_next_billing_date(auth_user.user_id)
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to get next billing date: {}", e)}))
+        ))?;
+
+    // If no next billing date found, fetch it from Stripe
+    if next_billing_date.is_none() {
+        // Call fetch_next_billing_date to get and update the billing date
+        match crate::handlers::stripe_handlers::fetch_next_billing_date(
+            State(state.clone()),
+            auth_user.clone(),
+            Path(auth_user.user_id)
+        ).await {
+            Ok(Json(response)) => {
+                if let Some(date) = response.get("next_billing_date").and_then(|v| v.as_i64()) {
+                    next_billing_date = Some(date as i32);
+                    tracing::info!("Successfully fetched and updated next billing date from Stripe: {}", date);
+                }
+            },
+            Err(e) => {
+                tracing::warn!("Failed to fetch next billing date from Stripe: {:?}", e.clone());
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Failed to fetch next billing date from Stripe: {:?}", e)}))
+                ))
+            }
+        }
+    }
+
+    // Calculate days until next billing
+    let days_until_billing = next_billing_date.map(|date| {
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+        (date - current_time) / (24 * 60 * 60)
+    }).unwrap_or(30); // Default to 30 days if we can't calculate
+
+    // If we're increasing the number of digests, check if user has sufficient credits
+    if new_count > current_count {
+        // Get user for credit check
+        let user = state.user_core.find_by_id(auth_user.user_id)
+            .map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to get user: {}", e)}))
+            ))?
+            .ok_or_else(|| (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"}))
+            ))?;
+
+        // Calculate increased digest count
+        let increased_digest_count = (new_count - current_count) as i32;
+        let credits_amount = (increased_digest_count * days_until_billing) as i32;
+
+        // Check if user has sufficient credits for the increased digests
+        if let Err(e) = crate::utils::usage::check_user_credits(
+            &state,
+            &user,
+            "digest",
+            Some(credits_amount.clone())
+        ).await {
+            return Err((
+                StatusCode::PAYMENT_REQUIRED,
+                Json(json!({
+                    "error": format!("Insufficient Messages: You need {} Messages or more overage credits to add {} new digest(s). You get more Messages in {} days. If you can't wait, you can buy overage credits immediately to receive these digests until Messages reset.", credits_amount, increased_digest_count, days_until_billing),
+                    "credits_needed": credits_amount,
+                    "digests_requested": increased_digest_count
+                }))
+            ));
+        }
+
+        // Deduct the credits for the increased digests
+        if let Err(e) = crate::utils::usage::deduct_user_credits(
+            &state,
+            auth_user.user_id,
+            "digest",
+            Some(credits_amount.clone())
+        ) {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": format!("Failed to reserve credits: {}", e),
+                }))
+            ));
+        }
+        tracing::info!("Decreased users Messages by {}", credits_amount);
+    } else if new_count < current_count {
+        // Get user's current credits
+        let user = state.user_core.find_by_id(auth_user.user_id)
+            .map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to get user: {}", e)}))
+            ))?
+            .ok_or_else(|| (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"}))
+            ))?;
+
+        // Calculate credit refund based on reduced digest count and remaining days
+        let reduced_digest_count = (current_count - new_count) as f32;
+        let credit_refund = reduced_digest_count * days_until_billing as f32;
+        let new_credits = user.credits_left + credit_refund;
+
+        // Update user's credits with the refund
+        state.user_repository.update_sub_credits(auth_user.user_id, new_credits)
+            .map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to update user Messages: {}", e)}))
+            ))?;
+        tracing::info!("Gave user {} Messages back", credit_refund);
+    }
 
     println!("updating: {:#?}, {:#?}, {:#?}", &request.morning_digest_time, &request.day_digest_time, &request.evening_digest_time);
     match state.user_core.update_digests(
@@ -816,9 +729,27 @@ pub async fn update_digests(
         request.day_digest_time.as_deref(),
         request.evening_digest_time.as_deref(),
     ) {
-        Ok(_) => Ok(Json(json!({
-            "message": "Digest settings updated successfully"
-        }))),
+        Ok(_) => {
+            let mut message = String::from("Digest settings updated successfully");
+            if new_count > current_count {
+                let increased_digest_count = (new_count - current_count) as i32;
+                let credits_deducted = (increased_digest_count * days_until_billing) as i32;
+                message.push_str(&format!(". {} Messages reserved for digests", credits_deducted));
+            } else if new_count < current_count {
+                let reduced_digest_count = (current_count - new_count) as f32;
+                let credit_refund = reduced_digest_count * days_until_billing as f32;
+                message.push_str(&format!(". {} Messages released from digests", credit_refund));
+            }
+
+            let response = json!({
+                "message": message,
+                "digests_changed": new_count != current_count,
+                "previous_digest_count": current_count,
+                "new_digest_count": new_count,
+            });
+
+            Ok(Json(response))
+        },
         Err(e) => Err((
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to update digest settings: {}", e)}))

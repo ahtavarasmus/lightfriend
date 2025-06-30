@@ -34,7 +34,6 @@ struct UserInfo {
     notify: bool,
     preferred_number: Option<String>,
     sub_tier: Option<String>,
-    msgs_left: i32,
     credits_left: f32,
     discount: bool,
     discount_tier: Option<String>,

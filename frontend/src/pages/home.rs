@@ -1,16 +1,11 @@
 use yew::prelude::*;
 use crate::auth::connect::Connect;
-use wasm_bindgen::prelude::*;
-use web_sys::{Element, HtmlElement, HtmlElement as HtmlElementTrait};
-use crate::pages::proactive::Proactive;
 use yew_router::prelude::*;
 use crate::Route;
 use yew_router::components::Link;
 use crate::config;
 use web_sys::{window, HtmlInputElement};
-use web_sys::js_sys;
 use gloo_net::http::Request;
-use serde::{Deserialize, Serialize};
 use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 use crate::pages::landing::Landing;
@@ -406,17 +401,6 @@ pub fn Home() -> Html {
                         >
                             {"Connections"}
                         </button>
-                            /*
-                        <button 
-                            class={classes!("tab-button", (*active_tab == DashboardTab::Proactive).then(|| "active"))}
-                            onclick={{
-                                let active_tab = active_tab.clone();
-                                Callback::from(move |_| active_tab.set(DashboardTab::Proactive))
-                            }}
-                        >
-                            {"Proactive"}
-                        </button>
-                            */
                         <button 
                             class={classes!("tab-button", (*active_tab == DashboardTab::Personal).then(|| "active"))}
                             onclick={{
@@ -466,101 +450,6 @@ pub fn Home() -> Html {
 
                                     </div>
                                 },
-                                /*
-                                DashboardTab::Proactive => html! {
-                                    <div class="proactive-tab">
-                                        {
-                                            if let Some(profile) = (*profile_data).as_ref() {
-                                                if profile.sub_tier.as_ref().map_or(false, |tier| tier == "tier 2") {
-                                                    html! {
-                                                        <>
-                                                            <Proactive user_id={profile.id} />
-                                                        </>
-                                                    }
-                                                } else {
-                                                    html! {
-                                                        <div class="subscription-required">
-                                                            <h3>{"Proactive Features Require an Escape Plan Subscription"}</h3>
-                                                            <p>{"Get access to proactive features like:"}</p>
-                                                            <ul>
-                                                                <li>{"Priority message filtering"}</li>
-                                                                <li>{"Keyword-based notifications"}</li>
-                                                                <li>{"Waiting checks for important content"}</li>
-                                                            </ul>
-                                                            <a href="/pricing" class="upgrade-button">{"Upgrade Now"}</a>
-                                                            <style>
-                                                                {r#"
-                                                                .subscription-required {
-                                                                    background: rgba(30, 30, 30, 0.7);
-                                                                    border: 1px solid rgba(30, 144, 255, 0.1);
-                                                                    border-radius: 12px;
-                                                                    padding: 2rem;
-                                                                    text-align: center;
-                                                                    margin: 2rem auto;
-                                                                    max-width: 600px;
-                                                                }
-
-                                                                .subscription-required h3 {
-                                                                    color: #7EB2FF;
-                                                                    font-size: 1.5rem;
-                                                                    margin-bottom: 1rem;
-                                                                }
-
-                                                                .subscription-required p {
-                                                                    color: #fff;
-                                                                    margin-bottom: 1.5rem;
-                                                                }
-
-                                                                .subscription-required ul {
-                                                                    list-style: none;
-                                                                    padding: 0;
-                                                                    margin: 0 0 2rem 0;
-                                                                    text-align: left;
-                                                                }
-
-                                                                .subscription-required ul li {
-                                                                    color: #fff;
-                                                                    padding: 0.5rem 0;
-                                                                    position: relative;
-                                                                    padding-left: 1.5rem;
-                                                                }
-
-                                                                .subscription-required ul li:before {
-                                                                    content: "✓";
-                                                                    color: #7EB2FF;
-                                                                    position: absolute;
-                                                                    left: 0;
-                                                                }
-
-                                                                .upgrade-button {
-                                                                    display: inline-block;
-                                                                    padding: 1rem 2rem;
-                                                                    background: linear-gradient(45deg, #1E90FF, #4169E1);
-                                                                    color: white;
-                                                                    text-decoration: none;
-                                                                    border-radius: 8px;
-                                                                    font-weight: bold;
-                                                                    transition: all 0.3s ease;
-                                                                }
-
-                                                                .upgrade-button:hover {
-                                                                    transform: translateY(-2px);
-                                                                    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
-                                                                }
-
-
-                                                            "#}
-                                                        </style>
-                                                        </div>
-                                                    }
-                                                }
-                                            } else {
-                                                html! {}
-                                            }
-                                        }
-                                    </div>
-                                },
-                            */
                                 DashboardTab::Personal => html! {
                                     <div class="personal-tab">
                                         {
@@ -1620,48 +1509,6 @@ pub fn Home() -> Html {
 
                     .tab-button:hover {
                         color: #7EB2FF;
-                    }
-
-                    .proactive-tab .coming-soon {
-                        text-align: center;
-                        padding: 2rem;
-                        background: rgba(30, 144, 255, 0.05);
-                        border-radius: 12px;
-                        border: 1px solid rgba(30, 144, 255, 0.1);
-                        margin: 2rem 0;
-                    }
-
-                    .proactive-tab .coming-soon h3 {
-                        color: #7EB2FF;
-                        font-size: 1.5rem;
-                        margin-bottom: 1rem;
-                    }
-
-                    .proactive-tab .coming-soon p {
-                        color: #999;
-                        margin-bottom: 1.5rem;
-                    }
-
-                    .proactive-tab .coming-soon ul {
-                        list-style: none;
-                        padding: 0;
-                        text-align: left;
-                        max-width: 300px;
-                        margin: 0 auto;
-                    }
-
-                    .proactive-tab .coming-soon li {
-                        color: #999;
-                        padding: 0.5rem 0;
-                        padding-left: 1.5rem;
-                        position: relative;
-                    }
-
-                    .proactive-tab .coming-soon li::before {
-                        content: '•';
-                        position: absolute;
-                        left: 0.5rem;
-                        color: #1E90FF;
                     }
 
                     .development-links {
