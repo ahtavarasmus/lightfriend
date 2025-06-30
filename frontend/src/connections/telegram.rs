@@ -231,7 +231,7 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
             <div class="telegram-connect">
                 <div class="service-header">
                     <div class="service-name">
-                        <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" alt="Telegram"/>
+                        <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" style="width: 24px; height: 24px;" alt="Telegram"/>
                         {"Telegram"}
                     </div>
                 </div>
@@ -410,8 +410,8 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                     }
 
                     .service-name img {
-                        width: 24px;
-                        height: 24px;
+                        width: 24px !important;
+                        height: 24px !important;
                     }
 
                     .service-status {

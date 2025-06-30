@@ -474,7 +474,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <tr>
                             <th>{"Feature"}</th>
                             <th>{"Basic Plan"}</th>
-                            <th>{"Freedom Plan"}</th>
+                            <th>{"Monitoring Plan"}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -843,6 +843,8 @@ pub fn pricing(props: &PricingProps) -> Html {
                     border-radius: 24px;
                     padding: 2.5rem;
                     backdrop-filter: blur(10px);
+                    overflow-x: auto; /* Enable horizontal scrolling */
+                    -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
                 }
 
                 .feature-comparison h2 {
@@ -1142,7 +1144,12 @@ pub fn pricing(props: &PricingProps) -> Html {
 
                     .feature-comparison {
                         padding: 1.5rem;
-                        margin: 2rem auto;
+                        margin: 2rem 1rem;
+                        max-width: calc(100vw - 2rem); /* Ensure it stays within viewport */
+                    }
+
+                    .feature-comparison table {
+                        min-width: 600px; /* Minimum width to maintain readability */
                     }
                 }
                 "#}
