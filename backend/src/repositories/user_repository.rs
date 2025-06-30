@@ -846,35 +846,6 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn set_matrix_secret_storage_recovery_key(&self, user_id: i32, recovery_key: &str) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        // Encrypt the password before storing
-        let encrypted_key= crate::utils::encryption::encrypt(recovery_key)
-            .map_err(|_| DieselError::RollbackTransaction)?;
-
-        diesel::update(users::table.find(user_id))
-            .set(users::encrypted_matrix_secret_storage_recovery_key.eq(encrypted_key))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    pub fn get_matrix_secret_storage_recovery_key(&self, user_id: i32) -> Result<Option<String>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        let encrypted_key= users::table
-            .find(user_id)
-            .select(users::encrypted_matrix_secret_storage_recovery_key)
-            .first::<Option<String>>(&mut conn)?;
-
-        match encrypted_key {
-            Some(key) => {
-                let rec_key= crate::utils::encryption::decrypt(&key)
-                    .map_err(|_| DieselError::RollbackTransaction)?;
-                Ok(Some(rec_key))
-            },
-            _ => Ok(None),
-        }
-    }
 
     pub fn get_matrix_credentials(&self, user_id: i32) -> Result<Option<(String, String, String, String)>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");

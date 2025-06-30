@@ -30,7 +30,7 @@ async fn initialize_matrix_clients(state: Arc<AppState>) {
                 tracing::debug!("Setting up new Matrix client for user {}", user_id);
                 
                 // Create and initialize client
-                match crate::utils::matrix_auth::get_client(user_id, &state, true).await {
+                match crate::utils::matrix_auth::get_client(user_id, &state).await {
                     Ok(client) => {
                         // Add event handlers before storing/cloning the client
                         use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;

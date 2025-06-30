@@ -102,7 +102,7 @@ pub async fn check_message_importance(
         "what_to_inform".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Concise SMS-friendly message (under 160 chars) about what requires immediate attention".to_string()),
+            description: Some("Concise SMS-friendly message (under 160 chars) about what is it that requires immediate attention".to_string()),
             ..Default::default()
         }),
     );
@@ -128,6 +128,7 @@ pub async fn check_message_importance(
                 required: Some(vec![
                     String::from("is_critical"),
                     String::from("what_to_inform"),
+                    String::from("first_message"),
                 ]),
             },
         },
