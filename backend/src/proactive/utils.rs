@@ -172,27 +172,26 @@ pub async fn check_waiting_check_match(
     Ok((response.waiting_check_id, sms, first))
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 pub struct DigestData {
     pub messages: Vec<MessageInfo>,
     pub calendar_events: Vec<CalendarEvent>,
     pub time_period_hours: u32,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 struct MessageInfo {
     sender: String,
     content: String,
-    timestamp: DateTime<Utc>,
+    timestamp_rfc: String,
     platform: String, // e.g., "email", "whatsapp", etc.
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 struct CalendarEvent {
     title: String,
-    start_time: DateTime<Utc>,
-    end_time: DateTime<Utc>,
-    description: Option<String>,
+    start_time_rfc: String,
+    duration_minutes: i64,
 }
 
 
@@ -404,12 +403,11 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                             events.iter().filter_map(|event| {
                                 let summary = event.get("summary")?.as_str()?.to_string();
                                 let start = event.get("start")?.as_str()?.parse().ok()?;
-                                let end = event.get("end")?.as_str()?.parse().ok()?;
+                                let duration_minutes = event.get("duration_minutes")?.as_str()?.parse().ok()?;
                                 Some(CalendarEvent {
                                     title: summary,
-                                    start_time: start,
-                                    end_time: end,
-                                    description: None,
+                                    start_time_rfc: start,
+                                    duration_minutes,
                                 })
                             }).collect()
                         } else {
@@ -445,7 +443,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                             .map(|email| MessageInfo {
                                 sender: email.from.unwrap_or_else(|| "Unknown sender".to_string()),
                                 content: email.snippet.unwrap_or_else(|| "No content".to_string()),
-                                timestamp: email.date.unwrap_or_else(|| Utc::now()),
+                                timestamp_rfc: email.date_formatted.unwrap_or_else(|| "No Timestamp".to_string()),
                                 platform: "email".to_string(),
                             })
                             .collect::<Vec<MessageInfo>>()
@@ -467,34 +465,32 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 hours_since_prev
             );
 
-            // Check if user has WhatsApp enabled before fetching messages
+            // Fetch WhatsApp messages
             if let Some(bridge) = state.user_repository.get_whatsapp_bridge(user_id)? {
-                // Fetch WhatsApp messages
                 match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp).await {
-                Ok(whatsapp_messages) => {
-                    // Convert WhatsAppMessage to MessageInfo and add to messages
-                    let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
-                        .map(|msg| MessageInfo {
-                            sender: format!("{} ({})", msg.sender_display_name, msg.room_name),
-                            content: msg.content,
-                            timestamp: DateTime::from_timestamp(msg.timestamp, 0)
-                                .unwrap_or_else(|| Utc::now()),
-                            platform: "whatsapp".to_string(),
-                        })
-                        .collect();
-                    
-                    tracing::debug!(
-                        "Fetched {} WhatsApp messages from the last {} hours for digest",
-                        whatsapp_infos.len(),
-                        hours_since_prev
-                    );
+                    Ok(whatsapp_messages) => {
+                        // Convert WhatsAppMessage to MessageInfo and add to messages
+                        let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
+                            .map(|msg| MessageInfo {
+                                sender: format!("{} ({})", msg.sender_display_name, msg.room_name),
+                                content: msg.content,
+                                timestamp_rfc: msg.formatted_timestamp,
+                                platform: "whatsapp".to_string(),
+                            })
+                            .collect();
+                        
+                        tracing::debug!(
+                            "Fetched {} WhatsApp messages from the last {} hours for digest",
+                            whatsapp_infos.len(),
+                            hours_since_prev
+                        );
 
-                    // Extend messages with WhatsApp messages
-                    messages.extend(whatsapp_infos);
+                        // Extend messages with WhatsApp messages
+                        messages.extend(whatsapp_infos);
 
-                    // Sort all messages by timestamp (most recent first)
-                    messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-                }
+                        // Sort all messages by timestamp (most recent first)
+                        messages.sort_by(|a, b| b.timestamp_rfc.cmp(&a.timestamp_rfc));
+                    }
                     Err(e) => {
                         tracing::error!("Failed to fetch WhatsApp messages for digest: {}", e);
                     }
@@ -605,12 +601,11 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                             events.iter().filter_map(|event| {
                                 let summary = event.get("summary")?.as_str()?.to_string();
                                 let start = event.get("start")?.as_str()?.parse().ok()?;
-                                let end = event.get("end")?.as_str()?.parse().ok()?;
+                                let duration_minutes = event.get("duration_minutes")?.as_str()?.parse().ok()?;
                                 Some(CalendarEvent {
                                     title: summary,
-                                    start_time: start,
-                                    end_time: end,
-                                    description: None,
+                                    start_time_rfc: start,
+                                    duration_minutes,
                                 })
                             }).collect()
                         } else {
@@ -646,7 +641,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                             .map(|email| MessageInfo {
                                 sender: email.from.unwrap_or_else(|| "Unknown sender".to_string()),
                                 content: email.snippet.unwrap_or_else(|| "No content".to_string()),
-                                timestamp: email.date.unwrap_or_else(|| Utc::now()),
+                                timestamp_rfc: email.date_formatted.unwrap_or_else(|| "No Timestamp".to_string()),
                                 platform: "email".to_string(),
                             })
                             .collect::<Vec<MessageInfo>>()
@@ -677,8 +672,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                             .map(|msg| MessageInfo {
                                 sender: format!("{} ({})", msg.sender_display_name, msg.room_name),
                                 content: msg.content,
-                                timestamp: DateTime::from_timestamp(msg.timestamp, 0)
-                                    .unwrap_or_else(|| Utc::now()),
+                                timestamp_rfc: msg.formatted_timestamp,
                                 platform: "whatsapp".to_string(),
                             })
                             .collect();
@@ -693,7 +687,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                         messages.extend(whatsapp_infos);
 
                         // Sort all messages by timestamp (most recent first)
-                        messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+                        messages.sort_by(|a, b| b.timestamp_rfc.cmp(&a.timestamp_rfc));
                     }
                     Err(e) => {
                         tracing::error!("Failed to fetch WhatsApp messages for digest: {}", e);
@@ -793,8 +787,13 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 }
             };
 
+
+            let tz: chrono_tz::Tz = timezone.parse()
+                .map_err(|e| format!("Invalid timezone: {}", e))?;
+
             // Format start time (now) and end time (now + hours_to_next) in RFC3339
-            let start_time = now.with_timezone(&Utc).to_rfc3339();
+            let start_time = now.with_timezone(&tz).to_rfc3339();
+
 
             // Calculate end of tomorrow
             let tomorrow_end = now.date_naive().succ_opt() // Get tomorrow's date
@@ -815,12 +814,11 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                             events.iter().filter_map(|event| {
                                 let summary = event.get("summary")?.as_str()?.to_string();
                                 let start = event.get("start")?.as_str()?.parse().ok()?;
-                                let end = event.get("end")?.as_str()?.parse().ok()?;
+                                let duration_minutes = event.get("duration_minutes")?.as_str()?.parse().ok()?;
                                 Some(CalendarEvent {
                                     title: summary,
-                                    start_time: start,
-                                    end_time: end,
-                                    description: None,
+                                    start_time_rfc: start,
+                                    duration_minutes,
                                 })
                             }).collect()
                         } else {
@@ -856,7 +854,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                             .map(|email| MessageInfo {
                                 sender: email.from.unwrap_or_else(|| "Unknown sender".to_string()),
                                 content: email.snippet.unwrap_or_else(|| "No content".to_string()),
-                                timestamp: email.date.unwrap_or_else(|| Utc::now()),
+                                timestamp_rfc: email.date_formatted.unwrap_or_else(|| "No Timestamp".to_string()),
                                 platform: "email".to_string(),
                             })
                             .collect::<Vec<MessageInfo>>()
@@ -887,8 +885,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                             .map(|msg| MessageInfo {
                                 sender: format!("{} ({})", msg.sender_display_name, msg.room_name),
                                 content: msg.content,
-                                timestamp: DateTime::from_timestamp(msg.timestamp, 0)
-                                    .unwrap_or_else(|| Utc::now()),
+                                timestamp_rfc: msg.formatted_timestamp,
                                 platform: "whatsapp".to_string(),
                             })
                             .collect();
@@ -903,7 +900,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                         messages.extend(whatsapp_infos);
 
                         // Sort all messages by timestamp (most recent first)
-                        messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+                        messages.sort_by(|a, b| b.timestamp_rfc.cmp(&a.timestamp_rfc));
                     }
                     Err(e) => {
                         tracing::error!("Failed to fetch WhatsApp messages for digest: {}", e);
@@ -949,6 +946,22 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
     Ok(())
 }
 
+/// Prompt for generating an SMS digest.
+const DIGEST_PROMPT: &str = r#"You are an AI that creates concise SMS digests of messages and calendar events.
+
+Rules
+• Absolute length limit: 480 characters.
+• **Do NOT** use markdown (no *, **, _, links, or backticks).
+• **Do NOT** use emojis or emoticons.
+• Plain text only; separate items with hyphens ("-") or short sentences.
+• Put truly critical or actionable items first.
+• Mention the platform (EMAIL / WHATSAPP / SMS) only when it adds essential context.
+• For calendar, include only events starting within the next few hours.
+
+Return JSON with a single field:
+• `digest` – the plain‑text SMS message.
+"#;
+
 pub async fn generate_digest(data: DigestData) -> Result<String, Box<dyn std::error::Error>> {
     let client = create_openai_client()?;
 
@@ -960,7 +973,7 @@ pub async fn generate_digest(data: DigestData) -> Result<String, Box<dyn std::er
                 "- [{}] {} on {}: {}",
                 msg.platform.to_uppercase(),
                 msg.sender,
-                msg.timestamp.format("%H:%M"),
+                msg.timestamp_rfc,
                 msg.content
             )
         })
@@ -972,11 +985,10 @@ pub async fn generate_digest(data: DigestData) -> Result<String, Box<dyn std::er
         .iter()
         .map(|event| {
             format!(
-                "- {} at {}-{}: {}",
+                "- {} at {} lasting {} minutes",
                 event.title,
-                event.start_time.format("%H:%M"),
-                event.end_time.format("%H:%M"),
-                event.description.as_deref().unwrap_or("")
+                event.start_time_rfc,
+                event.duration_minutes,
             )
         })
         .collect::<Vec<String>>()
@@ -985,9 +997,7 @@ pub async fn generate_digest(data: DigestData) -> Result<String, Box<dyn std::er
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
-            content: chat_completion::Content::Text(
-                "You are an AI that creates concise, SMS-friendly digests (maximum 480 chars, but the shorter the better without losing any critical information) of messages and calendar events. Focus on what's most important and actionable. When mentioning messages, include the platform (EMAIL/WHATSAPP) if it adds important context. If there are critical messages that need immediate attention, highlight those first. For calendar events, prioritize upcoming events in the next few hours.".to_string(),
-            ),
+            content: chat_completion::Content::Text(DIGEST_PROMPT.to_string()),
             name: None,
             tool_calls: None,
             tool_call_id: None,
