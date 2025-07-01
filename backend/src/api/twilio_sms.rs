@@ -323,6 +323,8 @@ pub async fn process_sms(
         None => "UTC",
     };
 
+    let require_confirmation = user_settings.require_confirmation;
+
     // Get timezone offset using jiff
     let (hours, minutes) = match crate::api::elevenlabs::get_offset_with_jiff(timezone_str) {
         Ok((h, m)) => (h, m),
@@ -770,7 +772,12 @@ pub async fn process_sms(
                         arguments,
                         &user,
                     ).await {
-                        Ok(response) => return response,
+                        Ok(response) => {
+                            if require_confirmation {
+                                return response;
+                            }
+                            tool_answers.insert(tool_call_id, response.2.message.clone());
+                        }
                         Err(e) => {
                             tracing::error!("Failed to handle calendar event creation: {}", e);
                             return (
@@ -801,16 +808,14 @@ pub async fn process_sms(
                         &user,
                         image_url.as_deref(),
                     ).await {
-                        Ok(response) => return response,
+                        Ok(response) => {
+                            if require_confirmation {
+                                return response;
+                            }
+                            tool_answers.insert(tool_call_id, response.2.message.clone());
+                        },
                         Err(e) => {
                             tracing::error!("Failed to handle WhatsApp message sending: {}", e);
-                            return (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                axum::Json(TwilioResponse {
-                                    message: "Failed to process WhatsApp message request".to_string(),
-                                })
-                            );
                         }
                     }
 

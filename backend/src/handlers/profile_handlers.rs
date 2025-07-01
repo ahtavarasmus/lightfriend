@@ -112,6 +112,7 @@ pub struct UpdateProfileRequest {
     agent_language: String,
     notification_type: Option<String>,
     save_context: Option<i32>,
+    require_confirmation: bool,
 }
 
 #[derive(Serialize)]
@@ -147,6 +148,8 @@ pub struct ProfileResponse {
     agent_language: String,
     notification_type: Option<String>,
     sub_country: Option<String>,
+    save_context: Option<i32>,
+    require_confirmation: bool,
 }
 
 use crate::handlers::auth_middleware::AuthUser;
@@ -202,6 +205,8 @@ pub async fn get_profile(
                 agent_language: user_settings.agent_language,
                 notification_type: user_settings.notification_type,
                 sub_country: user_settings.sub_country,
+                save_context: user_settings.save_context,
+                require_confirmation: user_settings.require_confirmation,
             }))
         }
         None => Err((
@@ -370,6 +375,7 @@ pub async fn update_profile(
         &update_req.timezone_auto,
         update_req.notification_type.as_deref(),
         update_req.save_context,
+        update_req.require_confirmation,
     ) {
         Ok(_) => {
             // Update agent language separately // TODO put to same down the line

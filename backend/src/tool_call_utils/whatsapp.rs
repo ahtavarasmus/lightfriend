@@ -175,18 +175,99 @@ pub async fn handle_send_whatsapp_message(
     image_url: Option<&str>
 ) -> Result<(axum::http::StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<crate::api::twilio_sms::TwilioResponse>), Box<dyn std::error::Error>> {
     let args: WhatsAppSendArgs = serde_json::from_str(args)?;
+    
+    // Get user settings to check confirmation preference
+    let user_settings = state.user_core.get_user_settings(user_id)?;
 
     tracing::info!("IN HANDLE_SEND_WHATSAPP_MESSAGE");
 
     // First search for the chat room
-    match crate::utils::whatsapp_utils::search_whatsapp_rooms(
+    let rooms = match crate::utils::whatsapp_utils::search_whatsapp_rooms(
         &state,
         user_id,
         &args.chat_name,
     ).await {
-        Ok(rooms) => {
-            if rooms.is_empty() {
-                let error_msg = format!("No WhatsApp contacts found matching '{}'.", args.chat_name);
+        Ok(rooms) => rooms,
+        Err(e) => {
+            eprintln!("Failed to search WhatsApp rooms: {}", e);
+            let error_msg = "Failed to find WhatsApp contact. Please make sure you're connected to WhatsApp bridge.";
+            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                conversation_sid,
+                twilio_number,
+                error_msg,
+                true,
+                None,
+                user,
+            ).await {
+                eprintln!("Failed to send error message: {}", e);
+            }
+            return Ok((
+                axum::http::StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                axum::Json(crate::api::twilio_sms::TwilioResponse {
+                    message: error_msg.to_string(),
+                })
+            ));
+        }
+    };
+
+    if rooms.is_empty() {
+        let error_msg = format!("No WhatsApp contacts found matching '{}'.", args.chat_name);
+        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+            conversation_sid,
+            twilio_number,
+            &error_msg,
+            true,
+            None,
+            user,
+        ).await {
+            eprintln!("Failed to send error message: {}", e);
+        }
+        return Ok((
+            axum::http::StatusCode::OK,
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            axum::Json(crate::api::twilio_sms::TwilioResponse {
+                message: error_msg,
+            })
+        ));
+    }
+
+    // Get the best match (first result)
+    let best_match = &rooms[0];
+    let exact_name = best_match.display_name.trim_end_matches(" (WA)").to_string();
+
+    // If confirmation is not required, send the message directly
+    if !user_settings.require_confirmation {
+        let message = args.message;
+        match crate::utils::whatsapp_utils::send_whatsapp_message(
+            &state,
+            user_id,
+            &exact_name,
+            &message,
+            image_url.map(|url| url.to_string()),
+        ).await {
+            Ok(_) => {
+                let success_msg = format!("WhatsApp message: '{}' sent to '{}'", message ,exact_name);
+                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    conversation_sid,
+                    twilio_number,
+                    &success_msg,
+                    true,
+                    None,
+                    user,
+                ).await {
+                    eprintln!("Failed to send success message: {}", e);
+                }
+                return Ok((
+                    axum::http::StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    axum::Json(crate::api::twilio_sms::TwilioResponse {
+                        message: success_msg,
+                    })
+                ));
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to send WhatsApp message: {}", e);
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     conversation_sid,
                     twilio_number,
@@ -205,112 +286,86 @@ pub async fn handle_send_whatsapp_message(
                     })
                 ));
             }
-
-            // Get the best match (first result)
-            let best_match = &rooms[0];
-            let exact_name = best_match.display_name.trim_end_matches(" (WA)").to_string();
-
-
-            // Set the temporary variable for WhatsApp message
-            if let Err(e) = state.user_core.set_temp_variable(
-                user_id,
-                Some("whatsapp"),
-                Some(&exact_name),
-                None,
-                Some(&args.message),
-                None,
-                None,
-                None,
-                image_url,
-            ) {
-                tracing::error!("Failed to set temporary variable: {}", e);
-                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                    conversation_sid,
-                    twilio_number,
-                    "Failed to prepare WhatsApp message sending. (not charged, contact rasmus@ahtava.com)",
-                    true,
-                    None,
-                    user,
-                ).await {
-                    tracing::error!("Failed to send error message: {}", e);
-                }
-                return Ok((
-                    axum::http::StatusCode::OK,
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    axum::Json(crate::api::twilio_sms::TwilioResponse {
-                        message: "Failed to prepare WhatsApp message sending".to_string(),
-                    })
-                ));
-            }
-
-            tracing::info!("Successfully set temporary variable for WhatsApp message");
-
-
-            // Format the confirmation message with the found contact name and image if present
-            let confirmation_msg = if image_url.is_some() {
-                format!(
-                    "Send WhatsApp to '{}' with the above image and a caption '{}' (yes-> send, no -> discard) (free reply)",
-                    exact_name, args.message
-                )
-            } else {
-                format!(
-                    "Send WhatsApp to '{}' with content: '{}' (yes-> send, no -> discard) (free reply)",
-                    exact_name, args.message
-                )
-            };
-
-            // Send the confirmation message
-            match crate::api::twilio_utils::send_conversation_message(
-                conversation_sid,
-                twilio_number,
-                &confirmation_msg,
-                true, // Don't redact since we need to extract info from this message later
-                None,
-                user,
-            ).await {
-                Ok(_) => {
-                    // Deduct credits for the confirmation message
-                    if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
-                        tracing::error!("Failed to deduct user credits: {}", e);
-                    }
-                    Ok((
-                        axum::http::StatusCode::OK,
-                        [(axum::http::header::CONTENT_TYPE, "application/json")],
-                        axum::Json(crate::api::twilio_sms::TwilioResponse {
-                            message: "WhatsApp message confirmation sent".to_string(),
-                        })
-                    ))
-                }
-                Err(e) => {
-                    eprintln!("Failed to send confirmation message: {}", e);
-                    Ok((
-                        axum::http::StatusCode::OK,
-                        [(axum::http::header::CONTENT_TYPE, "application/json")],
-                        axum::Json(crate::api::twilio_sms::TwilioResponse {
-                            message: "Failed to send WhatsApp confirmation".to_string(),
-                        })
-                    ))
-                }
-            }
         }
-        Err(e) => {
-            eprintln!("Failed to search WhatsApp rooms: {}", e);
-            let error_msg = "Failed to find WhatsApp contact. Please make sure you're connected to WhatsApp bridge.";
-            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                conversation_sid,
-                twilio_number,
-                error_msg,
-                true,
-                None,
-                user,
-            ).await {
-                eprintln!("Failed to send error message: {}", e);
+    }
+
+    // If confirmation is required, continue with the existing flow
+    // Set the temporary variable for WhatsApp message
+    if let Err(e) = state.user_core.set_temp_variable(
+        user_id,
+        Some("whatsapp"),
+        Some(&exact_name),
+        None,
+        Some(&args.message),
+        None,
+        None,
+        None,
+        image_url,
+    ) {
+        tracing::error!("Failed to set temporary variable: {}", e);
+        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+            conversation_sid,
+            twilio_number,
+            "Failed to prepare WhatsApp message sending. (not charged, contact rasmus@ahtava.com)",
+            true,
+            None,
+            user,
+        ).await {
+            tracing::error!("Failed to send error message: {}", e);
+        }
+        return Ok((
+            axum::http::StatusCode::OK,
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            axum::Json(crate::api::twilio_sms::TwilioResponse {
+                message: "Failed to prepare WhatsApp message sending".to_string(),
+            })
+        ));
+    }
+
+    tracing::info!("Successfully set temporary variable for WhatsApp message");
+
+    // Format the confirmation message with the found contact name and image if present
+    let confirmation_msg = if image_url.is_some() {
+        format!(
+            "Send WhatsApp to '{}' with the above image and a caption '{}' (yes-> send, no -> discard) (free reply)",
+            exact_name, args.message
+        )
+    } else {
+        format!(
+            "Send WhatsApp to '{}' with content: '{}' (yes-> send, no -> discard) (free reply)",
+            exact_name, args.message
+        )
+    };
+
+    // Send the confirmation message
+    match crate::api::twilio_utils::send_conversation_message(
+        conversation_sid,
+        twilio_number,
+        &confirmation_msg,
+        true, 
+        None,
+        user,
+    ).await {
+        Ok(_) => {
+            // Deduct credits for the confirmation message
+            if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
+                tracing::error!("Failed to deduct user credits: {}", e);
             }
             Ok((
                 axum::http::StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
-                    message: error_msg.to_string(),
+                    message: "WhatsApp message confirmation sent".to_string(),
+                })
+            ))
+        }
+        Err(e) => {
+            eprintln!("Failed to send confirmation message: {}", e);
+            Ok((
+                axum::http::StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                axum::Json(crate::api::twilio_sms::TwilioResponse {
+                    message: "Failed to send WhatsApp confirmation".to_string(),
                 })
             ))
         }

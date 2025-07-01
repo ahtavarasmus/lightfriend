@@ -43,6 +43,7 @@ pub struct UserProfile {
     pub notification_type: Option<String>,
     pub sub_country: Option<String>,
     pub save_context: Option<i32>,
+    pub require_confirmation: bool,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]

@@ -189,6 +189,7 @@ diesel::table! {
         evening_digest -> Nullable<Text>,
         critical_enabled -> Bool,
         number_of_digests_locked -> Integer,
+        require_confirmation -> Bool,
     }
 }
 

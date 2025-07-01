@@ -267,7 +267,7 @@ impl UserCore {
     }
 
     // Update user's profile
-    pub fn update_profile(&self, user_id: i32, email: &str, phone_number: &str, nickname: &str, info: &str, timezone: &str, timezone_auto: &bool, notification_type: Option<&str>, save_context: Option<i32>) -> Result<(), DieselError> {
+    pub fn update_profile(&self, user_id: i32, email: &str, phone_number: &str, nickname: &str, info: &str, timezone: &str, timezone_auto: &bool, notification_type: Option<&str>, save_context: Option<i32>, require_confirmation: bool) -> Result<(), DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         println!("Repository: Updating user {} with notification type: {:?}", user_id, notification_type);
@@ -325,6 +325,7 @@ impl UserCore {
                     user_settings::notification_type.eq(notification_type.map(|s| s.to_string())),
                     user_settings::info.eq(info),
                     user_settings::save_context.eq(save_context),
+                    user_settings::require_confirmation.eq(require_confirmation),
                 ))
                 .execute(conn)?;
 

@@ -225,7 +225,7 @@ pub async fn fetch_assistant(
                     &conversation.conversation_sid,
                     &conversation.twilio_number,
                     &error_message,
-                    false, // Don't redact since there is nothing there 
+                    true, 
                     None,
                     &user,
                 ).await {
@@ -1329,108 +1329,175 @@ pub async fn handle_whatsapp_confirm_send(
         }
     };
 
-    // First, try to find the exact room using fetch_whatsapp_room_messages
-    match crate::utils::whatsapp_utils::fetch_whatsapp_room_messages(
-        &state,
-        user_id,
-        &payload.chat_name,
-        Some(1), // Limit to 1 message since we only need the room name
-    ).await {
-        Ok((_, room_name)) => {
-            // Get the actual room name without the (WA) suffix
-            let clean_room_name = room_name.trim_end_matches(" (WA)").to_string();
-            
-            // Set the temporary variable for WhatsApp message
-            if let Err(e) = state.user_core.set_temp_variable(
-                user_id,
-                Some("whatsapp"),
-                Some(&clean_room_name),
-                None,
-                Some(&payload.message),
-                None,
-                None,
-                None,
-                None,
-            ) {
-                tracing::error!("Failed to set temporary variable: {}", e);
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
+    // Get user settings to check confirmation preference
+    let user_settings = match state.user_core.get_user_settings(user_id) {
+        Ok(settings) => settings,
+        Err(e) => {
+            error!("Failed to get user settings: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to get user settings"
+                }))
+            ));
+        }
+    };
+
+    // If confirmation is not required, send the message directly
+    if !user_settings.require_confirmation {
+        // First find the room
+        match crate::utils::whatsapp_utils::fetch_whatsapp_room_messages(
+            &state,
+            user_id,
+            &payload.chat_name,
+            Some(1), // Limit to 1 message since we only need the room name
+        ).await {
+            Ok((_, room_name)) => {
+                let clean_room_name = room_name.trim_end_matches(" (WA)").to_string();
+                
+                // Send the message directly
+                match crate::utils::whatsapp_utils::send_whatsapp_message(
+                    &state,
+                    user_id,
+                    &clean_room_name,
+                    &payload.message,
+                    None, // No image URL in this case
+                ).await {
+                    Ok(_) => {
+                        Ok(Json(json!({
+                            "status": "success",
+                            "message": format!("WhatsApp message sent to '{}'", clean_room_name),
+                            "room_name": clean_room_name,
+                        })))
+                    }
+                    Err(e) => {
+                        error!("Failed to send WhatsApp message: {}", e);
+                        Err((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "Failed to send WhatsApp message",
+                                "details": e.to_string()
+                            }))
+                        ))
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to find WhatsApp room: {}", e);
+                Err((
+                    StatusCode::NOT_FOUND,
                     Json(json!({
-                        "error": "Failed to prepare WhatsApp message",
+                        "error": "Failed to find WhatsApp room",
                         "details": e.to_string()
                     }))
-                ));
+                ))
             }
-
-            // Create confirmation message
-            let confirmation_message = format!(
-                "Send WhatsApp to '{}' with content: '{}' (yes-> send, no -> discard) (free reply)",
-                clean_room_name,
-                payload.message
-            );
-
-            // Get conversation for the user
-            let conversation = match state.user_conversations.get_conversation(
-                &user, 
-                user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
-            ).await {
-                Ok(conv) => conv,
-                Err(e) => {
-                    error!("Failed to get conversation: {}", e);
+        }
+    } else {
+        // If confirmation is required, continue with the existing flow
+        // First, try to find the exact room using fetch_whatsapp_room_messages
+        match crate::utils::whatsapp_utils::fetch_whatsapp_room_messages(
+            &state,
+            user_id,
+            &payload.chat_name,
+            Some(1), // Limit to 1 message since we only need the room name
+        ).await {
+            Ok((_, room_name)) => {
+                // Get the actual room name without the (WA) suffix
+                let clean_room_name = room_name.trim_end_matches(" (WA)").to_string();
+                
+                // Set the temporary variable for WhatsApp message
+                if let Err(e) = state.user_core.set_temp_variable(
+                    user_id,
+                    Some("whatsapp"),
+                    Some(&clean_room_name),
+                    None,
+                    Some(&payload.message),
+                    None,
+                    None,
+                    None,
+                    None,
+                ) {
+                    tracing::error!("Failed to set temporary variable: {}", e);
                     return Err((
                         StatusCode::INTERNAL_SERVER_ERROR,
                         Json(json!({
-                            "error": "Failed to get or create conversation"
+                            "error": "Failed to prepare WhatsApp message",
+                            "details": e.to_string()
                         }))
                     ));
                 }
-            };
 
-            // Send the confirmation SMS
-            match crate::api::twilio_utils::send_conversation_message(
-                &conversation.conversation_sid,
-                &conversation.twilio_number,
-                &confirmation_message,
-                false, // Don't redact since we need to extract info from this message later
-                None,
-                &user,
-            ).await {
-                Ok(message_sid) => {
-                    // Deduct credits for the confirmation message
-                    if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
-                        error!("Failed to deduct user credits: {}", e);
-                        // Continue execution even if credit deduction fails
+                // Create confirmation message
+                let confirmation_message = format!(
+                    "Send WhatsApp to '{}' with content: '{}' (yes-> send, no -> discard) (free reply)",
+                    clean_room_name,
+                    payload.message
+                );
+
+                // Get conversation for the user
+                let conversation = match state.user_conversations.get_conversation(
+                    &user, 
+                    user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
+                ).await {
+                    Ok(conv) => conv,
+                    Err(e) => {
+                        error!("Failed to get conversation: {}", e);
+                        return Err((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "Failed to get or create conversation"
+                            }))
+                        ));
                     }
-                    
-                    Ok(Json(json!({
-                        "status": "success",
-                        "message": "WhatsApp confirmation message sent",
-                        "room_name": clean_room_name,
-                        "message_sid": message_sid
-                    })))
+                };
+
+                // Send the confirmation SMS
+                match crate::api::twilio_utils::send_conversation_message(
+                    &conversation.conversation_sid,
+                    &conversation.twilio_number,
+                    &confirmation_message,
+                    true, 
+                    None,
+                    &user,
+                ).await {
+                    Ok(message_sid) => {
+                        // Deduct credits for the confirmation message
+                        if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
+                            error!("Failed to deduct user credits: {}", e);
+                            // Continue execution even if credit deduction fails
+                        }
+                        
+                        Ok(Json(json!({
+                            "status": "success",
+                            "message": "WhatsApp confirmation message sent",
+                            "room_name": clean_room_name,
+                            "message_sid": message_sid
+                        })))
+                    }
+                    Err(e) => {
+                        error!("Failed to send confirmation SMS: {}", e);
+                        Err((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({
+                                "error": "Failed to send confirmation message",
+                                "details": e.to_string()
+                            }))
+                        ))
+                    }
                 }
-                Err(e) => {
-                    error!("Failed to send confirmation SMS: {}", e);
-                    Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({
-                            "error": "Failed to send confirmation message",
-                            "details": e.to_string()
-                        }))
-                    ))
-                }
+            },
+            Err(e) => {
+                error!("Failed to find WhatsApp room: {}", e);
+                Err((
+                    StatusCode::NOT_FOUND,
+                    Json(json!({
+                        "error": "Failed to find WhatsApp room",
+                        "details": e.to_string()
+                    }))
+                ))
             }
-        },
-        Err(e) => {
-            error!("Failed to find WhatsApp room: {}", e);
-            Err((
-                StatusCode::NOT_FOUND,
-                Json(json!({
-                    "error": "Failed to find WhatsApp room",
-                    "details": e.to_string()
-                }))
-            ))
-        }
+        } 
     }
 }
 
@@ -1537,7 +1604,7 @@ pub async fn handle_telegram_confirm_send(
                 &conversation.conversation_sid,
                 &conversation.twilio_number,
                 &confirmation_message,
-                false, // Don't redact since we need to extract info from this message later
+                true,
                 None,
                 &user,
             ).await {
@@ -1621,91 +1688,147 @@ pub async fn handle_calendar_event_confirm(
         }
     };
 
-
-    // Get conversation for the user
-    let conversation = match state.user_conversations.get_conversation(
-        &user, 
-        user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
-    ).await {
-        Ok(conv) => conv,
+    // Get user settings to check confirmation preference
+    let user_settings = match state.user_core.get_user_settings(user_id) {
+        Ok(settings) => settings,
         Err(e) => {
-            error!("Failed to get conversation: {}", e);
+            error!("Failed to get user settings: {}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
-                    "error": "Failed to get or create conversation"
+                    "error": "Failed to get user settings"
                 }))
             ));
         }
     };
 
-    // Format the confirmation message
-    let confirmation_message = if let Some(ref desc) = payload.description {
-        format!(
-            "Create calendar event: '{}' starting at '{}' for {} minutes with description: '{}' (yes-> send, no -> discard) (free reply)",
-            payload.summary, payload.start_time, payload.duration_minutes, desc
-        )
-    } else {
-        format!(
-            "Create calendar event: '{}' starting at '{}' for {} minutes (yes-> send, no -> discard) (free reply)",
-            payload.summary, payload.start_time, payload.duration_minutes
-        )
-    };
-
-    // Set the temporary variable for calendar event
-    if let Err(e) = state.user_core.set_temp_variable(
-        user_id,
-        Some("calendar"),
-        None,
-        Some(&payload.summary),
-        Some(&payload.description.unwrap_or_default()),
-        Some(&payload.start_time),
-        Some(&payload.duration_minutes.to_string()),
-        None,
-        None,
-    ) {
-        error!("Failed to set temporary variable: {}", e);
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "error": "Failed to prepare calendar event",
-                "details": e.to_string()
-            }))
-        ));
-    }
-
-    // Send the confirmation SMS
-    match crate::api::twilio_utils::send_conversation_message(
-        &conversation.conversation_sid,
-        &conversation.twilio_number,
-        &confirmation_message,
-        false, // Don't redact since we need to extract info from this message later
-        None,
-        &user,
-    ).await {
-        Ok(message_sid) => {
-            // Deduct credits for the confirmation message
-            if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
-                error!("Failed to deduct user credits: {}", e);
-                // Continue execution even if credit deduction fails
+    // If confirmation is not required, create the calendar event directly
+    if !user_settings.require_confirmation {
+        // Parse the start time
+        let start_time = match chrono::DateTime::parse_from_rfc3339(&payload.start_time) {
+            Ok(dt) => dt.with_timezone(&chrono::Utc),
+            Err(_) => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": "Invalid start_time format. Please use RFC3339 format."
+                    }))
+                ));
             }
-            
-            Ok(Json(json!({
-                "status": "success",
-                "message": "Calendar event confirmation sent",
-                "event_summary": payload.summary,
-                "message_sid": message_sid
-            })))
+        };
+
+        // Calculate end time
+        let end_time = start_time + chrono::Duration::minutes(payload.duration_minutes as i64);
+
+        // Create the event request
+        let event_request = crate::handlers::google_calendar::CreateEventRequest {
+            summary: payload.summary.clone(),
+            description: payload.description.clone(),
+            start_time,
+            duration_minutes: payload.duration_minutes.clone(),
+            add_notification: payload.add_notification.unwrap_or(false),
+        };
+
+        // Create the event directly
+        match crate::handlers::google_calendar::create_calendar_event(State(state.clone()), crate::handlers::auth_middleware::AuthUser { user_id, is_admin: false }, Json(event_request)).await {
+            Ok(response) => {
+                Ok(Json(json!({
+                    "status": "success",
+                    "message": "Calendar event created successfully",
+                    "event": response.0
+                })))
+            }
+            Err(e) => {
+                error!("Failed to create calendar event: {:?}", e);
+                Err(e)
+            }
         }
-        Err(e) => {
-            error!("Failed to send confirmation SMS: {}", e);
-            Err((
+    } else {
+        // Get conversation for the user
+        let conversation = match state.user_conversations.get_conversation(
+            &user, 
+            user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
+        ).await {
+            Ok(conv) => conv,
+            Err(e) => {
+                error!("Failed to get conversation: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": "Failed to get or create conversation"
+                    }))
+                ));
+            }
+        };
+
+        // Format the confirmation message
+        let confirmation_message = if let Some(ref desc) = payload.description {
+            format!(
+                "Create calendar event: '{}' starting at '{}' for {} minutes with description: '{}' (yes-> send, no -> discard) (free reply)",
+                payload.summary, payload.start_time, payload.duration_minutes, desc
+            )
+        } else {
+            format!(
+                "Create calendar event: '{}' starting at '{}' for {} minutes (yes-> send, no -> discard) (free reply)",
+                payload.summary, payload.start_time, payload.duration_minutes
+            )
+        };
+
+        // Set the temporary variable for calendar event
+        if let Err(e) = state.user_core.set_temp_variable(
+            user_id,
+            Some("calendar"),
+            None,
+            Some(&payload.summary),
+            Some(&payload.description.unwrap_or_default()),
+            Some(&payload.start_time),
+            Some(&payload.duration_minutes.to_string()),
+            None,
+            None,
+        ) {
+            error!("Failed to set temporary variable: {}", e);
+            return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
-                    "error": "Failed to send confirmation message",
+                    "error": "Failed to prepare calendar event",
                     "details": e.to_string()
                 }))
-            ))
+            ));
+        }
+
+        // Send the confirmation SMS
+        match crate::api::twilio_utils::send_conversation_message(
+            &conversation.conversation_sid,
+            &conversation.twilio_number,
+            &confirmation_message,
+            true, 
+            None,
+            &user,
+        ).await {
+            Ok(message_sid) => {
+                // Deduct credits for the confirmation message
+                if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
+                    error!("Failed to deduct user credits: {}", e);
+                    // Continue execution even if credit deduction fails
+                }
+                
+                Ok(Json(json!({
+                    "status": "success",
+                    "message": "Calendar event confirmation sent",
+                    "event_summary": payload.summary,
+                    "message_sid": message_sid
+                })))
+            }
+            Err(e) => {
+                error!("Failed to send confirmation SMS: {}", e);
+                Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": "Failed to send confirmation message",
+                        "details": e.to_string()
+                    }))
+                ))
+            }
         }
     }
 }
@@ -2325,7 +2448,7 @@ pub async fn handle_email_response_tool_call(
                 &conversation.conversation_sid,
                 &conversation.twilio_number,
                 &confirmation_message,
-                false, // Don't redact since we need to extract info from this message later
+                true, 
                 None,
                 &user,
             ).await {

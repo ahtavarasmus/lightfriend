@@ -24,6 +24,7 @@ struct UpdateProfileRequest {
     agent_language: String,
     notification_type: Option<String>,
     save_context: Option<i32>,
+    require_confirmation: bool,
 }
 
 #[derive(Properties, PartialEq, Clone)]
@@ -49,6 +50,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         use_state(|| initial_value.or(Some("sms".to_string())))
     };
     let save_context = use_state(|| (*user_profile).save_context.unwrap_or(0));
+    let require_confirmation = use_state(|| (*user_profile).require_confirmation);
     let error = use_state(|| None::<String>);
     let success = use_state(|| None::<String>);
     let is_editing = use_state(|| false);
@@ -97,6 +99,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let user_profile = user_profile.clone();
         let save_context = save_context.clone();
         let props = props.clone();
+        let require_confirmation = require_confirmation.clone();
 
         Callback::from(move |_e: MouseEvent| {
             let email = email.clone();
@@ -113,6 +116,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             let user_profile = user_profile.clone();
             let notification_type = notification_type.clone();
             let save_context = save_context.clone();
+            let require_confirmation = require_confirmation.clone();
 
             // Check authentication first
             let is_authenticated = window()
@@ -148,6 +152,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                             agent_language: (*agent_language).clone(),
                             notification_type: (*notification_type).clone(),
                             save_context: Some(*save_context),
+                            require_confirmation: *require_confirmation,
                         })
                         .expect("Failed to build request")
                         .send()
@@ -176,7 +181,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     timezone_auto: Some(*timezone_auto),
                                     agent_language: (*agent_language).clone(),
                                     notification_type: (*notification_type).clone(),
-                                    save_context: Some(*save_context),
                                     verified: (*user_profile).verified,
                                     time_to_live: (*user_profile).time_to_live,
                                     time_to_delete: (*user_profile).time_to_delete,
@@ -189,6 +193,8 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     discount: (*user_profile).discount,
                                     notify: (*user_profile).notify,
                                     sub_country: (*user_profile).sub_country.clone(),
+                                    save_context: Some(*save_context),
+                                    require_confirmation: (*user_profile).require_confirmation.clone(),
                                 };
 
                                 // Notify parent component
@@ -601,16 +607,16 @@ let on_timezone_update = {
                                     }
                                 }}
                             >
-                                <option value="0">{"No history"}</option>
                                 {
                                     (1..=10).map(|i| {
                                         html! {
                                             <option value={i.to_string()} selected={*save_context == i}>
-                                                {format!("{} messages", i)}
+                                                {format!("{} {}", i, if i == 1 { "message" } else { "messages" })}
                                             </option>
                                         }
                                     }).collect::<Html>()
                                 }
+                                <option value="0" selected={*save_context == 0}>{"No history"}</option>
                             </select>
                         }
                     } else {
@@ -619,9 +625,47 @@ let on_timezone_update = {
                                 {
                                     match (*user_profile).save_context {
                                         Some(0) | None => "No history".to_string(),
-                                        Some(n) => format!("{} messages", n).to_string()
+                                        Some(n) => format!("{} {}", n, if n == 1 { "message" } else { "messages" }).to_string()
                                     }
                                 }
+                            </span>
+                        }
+                    }
+                }
+            </div>
+
+            <div class="profile-field">
+                <div class="field-label-group">
+                    <span class="field-label">{"Require Confirmation"}</span>
+                    <div class="tooltip">
+                        <span class="tooltip-icon">{"?"}</span>
+                        <span class="tooltip-text">
+                            {"When enabled, Lightfriend will ask for your confirmation before executing any actions that create or modify something. This adds an extra layer of control over the AI's actions."}
+                        </span>
+                    </div>
+                </div>
+                {
+                    if *is_editing {
+                        html! {
+                            <div class="checkbox-wrapper">
+                                <label class="custom-checkbox">
+                                    <input
+                                        type="checkbox"
+                                        checked={*require_confirmation}
+                                        onchange={let require_confirmation = require_confirmation.clone(); move |e: Event| {
+                                            let input: HtmlInputElement = e.target_unchecked_into();
+                                            require_confirmation.set(input.checked());
+                                        }}
+                                    />
+                                    <span class="checkmark"></span>
+                                    {"Ask for confirmation before taking actions"}
+                                </label>
+                            </div>
+                        }
+                    } else {
+                        html! {
+                            <span class="field-value">
+                                {if *require_confirmation { "Enabled" } else { "Disabled" }}
                             </span>
                         }
                     }
