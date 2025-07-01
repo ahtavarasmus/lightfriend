@@ -520,6 +520,7 @@ pub async fn register(
         credits_left: 0.00,
         charge_when_under: false,
         waiting_checks_count: 0,
+        discount: false,
     };
 
     state.user_core.create_user(new_user).map_err(|e| {

@@ -15,6 +15,7 @@ pub struct NewUser {
     pub credits_left: f32,
     pub charge_when_under: bool,
     pub waiting_checks_count: i32,
+    pub discount: bool,
 }
 
 #[derive(Deserialize)]
