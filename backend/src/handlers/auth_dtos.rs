@@ -12,6 +12,7 @@ pub struct NewUser {
     pub time_to_live: i32,
     pub verified: bool,
     pub credits: f32,
+    pub credits_left: f32,
     pub charge_when_under: bool,
     pub waiting_checks_count: i32,
 }
