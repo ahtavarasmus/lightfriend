@@ -772,12 +772,7 @@ pub async fn process_sms(
                         arguments,
                         &user,
                     ).await {
-                        Ok(response) => {
-                            if require_confirmation {
-                                return response;
-                            }
-                            tool_answers.insert(tool_call_id, response.2.message.clone());
-                        }
+                        Ok(response) => return response,
                         Err(e) => {
                             tracing::error!("Failed to handle calendar event creation: {}", e);
                             return (
@@ -808,12 +803,7 @@ pub async fn process_sms(
                         &user,
                         image_url.as_deref(),
                     ).await {
-                        Ok(response) => {
-                            if require_confirmation {
-                                return response;
-                            }
-                            tool_answers.insert(tool_call_id, response.2.message.clone());
-                        },
+                        Ok(response) => return response,
                         Err(e) => {
                             tracing::error!("Failed to handle WhatsApp message sending: {}", e);
                         }
