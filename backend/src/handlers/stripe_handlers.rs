@@ -750,7 +750,7 @@ pub async fn stripe_webhook(
                                 }
                             };
 
-                            messages = 120.00 - (days_until_billing * amount_of_digests) as f32;
+                            messages = 100.00 - (days_until_billing * amount_of_digests) as f32;
                         }
 
 

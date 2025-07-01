@@ -351,7 +351,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 <li>{"📊 Daily digest summaries (up to 3 per day)"}</li>
                                 <li>{"⚡ Up to 5 custom waiting checks (included)"}</li>
                                 <li>{"⭐ Priority sender notifications"}</li>
-                                <li>{"📱 120 Messages per month for:"}</li>
+                                <li>{"📱 100 Messages per month for:"}</li>
                                 <li class="sub-item">{"   • Daily digests"}</li>
                                 <li class="sub-item">{"   • Voice calls (1 min = 1 message)"}</li>
                                 <li class="sub-item">{"   • Text queries to Lightfriend"}</li>
@@ -588,7 +588,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     </details>
                     <details>
                         <summary>{"What counts as a message?"}</summary>
-                        <p>{"The Monitoring Plan includes 120 messages per month that can be used for: 1) Daily digests (up to 3 per day), 2) Voice calls (1 minute = 1 message), 3) Text queries to Lightfriend, or 4) Priority sender notifications. Critical message monitoring and up to 5 custom waiting checks are included and don't count against your message quota. AI clarification responses also don't count against your limit. The Basic Plan includes 40 messages per month for queries only."}</p>
+                        <p>{"The Monitoring Plan includes 100 messages per month that can be used for: 1) Daily digests (up to 3 per day), 2) Voice calls (1 minute = 1 message), 3) Text queries to Lightfriend, or 4) Priority sender notifications. Critical message monitoring and up to 5 custom waiting checks are included and don't count against your message quota. AI clarification responses also don't count against your limit. The Basic Plan includes 40 messages per month for queries only."}</p>
                     </details>
                     <details>
                         <summary>{"How do credits work?"}</summary>
