@@ -206,7 +206,7 @@ struct MatchResponse {
 /// Returns `(is_critical, what_to_inform, first_message)`.
 pub async fn check_message_importance(
     message: &str,
-) -> Result<(bool, String, String), Box<dyn std::error::Error>> {
+) -> Result<(bool, Option<String>, Option<String>), Box<dyn std::error::Error>> {
     // Build the chat payload ----------------------------------------------
     let client = create_openai_client()?;
 
@@ -286,24 +286,24 @@ pub async fn check_message_importance(
                         match serde_json::from_str::<MatchResponse>(args) {
                             Ok(response) => {
                                 tracing::debug!(target: "critical_check", ?response, "Message analysis result");
-                                Ok((response.is_critical, response.what_to_inform, response.first_message))
+                                Ok((response.is_critical, Some(response.what_to_inform), Some(response.first_message)))
                             }
                             Err(e) => {
                                 tracing::error!("Failed to parse message analysis response: {}", e);
-                                Ok((false, String::new(), String::new()))
+                                Ok((false,  None, None))
                             }
                         }
                     } else {
                         tracing::error!("No arguments found in tool call");
-                        Ok((false, String::new(), String::new()))
+                        Ok((false, None, None))
                     }
                 } else {
                     tracing::error!("No tool calls found");
-                    Ok((false, String::new(), String::new()))
+                    Ok((false, None, None))
                 }
             } else {
                 tracing::error!("No tool calls section in response");
-                Ok((false, String::new(), String::new()))
+                Ok((false, None, None))
             }
         }
         Err(e) => {

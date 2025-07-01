@@ -864,6 +864,8 @@ pub async fn handle_whatsapp_message(
     match crate::proactive::utils::check_message_importance(&content).await {
         Ok((is_critical, message, first_message)) => {
             if is_critical {
+                let message = message.unwrap_or("Critical WhatsApp message found, check WhatsApp to see it (failed to fetch actual content, pls report)".to_string());
+                let first_message = first_message.unwrap_or("Hey, I found some critical WhatsApp message you should know.".to_string());
                 tracing::info!(
                     "Message critical check passed for user {}: {}",
                     user_id, message
@@ -883,7 +885,7 @@ pub async fn handle_whatsapp_message(
             } else {
                 tracing::debug!(
                     "Message not considered important for user {}: {}",
-                    user_id, message
+                    user_id, message.unwrap_or("failed to return message for the noti".to_string())
                 );
             }
         }

@@ -724,6 +724,8 @@ pub async fn stripe_webhook(
                         }
 
                         let mut messages = 40.00;
+
+                        println!("sub_tier: {}", sub_info.tier);
                         
                         if sub_info.tier == "tier 2" {
                             // Calculate days until next billing

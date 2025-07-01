@@ -262,6 +262,8 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     match crate::proactive::utils::check_message_importance(&emails_content).await {
                                         Ok((is_critical, message, first_message)) => {
                                             if is_critical {
+                                                let message = message.unwrap_or("Critical email found, check email to see it (failed to fetch actual content, pls report)".to_string());
+                                                let first_message = first_message.unwrap_or("Hey, I found some critical email you should know.".to_string());
                                                 tracing::info!(
                                                     "Email critical check passed for user {}: {}",
                                                     user.id, message
@@ -282,7 +284,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             } else {
                                                 tracing::debug!(
                                                     "Email not considered important for user {}: {}",
-                                                    user.id, message
+                                                    user.id, message.unwrap_or("failed to get the email content".to_string())
                                                 );
 
                                             }
