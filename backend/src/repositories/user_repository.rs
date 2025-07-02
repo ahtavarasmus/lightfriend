@@ -469,11 +469,26 @@ impl UserRepository {
 
     pub fn delete_waiting_check(&self, user_id: i32, service_type: &str, content: &str) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::delete(waiting_checks::table)
-            .filter(waiting_checks::user_id.eq(user_id))
-            .filter(waiting_checks::service_type.eq(service_type))
-            .filter(waiting_checks::content.eq(content))
-            .execute(&mut conn)?;
+        
+        if service_type == "email" {
+            diesel::delete(waiting_checks::table)
+                .filter(waiting_checks::user_id.eq(user_id))
+                .filter(waiting_checks::service_type.eq("imap").or(waiting_checks::service_type.eq("email")))
+                .filter(waiting_checks::content.eq(content))
+                .execute(&mut conn)?;
+        } else if service_type == "messaging" {
+            diesel::delete(waiting_checks::table)
+                .filter(waiting_checks::user_id.eq(user_id))
+                .filter(waiting_checks::service_type.eq("messaging").or(waiting_checks::service_type.eq("whatsapp")))
+                .filter(waiting_checks::content.eq(content))
+                .execute(&mut conn)?;
+        } else {
+            diesel::delete(waiting_checks::table)
+                .filter(waiting_checks::user_id.eq(user_id))
+                .filter(waiting_checks::service_type.eq(service_type))
+                .filter(waiting_checks::content.eq(content))
+                .execute(&mut conn)?;
+        }
         Ok(())
     }
 
@@ -488,17 +503,41 @@ impl UserRepository {
 
     pub fn get_waiting_checks_all(&self, user_id: i32) -> Result<Vec<WaitingCheck>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        waiting_checks::table
+        let mut checks = waiting_checks::table
             .filter(waiting_checks::user_id.eq(user_id))
-            .load::<WaitingCheck>(&mut conn)
+            .load::<WaitingCheck>(&mut conn)?;
+
+        // Update service types
+        for check in &mut checks {
+            if check.service_type == "whatsapp" {
+                check.service_type = "messaging".to_string();
+            } else if check.service_type == "imap" {
+                check.service_type = "email".to_string();
+            }
+        }
+
+        Ok(checks)
     }
 
     pub fn get_waiting_checks(&self, user_id: i32, service_type: &str) -> Result<Vec<WaitingCheck>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        waiting_checks::table
-            .filter(waiting_checks::user_id.eq(user_id))
-            .filter(waiting_checks::service_type.eq(service_type))
-            .load::<WaitingCheck>(&mut conn)
+        
+        if service_type == "email" {
+            waiting_checks::table
+                .filter(waiting_checks::user_id.eq(user_id))
+                .filter(waiting_checks::service_type.eq("imap").or(waiting_checks::service_type.eq("email")))
+                .load::<WaitingCheck>(&mut conn)
+        } else if service_type == "messaging" {
+            waiting_checks::table
+                .filter(waiting_checks::user_id.eq(user_id))
+                .filter(waiting_checks::service_type.eq("messaging").or(waiting_checks::service_type.eq("whatsapp")))
+                .load::<WaitingCheck>(&mut conn)
+        } else {
+            waiting_checks::table
+                .filter(waiting_checks::user_id.eq(user_id))
+                .filter(waiting_checks::service_type.eq(service_type))
+                .load::<WaitingCheck>(&mut conn)
+        }
     }
 
     // Priority Senders methods

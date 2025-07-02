@@ -245,7 +245,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         );
 
                                         // Check waiting checks first if they exist
-                                        let waiting_checks = match state.user_repository.get_waiting_checks(user.id, "imap") {
+                                        let waiting_checks = match state.user_repository.get_waiting_checks(user.id, "email") {
                                             Ok(checks) => checks,
                                             Err(e) => {
                                                 tracing::error!("Failed to get waiting checks for user {}: {}", user.id, e);

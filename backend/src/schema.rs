@@ -230,9 +230,7 @@ diesel::table! {
     waiting_checks (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
-        due_date -> Integer,
         content -> Text,
-        remove_when_found -> Bool,
         service_type -> Text,
     }
 }

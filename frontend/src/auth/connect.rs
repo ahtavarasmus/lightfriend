@@ -367,14 +367,14 @@ let group_states = use_state(|| {
                                             <div class="feature-overlay">
                                                 <div class="overlay-content" style="color: #999;">
                                                     <i class="fas fa-lock"></i>
-                                                    <p>{"Connect Email or WhatsApp to use Waiting Checks"}</p>
+                                                    <p>{"Connect Email or some messaging app like WhatsApp to use Waiting Checks"}</p>
                                                 </div>
                                             </div>
                                         }
                                     } else {
                                         html! {
                                             <crate::proactive::waiting_checks::WaitingChecksSection
-                                                service_type={"whatsapp".to_string()}
+                                                service_type={"messaging".to_string()}
                                                 checks={Vec::new()}
                                                 on_change={Callback::from(|_| ())}
                                             />
@@ -576,15 +576,14 @@ let group_states = use_state(|| {
                                     </button>
                                 </div>
                                 <p class="service-description">
-                                    {"Set up proactive notifications for when you're waiting for something. Get a message when it's time to check on what you're waiting for. Currently only can be only put for emails. "}
+                                    {"Set up notifications for when you're waiting for something from emails or messaging apps. Get a message when it's time to check on what you're waiting for."}
                                 </p>
                                 <div id="waiting-checks-info" class="info-section" style="display: none">
                                     <h4>{"How It Works"}</h4>
                                     <div class="info-subsection">
                                         <ul>
-                                            <li>{"1. Tell lightfriend what you're waiting for"}</li>
-                                            <li>{"2. Set how long to wait before checking"}</li>
-                                            <li>{"3. When lightfriend notices the event, it sends you a text"}</li>
+                                            <li>{"1. Tell lightfriend what you're waiting for and from where (Messaging apps or email)"}</li>
+                                            <li>{"2. When lightfriend notices the event, it sends you a text and removes the waiting check"}</li>
                                         </ul>
                                     </div>
                                 </div>

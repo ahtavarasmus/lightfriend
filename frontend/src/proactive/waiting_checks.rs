@@ -569,8 +569,8 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
                                 }
                             })}
                         >
-                            <option value="imap">{"Email"}</option>
-                            <option value="whatsapp">{"WhatsApp"}</option>
+                            <option value="email">{"Email"}</option>
+                            <option value="messaging">{"Messaging Apps"}</option>
                         </select>
                         <input
                             type="text"
@@ -600,8 +600,8 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
             {
                 (*checks_local).iter().map(|check| {
                     let content = check.content.clone();
-                    let service_type_class = if check.service_type == "imap" { "email" } else { "messaging" };
-                    let service_type_display = if check.service_type == "imap" { "Email" } else { "WhatsApp" };
+                    let service_type_class = if check.service_type == "email" { "email" } else { "messaging" };
+                    let service_type_display = if check.service_type == "email" { "Email" } else { "Messaging" };
                     html! {
                         <li>
                             <span>{&check.content}</span>

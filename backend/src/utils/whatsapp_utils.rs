@@ -804,7 +804,7 @@ pub async fn handle_whatsapp_message(
 
 
     // --- Waiting checks --------------------------------------------------------
-    let waiting_checks = match state.user_repository.get_waiting_checks(user_id, "whatsapp") {
+    let waiting_checks = match state.user_repository.get_waiting_checks(user_id, "messaging") {
         Ok(checks) => checks,
         Err(e) => {
             tracing::error!("Failed to get waiting checks for user {}: {}", user_id, e);

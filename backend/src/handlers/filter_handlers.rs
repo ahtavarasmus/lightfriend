@@ -93,9 +93,7 @@ pub async fn create_waiting_check(
 
     let new_check = NewWaitingCheck {
         user_id: auth_user.user_id,
-        due_date: 0,
         content: request.content,
-        remove_when_found: true, // Always false now
         service_type: request.service_type,
     };
 

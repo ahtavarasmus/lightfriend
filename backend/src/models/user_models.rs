@@ -346,9 +346,7 @@ pub struct NewCalendarNotification {
 pub struct WaitingCheck {
     pub id: Option<i32>,
     pub user_id: i32,
-    pub due_date: i32,
     pub content: String,
-    pub remove_when_found: bool,
     pub service_type: String,// like email, whatsapp, .. 
 }
 
@@ -356,9 +354,7 @@ pub struct WaitingCheck {
 #[diesel(table_name = waiting_checks)]
 pub struct NewWaitingCheck {
     pub user_id: i32,
-    pub due_date: i32,
     pub content: String,
-    pub remove_when_found: bool,
     pub service_type: String,// like email, whatsapp, .. 
 }
 

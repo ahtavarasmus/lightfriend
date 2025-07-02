@@ -8,40 +8,38 @@ pub fn get_create_waiting_check_tool() -> openai_api_rs::v1::chat_completion::To
         "content".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The content to look for in emails".to_string()),
+            description: Some("The content to look for in incoming messages".to_string()),
             ..Default::default()
         }),
     );
     waiting_check_properties.insert(
-        "due_date".to_string(),
+        "service_type".to_string(),
         Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Number),
-            description: Some("Unix timestamp for when this check should be completed by, default to two weeks into the future.".to_string()),
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("Which service to monitor. Must be either \"messaging\" or \"email\".".to_string()),
+            enum_values: Some(vec!["messaging".to_string(), "email".to_string()]),
             ..Default::default()
         }),
     );
-    waiting_check_properties.insert(
-        "remove_when_found".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some("Whether to remove the check once the content is found, default to true.".to_string()),
-            ..Default::default()
-        }),
-    );
-    
+
     chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("create_waiting_check"),
-            description: Some(String::from("Creates a waiting check for monitoring emails. Use this when user wants to be notified about specific emails or content in their emails.")),
+            description: Some(String::from(
+                "Creates a waiting check for monitoring email or messages. \
+                 Use this when the user wants to be notified in the future about specific content that appears \
+                 in their emails or messaging apps such as WhatsApp.",
+            )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(waiting_check_properties),
-                required: Some(vec![String::from("content")]),
+                required: Some(vec![String::from("content"), String::from("service_type")]),
             },
         },
     }
 }
+
 
 pub fn get_delete_sms_conversation_history_tool() -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
@@ -80,8 +78,7 @@ use std::error::Error;
 #[derive(Deserialize)]
 pub struct WaitingCheckArgs {
     pub content: String,
-    pub due_date: Option<i64>,
-    pub remove_when_found: Option<bool>,
+    pub service_type: String,
 }
 
 pub async fn handle_create_waiting_check(
@@ -91,24 +88,13 @@ pub async fn handle_create_waiting_check(
 ) -> Result<String, Box<dyn Error>> {
     let args: WaitingCheckArgs = serde_json::from_str(args)?;
 
-    // Calculate default due date (2 weeks from now) if not provided
-    let due_date = args.due_date.unwrap_or_else(|| {
-        let two_weeks = chrono::Duration::weeks(2);
-        (chrono::Utc::now() + two_weeks).timestamp()
-    }) as i32;
-
-    // Default remove_when_found to true if not provided
-    let remove_when_found = args.remove_when_found.unwrap_or(true);
-
     let new_check = crate::models::user_models::NewWaitingCheck {
         user_id,
-        due_date,
         content: args.content,
-        remove_when_found,
-        service_type: "imap".to_string(), // Default to email service type
+        service_type: args.service_type,
     };
 
-    state.user_repository.create_waiting_check(&new_check)?;
+    state.user_repository.create_waiting_check(&new_check).map_err(|e| Box::new(e) as Box<dyn Error>)?;
 
-    Ok("I'll keep an eye out for that in your emails and notify you when I find it.".to_string())
+    Ok("I'll keep an eye out for that and notify you when I find it.".to_string())
 }

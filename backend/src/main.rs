@@ -294,7 +294,7 @@ async fn main() {
         .route("/api/call/calendar/confirm", get(elevenlabs::handle_calendar_event_confirm))
         .route("/api/call/email", get(elevenlabs::handle_email_fetch_tool_call))
         .route("/api/call/email/specific", post(elevenlabs::handle_email_search_tool_call))
-        .route("/api/call/email/waiting_check", post(elevenlabs::handle_create_waiting_check_email_tool_call))
+        .route("/api/call/waiting_check", post(elevenlabs::handle_create_waiting_check_tool_call))
         .route("/api/call/email/respond-confirm", post(elevenlabs::handle_email_response_tool_call))
         .route("/api/call/tasks", get(elevenlabs::handle_tasks_fetching_tool_call))
         .route("/api/call/tasks/create", post(elevenlabs::handle_tasks_creation_tool_call))

@@ -759,7 +759,7 @@ pub async fn process_sms(
                         }
                         Err(e) => {
                             tracing::error!("Failed to create waiting check: {}", e);
-                            tool_answers.insert(tool_call_id, "Sorry, I couldn't set up the email monitoring. Please try again.".to_string());
+                            tool_answers.insert(tool_call_id, "Sorry, I couldn't create a waiting check. (Contact rasmus@ahtava.com pls:D)".to_string());
                         }
                     }
                 } else if name == "create_calendar_event" {

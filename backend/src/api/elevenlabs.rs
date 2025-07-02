@@ -354,72 +354,33 @@ pub async fn fetch_assistant(
 
 #[derive(Deserialize)]
 pub struct WaitingCheckPayload {
-    pub content: String,
-    pub due_date: Option<String>,
-    pub remove_when_found: Option<bool>,
     pub user_id: i32,
+    pub content: String,
+    pub service_type: String,
 }
 
-pub async fn handle_create_waiting_check_email_tool_call(
+pub async fn handle_create_waiting_check_tool_call(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<WaitingCheckPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::debug!("Received waiting check creation request");
-
-    // Handle due_date: parse provided string or use default (2 weeks from now)
-    let due_date_utc = match payload.due_date {
-        Some(date_str) => {
-            // Validate the provided date string
-            match chrono::DateTime::parse_from_rfc3339(&date_str) {
-                Ok(_) => date_str, // If valid RFC3339, use as-is
-                Err(_) => {
-                    tracing::error!("Invalid due_date format provided, using default");
-                    let two_weeks = chrono::Duration::weeks(2);
-                    (chrono::Utc::now() + two_weeks)
-                        .format("%Y-%m-%dT00:00:00Z")
-                        .to_string()
-                }
-            }
-        }
-        None => {
-            let two_weeks = chrono::Duration::weeks(2);
-            (chrono::Utc::now() + two_weeks)
-                .format("%Y-%m-%dT00:00:00Z")
-                .to_string()
-        }
-    };
-
-    // Convert UTC string to timestamp integer
-    let due_date_timestamp = chrono::DateTime::parse_from_rfc3339(&due_date_utc)
-        .map(|dt| dt.timestamp())
-        .unwrap_or_else(|e| {
-            error!("Failed to parse due_date: {}", e);
-            (chrono::Utc::now() + chrono::Duration::weeks(2)).timestamp()
-        }) as i32;
-
-    // Default remove_when_found to true if not provided
-    let remove_when_found = payload.remove_when_found.unwrap_or(true);
-
     // Verify user exists
     match state.user_core.find_by_id(payload.user_id) {
         Ok(Some(_user)) => {
             let new_check = crate::models::user_models::NewWaitingCheck {
                 user_id: payload.user_id,
-                due_date: due_date_timestamp,
                 content: payload.content,
-                remove_when_found,
-                service_type: "imap".to_string(),
+                service_type: payload.service_type,
             };
 
             match state.user_repository.create_waiting_check(&new_check) {
                 Ok(_) => {
-                    tracing::debug!("Successfully created waiting check for user: {} with due date: {}", 
-                        payload.user_id, due_date_utc);
+                    tracing::debug!("Successfully created waiting check for user: {}", 
+                        payload.user_id);
                     Ok(Json(json!({
-                        "response": "I'll keep an eye out for that in your emails and notify you when I find it.",
+                        "response": "I'll keep an eye out for that and notify you when I find it.",
                         "status": "success",
                         "user_id": payload.user_id,
-                        "due_date": due_date_utc
                     })))
                 },
                 Err(e) => {

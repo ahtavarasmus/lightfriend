@@ -51,8 +51,8 @@ If a match is found you MUST additionally craft two short notifications:
 
 Return JSON with:
 • `waiting_check_id` – integer ID of the matched check, or null
-• `sms_message` – string (required when matched, else empty)
-• `first_message` – string (required when matched, else empty)
+• `sms_message` – Option<String> (required when matched, else null)
+• `first_message` – Option<String> (required when matched, else null)
 • `match_explanation` – ≤120 chars explaining why it matched (or empty when null)
 "#;
 
