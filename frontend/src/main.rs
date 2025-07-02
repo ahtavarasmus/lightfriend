@@ -22,6 +22,7 @@ mod pages {
     pub mod termsprivacy;
     pub mod proactive;
     pub mod faq;
+    pub mod supported_countries;
 }
 
 mod proactive {
@@ -61,6 +62,7 @@ mod admin {
 use pages::{
     home::Home,
     faq::Faq,
+    supported_countries::SupportedCountries,
     home::is_logged_in,
     termsprivacy::{TermsAndConditions, PrivacyPolicy},
     money::{Pricing},
@@ -87,6 +89,8 @@ pub enum Route {
     PasswordReset,
     #[at("/faq")]
     Faq,
+    #[at("/supported-countries")]
+    SupportedCountries,
     #[at("/")]
     Home,
     #[at("/login")]
@@ -120,6 +124,10 @@ fn switch(routes: Route) -> Html {
         Route::Faq => {
             info!("Rendering FAQ page");
             html! { <Faq /> }
+        },
+        Route::SupportedCountries => {
+            info!("Rendering SupportedCountries page");
+            html! { <SupportedCountries/> }
         },
         Route::Home => {
             info!("Rendering Home page");

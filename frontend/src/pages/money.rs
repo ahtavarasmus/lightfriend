@@ -215,14 +215,18 @@ pub fn pricing(props: &PricingProps) -> Html {
                             <>
                             <br/>
                             <p class="availability-note" style="color: #ff9494; font-size: 0.9rem; margin-top: 0.5rem;">
-                                {format!("Note: Service may be limited or unavailable in {}. Contact to ask for availability and you get a coupon code to use for the subscription to set the correct price.", (*country_name).clone())}
+                                {format!("Note: Service may be limited or unavailable in {}. ", (*country_name).clone())}
+                                {" More info about supported countries can be checked in "}
                                 <span class="legal-links">
+                                    <a style="color: #1E90FF;" href="/supported-countries">{"Supported Countries"}</a>
+                                    {" or by emailing "}
                                     <a style="color: #1E90FF;" 
                                        href={format!("mailto:rasmus@ahtava.com?subject=Country%20Availability%20Inquiry%20for%20{}&body=Hey,%0A%0AIs%20the%20service%20available%20in%20{}%3F%0A%0AThanks,%0A", 
                                        (*country_name).clone(), (*country_name).clone())}>
-                                        {"here."}
+                                        {"rasmus@ahtava.com"}
                                     </a>
                                 </span>
+                                {". Contact to ask for availability and you get a coupon code to use for the subscription to set the correct price."}
                             </p>
                             </>
                         }
@@ -270,7 +274,9 @@ pub fn pricing(props: &PricingProps) -> Html {
                             <ul class="quota-list">
                                 <li>{"🔍 Internet Search (Perplexity)"}</li>
                                 <li>{"☀️ Weather Updates"}</li>
-                                <li>{"📱 40 questions/messages per month"}</li>
+                                <li>{"📱 40 Messages per month for:"}</li>
+                                <li class="sub-item">{"   • Voice calls (1 min = 1 Message)"}</li>
+                                <li class="sub-item">{"   • Text queries to Lightfriend (1 message = 1 Message)"}</li>
                                 <li>{"💳 Additional credits for more messages"}</li>
                             </ul>
                         </div>
@@ -499,28 +505,13 @@ pub fn pricing(props: &PricingProps) -> Html {
                     </thead>
                     <tbody>
                         <tr>
-                            <td>{"Morning, Day and Evening Digests"}</td>
-                            <td>{"❌"}</td>
-                            <td>{"✅"}</td>
-                        </tr>
-                        <tr>
-                            <td>{"24/7 Critical Message Monitoring"}</td>
-                            <td>{"❌"}</td>
-                            <td>{"✅"}</td>
-                        </tr>
-                        <tr>
-                            <td>{"Custom Waiting Checks"}</td>
-                            <td>{"❌"}</td>
-                            <td>{"✅"}</td>
-                        </tr>
-                        <tr>
-                            <td>{"Base Messages(40/Month)"}</td>
+                            <td>{"Voice calling and SMS interface"}</td>
                             <td>{"✅"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
-                            <td>{"Priority Sender Notifications"}</td>
-                            <td>{"❌"}</td>
+                            <td>{"Base Messages(40/Month and 100/Month respectively)"}</td>
+                            <td>{"✅"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
@@ -565,6 +556,26 @@ pub fn pricing(props: &PricingProps) -> Html {
                         </tr>
                         <tr>
                             <td>{"Task Management"}</td>
+                            <td>{"❌"}</td>
+                            <td>{"✅"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"24/7 Critical Message Monitoring"}</td>
+                            <td>{"❌"}</td>
+                            <td>{"✅"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"Morning, Day and Evening Digests"}</td>
+                            <td>{"❌"}</td>
+                            <td>{"✅"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"Custom Waiting Checks"}</td>
+                            <td>{"❌"}</td>
+                            <td>{"✅"}</td>
+                        </tr>
+                        <tr>
+                            <td>{"Priority Sender Notifications"}</td>
                             <td>{"❌"}</td>
                             <td>{"✅"}</td>
                         </tr>

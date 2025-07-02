@@ -244,6 +244,13 @@ pub fn faq() -> Html {
                 </FaqItem>
 
                 <FaqItem 
+                    question="Which countries are supported?"
+                    id="supported-countries"
+                >
+                    <p>{"We're expanding the service based demand and availability to new countries. You can see info about supported countries from the "}<a href="/supported-countries">{"Supported Countries"}</a>{" page or check availability by emailing "}<a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com."}</a></p>
+                </FaqItem>
+
+                <FaqItem 
                     question="Can I try the service before signing up?"
                     id="try-service"
                 >
