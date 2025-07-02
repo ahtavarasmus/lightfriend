@@ -820,10 +820,46 @@ pub async fn handle_whatsapp_message(
         }
     };
 
+    fn trim_for_sms(sender: &str, content: &str) -> String {
+        let prefix = "WhatsApp from ";
+        let separator = ": ";
+        let max_len = 157;
+
+        let static_len = prefix.len() + separator.len();
+        let mut remaining = max_len - static_len;
+
+        // Reserve up to 30 chars for sender
+        let mut sender_trimmed = sender.chars().take(30).collect::<String>();
+        if sender.len() > sender_trimmed.len() {
+            sender_trimmed.push('…');
+        }
+        remaining = remaining.saturating_sub(sender_trimmed.len());
+
+        let mut content_trimmed = content.chars().take(remaining).collect::<String>();
+        if content.len() > content_trimmed.len() {
+            content_trimmed.push('…');
+        }
+
+        format!("{}{}{}{}", prefix, sender_trimmed, separator, content_trimmed)
+    }
+
+    tracing::info!("priority_senders found: {}",priority_senders.len());
     // FAST CHECKS SECOND - Check priority senders if active
     for priority_sender in &priority_senders {
-        if chat_name.to_lowercase().contains(&priority_sender.sender.to_lowercase()) ||
-           sender_name.to_lowercase().contains(&priority_sender.sender.to_lowercase()) {
+
+        // Clean up priority sender name by removing (WA) suffix
+        let clean_priority_sender = priority_sender.sender
+            .split(" (WA)")
+            .next()
+            .unwrap_or(&priority_sender.sender)
+            .trim()
+            .to_string();
+
+        if user_id == 1 {
+            tracing::info!("trying to match priority_sender {} with {}", &clean_priority_sender, chat_name);
+        }
+        if chat_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) ||
+           sender_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) {
             tracing::info!("Fast check: Priority sender matched for user {}: '{}'", user_id, priority_sender.sender);
             
             // Check if user has enough credits for notification
@@ -832,7 +868,7 @@ pub async fn handle_whatsapp_message(
                     // User has enough credits, proceed with notification
                     let state_clone = state.clone();
                     let content_clone = content.clone();
-                    let message = format!("WhatsApp from {}: {}", priority_sender.sender, content_clone);
+                    let message = trim_for_sms(&priority_sender.sender, &content_clone);
                     let first_message = format!("Hello, you have an important WhatsApp message from {}.", priority_sender.sender);
                     
                     // Spawn a new task for sending notification

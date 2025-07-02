@@ -58,11 +58,19 @@ Return JSON with:
 
 
 #[derive(Debug, Serialize, Deserialize)]
-struct WaitingCheckMatchResponse {
-    waiting_check_id: Option<i32>,
-    sms_message: Option<String>,
-    first_message: Option<String>,
-    match_explanation: Option<String>,
+// or #[serde_with::skip_serializing_none]  <-- whole-struct shortcut
+pub struct WaitingCheckMatchResponse {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_check_id: Option<i32>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sms_message: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_message: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub match_explanation: Option<String>,
 }
 
 /// Determine whether `message` satisfies **one** of the supplied `waiting_checks`.
@@ -194,8 +202,10 @@ pub struct CalendarEvent {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MatchResponse {
     pub is_critical: bool,
-    pub what_to_inform: String,
-    pub first_message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub what_to_inform: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_message: Option<String>,
 }
 
 /// Checks whether a single message is critical.
@@ -282,7 +292,7 @@ pub async fn check_message_importance(
                         match serde_json::from_str::<MatchResponse>(args) {
                             Ok(response) => {
                                 tracing::debug!(target: "critical_check", ?response, "Message analysis result");
-                                Ok((response.is_critical, Some(response.what_to_inform), Some(response.first_message)))
+                                Ok((response.is_critical, response.what_to_inform, response.first_message))
                             }
                             Err(e) => {
                                 tracing::error!("Failed to parse message analysis response: {}", e);
@@ -468,7 +478,8 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                         // Convert WhatsAppMessage to MessageInfo and add to messages
                         let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
                             .map(|msg| MessageInfo {
-                                sender: format!("{} ({})", msg.sender_display_name, msg.room_name),
+                                // Remove the (WA) suffix if it exists
+                                sender: msg.sender_display_name.trim_end_matches(" (WA)").to_string(),
                                 content: msg.content,
                                 timestamp_rfc: msg.formatted_timestamp,
                                 platform: "whatsapp".to_string(),
@@ -666,7 +677,8 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                         // Convert WhatsAppMessage to MessageInfo and add to messages
                         let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
                             .map(|msg| MessageInfo {
-                                sender: format!("{} ({})", msg.sender_display_name, msg.room_name),
+                                // Remove the (WA) suffix if it exists
+                                sender: msg.sender_display_name.trim_end_matches(" (WA)").to_string(),
                                 content: msg.content,
                                 timestamp_rfc: msg.formatted_timestamp,
                                 platform: "whatsapp".to_string(),
@@ -879,7 +891,8 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                         // Convert WhatsAppMessage to MessageInfo and add to messages
                         let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
                             .map(|msg| MessageInfo {
-                                sender: format!("{} ({})", msg.sender_display_name, msg.room_name),
+                                // Remove the (WA) suffix if it exists
+                                sender: msg.sender_display_name.trim_end_matches(" (WA)").to_string(),
                                 content: msg.content,
                                 timestamp_rfc: msg.formatted_timestamp,
                                 platform: "whatsapp".to_string(),
