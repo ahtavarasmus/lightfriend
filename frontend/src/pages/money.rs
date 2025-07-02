@@ -42,6 +42,7 @@ pub struct CheckoutButtonProps {
     pub user_id: i32,
     pub user_email: String,
     pub subscription_type: String,
+    pub selected_country: String,
 }
 
 #[function_component(CheckoutButton)]
@@ -49,14 +50,31 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
     let user_id = props.user_id;
     let user_email = props.user_email.clone();
     let subscription_type = props.subscription_type.clone();
+    let selected_country = props.selected_country.clone();
 
     let onclick = {
         let user_id = user_id.clone();
         let subscription_type = subscription_type.clone();
+        let selected_country = selected_country.clone();
+        
         Callback::from(move |e: MouseEvent| {
             e.prevent_default();
             let user_id = user_id.clone();
             let subscription_type = subscription_type.clone();
+            
+            // For Monitoring Plan and "Other" country, show confirmation dialog
+            if subscription_type == "monitoring_plan" && selected_country == "Other" {
+                if let Some(window) = web_sys::window() {
+                    if !window.confirm_with_message(
+                        "Have you contacted us to get a coupon code for your country? The base price shown is just a placeholder and the actual price will be set using a coupon code based on your country's pricing. Click OK if you have a coupon code, or Cancel to contact us first."
+                    ).unwrap_or(false) {
+                        // If user clicks Cancel, redirect to email
+                        let email_url = "mailto:rasmus@ahtava.com?subject=Monitoring%20Plan%20Pricing%20Inquiry&body=Hey,%0A%0AI'm%20interested%20in%20the%20Monitoring%20Plan.%20Could%20you%20please%20provide%20me%20with%20the%20correct%20pricing%20and%20coupon%20code%20for%20my%20country?%0A%0AThanks!";
+                        let _ = window.location().set_href(email_url);
+                        return;
+                    }
+                }
+            }
             
             wasm_bindgen_futures::spawn_local(async move {
                 if let Some(token) = window()
@@ -279,6 +297,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                         user_id={props.user_id} 
                                         user_email={props.user_email.clone()} 
                                         subscription_type="basic"
+                                        selected_country={(*selected_country).clone()}
                                     />
                                 }
                             } else if props.sub_tier.as_ref().unwrap() == &"tier 1".to_string() {
@@ -383,6 +402,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                         user_id={props.user_id} 
                                         user_email={props.user_email.clone()} 
                                         subscription_type="monitoring_plan"
+                                        selected_country={(*selected_country).clone()}
                                     />
                                 }
                             } else if props.sub_tier.as_ref().unwrap() == &"tier 2".to_string() {
