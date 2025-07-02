@@ -243,7 +243,7 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
                         border: 1px solid rgba(245, 158, 11, 0.2);
                         background: rgba(0, 0, 0, 0.2);
                         color: #fff;
-                        min-width: 120px;
+                        min-width: 140px;
                         cursor: pointer;
                     }
 
