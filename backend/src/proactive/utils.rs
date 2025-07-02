@@ -955,20 +955,21 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
     Ok(())
 }
 
-/// Prompt for generating an SMS digest.
-const DIGEST_PROMPT: &str = r#"You are an AI that creates concise SMS digests of messages and calendar events.
+// Prompt for generating an SMS digest
+const DIGEST_PROMPT: &str = r#"You are an AI called lightfriend that creates concise SMS digests of messages and calendar events.
 
 Rules
 • Absolute length limit: 480 characters.
-• **Do NOT** use markdown (no *, **, _, links, or backticks).
-• **Do NOT** use emojis or emoticons.
-• Plain text only; separate items with hyphens ("-") or short sentences.
+• Do NOT use markdown (no *, **, _, links, or backticks).
+• Do NOT use emojis or emoticons.
+• Plain text only.
+• Start each item on a new line; you may prefix items with a hyphen (“-”) if helpful, but keep the newline.
 • Put truly critical or actionable items first.
-• Mention the platform (EMAIL / WHATSAPP / SMS) only when it adds essential context.
+• Mention the platform (EMAIL / WHATSAPP / CALENDAR) only when it adds essential context.
 • For calendar, include only events starting within the next few hours.
 
 Return JSON with a single field:
-• `digest` – the plain‑text SMS message.
+• `digest` – the plain-text SMS message, with newlines separating items.
 "#;
 
 pub async fn generate_digest(data: DigestData) -> Result<String, Box<dyn std::error::Error>> {
