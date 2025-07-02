@@ -197,7 +197,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                             <>
                             <br/>
                             <p class="availability-note" style="color: #ff9494; font-size: 0.9rem; margin-top: 0.5rem;">
-                                {format!("Note: Service may be limited or unavailable in {}. Contact to ask for availability ", (*country_name).clone())}
+                                {format!("Note: Service may be limited or unavailable in {}. Contact to ask for availability and you get a coupon code to use for the subscription to set the correct price.", (*country_name).clone())}
                                 <span class="legal-links">
                                     <a style="color: #1E90FF;" 
                                        href={format!("mailto:rasmus@ahtava.com?subject=Country%20Availability%20Inquiry%20for%20{}&body=Hey,%0A%0AIs%20the%20service%20available%20in%20{}%3F%0A%0AThanks,%0A", 

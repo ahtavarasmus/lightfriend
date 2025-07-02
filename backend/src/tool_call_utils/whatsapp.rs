@@ -289,7 +289,7 @@ pub async fn handle_send_whatsapp_message(
         }
     }
 
-    // If confirmation is required, continue with the existing flow
+    // If confirmation is required, continue
     // Set the temporary variable for WhatsApp message
     if let Err(e) = state.user_core.set_temp_variable(
         user_id,
