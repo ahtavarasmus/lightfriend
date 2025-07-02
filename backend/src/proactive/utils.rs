@@ -69,8 +69,8 @@ struct WaitingCheckMatchResponse {
 /// Returns `(waiting_check_id, sms_message, first_message)`.
 pub async fn check_waiting_check_match(
     message: &str,
-    waiting_checks: Vec<WaitingCheck>,
-) -> Result<(Option<i32>, String, String), Box<dyn std::error::Error>> {
+    waiting_checks: &Vec<WaitingCheck>,
+) -> Result<(Option<i32>, Option<String>, Option<String>), Box<dyn std::error::Error>> {
     let client = create_openai_client()?;
 
     let waiting_checks_str = waiting_checks
@@ -165,11 +165,7 @@ pub async fn check_waiting_check_match(
         tracing::debug!("Waiting‑check match explanation: {}", explanation);
     }
 
-    // Provide empty strings when Not matched
-    let sms = response.sms_message.unwrap_or_default();
-    let first = response.first_message.unwrap_or_default();
-
-    Ok((response.waiting_check_id, sms, first))
+    Ok((response.waiting_check_id, response.sms_message, response.first_message))
 }
 
 #[derive(Debug, Serialize)]
@@ -180,26 +176,26 @@ pub struct DigestData {
 }
 
 #[derive(Debug, Serialize)]
-struct MessageInfo {
-    sender: String,
-    content: String,
-    timestamp_rfc: String,
-    platform: String, // e.g., "email", "whatsapp", etc.
+pub struct MessageInfo {
+    pub sender: String,
+    pub content: String,
+    pub timestamp_rfc: String,
+    pub platform: String, // e.g., "email", "whatsapp", etc.
 }
 
 #[derive(Debug, Serialize)]
-struct CalendarEvent {
-    title: String,
-    start_time_rfc: String,
-    duration_minutes: i64,
+pub struct CalendarEvent {
+    pub title: String,
+    pub start_time_rfc: String,
+    pub duration_minutes: i64,
 }
 
 
 #[derive(Debug, Serialize, Deserialize)]
-struct MatchResponse {
-    is_critical: bool,
-    what_to_inform: String,
-    first_message: String,
+pub struct MatchResponse {
+    pub is_critical: bool,
+    pub what_to_inform: String,
+    pub first_message: String,
 }
 
 /// Checks whether a single message is critical.

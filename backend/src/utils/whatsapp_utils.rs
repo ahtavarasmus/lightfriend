@@ -860,6 +860,37 @@ pub async fn handle_whatsapp_message(
         }
     }
 
+    if !waiting_checks.is_empty() {
+        // Check if any waiting checks match the message
+        if let Ok((check_id_option, message, first_message)) = crate::proactive::utils::check_waiting_check_match(
+            &content,
+            &waiting_checks,
+        ).await {
+            if let Some(check_id) = check_id_option {
+                let message = message.unwrap_or("Waiting check matched in WhatsApp, but failed to get content".to_string());
+                let first_message = first_message.unwrap_or("Hey, I found a match for one of your waiting checks in WhatsApp.".to_string());
+                
+                // Delete the matched waiting check
+                if let Err(e) = state.user_repository.delete_waiting_check_by_id(user_id, check_id) {
+                    tracing::error!("Failed to delete waiting check {}: {}", check_id, e);
+                }
+                
+                // Send notification
+                let state_clone = state.clone();
+                tokio::spawn(async move {
+                    crate::proactive::utils::send_notification(
+                        &state_clone,
+                        user_id,
+                        &message,
+                        "whatsapp".to_string(),
+                        Some(first_message),
+                    ).await;
+                });
+                return;
+            }
+        }
+    }
+
     // Check message importance based on waiting checks and criticality
     match crate::proactive::utils::check_message_importance(&content).await {
         Ok((is_critical, message, first_message)) => {
