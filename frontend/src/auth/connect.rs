@@ -199,15 +199,21 @@ let group_states = use_state(|| {
                 <div class="connect-section">
 
                     // Apps 
-                    <div class="service-group">
+                    <div class={classes!("service-group", 
+                        if props.sub_tier.as_deref() != Some("tier 2") && !props.discount { "disabled" } else { "" }
+                    )}>
                         <h3 class="service-group-title"
-                            onclick={let group_states = group_states.clone();
+                            onclick={
+                                let group_states = group_states.clone();
+                                let can_expand = props.sub_tier.as_deref() == Some("tier 2") || props.discount;
                                 Callback::from(move |_| {
-                                    let mut new_states = (*group_states).clone();
-                                    if let Some(state) = new_states.get_mut("apps") {
-                                        state.expanded = !state.expanded;
+                                    if can_expand {
+                                        let mut new_states = (*group_states).clone();
+                                        if let Some(state) = new_states.get_mut("apps") {
+                                            state.expanded = !state.expanded;
+                                        }
+                                        group_states.set(new_states);
                                     }
-                                    group_states.set(new_states);
                                 })
                             }
                         >
@@ -275,7 +281,9 @@ let group_states = use_state(|| {
                     </div>
 
                     // Proactive Services
-                    <div class="service-group">
+                    <div class={classes!("service-group", 
+                        if props.sub_tier.as_deref() != Some("tier 2") && !props.discount { "disabled" } else { "" }
+                    )}>
                         <h3 class="service-group-title"
                             onclick={let group_states = group_states.clone();
                                 Callback::from(move |_| {
@@ -552,41 +560,60 @@ let group_states = use_state(|| {
                             </div>
 
                             // Waiting Checks
-                            <div class="service-item">
-                                <div class="service-header">
-                                    <div class="service-name">
-                                        {"⏰ Waiting Checks"}
-                                    </div>
-                                    <button class="info-button" onclick={Callback::from(|_| {
-                                        if let Some(element) = web_sys::window()
-                                            .and_then(|w| w.document())
-                                            .and_then(|d| d.get_element_by_id("waiting-checks-info"))
-                                        {
-                                            let display = element.get_attribute("style")
-                                                .unwrap_or_else(|| "display: none".to_string());
-                                            
-                                            if display.contains("none") {
-                                                let _ = element.set_attribute("style", "display: block");
-                                            } else {
-                                                let _ = element.set_attribute("style", "display: none");
-                                            }
+                            <div class={classes!("service-item",
+                                if props.sub_tier.as_deref() != Some("tier 2") && !props.discount { "disabled" } else { "" }
+                            )}>
+                                {
+                                    if props.sub_tier.as_deref() != Some("tier 2") && !props.discount {
+                                        html! {
+                                            <div class="feature-overlay">
+                                                <div class="overlay-content" style="color: #999;">
+                                                    <i class="fas fa-lock"></i>
+                                                    <p>{"Upgrade to Tier 2 to use Waiting Checks"}</p>
+                                                </div>
+                                            </div>
                                         }
-                                    })}>
-                                        {"ⓘ"}
-                                    </button>
-                                </div>
-                                <p class="service-description">
-                                    {"Set up notifications for when you're waiting for something from emails or messaging apps. Get a message when it's time to check on what you're waiting for."}
-                                </p>
-                                <div id="waiting-checks-info" class="info-section" style="display: none">
-                                    <h4>{"How It Works"}</h4>
-                                    <div class="info-subsection">
-                                        <ul>
-                                            <li>{"1. Tell lightfriend what you're waiting for and from where (Messaging apps or email)"}</li>
-                                            <li>{"2. When lightfriend notices the event, it sends you a text and removes the waiting check"}</li>
-                                        </ul>
-                                    </div>
-                                </div>
+                                    } else {
+                                        html! {
+                                            <>
+                                                <div class="service-header">
+                                                    <div class="service-name">
+                                                        {"⏰ Waiting Checks"}
+                                                    </div>
+                                                    <button class="info-button" onclick={Callback::from(|_| {
+                                                        if let Some(element) = web_sys::window()
+                                                            .and_then(|w| w.document())
+                                                            .and_then(|d| d.get_element_by_id("waiting-checks-info"))
+                                                        {
+                                                            let display = element.get_attribute("style")
+                                                                .unwrap_or_else(|| "display: none".to_string());
+                                                            
+                                                            if display.contains("none") {
+                                                                let _ = element.set_attribute("style", "display: block");
+                                                            } else {
+                                                                let _ = element.set_attribute("style", "display: none");
+                                                            }
+                                                        }
+                                                    })}>
+                                                        {"ⓘ"}
+                                                    </button>
+                                                </div>
+                                                <p class="service-description">
+                                                    {"Set up notifications for when you're waiting for something from emails or messaging apps. Get a message when it's time to check on what you're waiting for."}
+                                                </p>
+                                                <div id="waiting-checks-info" class="info-section" style="display: none">
+                                                    <h4>{"How It Works"}</h4>
+                                                    <div class="info-subsection">
+                                                        <ul>
+                                                            <li>{"1. Tell lightfriend what you're waiting for and from where (Messaging apps or email)"}</li>
+                                                            <li>{"2. When lightfriend notices the event, it sends you a text and removes the waiting check"}</li>
+                                                        </ul>
+                                                    </div>
+                                                </div>
+                                            </>
+                                        }
+                                    }
+                                }
                             </div>
 
                             // SMS During Calls
@@ -722,6 +749,29 @@ let group_states = use_state(|| {
     backdrop-filter: blur(10px);
     width: 100%;
     box-sizing: border-box;
+    position: relative;
+}
+
+.service-group.disabled {
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+.service-group.disabled::after {
+    content: "Upgrade to Tier 2 to access Apps";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #999;
+    font-size: 1.1rem;
+    border-radius: 16px;
+    backdrop-filter: blur(4px);
 }
 
 .service-group-title {

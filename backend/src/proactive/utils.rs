@@ -14,26 +14,6 @@ use chrono::{DateTime, Utc, Duration};
 /// Definition of a **critical** message: something that will cause human‑safety risk,
 /// major financial/data loss, legal breach, or production outage if it waits >2 h.
 /// The model must default to *non‑critical* when uncertain.
-const CRITICAL_PROMPT: &str = r#"You are an AI that decides whether an incoming user message is **critical** — i.e. it must be surfaced within **two hours** and cannot wait for the next scheduled summary.
-
-A message is **critical** if delaying action beyond 2 h risks:
-• Direct harm to people
-• Severe data loss or major financial loss
-• Production system outage or security breach
-• Hard legal/compliance deadline expiring in ≤2 h
-• The sender explicitly says it must be handled immediately (e.g. \"ASAP\", \"emergency\", \"right now\") or gives a ≤2 h deadline.
-
-Everything else — vague urgency, routine updates, or unclear requests — is **NOT** critical.
-If unsure, choose **not critical**.
-
-**Process**
-1. Detect the message language; translate internally to English before reasoning.
-2. Apply the criteria strictly.
-3. Output JSON with fields:
-   – `is_critical` (bool, REQUIRED)
-   – `what_to_inform` (≤160 chars, REQUIRED when critical, else empty) – one concise SMS sentence.
-   – `first_message` (≤100 chars, REQUIRED when critical, else empty) – attention‑grab opening for voice assistant.
-"#;
 
 /// Prompt for matching incoming messages against the user’s *waiting checks*.
 /// A waiting check represents something the user explicitly asked to be notified
@@ -55,6 +35,48 @@ Return JSON with:
 • `first_message` – Option<String> (required when matched, else null)
 • `match_explanation` – ≤120 chars explaining why it matched (or empty when null)
 "#;
+
+const CRITICAL_PROMPT: &str = r#"You are an AI that decides whether an incoming user message is **critical** — i.e. it must be surfaced within **two hours** and cannot wait for the next scheduled summary.
+
+A message is **critical** if delaying action beyond 2 h risks:
+• Direct harm to people  
+• Severe data loss or major financial loss  
+• Production system outage or security breach  
+• Hard legal/compliance deadline expiring in ≤ 2 h  
+• The sender explicitly says it must be handled immediately (e.g. “ASAP”, “emergency”, “right now”) or gives a ≤ 2 h deadline.
+
+Everything else — vague urgency, routine updates, or unclear requests — is **NOT** critical.  
+If unsure, choose **not critical**.
+
+---
+
+### Process
+1. Detect the message language; translate internally to English before reasoning.  
+2. Apply the criteria **strictly**.  
+3. Produce JSON with these fields (do **not** add others):
+
+| Field | Required? | Max chars | Content rules |
+|-------|-----------|-----------|---------------|
+| `is_critical` | always | — | Boolean. |
+| `what_to_inform` | *only when* `is_critical==true` | 160 | **One SMS sentence** that:<br>  • Briefly summarizes the core problem/ask (who/what/when).<br>  • States the single most urgent next action the recipient must take within 2 h. |
+| `first_message` | *only when* `is_critical==true` | 100 | **Voice-assistant opener** that grabs attention and repeats the required action in imperative form. |
+
+If `is_critical` is false, leave the other two fields empty strings.
+
+---
+
+#### Examples
+
+**Incoming:**  
+“I'm at the store should I buy eggs or do we have some still?”  
+
+**Output:**  
+```json
+{
+  "is_critical": true,
+  "what_to_inform": "Rasmus is asking on WhatsApp if he needs to buy eggs as well",
+  "first_message": "Hey, Rasmus needs more information about the shopping list"
+}"#;
 
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -216,6 +238,8 @@ pub async fn check_message_importance(
     // Build the chat payload ----------------------------------------------
     let client = create_openai_client()?;
 
+    println!("message before analysis: {}", message);
+
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
@@ -292,6 +316,7 @@ pub async fn check_message_importance(
                         match serde_json::from_str::<MatchResponse>(args) {
                             Ok(response) => {
                                 tracing::debug!(target: "critical_check", ?response, "Message analysis result");
+                                println!("critical: {:#?}, what_to_inform: {:#?}, first_message: {:#?}", response.is_critical, response.what_to_inform, response.first_message);
                                 Ok((response.is_critical, response.what_to_inform, response.first_message))
                             }
                             Err(e) => {

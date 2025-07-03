@@ -188,7 +188,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     };
 
                                     // Mark emails as processed and format them for importance checking
-                                    let mut emails_content = String::new();
+                                    let mut emails_content = String::from("New emails:\n");
                                     for email in &sorted_emails {
 
                                         // Check if this email was already processed

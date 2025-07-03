@@ -928,7 +928,20 @@ pub async fn handle_whatsapp_message(
     }
 
     // Check message importance based on waiting checks and criticality
-    match crate::proactive::utils::check_message_importance(&content).await {
+    let user_settings = match state.user_core.get_user_settings(user_id) {
+        Ok(settings) => settings,
+        Err(e) => {
+            tracing::error!("Failed to get user settings: {}", e);
+            return;
+        }
+    };
+
+    if !user_settings.critical_enabled {
+        tracing::debug!("Critical message checking disabled for user {}", user_id);
+        return;
+    }
+
+    match crate::proactive::utils::check_message_importance(&format!("WhatsApp from {}: {}", chat_name, content)).await {
         Ok((is_critical, message, first_message)) => {
             if is_critical {
                 let message = message.unwrap_or("Critical WhatsApp message found, check WhatsApp to see it (failed to fetch actual content, pls report)".to_string());
