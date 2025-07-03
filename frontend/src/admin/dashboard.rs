@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use yew_router::prelude::*;
 use crate::Route;
 use chrono::{Utc, TimeZone};
-use crate::admin::usage::{UsageLogs, UsageLog, CriticalMessageStats, WaitingMessageStats};
+use crate::admin::usage::{UsageLogs, UsageLog, CriticalMessageStats, WaitingMessageStats, CalendarMessageStats};
 use serde_json::json;
 
 #[derive(Serialize)]
@@ -627,6 +627,9 @@ pub fn admin_dashboard() -> Html {
                 />
 
                 <WaitingMessageStats
+                    usage_logs={(*usage_logs).clone()}
+                />
+                <CalendarMessageStats 
                     usage_logs={(*usage_logs).clone()}
                 />
 
