@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use yew_router::prelude::*;
 use crate::Route;
 use chrono::{Utc, TimeZone};
-use crate::admin::usage::{UsageLogs, UsageLog, CriticalMessageStats};
+use crate::admin::usage::{UsageLogs, UsageLog, CriticalMessageStats, WaitingMessageStats};
 use serde_json::json;
 
 #[derive(Serialize)]
@@ -626,6 +626,9 @@ pub fn admin_dashboard() -> Html {
                     usage_logs={(*usage_logs).clone()}
                 />
 
+                <WaitingMessageStats
+                    usage_logs={(*usage_logs).clone()}
+                />
 
                 {
                     if let Some(error_msg) = (*error).as_ref() {
