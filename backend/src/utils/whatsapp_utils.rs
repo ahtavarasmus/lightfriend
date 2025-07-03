@@ -878,7 +878,7 @@ pub async fn handle_whatsapp_message(
                             &state_clone,
                             user_id,
                             &message,
-                            "whatsapp".to_string(),
+                            "whatsapp_priority".to_string(),
                             Some(first_message),
                         ).await;
                         
@@ -918,7 +918,7 @@ pub async fn handle_whatsapp_message(
                         &state_clone,
                         user_id,
                         &message,
-                        "whatsapp".to_string(),
+                        "whatsapp_waiting_check".to_string(),
                         Some(first_message),
                     ).await;
                 });
@@ -958,7 +958,7 @@ pub async fn handle_whatsapp_message(
                         &state_clone,
                         user_id,
                         &message,
-                        "whatsapp".to_string(),
+                        "whatsapp_critical".to_string(),
                         Some(first_message),
                     ).await;
                 });

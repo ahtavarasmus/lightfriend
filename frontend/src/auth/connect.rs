@@ -758,7 +758,7 @@ let group_states = use_state(|| {
 }
 
 .service-group.disabled::after {
-    content: "Upgrade to Tier 2 to access Apps";
+    content: "Upgrade to Tier 2 to access Apps & Monitoring";
     position: absolute;
     top: 0;
     left: 0;

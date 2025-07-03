@@ -229,7 +229,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                     &state_clone,
                                                     user.id,
                                                     &message,
-                                                    "email".to_string(),
+                                                    "email_priority".to_string(),
                                                     Some(first_message),
                                                 ).await;
                                             });
@@ -276,7 +276,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                             &state_clone,
                                                             user_id,
                                                             &message,
-                                                            "email".to_string(),
+                                                            "email_waiting_check".to_string(),
                                                             Some(first_message),
                                                         ).await;
                                                     });
@@ -309,7 +309,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                         &state_clone,
                                                         user.id,
                                                         &message_clone,
-                                                        "email".to_string(),
+                                                        "email_critical".to_string(),
                                                         Some(first_message),
                                                     ).await;
                                                 });
@@ -633,7 +633,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             &state_clone,
                                             user_id,
                                             &notification,
-                                            "calendar".to_string(),
+                                            "calendar_notification".to_string(),
                                             Some(first_message),
                                         ).await;
                                     });

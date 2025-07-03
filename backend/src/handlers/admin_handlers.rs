@@ -39,14 +39,15 @@ pub struct EmailBroadcastRequest {
 #[derive(Serialize)]
 pub struct UsageLogResponse {
     id: i32,
-    sid: Option<String>,
+    user_id: i32,
     activity_type: String,
-    credits: Option<f32>,
     timestamp: i32,
-    time_consumed: Option<i32>,
-    success: Option<bool>,
-    reason: Option<String>,
+    sid: Option<String>,
     status: Option<String>,
+    success: Option<bool>,
+    credits: Option<f32>,
+    time_consumed: Option<i32>,
+    reason: Option<String>,
     recharge_threshold_timestamp: Option<i32>,
     zero_credits_timestamp: Option<i32>,
 }
@@ -423,15 +424,15 @@ pub async fn get_usage_logs(
 
             UsageLogResponse {
                 id: log.id.unwrap_or(0),
-
-                sid: log.sid,
+                user_id: log.user_id,
                 activity_type: log.activity_type,
-                credits: log.credits,
                 timestamp: log.created_at,
-                time_consumed: log.time_consumed,
-                success: log.success,
-                reason: log.reason,
+                sid: log.sid,
                 status: log.status,
+                success: log.success,
+                credits: log.credits,
+                time_consumed: log.time_consumed,
+                reason: log.reason,
                 recharge_threshold_timestamp: log.recharge_threshold_timestamp,
                 zero_credits_timestamp: log.zero_credits_timestamp,
             }

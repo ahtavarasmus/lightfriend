@@ -210,7 +210,7 @@ pub struct UsageLog {
     pub id: Option<i32>,
     pub user_id: i32,
     pub sid: Option<String>, // elevenlabs call id or twilio message id
-    pub activity_type: String, // sms or call
+    pub activity_type: String, // sms, call, calendar_notification, email_priority, email_waiting_check, email_critical, whatsapp_critical, whatsapp_priority, whatsapp_waiting_check
     pub credits: Option<f32>, // the amount of credits used in euros
     pub created_at: i32, // int timestamp utc epoch
     pub time_consumed: Option<i32>, // messsage response time or call duration in seconds

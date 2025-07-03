@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use yew_router::prelude::*;
 use crate::Route;
 use chrono::{Utc, TimeZone};
-use crate::profile::billing_models::format_timestamp;
+use crate::admin::usage::{UsageLogs, UsageLog};
 use serde_json::json;
 
 #[derive(Serialize)]
@@ -55,24 +55,6 @@ struct EmailJudgmentResponse {
     score: i32,
     reason: String,
 }
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct UsageLog {
-    id: i32,
-    activity_type: String,
-    timestamp: i32,
-    sid: Option<String>,
-    status: Option<String>,
-    success: Option<bool>,
-    credits: Option<f32>,
-    time_consumed: Option<i32>,
-    reason: Option<String>,
-    recharge_threshold_timestamp: Option<i32>,
-    zero_credits_timestamp: Option<i32>,
-}
-
-
-
 
 #[derive(Debug, Clone)]
 struct ChatMessage {
@@ -629,206 +611,16 @@ pub fn admin_dashboard() -> Html {
                     </div>
                 </div>
 
-                // Usage Logs Section
-                <div class="filter-section">
-                    <h3>{"Usage Logs"}</h3>
-                    <div class="usage-filter">
-                        <button 
-                            class={classes!(
-                                "filter-button",
-                                (activity_filter.is_none()).then_some("active")
-                            )}
-                            onclick={
-                                let activity_filter = activity_filter.clone();
-                                Callback::from(move |_| activity_filter.set(None))
-                            }
-                        >
-                            {"All"}
-                        </button>
-                        <button 
-                            class={classes!(
-                                "filter-button",
-                                (activity_filter.as_deref() == Some("sms")).then_some("active")
-                            )}
-                            onclick={
-                                let activity_filter = activity_filter.clone();
-                                Callback::from(move |_| activity_filter.set(Some("sms".to_string())))
-                            }
-                        >
-                            {"SMS"}
-                        </button>
-                        <button 
-                            class={classes!(
-                                "filter-button",
-                                (activity_filter.as_deref() == Some("call")).then_some("active")
-                            )}
-                            onclick={
-                                let activity_filter = activity_filter.clone();
-                                Callback::from(move |_| activity_filter.set(Some("call".to_string())))
-                            }
-                        >
-                            {"Calls"}
-                        </button>
-                        <button 
-                            class={classes!(
-                                "filter-button",
-                                (activity_filter.as_deref() == Some("failed")).then_some("active")
-                            )}
-                            onclick={
-                                let activity_filter = activity_filter.clone();
-                                Callback::from(move |_| activity_filter.set(Some("failed".to_string())))
-                            }
-                        >
-                            {"Failed"}
-                        </button>
-                    </div>
-
-                    <div class="usage-logs">
-                        {
-                            (*usage_logs).iter()
-                                .filter(|log| {
-                    if let Some(filter) = (*activity_filter).as_ref() {
-                        match filter.as_str() {
-                            "failed" => !log.success.unwrap_or(true),
-                            _ => log.activity_type == *filter
-                        }
-                    } else {
-                        true
+                <UsageLogs
+                    usage_logs={(*usage_logs).clone()}
+                    activity_filter={(*activity_filter).clone()}
+                    on_filter_change={
+                        let activity_filter = activity_filter.clone();
+                        Callback::from(move |new_filter| {
+                            activity_filter.set(new_filter);
+                        })
                     }
-                                })
-                                .map(|log| {
-                                    html! {
-                                        <div class={classes!("usage-log-item", log.activity_type.clone())}>
-                                                <div class="usage-log-header">
-                                                    <span class="usage-type">{&log.activity_type}</span>
-                                                    <span class="usage-date">
-                                                        {
-                                                            // Format timestamp with date and time
-                                                            if let Some(dt) = Utc.timestamp_opt(log.timestamp as i64, 0).single() {
-                                                                dt.format("%Y-%m-%d %H:%M:%S UTC").to_string()
-                                                            } else {
-                                                                "Invalid timestamp".to_string()
-                                                            }
-                                                        }
-                                                    </span>
-                                                </div>
-                                                <div class="usage-details">
-                                                    {
-                                                        if let Some(status) = &log.status {
-                                                            html! {
-                                                                <div>
-                                                                    <span class="label">{"Status"}</span>
-                                                                    <span class={classes!("value", if log.success.unwrap_or(false) { "success" } else { "failure" })}>
-                                                                        {status}
-                                                                    </span>
-                                                                </div>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-                                                    }
-                                                    {
-                                                        // Add success field display
-                                                        if let Some(success) = log.success {
-                                                            html! {
-                                                                <div>
-                                                                    <span class="label">{"Success"}</span>
-                                                                    <span class={classes!("value", if success { "success" } else { "failure" })}>
-                                                                        {if success { "Yes" } else { "No" }}
-                                                                    </span>
-                                                                </div>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-                                                    }
-
-                                                    {
-                                                        if let Some(credits) = log.credits {
-                                                            html! {
-                                                                <div>
-                                                                    <span class="label">{"Credits Used"}</span>
-                                                                    <span class="value">{format!("{:.2}€", credits)}</span>
-                                                                </div>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-
-                                                    }
-                                                    {
-                                                        if let Some(time) = log.time_consumed {
-                                                            html! {
-                                                                <div>
-                                                                    <span class="label">{"Duration"}</span>
-                                                                    <span class="value">{format!("{}s", time)}</span>
-                                                                </div>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-
-                                                    }
-                                                    {
-                                                        if let Some(reason) = &log.reason {
-                                                            html! {
-                                                                <div class="usage-reason">
-                                                                    <span class="label">{"Reason"}</span>
-                                                                    <span class="value">{reason}</span>
-                                                                </div>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-
-                                                    }
-                                                    {
-                                                        if let Some(sid) = &log.sid {
-                                                            html! {
-                                                                <div class="usage-sid">
-                                                                    <span class="label">{"SID"}</span>
-                                                                    <span class="value">{sid}</span>
-                                                                </div>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-
-                                                    }
-                                                    {
-                                                        if let Some(threshold) = log.recharge_threshold_timestamp {
-                                                            html! {
-                                                                <div>
-                                                                    <span class="label">{"Recharge Threshold"}</span>
-                                                                    <span class="value">{format_timestamp(threshold)}</span>
-                                                                </div>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-
-                                                    }
-                                                    {
-                                                        if let Some(zero) = log.zero_credits_timestamp {
-                                                            html! {
-                                                                <div>
-                                                                    <span class="label">{"Zero Credits At"}</span>
-                                                                    <span class="value">{format_timestamp(zero)}</span>
-                                                                </div>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-
-                                                    }
-                                                </div>
-                                        </div>
-                                    }
-                                })
-                                .collect::<Html>()
-                        }
-                    </div>
-                </div>
+                />
 
 
                 {

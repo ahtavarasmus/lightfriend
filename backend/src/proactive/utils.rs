@@ -58,7 +58,7 @@ If unsure, choose **not critical**.
 | Field | Required? | Max chars | Content rules |
 |-------|-----------|-----------|---------------|
 | `is_critical` | always | — | Boolean. |
-| `what_to_inform` | *only when* `is_critical==true` | 160 | **One SMS sentence** that:<br>  • Briefly summarizes the core problem/ask (who/what/when).<br>  • States the single most urgent next action the recipient must take within 2 h. |
+| `what_to_inform` | *only when* `is_critical==true` | 160 | **One SMS sentence** that:<br>  • Briefly summarizes the core problem/ask (who/what/when).<br>  • States the single most urgent next action the recipient must take within 2 h. Remember to include the sender or the Chat the message is from. |
 | `first_message` | *only when* `is_critical==true` | 100 | **Voice-assistant opener** that grabs attention and repeats the required action in imperative form. |
 
 If `is_critical` is false, leave the other two fields empty strings.
@@ -1190,7 +1190,7 @@ pub async fn send_notification(
                 user.phone_number.clone(),
                 user.preferred_number
                     .unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set")),
-                content_type, // Notification type
+                content_type.clone(), // Notification type
                 first_message.unwrap_or("Hello, I have a critical notification to tell you about".to_string()),
                 notification.clone().to_string(),
                 user.id.to_string(),
@@ -1204,10 +1204,41 @@ pub async fn send_notification(
                         }
                     }
                     tracing::debug!("Successfully initiated call notification for user {}", user.id);
+                    // Log successful call notification
+                    if let Err(e) = state.user_repository.log_usage(
+                        user_id,
+                        response.get("sid").and_then(|v| v.as_str()).map(String::from),
+                        content_type,
+                        None,
+                        None,
+                        Some(true),
+                        None,
+                        Some("completed".to_string()),
+                        None,
+                        None,
+                    ) {
+                        tracing::error!("Failed to log call notification usage: {}", e);
+                    }
                 }
                 Err((_, json_err)) => {
                     tracing::error!("Failed to initiate call notification: {:?}", json_err);
                     println!("Failed to send call notification for user {}", user_id);
+                    
+                    // Log failed call notification
+                    if let Err(e) = state.user_repository.log_usage(
+                        user_id,
+                        None,
+                        content_type,
+                        None,
+                        None,
+                        Some(false),
+                        Some(format!("Failed to initiate call: {:?}", json_err)),
+                        Some("failed".to_string()),
+                        None,
+                        None,
+                    ) {
+                        tracing::error!("Failed to log failed call notification: {}", e);
+                    }
                 }
             }
         }
@@ -1221,13 +1252,45 @@ pub async fn send_notification(
                 None,
                 &user,
             ).await {
-                Ok(_) => {
+                Ok(response_sid) => {
                     tracing::info!("Successfully sent notification to user {}", user_id);
                     println!("SMS notification sent successfully for user {}", user_id);
+                    
+                    // Log successful SMS notification
+                    if let Err(e) = state.user_repository.log_usage(
+                        user_id,
+                        Some(response_sid),
+                        content_type,
+                        None,
+                        None,
+                        Some(true),
+                        None,
+                        Some("delivered".to_string()),
+                        None,
+                        None,
+                    ) {
+                        tracing::error!("Failed to log SMS notification usage: {}", e);
+                    }
                 }
                 Err(e) => {
                     tracing::error!("Failed to send notification: {}", e);
                     println!("Failed to send SMS notification for user {}", user_id);
+                    
+                    // Log failed SMS notification
+                    if let Err(log_err) = state.user_repository.log_usage(
+                        user_id,
+                        None,
+                        content_type,
+                        None,
+                        None,
+                        Some(false),
+                        Some(format!("Failed to send SMS: {}", e)),
+                        Some("failed".to_string()),
+                        None,
+                        None,
+                    ) {
+                        tracing::error!("Failed to log failed SMS notification: {}", log_err);
+                    }
                 }
             }
         }

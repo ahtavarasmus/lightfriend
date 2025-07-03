@@ -290,7 +290,7 @@ impl UserRepository {
         Ok(())
     }
 
-    // log the usage. activity_type either 'call' or 'sms'
+    // log the usage. activity_type either 'call' or 'sms', or the new 'notification'
     pub fn log_usage(&self, user_id: i32, sid: Option<String>, activity_type: String, credits: Option<f32>, time_consumed: Option<i32>, success: Option<bool>, reason: Option<String>, status: Option<String>, recharge_threshold_timestamp: Option<i32>, zero_credits_timestamp: Option<i32>) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
