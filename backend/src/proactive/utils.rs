@@ -238,7 +238,6 @@ pub async fn check_message_importance(
     // Build the chat payload ----------------------------------------------
     let client = create_openai_client()?;
 
-    println!("message before analysis: {}", message);
 
     let messages = vec![
         chat_completion::ChatCompletionMessage {
@@ -316,7 +315,6 @@ pub async fn check_message_importance(
                         match serde_json::from_str::<MatchResponse>(args) {
                             Ok(response) => {
                                 tracing::debug!(target: "critical_check", ?response, "Message analysis result");
-                                println!("critical: {:#?}, what_to_inform: {:#?}, first_message: {:#?}", response.is_critical, response.what_to_inform, response.first_message);
                                 Ok((response.is_critical, response.what_to_inform, response.first_message))
                             }
                             Err(e) => {
