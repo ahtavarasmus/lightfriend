@@ -479,6 +479,26 @@ pub struct UserCalendarStats {
     pub last_activity: i32,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct UserSmsStats {
+    pub user_id: i32,
+    pub total_sms_messages: usize,
+    pub days_active: usize,
+    pub average_per_day: f64,
+    pub first_activity: i32,
+    pub last_activity: i32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UserCallStats {
+    pub user_id: i32,
+    pub total_call_seconds: i32,
+    pub days_active: usize,
+    pub average_seconds_per_day: f64,
+    pub first_activity: i32,
+    pub last_activity: i32,
+}
+
 #[derive(Properties, PartialEq)]
 pub struct CriticalMessageStatsProps {
     pub usage_logs: Vec<UsageLog>,
@@ -486,6 +506,16 @@ pub struct CriticalMessageStatsProps {
 
 #[derive(Properties, PartialEq)]
 pub struct CalendarMessageStatsProps {
+    pub usage_logs: Vec<UsageLog>,
+}
+
+#[derive(Properties, PartialEq)]
+pub struct SmsMessageStatsProps {
+    pub usage_logs: Vec<UsageLog>,
+}
+
+#[derive(Properties, PartialEq)]
+pub struct CallMessageStatsProps {
     pub usage_logs: Vec<UsageLog>,
 }
 
@@ -601,6 +631,120 @@ fn calculate_calendar_stats(usage_logs: &[UsageLog]) -> Vec<UserCalendarStats> {
     stats
 }
 
+fn calculate_sms_stats(usage_logs: &[UsageLog]) -> Vec<UserSmsStats> {
+    let mut user_stats: HashMap<i32, (Vec<i32>, usize)> = HashMap::new();
+    
+    // Filter SMS messages and group by user
+    for log in usage_logs.iter() {
+        if log.activity_type == "sms" {
+            let entry = user_stats.entry(log.user_id).or_insert((Vec::new(), 0));
+            entry.0.push(log.timestamp);
+            entry.1 += 1;
+        }
+    }
+    
+    let mut stats = Vec::new();
+    
+    for (user_id, (timestamps, total_count)) in user_stats {
+        if timestamps.is_empty() {
+            continue;
+        }
+        
+        let mut sorted_timestamps = timestamps;
+        sorted_timestamps.sort();
+        
+        let first_activity = *sorted_timestamps.first().unwrap();
+        let last_activity = *sorted_timestamps.last().unwrap();
+        
+        // Calculate unique days
+        let mut unique_days = std::collections::HashSet::new();
+        for &timestamp in &sorted_timestamps {
+            let dt = Utc.timestamp_opt(timestamp as i64, 0).single().unwrap();
+            let day_key = dt.format("%Y-%m-%d").to_string();
+            unique_days.insert(day_key);
+        }
+        
+        let days_active = unique_days.len();
+        let average_per_day = if days_active > 0 {
+            total_count as f64 / days_active as f64
+        } else {
+            0.0
+        };
+        
+        stats.push(UserSmsStats {
+            user_id,
+            total_sms_messages: total_count,
+            days_active,
+            average_per_day,
+            first_activity,
+            last_activity,
+        });
+    }
+    
+    // Sort by average per day (descending)
+    stats.sort_by(|a, b| b.average_per_day.partial_cmp(&a.average_per_day).unwrap());
+    
+    stats
+}
+
+fn calculate_call_stats(usage_logs: &[UsageLog]) -> Vec<UserCallStats> {
+    let mut user_stats: HashMap<i32, (Vec<i32>, i32)> = HashMap::new();
+    
+    // Filter call messages and group by user, summing time_consumed
+    for log in usage_logs.iter() {
+        if log.activity_type == "call" {
+            if let Some(duration) = log.time_consumed {
+                let entry = user_stats.entry(log.user_id).or_insert((Vec::new(), 0));
+                entry.0.push(log.timestamp);
+                entry.1 += duration;
+            }
+        }
+    }
+    
+    let mut stats = Vec::new();
+    
+    for (user_id, (timestamps, total_seconds)) in user_stats {
+        if timestamps.is_empty() {
+            continue;
+        }
+        
+        let mut sorted_timestamps = timestamps;
+        sorted_timestamps.sort();
+        
+        let first_activity = *sorted_timestamps.first().unwrap();
+        let last_activity = *sorted_timestamps.last().unwrap();
+        
+        // Calculate unique days
+        let mut unique_days = std::collections::HashSet::new();
+        for &timestamp in &sorted_timestamps {
+            let dt = Utc.timestamp_opt(timestamp as i64, 0).single().unwrap();
+            let day_key = dt.format("%Y-%m-%d").to_string();
+            unique_days.insert(day_key);
+        }
+        
+        let days_active = unique_days.len();
+        let average_seconds_per_day = if days_active > 0 {
+            total_seconds as f64 / days_active as f64
+        } else {
+            0.0
+        };
+        
+        stats.push(UserCallStats {
+            user_id,
+            total_call_seconds: total_seconds,
+            days_active,
+            average_seconds_per_day,
+            first_activity,
+            last_activity,
+        });
+    }
+    
+    // Sort by average seconds per day (descending)
+    stats.sort_by(|a, b| b.average_seconds_per_day.partial_cmp(&a.average_seconds_per_day).unwrap());
+    
+    stats
+}
+
 #[function_component(CriticalMessageStats)]
 pub fn critical_message_stats(props: &CriticalMessageStatsProps) -> Html {
     let stats = calculate_critical_stats(&props.usage_logs);
@@ -706,6 +850,140 @@ pub fn calendar_message_stats(props: &CalendarMessageStatsProps) -> Html {
                                     </div>
                                     <div class="stats-cell">
                                         <strong>{format!("{:.2}", stat.average_per_day)}</strong>
+                                    </div>
+                                    <div class="stats-cell">
+                                        {
+                                            if let Some(dt) = Utc.timestamp_opt(stat.first_activity as i64, 0).single() {
+                                                dt.format("%Y-%m-%d").to_string()
+                                            } else {
+                                                "Invalid".to_string()
+                                            }
+                                        }
+                                    </div>
+                                    <div class="stats-cell">
+                                        {
+                                            if let Some(dt) = Utc.timestamp_opt(stat.last_activity as i64, 0).single() {
+                                                dt.format("%Y-%m-%d").to_string()
+                                            } else {
+                                                "Invalid".to_string()
+                                            }
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        }).collect::<Html>()
+                    }
+                }
+            </div>
+        </div>
+    }
+}
+
+#[function_component(SmsMessageStats)]
+pub fn sms_message_stats(props: &SmsMessageStatsProps) -> Html {
+    let stats = calculate_sms_stats(&props.usage_logs);
+    
+    html! {
+        <div class="sms-stats-section">
+            <h3>{"SMS Message Statistics by User"}</h3>
+            <div class="stats-table">
+                <div class="stats-header">
+                    <div class="stats-cell">{"User ID"}</div>
+                    <div class="stats-cell">{"Total SMS Messages"}</div>
+                    <div class="stats-cell">{"Days Active"}</div>
+                    <div class="stats-cell">{"Average per Day"}</div>
+                    <div class="stats-cell">{"First Activity"}</div>
+                    <div class="stats-cell">{"Last Activity"}</div>
+                </div>
+                {
+                    if stats.is_empty() {
+                        html! {
+                            <div class="no-stats">
+                                {"No SMS message activity found"}
+                            </div>
+                        }
+                    } else {
+                        stats.iter().map(|stat| {
+                            html! {
+                                <div class="stats-row">
+                                    <div class="stats-cell">
+                                        <strong>{stat.user_id}</strong>
+                                    </div>
+                                    <div class="stats-cell">
+                                        {stat.total_sms_messages}
+                                    </div>
+                                    <div class="stats-cell">
+                                        {stat.days_active}
+                                    </div>
+                                    <div class="stats-cell">
+                                        <strong>{format!("{:.2}", stat.average_per_day)}</strong>
+                                    </div>
+                                    <div class="stats-cell">
+                                        {
+                                            if let Some(dt) = Utc.timestamp_opt(stat.first_activity as i64, 0).single() {
+                                                dt.format("%Y-%m-%d").to_string()
+                                            } else {
+                                                "Invalid".to_string()
+                                            }
+                                        }
+                                    </div>
+                                    <div class="stats-cell">
+                                        {
+                                            if let Some(dt) = Utc.timestamp_opt(stat.last_activity as i64, 0).single() {
+                                                dt.format("%Y-%m-%d").to_string()
+                                            } else {
+                                                "Invalid".to_string()
+                                            }
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        }).collect::<Html>()
+                    }
+                }
+            </div>
+        </div>
+    }
+}
+
+#[function_component(CallMessageStats)]
+pub fn call_message_stats(props: &CallMessageStatsProps) -> Html {
+    let stats = calculate_call_stats(&props.usage_logs);
+    
+    html! {
+        <div class="call-stats-section">
+            <h3>{"Call Statistics by User"}</h3>
+            <div class="stats-table">
+                <div class="stats-header">
+                    <div class="stats-cell">{"User ID"}</div>
+                    <div class="stats-cell">{"Total Call Duration (seconds)"}</div>
+                    <div class="stats-cell">{"Days Active"}</div>
+                    <div class="stats-cell">{"Average Seconds per Day"}</div>
+                    <div class="stats-cell">{"First Activity"}</div>
+                    <div class="stats-cell">{"Last Activity"}</div>
+                </div>
+                {
+                    if stats.is_empty() {
+                        html! {
+                            <div class="no-stats">
+                                {"No call activity found"}
+                            </div>
+                        }
+                    } else {
+                        stats.iter().map(|stat| {
+                            html! {
+                                <div class="stats-row">
+                                    <div class="stats-cell">
+                                        <strong>{stat.user_id}</strong>
+                                    </div>
+                                    <div class="stats-cell">
+                                        {format!("{} ({:.1} min)", stat.total_call_seconds, stat.total_call_seconds as f64 / 60.0)}
+                                    </div>
+                                    <div class="stats-cell">
+                                        {stat.days_active}
+                                    </div>
+                                    <div class="stats-cell">
+                                        <strong>{format!("{:.1}s ({:.1} min)", stat.average_seconds_per_day, stat.average_seconds_per_day / 60.0)}</strong>
                                     </div>
                                     <div class="stats-cell">
                                         {
