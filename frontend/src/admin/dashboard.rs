@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use yew_router::prelude::*;
 use crate::Route;
 use chrono::{Utc, TimeZone};
-use crate::admin::usage::{UsageLogs, UsageLog};
+use crate::admin::usage::{UsageLogs, UsageLog, CriticalMessageStats};
 use serde_json::json;
 
 #[derive(Serialize)]
@@ -620,6 +620,10 @@ pub fn admin_dashboard() -> Html {
                             activity_filter.set(new_filter);
                         })
                     }
+                />
+
+                <CriticalMessageStats
+                    usage_logs={(*usage_logs).clone()}
                 />
 
 
@@ -1950,6 +1954,93 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                     .users-table-container {
                         overflow-x: auto;
                         margin: 1rem 0;
+                    }
+
+                    /* Critical Message Stats Styles */
+                    .critical-stats-section {
+                        margin: 2rem 0;
+                        padding: 1.5rem;
+                        background: rgba(30, 30, 30, 0.7);
+                        border-radius: 8px;
+                        border: 1px solid rgba(30, 144, 255, 0.2);
+                    }
+
+                    .critical-stats-section h3 {
+                        color: #1E90FF;
+                        margin-bottom: 1.5rem;
+                        font-size: 1.2rem;
+                        font-weight: 600;
+                    }
+
+                    .stats-table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        background: rgba(0, 0, 0, 0.3);
+                        border-radius: 8px;
+                        overflow: hidden;
+                    }
+
+                    .stats-header {
+                        display: grid;
+                        grid-template-columns: 1fr 2fr 1.5fr 1.5fr 1.5fr 1.5fr;
+                        background: rgba(30, 144, 255, 0.1);
+                        border-bottom: 2px solid rgba(30, 144, 255, 0.3);
+                    }
+
+                    .stats-row {
+                        display: grid;
+                        grid-template-columns: 1fr 2fr 1.5fr 1.5fr 1.5fr 1.5fr;
+                        border-bottom: 1px solid rgba(30, 144, 255, 0.1);
+                        transition: all 0.3s ease;
+                    }
+
+                    .stats-row:hover {
+                        background: rgba(30, 144, 255, 0.05);
+                    }
+
+                    .stats-cell {
+                        padding: 0.75rem;
+                        color: #fff;
+                        font-size: 0.9rem;
+                        display: flex;
+                        align-items: center;
+                    }
+
+                    .stats-header .stats-cell {
+                        color: #1E90FF;
+                        font-weight: 600;
+                        font-size: 0.85rem;
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                    }
+
+                    .stats-cell strong {
+                        color: #FFD700;
+                    }
+
+                    .no-stats {
+                        padding: 2rem;
+                        text-align: center;
+                        color: #999;
+                        font-style: italic;
+                    }
+
+                    @media (max-width: 768px) {
+                        .stats-header,
+                        .stats-row {
+                            grid-template-columns: 1fr;
+                            gap: 0.5rem;
+                        }
+
+                        .stats-cell {
+                            padding: 0.5rem;
+                            border-bottom: 1px solid rgba(30, 144, 255, 0.1);
+                        }
+
+                        .stats-header .stats-cell {
+                            background: rgba(30, 144, 255, 0.2);
+                            margin-bottom: 0.25rem;
+                        }
                     }
 
                 "#}
