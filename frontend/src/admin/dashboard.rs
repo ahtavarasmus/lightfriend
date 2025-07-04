@@ -548,16 +548,16 @@ pub fn admin_dashboard() -> Html {
                                                         .flatten()
                                                     {
                                                         // Add user message to chat
-                                                                                                let mut new_messages = (*chat_messages).clone();
-                                                                                                new_messages.push(ChatMessage {
-                                                                                                    content: message_content.clone(),
-                                                                                                    is_user: true,
-                                                                                                    timestamp: chrono::Utc::now().timestamp(),
-                                                                                                    image_url: image_preview_data,
-                                                                                                });
-                                                                                                chat_messages.set(new_messages);
-                                                                                                // Clear the image preview after sending
-                                                                                                image_preview.set(ImagePreview { data_url: None });
+                                                        let mut new_messages = (*chat_messages).clone();
+                                                        new_messages.push(ChatMessage {
+                                                            content: message_content.clone(),
+                                                            is_user: true,
+                                                            timestamp: chrono::Utc::now().timestamp(),
+                                                            image_url: image_preview_data,
+                                                        });
+                                                        chat_messages.set(new_messages);
+                                                        // Clear the image preview after sending
+                                                        image_preview.set(ImagePreview { data_url: None });
                                                         
                                                         // Clear input
                                                         test_message.set(String::new());
@@ -666,6 +666,7 @@ pub fn admin_dashboard() -> Html {
                                                 <th>{"Overage Credits"}</th>
                                                 <th>{"Daily Credits"}</th>
                                                 <th>{"Tier"}</th>
+                                                <th>{"BYON"}</th>
                                                 <th>{"Verified"}</th>
                                                 <th>{"Notify"}</th>
                                                 <th>{"Discount"}</th>
@@ -739,9 +740,6 @@ pub fn admin_dashboard() -> Html {
                                                                 <td>
                                                                     <span class={classes!(
                                                                         "status-badge",
-
-
-                                                                        if user.discount { "enabled" } else { "disabled" },
                                                                         match user.discount_tier.as_deref() {
                                                                             Some("msg") => "discount-msg",
                                                                             Some("voice") => "discount-voice",
@@ -749,14 +747,6 @@ pub fn admin_dashboard() -> Html {
                                                                             _ => "disabled"
                                                                         }
                                                                     )}>
-                                                                                                                                                                                                {if user.discount { "Yes" } else { "No" }}
-
-                                                                        {match user.discount_tier.as_deref() {
-                                                                            Some("msg") => "MSG",
-                                                                            Some("voice") => "Voice",
-                                                                            Some("full") => "Full",
-                                                                            _ => "None"
-                                                                        }}
                                                                     </span>
                                                                 </td>
                                                                 <td>
@@ -773,6 +763,14 @@ pub fn admin_dashboard() -> Html {
                                                                         if user.notify { "enabled" } else { "disabled" }
                                                                     )}>
                                                                         {if user.notify { "Yes" } else { "No" }}
+                                                                    </span>
+                                                                </td>
+                                                                <td>
+                                                                    <span class={classes!(
+                                                                        "status-badge",
+                                                                        if user.discount { "enabled" } else { "disabled" }
+                                                                    )}>
+                                                                        {if user.discount { "Yes" } else { "No" }}
                                                                     </span>
                                                                 </td>
                                                                 <td>

@@ -74,6 +74,7 @@ pub async fn get_users(
                 Json(json!({"error": "Database error"}))
             )
         })?;
+        println!("discount: {}", user.discount);
 
         users_response.push(UserResponse {
             id: user.id,
