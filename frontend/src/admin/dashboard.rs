@@ -747,6 +747,15 @@ pub fn admin_dashboard() -> Html {
                                                                             _ => "disabled"
                                                                         }
                                                                     )}>
+
+                                                                        {
+                                                                            match user.discount_tier.as_deref() {
+                                                                                Some("msg") => "MSG",
+                                                                                Some("voice") => "VOICE",
+                                                                                Some("full") => "FULL",
+                                                                                _ => "NORMAL"
+                                                                            }
+                                                                        }
                                                                     </span>
                                                                 </td>
                                                                 <td>
