@@ -1176,7 +1176,12 @@ pub async fn send_notification(
     };
 
     // Check user's notification preference from settings
-    let notification_type = user_settings.notification_type.as_deref().unwrap_or("sms");
+    let notification_type = if content_type.contains("critical") {
+        user_settings.critical_enabled.as_deref().unwrap_or("sms")
+    } else {
+        user_settings.notification_type.as_deref().unwrap_or("sms")
+    };
+
     match notification_type {
         "call" => {
             // For calls, we need a brief intro and detailed message

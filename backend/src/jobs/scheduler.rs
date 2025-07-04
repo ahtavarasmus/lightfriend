@@ -290,7 +290,22 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         emails_content.push_str(&email_content);
                                     }
 
+
                                     // Check message importance based on waiting checks and criticality
+                                    let user_settings = match state.user_core.get_user_settings(user.id) {
+                                        Ok(settings) => settings,
+                                        Err(e) => {
+                                            tracing::error!("Failed to get user settings: {}", e);
+                                            return;
+                                        }
+                                    };
+
+                                    if user_settings.critical_enabled.is_none() {
+                                        tracing::debug!("Critical message checking disabled for user {}", user.id);
+                                        return;
+                                    }
+
+                                    // Check message importance based on criticality
                                     match crate::proactive::utils::check_message_importance(&emails_content).await {
                                         Ok((is_critical, message, first_message)) => {
                                             if is_critical {

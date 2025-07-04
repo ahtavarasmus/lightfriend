@@ -8,17 +8,17 @@ use crate::config;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CriticalResponse {
-    enabled: bool,
+    enabled: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UpdateCriticalRequest {
-    enabled: bool,
+    enabled: Option<String>,
 }
 
 #[function_component(CriticalSection)]
 pub fn critical_section() -> Html {
-    let critical_enabled = use_state(|| false);
+    let critical_enabled = use_state(|| None::<String>);
     let show_info = use_state(|| false);
     let is_saving = use_state(|| false);
 
@@ -57,14 +57,13 @@ pub fn critical_section() -> Html {
     }
 
 
-    let handle_toggle = {
+    let handle_option_change = {
         let critical_enabled = critical_enabled.clone();
         let is_saving = is_saving.clone();
         
-        Callback::from(move |_| {
-            let new_value = !*critical_enabled;
+        Callback::from(move |new_value: Option<String>| {
             let is_saving = is_saving.clone();
-            critical_enabled.set(new_value);
+            critical_enabled.set(new_value.clone());
             
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
@@ -181,8 +180,9 @@ pub fn critical_section() -> Html {
 
                     .critical-option {
                         display: flex;
-                        align-items: center;
-                        justify-content: space-between;
+                        flex-direction: column;
+                        align-items: flex-start;
+                        gap: 1rem;
                         padding: 1rem;
                         background: rgba(0, 0, 0, 0.2);
                         border: 1px solid rgba(245, 158, 11, 0.1);
@@ -195,11 +195,6 @@ pub fn critical_section() -> Html {
                         font-size: 0.9rem;
                     }
 
-                    .critical-controls {
-                        display: flex;
-                        align-items: center;
-                        gap: 1rem;
-                    }
 
                     /* Mobile responsiveness */
                     @media (max-width: 480px) {
@@ -222,10 +217,6 @@ pub fn critical_section() -> Html {
                             padding: 0.75rem;
                         }
 
-                        .critical-controls {
-                            width: 100%;
-                            justify-content: space-between;
-                        }
 
                         .info-section {
                             padding: 1rem;
@@ -243,69 +234,69 @@ pub fn critical_section() -> Html {
                             padding-left: 1.2rem;
                         }
 
-                        .status-text {
-                            font-size: 0.75rem;
-                        }
                     }
 
-                    .switch {
-                        position: relative;
-                        display: inline-block;
-                        width: 48px;
-                        height: 24px;
+
+                    .radio-group {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 0.75rem;
                     }
 
-                    .switch input {
-                        opacity: 0;
-                        width: 0;
-                        height: 0;
-                    }
-
-                    .slider {
-                        position: absolute;
+                    .radio-option {
+                        display: flex;
+                        align-items: center;
+                        gap: 0.75rem;
                         cursor: pointer;
-                        top: 0;
-                        left: 0;
-                        right: 0;
-                        bottom: 0;
-                        background: rgba(0, 0, 0, 0.2);
-                        border: 1px solid rgba(245, 158, 11, 0.2);
-                        transition: .4s;
-                        border-radius: 24px;
+                        padding: 0.5rem;
+                        border-radius: 8px;
+                        transition: background-color 0.2s ease;
                     }
 
-                    .slider:before {
-                        position: absolute;
-                        content: "";
-                        height: 16px;
-                        width: 16px;
-                        left: 4px;
-                        bottom: 3px;
-                        background-color: #fff;
-                        transition: .4s;
+                    .radio-option:hover {
+                        background: rgba(245, 158, 11, 0.05);
+                    }
+
+                    .radio-option input[type="radio"] {
+                        appearance: none;
+                        width: 18px;
+                        height: 18px;
+                        border: 2px solid rgba(245, 158, 11, 0.3);
                         border-radius: 50%;
+                        background: transparent;
+                        cursor: pointer;
+                        position: relative;
+                        transition: all 0.2s ease;
                     }
 
-                    input:checked + .slider {
-                        background: #F59E0B;
+                    .radio-option input[type="radio"]:checked {
                         border-color: #F59E0B;
+                        background: rgba(245, 158, 11, 0.1);
                     }
 
-                    input:checked + .slider:before {
-                        transform: translateX(24px);
+                    .radio-option input[type="radio"]:checked::after {
+                        content: '';
+                        position: absolute;
+                        top: 50%;
+                        left: 50%;
+                        transform: translate(-50%, -50%);
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 50%;
+                        background: #F59E0B;
                     }
 
-                    .status-text {
-                        font-size: 0.8rem;
-                        margin-left: 1rem;
+                    .radio-label {
+                        color: #fff;
+                        font-size: 0.9rem;
+                        cursor: pointer;
+                        flex: 1;
                     }
 
-                    .status-text.active {
-                        color: #22C55E;
-                    }
-
-                    .status-text.inactive {
+                    .radio-description {
                         color: #999;
+                        font-size: 0.8rem;
+                        margin-top: 0.25rem;
                     }
 
                 "#}
@@ -340,19 +331,52 @@ pub fn critical_section() -> Html {
             </div>
 
             <div class="critical-option">
-                <span class="critical-label">{"Enable Critical Notifications"}</span>
-                <div class="critical-controls">
-                    <label class="switch">
+                <span class="critical-label">{"Critical Notification Method"}</span>
+                <div class="radio-group">
+                    <label class="radio-option" onclick={
+                        let handle_option_change = handle_option_change.clone();
+                        Callback::from(move |_| handle_option_change.emit(None))
+                    }>
                         <input 
-                            type="checkbox"
-                            checked={*critical_enabled}
-                            onchange={handle_toggle}
+                            type="radio"
+                            name="critical-notifications"
+                            checked={critical_enabled.is_none()}
                         />
-                        <span class="slider"></span>
+                        <div class="radio-label">
+                            {"Disabled"}
+                            <div class="radio-description">{"No critical notifications"}</div>
+                        </div>
                     </label>
-                    <span class={classes!("status-text", if *critical_enabled { "active" } else { "inactive" })}>
-                        {if *critical_enabled { "Active" } else { "Inactive" }}
-                    </span>
+                    
+                    <label class="radio-option" onclick={
+                        let handle_option_change = handle_option_change.clone();
+                        Callback::from(move |_| handle_option_change.emit(Some("sms".to_string())))
+                    }>
+                        <input 
+                            type="radio"
+                            name="critical-notifications"
+                            checked={*critical_enabled == Some("sms".to_string())}
+                        />
+                        <div class="radio-label">
+                            {"SMS Notifications"}
+                            <div class="radio-description">{"Receive critical alerts via SMS"}</div>
+                        </div>
+                    </label>
+                    
+                    <label class="radio-option" onclick={
+                        let handle_option_change = handle_option_change.clone();
+                        Callback::from(move |_| handle_option_change.emit(Some("call".to_string())))
+                    }>
+                        <input 
+                            type="radio"
+                            name="critical-notifications"
+                            checked={*critical_enabled == Some("call".to_string())}
+                        />
+                        <div class="radio-label">
+                            {"Phone Call Notifications"}
+                            <div class="radio-description">{"Receive critical alerts via phone call"}</div>
+                        </div>
+                    </label>
                 </div>
             </div>
         </>

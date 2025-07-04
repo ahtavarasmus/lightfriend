@@ -9,12 +9,12 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 pub struct CriticalEnabledRequest {
-    enabled: bool,
+    enabled: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct CriticalEnabledResponse {
-    enabled: bool,
+    enabled: Option<String>,
 }
 
 #[derive(Deserialize)]

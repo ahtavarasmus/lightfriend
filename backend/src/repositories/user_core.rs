@@ -115,8 +115,8 @@ impl UserCore {
                     sub_country: None,
                     info: None,
                     save_context: Some(5),
-                    critical_enabled: true,
                     number_of_digests_locked: 0,
+                    critical_enabled: Some("sms".to_string()),
                 };
                 
                 diesel::insert_into(user_settings::table)
@@ -154,8 +154,8 @@ impl UserCore {
                 sub_country: None,
                 info: None,
                 save_context: Some(5),
-                critical_enabled: true,
                 number_of_digests_locked: 0,
+                critical_enabled: Some("sms".to_string()),
             };
             
             diesel::insert_into(user_settings::table)
@@ -583,7 +583,7 @@ impl UserCore {
         Ok(settings)
     }
 
-    pub fn update_critical_enabled(&self, user_id: i32, enabled: bool) -> Result<(), DieselError> {
+    pub fn update_critical_enabled(&self, user_id: i32, enabled: Option<String>) -> Result<(), DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
@@ -598,7 +598,7 @@ impl UserCore {
         Ok(())
     }
 
-    pub fn get_critical_enabled(&self, user_id: i32) -> Result<bool, DieselError> {
+    pub fn get_critical_enabled(&self, user_id: i32) -> Result<Option<String>, DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
@@ -609,7 +609,7 @@ impl UserCore {
         let critical_enabled = user_settings::table
             .filter(user_settings::user_id.eq(user_id))
             .select(user_settings::critical_enabled)
-            .first::<bool>(&mut conn)?;
+            .first::<Option<String>>(&mut conn)?;
 
         Ok(critical_enabled)
     }

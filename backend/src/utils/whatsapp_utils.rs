@@ -935,7 +935,7 @@ pub async fn handle_whatsapp_message(
         }
     };
 
-    if !user_settings.critical_enabled {
+    if user_settings.critical_enabled.is_none() {
         tracing::debug!("Critical message checking disabled for user {}", user_id);
         return;
     }
