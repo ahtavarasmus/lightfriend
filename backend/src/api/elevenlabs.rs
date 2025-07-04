@@ -148,6 +148,7 @@ pub async fn fetch_assistant(
     let call_sid = payload.call_sid;
     let called_number = payload.called_number;
     let caller_number = payload.caller_id;
+    println!("caller_number: {}", caller_number);
 
 
     let us_voice_id = std::env::var("US_VOICE_ID").expect("US_VOICE_ID not set");
