@@ -1175,72 +1175,7 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                                                                                 _ => "Set Tier 2"
                                                                             }}
                                                                         </button>
-                                                                        {
-                                                                            // Only show migrate button for users with subscription
-                                                                            if user.sub_tier.is_some() {
-                                                                                html! {
-                                                                                    <button 
-                                                                                        onclick={{
-                                                                                            let users = users.clone();
-                                                                                            let error = error.clone();
-                                                                                            let user_id = user.id;
-                                                                                            Callback::from(move |_| {
-                                                                                                let users = users.clone();
-                                                                                                let error = error.clone();
-                                                                                                wasm_bindgen_futures::spawn_local(async move {
-                                                                                                    if let Some(token) = window()
-                                                                                                        .and_then(|w| w.local_storage().ok())
-                                                                                                        .flatten()
-                                                                                                        .and_then(|storage| storage.get_item("token").ok())
-                                                                                                        .flatten()
-                                                                                                    {
-                                                                                                        match Request::post(&format!("{}/api/profile/migrate-to-daily/{}", config::get_backend_url(), user_id))
-                                                                                                            .header("Authorization", &format!("Bearer {}", token))
-                                                                                                            .send()
-                                                                                                            .await
-                                                                                                        {
-                                                                                                            Ok(response) => {
-                                                                                                                if response.ok() {
-                                                                                                                    match response.json::<serde_json::Value>().await {
-                                                                                                                        Ok(data) => {
-                                                                                                                            // Refresh the users list
-                                                                                                                            if let Ok(response) = Request::get(&format!("{}/api/admin/users", config::get_backend_url()))
-                                                                                                                                .header("Authorization", &format!("Bearer {}", token))
-                                                                                                                                .send()
-                                                                                                                                .await
-                                                                                                                            {
-                                                                                                                                if let Ok(updated_users) = response.json::<Vec<UserInfo>>().await {
-                                                                                                                                    users.set(updated_users);
-                                                                                                                                }
-                                                                                                                            }
-                                                                                                                            error.set(Some(format!("Successfully migrated user to daily reset plan. Country: {}", 
-                                                                                                                                data["country"].as_str().unwrap_or("unknown"))));
-                                                                                                                        }
-                                                                                                                        Err(_) => {
-                                                                                                                            error.set(Some("Failed to parse migration response".to_string()));
-                                                                                                                        }
-                                                                                                                    }
-                                                                                                                } else {
-                                                                                                                    error.set(Some("Failed to migrate user to daily reset plan".to_string()));
-                                                                                                                }
-                                                                                                            }
-                                                                                                            Err(_) => {
-                                                                                                                error.set(Some("Failed to send migration request".to_string()));
-                                                                                                            }
-                                                                                                        }
-                                                                                                    }
-                                                                                                });
-                                                                                            })
-                                                                                        }}
-                                                                                        class="iq-button migrate"
-                                                                                    >
-                                                                                        {"Migrate to Daily Reset"}
-                                                                                    </button>
-                                                                                }
-                                                                            } else {
-                                                                                html! {}
-                                                                            }
-                                                                        }
+                                                                        
                                                                         <button 
                                                                             onclick={{
                                                                                 let delete_modal = delete_modal.clone();

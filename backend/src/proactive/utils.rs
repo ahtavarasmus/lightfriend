@@ -502,7 +502,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                         let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
                             .map(|msg| MessageInfo {
                                 // Remove the (WA) suffix if it exists
-                                sender: msg.sender_display_name.trim_end_matches(" (WA)").to_string(),
+                                sender: msg.room_name,
                                 content: msg.content,
                                 timestamp_rfc: msg.formatted_timestamp,
                                 platform: "whatsapp".to_string(),
@@ -701,7 +701,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                         let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
                             .map(|msg| MessageInfo {
                                 // Remove the (WA) suffix if it exists
-                                sender: msg.sender_display_name.trim_end_matches(" (WA)").to_string(),
+                                sender: msg.room_name,
                                 content: msg.content,
                                 timestamp_rfc: msg.formatted_timestamp,
                                 platform: "whatsapp".to_string(),
@@ -914,8 +914,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                         // Convert WhatsAppMessage to MessageInfo and add to messages
                         let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
                             .map(|msg| MessageInfo {
-                                // Remove the (WA) suffix if it exists
-                                sender: msg.sender_display_name.trim_end_matches(" (WA)").to_string(),
+                                sender: msg.room_name,
                                 content: msg.content,
                                 timestamp_rfc: msg.formatted_timestamp,
                                 platform: "whatsapp".to_string(),

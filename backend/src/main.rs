@@ -439,11 +439,6 @@ async fn main() {
         // WhatsApp filter toggle routes
         // Generic filter toggle routes
         .route("/api/profile/email-judgments", get(profile_handlers::get_email_judgments))
-
-        .route("/api/profile/migrate-to-daily/{user_id}", post(profile_handlers::migrate_to_daily))
-
-
-
         .route_layer(middleware::from_fn(handlers::auth_middleware::require_auth));
 
 

@@ -8,6 +8,9 @@ use stripe::{
     CreatePaymentIntent,
     BillingPortalSession,
     CreateBillingPortalSession,
+    Subscription,
+    UpdateSubscription,
+    ListSubscriptions,
 };
 
 use serde::{Deserialize, Serialize};
@@ -105,6 +108,7 @@ pub async fn create_basic_subscription_checkout(
             Json(json!({"error": format!("Database error: {}", e)})),
         )),
     };
+
 
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
 
@@ -244,6 +248,7 @@ pub async fn create_subscription_checkout(
             Json(json!({"error": format!("Database error: {}", e)})),
         )),
     };
+
 
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
 
@@ -533,6 +538,71 @@ pub async fn create_checkout_session(
 }
 
 
+// Helper function to cancel existing subscriptions of a different tier
+async fn cancel_existing_subscriptions_of_different_tier(
+    client: &Client,
+    customer_id: &str,
+    new_tier: &str,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    println!("Checking for existing subscriptions to cancel for customer: {}", customer_id);
+    
+    // List all active subscriptions for the customer
+    let subscriptions = Subscription::list(
+        client,
+        &ListSubscriptions {
+            customer: Some(customer_id.parse().unwrap()),
+            status: Some(stripe::SubscriptionStatusFilter::Active),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| {
+        println!("Failed to list subscriptions: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to fetch existing subscriptions: {}", e)})),
+        )
+    })?;
+
+    // Check each subscription and cancel if it's a different tier
+    for subscription in subscriptions.data {
+        if let Some(price_id) = subscription.items.data.first()
+            .and_then(|item| item.price.as_ref())
+            .map(|price| price.id.to_string())
+        {
+            let existing_tier = extract_subscription_info(&price_id).tier;
+            
+            // If the existing subscription is a different tier, cancel it
+            if existing_tier != new_tier {
+                println!("Canceling existing {} subscription: {}", existing_tier, subscription.id);
+                
+                Subscription::update(
+                    client,
+                    &subscription.id,
+                    UpdateSubscription {
+                        cancel_at_period_end: Some(true),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|e| {
+                    println!("Failed to cancel subscription {}: {}", subscription.id, e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Failed to cancel existing subscription: {}", e)})),
+                    )
+                })?;
+                
+                println!("Successfully scheduled cancellation for subscription: {}", subscription.id);
+            } else {
+                println!("Existing subscription {} is same tier ({}), not canceling", subscription.id, existing_tier);
+            }
+        }
+    }
+    
+    Ok(())
+}
+
 // Helper function to create a new Stripe customer
 async fn create_new_customer(
     client: &Client,
@@ -712,6 +782,16 @@ pub async fn stripe_webhook(
                     {
                         // Extract subscription info (both country and tier)
                         let sub_info = extract_subscription_info(&price_id);
+                        
+                        // Cancel existing subscriptions of different tiers before updating
+                        if let Err(e) = cancel_existing_subscriptions_of_different_tier(
+                            &client,
+                            &customer_id.to_string(),
+                            sub_info.tier,
+                        ).await {
+                            tracing::error!("Failed to cancel existing subscriptions of different tier: {:?}", e);
+                            // Continue processing even if cancellation fails - this is not critical enough to stop the webhook
+                        }
                         
                         // Update subscription country
                         if let Err(e) = state.user_core.update_sub_country(user.id, sub_info.country) {
