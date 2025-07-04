@@ -611,15 +611,15 @@ pub fn digest_section() -> Html {
                 </button>
             </div>
             <div class="flow-description">
-                {"Get summarized updates about your messages and upcoming events at specific times of the day"}
+                {"Get summarized updates about messages you might have missed and upcoming events at specific times of the day"}
             </div>
             <div class="info-section" style={if *show_info { "display: block" } else { "display: none" }}>
                 <h4>{"How It Works"}</h4>
                 <div class="info-subsection">
                     <ul>
                         <li>{"Morning Digest: Get a summary of messages received overnight and about upcoming events"}</li>
-                        <li>{"Day Digest: Receive a midday update of important messages and about upcoming events"}</li>
-                        <li>{"Evening Digest: Review a summary of the day's communications and next days events"}</li>
+                        <li>{"Day Digest: Receive a midday update of possible unread important messages and about upcoming events"}</li>
+                        <li>{"Evening Digest: Receive an evening update of unread important messages since midday and events you have scheduled for the next day."}</li>
                     </ul>
                 </div>
             </div>

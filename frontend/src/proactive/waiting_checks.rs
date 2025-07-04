@@ -534,7 +534,7 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
                     <h4>{"How It Works"}</h4>
                     <div class="info-subsection">
                         <ul>
-                            <li>{"Lightfriend will notify you when it notices anything related to your waiting checks in messages"}</li>
+                            <li>{"Lightfriend will notify you when it notices anything related to your waiting checks in messages or emails"}</li>
                             <li>{"Checks are automatically removed once a match is found"}</li>
                             <li>{"You can set up to 5 waiting checks at a time"}</li>
                             <li>{"Waiting checks can also be set through SMS or voice calls with lightfriend"}</li>

@@ -333,7 +333,7 @@ pub fn critical_section() -> Html {
                         <ul>
                             <li>{"Receive instant notifications for urgent messages"}</li>
                             <li>{"Never miss time-sensitive information"}</li>
-                            <li>{"Get alerted about critical updates immediately"}</li>
+                            <li>{"Filter is setup to notify about messages that seem like they are super time critical and cannot wait another 2 hours."}</li>
                         </ul>
                     </div>
                 </div>

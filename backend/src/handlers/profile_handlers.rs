@@ -181,7 +181,6 @@ pub async fn get_profile(
 
             let ttl = user.time_to_live.unwrap_or(0);
             let time_to_delete = current_time > ttl;
-            println!("discount: {}", user.discount);
 
             Ok(Json(ProfileResponse {
                 id: user.id,
