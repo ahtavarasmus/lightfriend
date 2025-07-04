@@ -100,7 +100,7 @@ pub async fn fetch_imap_previews(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Starting IMAP preview fetch for user {} with limit {:?}", auth_user.user_id, params.limit);
 
-    match fetch_emails_imap(&state, auth_user.user_id, true, params.limit, false).await {
+    match fetch_emails_imap(&state, auth_user.user_id, true, params.limit, false, false).await {
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP previews", previews.len());
             
@@ -147,7 +147,7 @@ pub async fn fetch_full_imap_emails(
         testing = true;
     }
 
-    match fetch_emails_imap(&state, auth_user.user_id, false, limit, false).await {
+    match fetch_emails_imap(&state, auth_user.user_id, false, limit, false, false).await {
         Ok(previews) => {
             tracing::info!("Fetched {} IMAP full emails", previews.len());
             
@@ -495,7 +495,8 @@ pub async fn fetch_emails_imap(
     user_id: i32,
     preview_only: bool,
     limit: Option<u32>,
-    unprocessed: bool, 
+    unprocessed: bool,
+    unread_only: bool,
 ) -> Result<Vec<ImapEmailPreview>, ImapError> {
     tracing::debug!("Starting fetch_emails_imap for user {} with preview_only: {}, limit: {:?}, unprocessed: {}", 
         user_id, preview_only, limit, unprocessed);
@@ -613,6 +614,11 @@ pub async fn fetch_emails_imap(
             .flags()
             .iter()
             .any(|flag| flag.to_string() == "\\Seen");
+
+        // Skip read emails if unread_only is true
+        if unread_only && is_read {
+            continue;
+        }
 
             // Try to get both full body and text body
         let full_body = message.body().map(|b| String::from_utf8_lossy(b).into_owned());

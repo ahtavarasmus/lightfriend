@@ -435,7 +435,7 @@ pub async fn handle_email_fetch_tool_call(
     };
     tracing::debug!("Received email fetch request for user: {}", user_id);
     
-    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user_id, true, Some(10), false).await {
+    match crate::handlers::imap_handlers::fetch_emails_imap(&state, user_id, true, Some(10), false, false).await {
         Ok(emails) => {
             if emails.is_empty() {
                 return Ok(Json(json!({
@@ -978,7 +978,7 @@ pub async fn handle_email_search_tool_call(
     };
 
     // First fetch recent emails with increased limit
-    match fetch_emails_imap(&state, user_id, true, Some(50), false).await {
+    match fetch_emails_imap(&state, user_id, true, Some(50), false, false).await {
         Ok(emails) => {
             let search_term = payload.search_term.to_lowercase();
             let search_type = payload.search_type.as_deref().unwrap_or("all");
@@ -2139,7 +2139,7 @@ pub async fn handle_whatsapp_fetch_tool_call(
     };
 
     // Fetch messages using the existing utility function
-    match crate::utils::whatsapp_utils::fetch_whatsapp_messages(&state, user_id, start_timestamp, end_timestamp).await {
+    match crate::utils::whatsapp_utils::fetch_whatsapp_messages(&state, user_id, start_timestamp, end_timestamp, false).await {
         Ok(messages) => {
             if messages.is_empty() {
                 return Ok(Json(json!({

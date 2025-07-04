@@ -458,7 +458,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             // Check if user has IMAP credentials before fetching emails
             let mut messages = if state.user_repository.get_imap_credentials(user_id)?.is_some() {
                 // Fetch and filter emails
-                match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false).await {
+                match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false, true).await {
                     Ok(emails) => {
                         emails.into_iter()
                             .filter(|email| {
@@ -496,7 +496,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
 
             // Fetch WhatsApp messages
             if let Some(bridge) = state.user_repository.get_whatsapp_bridge(user_id)? {
-                match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp).await {
+                match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp, true).await {
                     Ok(whatsapp_messages) => {
                         // Convert WhatsAppMessage to MessageInfo and add to messages
                         let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
@@ -657,7 +657,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             // Check if user has IMAP credentials before fetching emails
             let mut messages = if state.user_repository.get_imap_credentials(user_id)?.is_some() {
                 // Fetch and filter emails
-                match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false).await {
+                match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false, true).await {
                     Ok(emails) => {
                         emails.into_iter()
                             .filter(|email| {
@@ -695,7 +695,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
 
             // Fetch WhatsApp messages
             if let Some(bridge) = state.user_repository.get_whatsapp_bridge(user_id)? {
-                match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp).await {
+                match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp, true).await {
                     Ok(whatsapp_messages) => {
                         // Convert WhatsAppMessage to MessageInfo and add to messages
                         let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
@@ -871,7 +871,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             // Check if user has IMAP credentials before fetching emails
             let mut messages = if state.user_repository.get_imap_credentials(user_id)?.is_some() {
                 // Fetch and filter emails
-                match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false).await {
+                match crate::handlers::imap_handlers::fetch_emails_imap(state, user_id, false, Some(50), false, true).await {
                     Ok(emails) => {
                         emails.into_iter()
                             .filter(|email| {
@@ -909,7 +909,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
 
             // Fetch WhatsApp messages
             if let Some(bridge) = state.user_repository.get_whatsapp_bridge(user_id)? {
-                match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp).await {
+                match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, end_timestamp, true).await {
                     Ok(whatsapp_messages) => {
                         // Convert WhatsAppMessage to MessageInfo and add to messages
                         let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()

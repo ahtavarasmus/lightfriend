@@ -64,6 +64,7 @@ pub async fn fetch_whatsapp_messages(
     user_id: i32,
     start_time: i64,
     end_time: i64,
+    unread_only: bool,
 ) -> Result<Vec<WhatsAppMessage>> {
 
     tracing::info!("Fetching WhatsApp messages for user {}", user_id);
@@ -115,6 +116,11 @@ pub async fn fetch_whatsapp_messages(
                display_name == "WhatsApp Bridge" ||
                display_name == "WhatsApp bridge bot" {
                 return None;
+            }
+
+            // ── Skip rooms that have nothing new ───────────────────────────
+            if unread_only && room.unread_notification_counts().notification_count == 0 {
+                return None; 
             }
 
             // Check bridge bot membership
@@ -359,7 +365,6 @@ pub async fn send_whatsapp_message(
         // Check for exact match (case insensitive)
         if chat_name_part.to_lowercase() == search_term_lower {
             target_room = Some(room);
-            tracing::info!("Found exact matching room: {}", room_name);
             break;
         }
     }
@@ -803,7 +808,6 @@ pub async fn handle_whatsapp_message(
         .to_string();
 
 
-    // --- Waiting checks --------------------------------------------------------
     let waiting_checks = match state.user_repository.get_waiting_checks(user_id, "messaging") {
         Ok(checks) => checks,
         Err(e) => {
@@ -843,7 +847,6 @@ pub async fn handle_whatsapp_message(
         format!("{}{}{}{}", prefix, sender_trimmed, separator, content_trimmed)
     }
 
-    tracing::info!("priority_senders found: {}",priority_senders.len());
     // FAST CHECKS SECOND - Check priority senders if active
     for priority_sender in &priority_senders {
 
@@ -855,12 +858,8 @@ pub async fn handle_whatsapp_message(
             .trim()
             .to_string();
 
-        if user_id == 1 {
-            tracing::info!("trying to match priority_sender {} with {}", &clean_priority_sender, chat_name);
-        }
         if chat_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) ||
            sender_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) {
-            tracing::info!("Fast check: Priority sender matched for user {}: '{}'", user_id, priority_sender.sender);
             
             // Check if user has enough credits for notification
             match crate::utils::usage::check_user_credits(&state, &user, "notification", None).await {
@@ -899,7 +898,7 @@ pub async fn handle_whatsapp_message(
     if !waiting_checks.is_empty() {
         // Check if any waiting checks match the message
         if let Ok((check_id_option, message, first_message)) = crate::proactive::utils::check_waiting_check_match(
-            &content,
+            &format!("WhatsApp from {}: {}", chat_name, content),
             &waiting_checks,
         ).await {
             if let Some(check_id) = check_id_option {
@@ -946,10 +945,6 @@ pub async fn handle_whatsapp_message(
             if is_critical {
                 let message = message.unwrap_or("Critical WhatsApp message found, check WhatsApp to see it (failed to fetch actual content, pls report)".to_string());
                 let first_message = first_message.unwrap_or("Hey, I found some critical WhatsApp message you should know.".to_string());
-                tracing::info!(
-                    "Message critical check passed for user {}: {}",
-                    user_id, message
-                );
                 
                 // Spawn a new task for sending critical message notification
                 let state_clone = state.clone();
@@ -962,11 +957,6 @@ pub async fn handle_whatsapp_message(
                         Some(first_message),
                     ).await;
                 });
-            } else {
-                tracing::debug!(
-                    "Message not considered important for user {}: {}",
-                    user_id, message.unwrap_or("failed to return message for the noti".to_string())
-                );
             }
         }
         Err(e) => {

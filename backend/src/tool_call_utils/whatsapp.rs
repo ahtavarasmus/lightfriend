@@ -523,6 +523,7 @@ pub async fn handle_fetch_whatsapp_messages(
         user_id,
         start_time,
         end_time,
+        false,
     ).await {
         Ok(messages) => {
             if messages.is_empty() {

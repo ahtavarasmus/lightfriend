@@ -125,7 +125,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 // Check IMAP service
                 if let Ok(imap_users) = state.user_repository.get_active_imap_connection_users() {
                     if imap_users.contains(&user.id) {
-                        match imap_handlers::fetch_emails_imap(&state, user.id, true, Some(10), true).await {
+                        match imap_handlers::fetch_emails_imap(&state, user.id, true, Some(10), true, true).await {
                             Ok(emails) => {
                                 
                                 match state.user_repository.get_processed_emails(user.id) {

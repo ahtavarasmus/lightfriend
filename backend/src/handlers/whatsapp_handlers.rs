@@ -92,12 +92,11 @@ pub async fn test_fetch_messages(
 
     tracing::info!("Fetching messages from {} to {}", start_time, end_time);
 
-    match crate::utils::whatsapp_utils::fetch_whatsapp_messages(&state, auth_user.user_id, start_time, end_time).await {
+    match crate::utils::whatsapp_utils::fetch_whatsapp_messages(&state, auth_user.user_id, start_time, end_time, false).await {
         Ok(messages) => {
             tracing::info!("Found {} messages", messages.len());
             
             // Print message details in a readable format for testing
-            println!("\n📱 WhatsApp Messages Summary:");
             println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             
             for msg in messages.iter() {
@@ -148,7 +147,7 @@ pub async fn test_fetch_messages(
             
             // Try to fall back to the older fetch_whatsapp_messages method
             tracing::info!("Attempting fallback to fetch_whatsapp_messages method");
-            match fetch_whatsapp_messages(&state, auth_user.user_id, start_time, end_time).await {
+            match fetch_whatsapp_messages(&state, auth_user.user_id, start_time, end_time, false).await {
                 Ok(fallback_messages) => {
                     tracing::info!("Fallback successful, found {} messages", fallback_messages.len());
                     Ok(Json(WhatsAppMessagesResponse { messages: fallback_messages }))

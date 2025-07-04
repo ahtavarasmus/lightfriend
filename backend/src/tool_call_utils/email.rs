@@ -130,7 +130,7 @@ pub async fn handle_fetch_specific_email(state: &Arc<AppState>, user_id: i32, qu
     let user_id_clone = user_id.clone();
 
     // Fetch the latest 20 emails with full content
-    match crate::handlers::imap_handlers::fetch_emails_imap(&state_clone, user_id_clone, true, Some(20), false).await {
+    match crate::handlers::imap_handlers::fetch_emails_imap(&state_clone, user_id_clone, true, Some(20), false, false).await {
         Ok(emails) => {
             if emails.is_empty() {
                 return "No emails found".to_string();
