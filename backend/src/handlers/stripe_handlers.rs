@@ -173,6 +173,151 @@ pub async fn create_basic_subscription_checkout(
     })))
 }
 
+
+
+pub async fn create_oracle_subscription_checkout(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Path(user_id): Path<i32>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    println!("Starting create_oracle_subscription_checkout for user_id: {}", user_id);
+
+    // Validate user_id
+    if user_id <= 0 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid user ID"})),
+        ));
+    }
+
+    // Check if user is accessing their own data or is an admin
+    if auth_user.user_id != user_id && !auth_user.is_admin {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({"error": "Access denied"})),
+        ));
+    }
+
+    // Verify user exists in database
+    let user = state
+        .user_core
+        .find_by_id(user_id)
+        .map_err(|e| {
+            println!("Database error when finding user: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to verify user"})),
+            )
+        })?
+        .ok_or_else(|| {
+            println!("User not found: {}", user_id);
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "User not found"})),
+            )
+        })?;
+
+    // Initialize Stripe client
+    let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY").map_err(|_| {
+        println!("STRIPE_SECRET_KEY not found in environment");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Stripe configuration error"})),
+        )
+    })?;
+    let client = Client::new(stripe_secret_key);
+    println!("Stripe client initialized");
+
+    // Get or create Stripe customer
+    let customer_id = match state.user_repository.get_stripe_customer_id(user_id) {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            let user = state
+                .user_core
+                .find_by_id(user_id)
+                .map_err(|e| (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Database error: {}", e)})),
+                ))?
+                .ok_or_else(|| (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({"error": "User not found"})),
+                ))?;
+            create_new_customer(&client, user_id, &user.email, &state).await?
+        },
+        Err(e) => return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Database error: {}", e)})),
+        )),
+    };
+
+
+    let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
+
+    // Select price ID based on user's phone number
+    let price_id = if user.phone_number.starts_with("+1") {
+        std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_US")
+    } else if user.phone_number.starts_with("+358") {
+        std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_FI")
+    } else if user.phone_number.starts_with("+44") {
+        std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_UK")
+    } else if user.phone_number.starts_with("+61") {
+        std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_AU")
+    } else {
+        // Default to other price for other countries
+        std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_OTHER")
+    }.expect("Stripe price ID not found for region");
+    
+    let checkout_session = CheckoutSession::create(
+        &client,
+        CreateCheckoutSession {
+            success_url: Some(&format!("{}/billing?subscription=success", domain_url)),
+            cancel_url: Some(&format!("{}/billing?subscription=canceled", domain_url)),
+            mode: Some(stripe::CheckoutSessionMode::Subscription),
+            line_items: Some(vec![
+                stripe::CreateCheckoutSessionLineItems {
+                    price: Some(price_id),
+                    quantity: Some(1),
+                    ..Default::default()
+                }
+            ]),
+            customer: Some(customer_id.parse().unwrap()),
+            allow_promotion_codes: Some(true),
+            billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
+            automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
+                enabled: true,
+                liability: None,
+            }),
+            tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
+                enabled: true,
+            }),
+            customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
+                address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
+                name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto),
+                shipping: None,
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .map_err(|e| {
+        println!("Stripe error details: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": format!("Failed to create Subscription Checkout Session: {}", e)})),
+        )
+    })?;
+
+
+    println!("Subscription checkout session created successfully");
+    
+    // Return the Checkout session URL
+    Ok(Json(json!({
+        "url": checkout_session.url.unwrap(),
+        "message": "Redirecting to Stripe Checkout for subscription"
+    })))
+}
+
 pub async fn create_subscription_checkout(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -254,16 +399,16 @@ pub async fn create_subscription_checkout(
 
     // Select price ID based on user's phone number
     let price_id = if user.phone_number.starts_with("+1") {
-        std::env::var("STRIPE_SUBSCRIPTION_MONITORING_PRICE_ID_US")
+        std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_US")
     } else if user.phone_number.starts_with("+358") {
-        std::env::var("STRIPE_SUBSCRIPTION_MONITORING_PRICE_ID_FI")
+        std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_FI")
     } else if user.phone_number.starts_with("+44") {
-        std::env::var("STRIPE_SUBSCRIPTION_MONITORING_PRICE_ID_UK")
+        std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_UK")
     } else if user.phone_number.starts_with("+61") {
-        std::env::var("STRIPE_SUBSCRIPTION_MONITORING_PRICE_ID_AU")
+        std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_AU")
     } else {
         // Default to other price for other countries
-        std::env::var("STRIPE_SUBSCRIPTION_MONITORING_PRICE_ID_OTHER")
+        std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER")
     }.expect("Stripe price ID not found for region");
     
     let checkout_session = CheckoutSession::create(
@@ -654,7 +799,7 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
     // Default values
     let mut info = SubscriptionInfo {
         country: None,
-        tier: "tier 2", // Default to World tier
+        tier: "tier 2", // Default to Sentinel tier
     };
 
     // Helper macro to reduce code duplication
@@ -693,7 +838,16 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
         );
     }
 
-    // Tier 2 Plans (World and Escape Daily) 
+    // Tier 1.5 Plans (Oracle Plan)
+    for country in ["US", "FI", "UK", "AU", "OTHER"] {
+        // Check Hard Mode price IDs (older subscriptions)
+        check_price_id!(
+            country,
+            format!("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_{}", country),
+            "tier 1.5"
+        );
+    }
+
     for country in ["US", "FI", "UK", "AU", "OTHER"] {
         // Check World price IDs (older subscriptions)
         check_price_id!(
@@ -710,10 +864,17 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
             "tier 2"
         );
 
-        // Check Monitoring price IDs
+        // Check Monitoring price IDs (older subscriptions)
         check_price_id!(
             country,
             format!("STRIPE_SUBSCRIPTION_MONITORING_PRICE_ID_{}", country),
+            "tier 2"
+        );
+
+        // Check Sentinel price IDs
+        check_price_id!(
+            country,
+            format!("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_{}", country),
             "tier 2"
         );
     }
@@ -808,6 +969,7 @@ pub async fn stripe_webhook(
                         println!("sub_tier: {}", sub_info.tier);
                         
                         if sub_info.tier == "tier 2" {
+                            tracing::info!("User subscribed to tier 2");
                             // Calculate days until next billing
                             let days_until_billing = Some(subscription.current_period_end).map(|date| {
                                 let current_time = std::time::SystemTime::now()
@@ -832,7 +994,13 @@ pub async fn stripe_webhook(
                                 }
                             };
 
-                            messages = 100.00 - (days_until_billing * amount_of_digests) as f32;
+                            messages = 120.00 - (days_until_billing * amount_of_digests) as f32;
+                            println!("with messages: {}", messages);
+                        } else if sub_info.tier == "tier 1.5" {
+                            println!("User subscribed to tier 1.5");
+                            messages = 70.00;
+                        } else {
+                            println!("User subscribed to tier 1");
                         }
 
 

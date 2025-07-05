@@ -700,6 +700,7 @@ pub async fn handle_whatsapp_message(
     state: Arc<AppState>,
 ) {
     tracing::info!("Entering WhatsApp message handler");
+
     // Get room name
     let room_name = match room.display_name().await {
         Ok(name) => name.to_string(),

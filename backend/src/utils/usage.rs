@@ -21,7 +21,7 @@ pub async fn check_user_credits(
 
     // Define costs for each country
     let (message_cost, voice_second_cost, notification_cost) = match country.as_deref() {
-        Some("US") => (0.20, 0.0033, 0.066),  // US: $0.20/msg, $0.20/minute, $0.066/notification
+        Some("US") => (0.15, 0.0025, 0.05),  // US: $0.20/msg, $0.20/minute, $0.066/notification
         Some("FI") => (0.30, 0.005, 0.10),  // Finland: €0.30/msg, €0.25/minute, €0.10/notification
         Some("UK") => (0.30, 0.005, 0.10),  // UK: £0.30/msg, £0.25/minute, £0.10/notification
         Some("AU") => (0.30, 0.005, 0.10),  // Australia: A$0.30/msg, A$0.25/minute, A$0.10/notification
@@ -176,7 +176,7 @@ pub fn deduct_user_credits(
 
     // Define costs for each country
     let (message_cost, voice_second_cost, notification_cost) = match country.as_deref() {
-        Some("US") => (0.20, 0.0033, 0.066),  // US: $0.10/msg, $0.20/minute, $0.05/notification
+        Some("US") => (0.15, 0.0025, 0.05),  // US: $0.10/msg, $0.20/minute, $0.05/notification
         Some("FI") => (0.30, 0.005, 0.10),  // Finland: €0.30/msg, €0.25/minute, €0.15/notification
         Some("UK") => (0.30, 0.005, 0.10),  // UK: £0.30/msg, £0.25/minute, £0.15/notification
         Some("AU") => (0.30, 0.005, 0.10),  // Australia: A$0.30/msg, A$0.25/minute, A$0.20/notification

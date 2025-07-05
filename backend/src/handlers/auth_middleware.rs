@@ -47,8 +47,8 @@ fn requires_subscription(path: &str, sub_tier: Option<String>, has_discount: boo
     );
     
     // Tier 2 subscribers and users with discount get access to everything
-    if Some("tier 2".to_string()) == sub_tier || has_discount {
-        debug!("User has tier 2 subscription or discount - granting full access");
+    if Some("tier 2".to_string()) == sub_tier || Some("tier 1.5".to_string()) == sub_tier || has_discount {
+        debug!("User has correct subscription or discount - granting full access");
         return false;
     } else if Some("tier 1".to_string()) == sub_tier {
         // Define tools available to tier 1 subscribers

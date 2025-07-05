@@ -200,7 +200,7 @@ let group_states = use_state(|| {
 
                     // Apps 
                     <div class={classes!("service-group", 
-                        if props.sub_tier.as_deref() != Some("tier 2") && !props.discount { "disabled" } else { "" }
+                        if props.sub_tier.as_deref() != Some("tier 2") && props.sub_tier.as_deref() != Some("tier 1.5") && !props.discount { "apps-disabled" } else { "" }
                     )}>
                         <h3 class="service-group-title"
                             onclick={
@@ -282,7 +282,7 @@ let group_states = use_state(|| {
 
                     // Proactive Services
                     <div class={classes!("service-group", 
-                        if props.sub_tier.as_deref() != Some("tier 2") && !props.discount { "disabled" } else { "" }
+                        if props.sub_tier.as_deref() != Some("tier 2") { "monitoring-disabled" } else { "" }
                     )}>
                         <h3 class="service-group-title"
                             onclick={let group_states = group_states.clone();
@@ -437,7 +437,11 @@ let group_states = use_state(|| {
                             <i class="fa-solid fa-hammer"></i>
                             {"Tools"}
                             <div class="group-summary">
-                                <span class="service-count">{"6 tools ready!"}</span>
+                                <span class="service-count">
+                                {
+                                    if props.sub_tier.as_deref() != Some("tier 2") { {"5 tools ready!"} } else { "6 tools ready!" }
+                                }
+                                </span>
                                 <i class={if group_states.get("tools").map(|s| s.expanded).unwrap_or(false) {
                                     "fas fa-chevron-up"
                                 } else {
@@ -569,7 +573,7 @@ let group_states = use_state(|| {
                                             <div class="feature-overlay">
                                                 <div class="overlay-content" style="color: #999;">
                                                     <i class="fas fa-lock"></i>
-                                                    <p>{"Upgrade to Tier 2 to use Waiting Checks"}</p>
+                                                    <p>{"Upgrade to Sentinel Plan to use Waiting Checks"}</p>
                                                 </div>
                                             </div>
                                         }
@@ -752,13 +756,26 @@ let group_states = use_state(|| {
     position: relative;
 }
 
-.service-group.disabled {
-    opacity: 0.7;
-    pointer-events: none;
+
+.service-group.apps-disabled::after {
+    content: "Upgrade to Oracle or Sentinel Plan to access Apps";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #999;
+    font-size: 1.1rem;
+    border-radius: 16px;
+    backdrop-filter: blur(4px);
 }
 
-.service-group.disabled::after {
-    content: "Upgrade to Tier 2 to access Apps & Monitoring";
+.service-group.monitoring-disabled::after {
+    content: "Upgrade to Sentinel Plan to access Monitoring";
     position: absolute;
     top: 0;
     left: 0;

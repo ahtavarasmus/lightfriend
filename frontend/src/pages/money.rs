@@ -63,7 +63,7 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
             let subscription_type = subscription_type.clone();
             
             // For Monitoring Plan and "Other" country, show confirmation dialog
-            if subscription_type == "monitoring_plan" && selected_country == "Other" {
+            if subscription_type == "sentinel_plan" && selected_country == "Other" {
                 if let Some(window) = web_sys::window() {
                     if !window.confirm_with_message(
                         "Have you contacted us to get a coupon code for your country? The base price shown is just a placeholder and the actual price will be set using a coupon code based on your country's pricing. Click OK if you have a coupon code, or Cancel to contact us first."
@@ -85,6 +85,8 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
                 {
                     let endpoint = if subscription_type == "basic" {
                         format!("{}/api/stripe/basic-subscription-checkout/{}", config::get_backend_url(), user_id)
+                    } else if subscription_type == "oracle" {
+                        format!("{}/api/stripe/oracle-subscription-checkout/{}", config::get_backend_url(), user_id)
                     } else {
                         format!("{}/api/stripe/subscription-checkout/{}", config::get_backend_url(), user_id)
                     };
@@ -171,12 +173,20 @@ pub fn pricing(props: &PricingProps) -> Html {
         );
     }
 
-    let prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 20.00),
-        ("FI".to_string(), 35.00),
-        ("UK".to_string(), 35.00),
-        ("AU".to_string(), 35.00),
-        ("Other".to_string(), 40.00),
+    let sentinel_prices: HashMap<String, f64> = HashMap::from([
+        ("US".to_string(), 29.00),
+        ("FI".to_string(), 65.00),
+        ("UK".to_string(), 65.00),
+        ("AU".to_string(), 65.00),
+        ("Other".to_string(), 65.00),
+    ]);
+
+    let oracle_prices: HashMap<String, f64> = HashMap::from([
+        ("US".to_string(), 19.00),
+        ("FI".to_string(), 39.00),
+        ("UK".to_string(), 39.00),
+        ("AU".to_string(), 39.00),
+        ("Other".to_string(), 39.00),
     ]);
 
     let basic_prices: HashMap<String, f64> = HashMap::from([
@@ -188,7 +198,7 @@ pub fn pricing(props: &PricingProps) -> Html {
     ]);
 
     let credit_rates: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 0.20), // cost per additional message/question
+        ("US".to_string(), 0.15), // cost per additional message/question
         ("FI".to_string(), 0.30),
         ("UK".to_string(), 0.30),
         ("AU".to_string(), 0.30),
@@ -256,6 +266,13 @@ pub fn pricing(props: &PricingProps) -> Html {
                                     html! {
                                         <>
                                             <span class="amount">{format!("from €{:.2}", basic_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </>
+                                    }
+                                } else if *selected_country == "US" {
+                                    html! {
+                                        <>
+                                            <span class="amount">{format!("${:.2}", basic_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
                                             <span class="period">{"/month"}</span>
                                         </>
                                     }
@@ -345,24 +362,31 @@ pub fn pricing(props: &PricingProps) -> Html {
                     }
                 </div>
 
-                <div class="pricing-card subscription premium">
-                    <div class="premium-tag">{"Save 100+ Hours Monthly*"}</div>
+                <div class="pricing-card subscription popular">
+                    <div class="popular-tag">{"Most Popular"}</div>
                     <div class="card-header">
-                        <h3>{"Monitoring Plan"}</h3>
-                        <p class="best-for">{"Your personal AI assistant that helps you stay connected while maintaining peace of mind."}</p>
+                        <h3>{"Oracle Plan"}</h3>
+                        <p class="best-for">{"Answers plus integrations — no monitoring."}</p>
                         <div class="price">
                             {
                                 if *selected_country == "Other" {
                                     html! {
                                         <>
-                                            <span class="amount">{format!("from €{:.2}", prices.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                            <span class="amount">{format!("from €{:.2}", oracle_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </>
+                                    }
+                                } else if *selected_country == "US" {
+                                    html! {
+                                        <>
+                                            <span class="amount">{format!("${:.2}", oracle_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
                                             <span class="period">{"/month"}</span>
                                         </>
                                     }
                                 } else {
                                     html! {
                                         <>
-                                            <span class="amount">{format!("€{:.2}", prices.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                            <span class="amount">{format!("€{:.2}", oracle_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
                                             <span class="period">{"/month"}</span>
                                         </>
                                     }
@@ -372,15 +396,13 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <div class="includes">
                             <p>{"Subscription includes:"}</p>
                             <ul class="quota-list">
-                                <li>{"🔔 24/7 monitoring for critical messages (included)"}</li>
-                                <li>{"📊 Daily digest summaries (up to 3 per day)"}</li>
-                                <li>{"⚡ Up to 5 custom waiting checks (included)"}</li>
-                                <li>{"⭐ Priority sender notifications"}</li>
-                                <li>{"📱 100 Messages per month for:"}</li>
-                                <li class="sub-item">{"   • Daily digests"}</li>
+                                <li>{"💬 WhatsApp Integration"}</li>
+                                <li>{"📧 Email Integration"}</li>
+                                <li>{"📅 Calendar Integration"}</li>
+                                <li>{"✅ Task Management"}</li>
+                                <li>{"📱 70 Messages per month for:"}</li>
                                 <li class="sub-item">{"   • Voice calls (1 min = 1 message)"}</li>
                                 <li class="sub-item">{"   • Text queries to Lightfriend"}</li>
-                                <li class="sub-item">{"   • Priority sender notifications"}</li>
                                 <li>{"💳 Additional credits for more messages"}</li>
                                 <li>{"✨ Everything in Basic Plan included"}</li>
                             </ul>
@@ -407,7 +429,127 @@ pub fn pricing(props: &PricingProps) -> Html {
                                     <CheckoutButton 
                                         user_id={props.user_id} 
                                         user_email={props.user_email.clone()} 
-                                        subscription_type="monitoring_plan"
+                                        subscription_type="oracle"
+                                        selected_country={(*selected_country).clone()}
+                                    />
+                                }
+                            } else if props.sub_tier.as_ref().unwrap() == &"tier 1.5".to_string() {
+                                html! {
+                                    <button class="iq-button current-plan" disabled=true><b>{"Current Plan"}</b></button>
+                                }
+                            } else {
+                                let onclick = {
+                                    Callback::from(move |e: MouseEvent| {
+                                        e.prevent_default();
+                                        if let Some(window) = web_sys::window() {
+                                            if let Ok(Some(storage)) = window.local_storage() {
+                                                let _ = storage.set_item("selected_plan", "oracle");
+                                                let _ = window.location().set_href("/register");
+                                            }
+                                        }
+                                    })
+                                };
+                                html! {
+                                    <button onclick={onclick} class="iq-button signup-button"><b>{"Upgrade to Premium Plan"}</b></button>
+                                }
+                            }
+                        } else {
+                            let onclick = {
+                                Callback::from(move |e: MouseEvent| {
+                                    e.prevent_default();
+                                    if let Some(window) = web_sys::window() {
+                                        if let Ok(Some(storage)) = window.local_storage() {
+                                            let _ = storage.set_item("selected_plan", "oracle");
+                                            let _ = window.location().set_href("/register");
+                                        }
+                                    }
+                                })
+                            };
+                            html! {
+                                <button onclick={onclick} class="iq-button signup-button"><b>{"Get Started"}</b></button>
+                            }
+                        }
+                    }
+                </div>
+
+                <div class="pricing-card subscription premium">
+                    <div class="premium-tag">
+                        {
+                            if ["FI", "UK"].contains(&(*selected_country).as_str()) {
+                                "EU-Hosted 24/7 Monitoring"
+                            } else {
+                                "All-Inclusive Monitoring"
+                            }
+                        }
+                    </div>
+                    <div class="card-header">
+                        <h3>{"Sentinel Plan"}</h3>
+                        <p class="best-for">{"24/7 AI monitoring and alerts for peace of mind."}</p>
+                        <div class="price">
+                            {
+                                if *selected_country == "Other" {
+                                    html! {
+                                        <>
+                                            <span class="amount">{format!("from €{:.2}", sentinel_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </>
+                                    }
+                                } else if *selected_country == "US" {
+                                    html! {
+                                        <>
+                                            <span class="amount">{format!("${:.2}", sentinel_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </>
+                                    }
+                                } else {
+                                    html! {
+                                        <>
+                                            <span class="amount">{format!("€{:.2}", sentinel_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                            <span class="period">{"/month"}</span>
+                                        </>
+                                    }
+                                }
+                            }
+                        </div>
+                        <div class="includes">
+                            <p>{"Subscription includes:"}</p>
+                            <ul class="quota-list">
+                                <li>{"🔔 24/7 monitoring for critical messages (included)"}</li>
+                                <li>{"⚡ Set temporary monitoring for specific messages (like package delivery)"}</li>
+                                <li>{"⭐ Priority sender notifications"}</li>
+                                <li>{"📊 Daily digest summaries (up to 3 per day)"}</li>
+                                <li>{"📱 120 Messages per month for:"}</li>
+                                <li class="sub-item">{"   • Daily digests"}</li>
+                                <li class="sub-item">{"   • Voice calls (1 min = 1 message)"}</li>
+                                <li class="sub-item">{"   • Text queries to Lightfriend"}</li>
+                                <li class="sub-item">{"   • Priority sender notifications"}</li>
+                                <li>{"💳 Additional credits for more messages"}</li>
+                                <li>{"✨ Everything in Oracle Plan included"}</li>
+                            </ul>
+                        </div>
+                    </div>
+                    {
+                        if props.is_logged_in {
+                            if !props.verified {
+                                let onclick = {
+                                    Callback::from(move |e: MouseEvent| {
+                                        e.prevent_default();
+                                        if let Some(window) = web_sys::window() {
+                                            let _ = window.location().set_href("/verify");
+                                        }
+                                    })
+                                };
+                                html! {
+                                    <button class="iq-button verify-required" {onclick}>
+                                        <b>{"Verify Account to Subscribe"}</b>
+                                    </button>
+                                }
+                            } else if props.sub_tier.as_ref().is_none() {
+                                html! {
+                                    <CheckoutButton 
+                                        user_id={props.user_id} 
+                                        user_email={props.user_email.clone()} 
+                                        subscription_type="sentinel_plan"
                                         selected_country={(*selected_country).clone()}
                                     />
                                 }
@@ -421,7 +563,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                         e.prevent_default();
                                         if let Some(window) = web_sys::window() {
                                             if let Ok(Some(storage)) = window.local_storage() {
-                                                let _ = storage.set_item("selected_plan", "monitoring_plan");
+                                                let _ = storage.set_item("selected_plan", "sentinel_plan");
                                                 let _ = window.location().set_href("/register");
                                             }
                                         }
@@ -437,7 +579,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                     e.prevent_default();
                                     if let Some(window) = web_sys::window() {
                                         if let Ok(Some(storage)) = window.local_storage() {
-                                            let _ = storage.set_item("selected_plan", "monitoring_plan");
+                                            let _ = storage.set_item("selected_plan", "sentinel_plan");
                                             let _ = window.location().set_href("/register");
                                         }
                                     }
@@ -460,15 +602,45 @@ pub fn pricing(props: &PricingProps) -> Html {
                             <div class="package-row">
                                 <h3>{"Additional Messages:"}</h3>
                                 <div class="price">
-                                    <span class="amount">{format!("€{:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0))}</span>
-                                    <span class="period">{" per message"}</span>
+                                    {
+                                        if *selected_country == "US" {
+                                            html! {
+                                                <>
+                                                    <span class="amount">{format!("${:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                                    <span class="period">{" per message"}</span>
+                                                </>
+                                            }
+                                        } else {
+                                            html! {
+                                                <>
+                                                    <span class="amount">{format!("€{:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                                    <span class="period">{" per message"}</span>
+                                                </>
+                                            }
+                                        }
+                                    }
                                 </div>
                             </div>
                             <div class="package-row">
                                 <h3>{"Additional Priority Sender Notifications:"}</h3>
                                 <div class="price">
-                                    <span class="amount">{format!("€{:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0)/&3.0)}</span>
-                                    <span class="period">{" per notification"}</span>
+                                    {
+                                        if *selected_country == "US" {
+                                            html! {
+                                                <>
+                                                    <span class="amount">{format!("${:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0)/&3.0)}</span>
+                                                    <span class="period">{" per notification"}</span>
+                                                </>
+                                            }
+                                        } else {
+                                            html! {
+                                                <>
+                                                    <span class="amount">{format!("€{:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0)/&3.0)}</span>
+                                                    <span class="period">{" per notification"}</span>
+                                                </>
+                                            }
+                                        }
+                                    }
                                 </div>
                             </div>
                         </div>
@@ -500,6 +672,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <tr>
                             <th>{"Feature"}</th>
                             <th>{"Basic Plan"}</th>
+                            <th>{"Premium Plan"}</th>
                             <th>{"Monitoring Plan"}</th>
                         </tr>
                     </thead>
@@ -508,9 +681,11 @@ pub fn pricing(props: &PricingProps) -> Html {
                             <td>{"Voice calling and SMS interface"}</td>
                             <td>{"✅"}</td>
                             <td>{"✅"}</td>
+                            <td>{"✅"}</td>
                         </tr>
                         <tr>
-                            <td>{"Base Messages(40/Month and 100/Month respectively)"}</td>
+                            <td>{"Base Messages (40/70/120 per month respectively)"}</td>
+                            <td>{"✅"}</td>
                             <td>{"✅"}</td>
                             <td>{"✅"}</td>
                         </tr>
@@ -518,9 +693,11 @@ pub fn pricing(props: &PricingProps) -> Html {
                             <td>{"Buy Additional Messages"}</td>
                             <td>{"✅"}</td>
                             <td>{"✅"}</td>
+                            <td>{"✅"}</td>
                         </tr>
                         <tr>
                             <td>{"Perplexity AI Web Search"}</td>
+                            <td>{"✅"}</td>
                             <td>{"✅"}</td>
                             <td>{"✅"}</td>
                         </tr>
@@ -528,59 +705,71 @@ pub fn pricing(props: &PricingProps) -> Html {
                             <td>{"Weather Search"}</td>
                             <td>{"✅"}</td>
                             <td>{"✅"}</td>
+                            <td>{"✅"}</td>
                         </tr>
                         <tr>
                             <td>{"Photo Analysis & Translation (US & AUS only)"}</td>
+                            <td>{"✅"}</td>
                             <td>{"✅"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
                             <td>{"QR Code Scanning (US & AUS only)"}</td>
                             <td>{"✅"}</td>
-                            <td>{"✅ "}</td>
+                            <td>{"✅"}</td>
+                            <td>{"✅"}</td>
                         </tr>
                         <tr>
                             <td>{"WhatsApp Integration"}</td>
                             <td>{"❌"}</td>
+                            <td>{"✅"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
                             <td>{"Email Integration"}</td>
                             <td>{"❌"}</td>
                             <td>{"✅"}</td>
+                            <td>{"✅"}</td>
                         </tr>
                         <tr>
                             <td>{"Calendar Integration"}</td>
                             <td>{"❌"}</td>
+                            <td>{"✅"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
                             <td>{"Task Management"}</td>
                             <td>{"❌"}</td>
                             <td>{"✅"}</td>
+                            <td>{"✅"}</td>
                         </tr>
                         <tr>
                             <td>{"24/7 Critical Message Monitoring"}</td>
+                            <td>{"❌"}</td>
                             <td>{"❌"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
                             <td>{"Morning, Day and Evening Digests"}</td>
                             <td>{"❌"}</td>
+                            <td>{"❌"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
                             <td>{"Custom Waiting Checks"}</td>
+                            <td>{"❌"}</td>
                             <td>{"❌"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
                             <td>{"Priority Sender Notifications"}</td>
                             <td>{"❌"}</td>
+                            <td>{"❌"}</td>
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
                             <td>{"Priority Support"}</td>
+                            <td>{"✅"}</td>
                             <td>{"✅"}</td>
                             <td>{"✅"}</td>
                         </tr>
@@ -615,19 +804,19 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <div class="faq-grid">
                     <details>
                         <summary>{"How does billing work?"}</summary>
-                        <p>{"Freedom Plan includes 40 messages per month, with pricing varying by country (€20/month for US, €35/month for FI/UK/AU, €40+ for other countries depending on the country). Basic Plan starts at €8/month for US, €15/month for FI/UK/AU, and €15+ for other countries. Additional messages can be purchased using credits. All plans include daily digests, 24/7 monitoring, and up to 5 custom waiting checks. Unused credits carry over indefinitely. No hidden fees or commitments."}</p>
+                        <p>{"All plans are billed monthly and include a certain number of Messages per month. Additional Messages can be purchased using credits. Unused credits carry over indefinitely. You retain subscription benefits until the next normal billing period end even if you unsubscribed immediately. No hidden fees or commitments. Note that due to high cost of running the service, no free tiers or refunds can be offered (Lightfriend is a bootstrapped startup)."}</p>
                     </details>
                     <details>
-                        <summary>{"What counts as a message?"}</summary>
-                        <p>{"The Monitoring Plan includes 100 messages per month that can be used for: 1) Daily digests (up to 3 per day), 2) Voice calls (1 minute = 1 message), 3) Text queries to Lightfriend, or 4) Priority sender notifications. Critical message monitoring and up to 5 custom waiting checks are included and don't count against your message quota. AI clarification responses also don't count against your limit. The Basic Plan includes 40 messages per month for queries only."}</p>
+                        <summary>{"What counts as a Message?"}</summary>
+                        <p>{"Messages can be used for voice calls (1 minute = 1 Message) or text queries (1 query = 1 Message). On the Sentinel Plan they can also be used for receiving daily digests (1 digest = 1 Message) or notifications from priority senders (1 notification = 1/3 Message). Critical message monitoring and custom waiting checks (Sentinel Plan only) don't count against your quota."}</p>
                     </details>
                     <details>
                         <summary>{"How do credits work?"}</summary>
-                        <p>{"Credits can be used for additional messages beyond your monthly limit or for priority sender notifications. Credit rates vary by country (€0.50 per message in US, €0.75 elsewhere). Enable auto-top-up to automatically purchase credits when you run low. Unused credits never expire."}</p>
+                        <p>{"Credits can be used for additional messages beyond your monthly limit. Credit rates vary by country ($0.15 per message in US, €0.30 elsewhere). Enable auto-top-up to automatically purchase credits when you run low. Unused credits never expire."}</p>
                     </details>
                     <details>
                         <summary>{"How does automatic monitoring work?"}</summary>
-                        <p>{"The AI continuously monitors your email, messages, and calendar, providing three daily digest summaries (morning, day, evening). Critical messages are flagged immediately. You can set up to 5 custom waiting checks to monitor for specific types of messages or emails, and designate priority senders whose messages will always be notified about."}</p>
+                        <p>{"The AI continuously monitors your email, messages, and calendar, providing three daily digest summaries (morning, day, evening). Critical messages are flagged immediately and sent to you if enabled. You can set up to 5 custom waiting checks to monitor for specific types of messages or emails, and designate priority senders whose messages will always be notified about."}</p>
                     </details>
                     <details>
                         <summary>{"Is the service available in my country?"}</summary>
@@ -639,6 +828,7 @@ pub fn pricing(props: &PricingProps) -> Html {
             <div class="footnotes">
                 <p class="footnote">{"* Gen Z spends 4-7 hours daily on phones, often regretting 60% of social media time. "}<a href="https://explodingtopics.com/blog/smartphone-usage-stats" target="_blank" rel="noopener noreferrer">{"Read the study"}</a></p>
                 <p class="footnote">{"The dumbphone is sold separately and is not included in any plan."}</p>
+                <p class="footnote">{"All data processed & stored in EU-based servers compliant with GDPR."}</p>
             </div>
 
             <div class="legal-links">
@@ -745,9 +935,9 @@ pub fn pricing(props: &PricingProps) -> Html {
 
                 .pricing-grid {
                     display: grid;
-                    grid-template-columns: repeat(2, 1fr);
+                    grid-template-columns: repeat(3, 1fr);
                     gap: 2rem;
-                    max-width: 1200px;
+                    max-width: 1400px;
                     margin: 4rem auto;
                 }
 

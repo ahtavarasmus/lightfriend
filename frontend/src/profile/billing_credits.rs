@@ -472,9 +472,12 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                 <div class="tooltip">
                                                     {
                                                         if sub_tier == "tier 1" {
-                                                            "Basic Plan gives your lightfriend access to Perplexity Search and Weather tool with 40 monthly base message quota."
+                                                            "Basic Plan gives your lightfriend access to Perplexity Search and Weather tool with 40 monthly Message quota."
+                                                        } else if sub_tier == "tier 1.5" {
+
+                                                            "Oracle Plan gives full integrations capability to your lightfriend and 70 monthly Message quota."
                                                         } else {
-                                                            "Monitoring Plan gives full monitoring capability to your lightfriend and 40 monthly base message quota."
+                                                            "Sentinel Plan gives full integrations and monitoring capability to your lightfriend and 120 monthly Message quota."
                                                         }
                                                     }
                                                 </div>
@@ -482,8 +485,10 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                         {
                                                             if sub_tier == "tier 1" {
                                                                 "Basic Plan"
+                                                            } else if sub_tier == "tier 1.5" {
+                                                                "Oracle Plan"
                                                             } else {
-                                                                "Monitoring Plan"
+                                                                "Sentinel Plan"
                                                             }
                                                         }
                                                     </span>
@@ -508,7 +513,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                 <div class="discount-status">
                                                 <h3>{"Current Subscription"}</h3>
                                                 <div class="tooltip">
-                                                    {"Upgrade to Monitoring Plan to get full access to everything or to Basic Plan for Perplexity Search and Weather tool"}
+                                                    {"Current subscription is inactive. You need a active subscription to use lightfriend."}
                                                 </div>
                                                     <span>{"Inactive"}</span>
                                                 </div>
@@ -535,7 +540,7 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                             
                             <div class="auto-topup-container">
                                 {
-                                    if user_profile.sub_tier.is_some() || user_profile.time_to_live.unwrap_or(i32::MAX) < 1747170000 {
+                                    if user_profile.sub_tier.is_some() || user_profile.discount {
                                         html! {
                                             <>
                                                 if user_profile.stripe_payment_method_id.is_some() {
