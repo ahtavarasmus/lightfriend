@@ -62,8 +62,8 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
             let user_id = user_id.clone();
             let subscription_type = subscription_type.clone();
             
-            // For Monitoring Plan and "Other" country, show confirmation dialog
-            if subscription_type == "sentinel_plan" && selected_country == "Other" {
+            // For Sentinel Plan and "Other" country, show confirmation dialog
+            if subscription_type != "basic" && selected_country == "Other" {
                 if let Some(window) = web_sys::window() {
                     if !window.confirm_with_message(
                         "Have you contacted us to get a coupon code for your country? The base price shown is just a placeholder and the actual price will be set using a coupon code based on your country's pricing. Click OK if you have a coupon code, or Cancel to contact us first."
@@ -328,19 +328,13 @@ pub fn pricing(props: &PricingProps) -> Html {
                                     <button class="iq-button current-plan" disabled=true><b>{"Current Plan"}</b></button>
                                 }
                             } else {
-                                let onclick = {
-                                    Callback::from(move |e: MouseEvent| {
-                                        e.prevent_default();
-                                        if let Some(window) = web_sys::window() {
-                                            if let Ok(Some(storage)) = window.local_storage() {
-                                                let _ = storage.set_item("selected_plan", "basic");
-                                                let _ = window.location().set_href("/register");
-                                            }
-                                        }
-                                    })
-                                };
                                 html! {
-                                    <button onclick={onclick} class="iq-button signup-button"><b>{"Switch to Basic Plan"}</b></button>
+                                    <CheckoutButton 
+                                        user_id={props.user_id} 
+                                        user_email={props.user_email.clone()} 
+                                        subscription_type="basic"
+                                        selected_country={(*selected_country).clone()}
+                                    />
                                 }
                             }
                         } else {
@@ -438,19 +432,13 @@ pub fn pricing(props: &PricingProps) -> Html {
                                     <button class="iq-button current-plan" disabled=true><b>{"Current Plan"}</b></button>
                                 }
                             } else {
-                                let onclick = {
-                                    Callback::from(move |e: MouseEvent| {
-                                        e.prevent_default();
-                                        if let Some(window) = web_sys::window() {
-                                            if let Ok(Some(storage)) = window.local_storage() {
-                                                let _ = storage.set_item("selected_plan", "oracle");
-                                                let _ = window.location().set_href("/register");
-                                            }
-                                        }
-                                    })
-                                };
                                 html! {
-                                    <button onclick={onclick} class="iq-button signup-button"><b>{"Upgrade to Premium Plan"}</b></button>
+                                    <CheckoutButton 
+                                        user_id={props.user_id} 
+                                        user_email={props.user_email.clone()} 
+                                        subscription_type="oracle"
+                                        selected_country={(*selected_country).clone()}
+                                    />
                                 }
                             }
                         } else {
@@ -558,19 +546,13 @@ pub fn pricing(props: &PricingProps) -> Html {
                                     <button class="iq-button current-plan" disabled=true><b>{"Current Plan"}</b></button>
                                 }
                             } else {
-                                let onclick = {
-                                    Callback::from(move |e: MouseEvent| {
-                                        e.prevent_default();
-                                        if let Some(window) = web_sys::window() {
-                                            if let Ok(Some(storage)) = window.local_storage() {
-                                                let _ = storage.set_item("selected_plan", "sentinel_plan");
-                                                let _ = window.location().set_href("/register");
-                                            }
-                                        }
-                                    })
-                                };
                                 html! {
-                                    <button onclick={onclick} class="iq-button signup-button"><b>{"Upgrade Monitoring Plan"}</b></button>
+                                    <CheckoutButton 
+                                        user_id={props.user_id} 
+                                        user_email={props.user_email.clone()} 
+                                        subscription_type="sentinel_plan"
+                                        selected_country={(*selected_country).clone()}
+                                    />
                                 }
                             }
                         } else {
@@ -672,8 +654,8 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <tr>
                             <th>{"Feature"}</th>
                             <th>{"Basic Plan"}</th>
-                            <th>{"Premium Plan"}</th>
-                            <th>{"Monitoring Plan"}</th>
+                            <th>{"Oracle Plan"}</th>
+                            <th>{"Sentinel Plan"}</th>
                         </tr>
                     </thead>
                     <tbody>
