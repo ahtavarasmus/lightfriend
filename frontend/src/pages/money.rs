@@ -120,8 +120,28 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
     }
 }
 
+
+
 #[function_component(Pricing)]
 pub fn pricing(props: &PricingProps) -> Html {
+    // Add this function at the top of your file, after the imports
+    fn get_country_from_phone(phone_number: &str) -> String {
+        // Remove any non-digit characters for analysis
+        let digits: String = phone_number.chars().filter(|c| c.is_digit(10)).collect();
+        
+        // Check country codes
+        if digits.starts_with("1") {
+            "US".to_string()
+        } else if digits.starts_with("358") {
+            "FI".to_string()
+        } else if digits.starts_with("44") {
+            "UK".to_string()
+        } else if digits.starts_with("61") {
+            "AU".to_string()
+        } else {
+            "Other".to_string()
+        }
+    }
     let selected_country = use_state(|| "US".to_string());
     let country_name = use_state(|| String::new());
 
@@ -139,39 +159,78 @@ pub fn pricing(props: &PricingProps) -> Html {
     }
 
     
-    // Detect user's country on component mount
+    // Set country based on user's phone number if logged in, otherwise detect from IP
     {
-        let selected_country = selected_country.clone();
-        let country_name = country_name.clone();
+        // Keep the originals alive for the rest of the component
+        let selected_country_state = selected_country.clone();
+        let country_name_state     = country_name.clone();
+
+        let is_logged_in = props.is_logged_in;
+
         use_effect_with_deps(
-            move |_| {
-                wasm_bindgen_futures::spawn_local(async move {
-                    if let Ok(response) = Request::get("https://ipapi.co/json/")
-                        .send()
-                        .await
-                    {
-                        if let Ok(json) = response.json::<Value>().await {
-                            if let Some(country_code) = json.get("country_code").and_then(|c| c.as_str()) {
-                                let country_code = country_code.to_uppercase();
-                                // Get full country name
-                                if let Some(country) = json.get("country_name").and_then(|c| c.as_str()) {
-                                    country_name.set(country.to_string());
-                                }
-                                // Only set if it's one of our supported countries
-                                if ["US", "FI", "UK", "AU"].contains(&country_code.as_str()) {
-                                    selected_country.set(country_code);
-                                } else {
-                                    selected_country.set("Other".to_string());
-                                }
+            {
+                // Capture **clones** inside the closure so nothing else is moved away.
+                let user_phone       = props.phone_number.clone();
+                let selected_country = selected_country_state.clone();
+                let country_name     = country_name_state.clone();
+
+                move |_| {
+                    if is_logged_in {
+                        // Logged-in user → use phone number
+                        if let Some(phone) = &user_phone {
+                            let country = get_country_from_phone(phone);
+                            selected_country.set(country);
+
+                            match selected_country.as_str() {
+                                "US" => country_name.set("United States".to_string()),
+                                "FI" => country_name.set("Finland".to_string()),
+                                "UK" => country_name.set("United Kingdom".to_string()),
+                                "AU" => country_name.set("Australia".to_string()),
+                                _    => country_name.set("Other".to_string()),
                             }
                         }
+                    } else {
+                        // Not logged in → fall back to IP lookup (async)
+                        let selected_country = selected_country.clone();
+                        let country_name     = country_name.clone();
+
+                        wasm_bindgen_futures::spawn_local(async move {
+                            if let Ok(response) = Request::get("https://ipapi.co/json/").send().await {
+                                if let Ok(json) = response.json::<Value>().await {
+                                    if let Some(code) = json.get("country_code").and_then(|c| c.as_str()) {
+                                        let code = code.to_uppercase();
+
+                                        if let Some(name) =
+                                            json.get("country_name").and_then(|c| c.as_str())
+                                        {
+                                            country_name.set(name.to_string());
+                                        }
+
+                                        if ["US", "FI", "UK", "AU"].contains(&code.as_str()) {
+                                            selected_country.set(code);
+                                        } else {
+                                            selected_country.set("Other".to_string());
+                                        }
+                                    }
+                                }
+                            }
+                        });
                     }
-                });
-                || ()
+
+                    || ()
+                }
             },
-            (),
+            (
+                is_logged_in,
+                // Dependency tuple gets its own fresh clone
+                props.phone_number.clone(),
+            ),
         );
     }
+
+    
+
+    
 
     let sentinel_prices: HashMap<String, f64> = HashMap::from([
         ("US".to_string(), 29.00),
@@ -246,12 +305,27 @@ pub fn pricing(props: &PricingProps) -> Html {
                 }
             </div>
 
-            <div class="country-selector">
-                <label for="country">{"Select your country: "}</label>
-                <select id="country" onchange={on_country_change}>
-                    { for ["US", "FI", "UK", "AU", "Other"].iter().map(|&c| html! { <option value={c} selected={*selected_country == c}>{c}</option> }) }
-                </select>
-            </div>
+            /* Country selector ‒ hide if user is logged in */
+            {
+                if !props.is_logged_in {
+                    html! {
+                        <div class="country-selector">
+                            <label for="country">{"Select your country: "}</label>
+                            <select id="country" onchange={on_country_change}>
+                                { for ["US", "FI", "UK", "AU", "Other"]
+                                    .iter()
+                                    .map(|&c| html! {
+                                        <option value={c} selected={*selected_country == c}>{c}</option>
+                                    })
+                                }
+                            </select>
+                        </div>
+                    }
+                } else {
+                    html! {}   // nothing rendered when logged in
+                }
+            }
+
             
             <div class="pricing-grid">
 

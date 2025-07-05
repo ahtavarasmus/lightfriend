@@ -195,6 +195,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     sub_country: (*user_profile).sub_country.clone(),
                                     save_context: Some(*save_context),
                                     require_confirmation: (*user_profile).require_confirmation.clone(),
+                                    days_until_billing: (*user_profile).days_until_billing.clone(),
                                 };
 
                                 // Notify parent component
