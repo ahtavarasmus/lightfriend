@@ -75,6 +75,7 @@ pub struct ProfileResponse {
     sub_country: Option<String>,
     save_context: Option<i32>,
     require_confirmation: bool,
+    days_until_billing: Option<i32>,
 }
 
 use crate::handlers::auth_middleware::AuthUser;
@@ -107,6 +108,14 @@ pub async fn get_profile(
             let ttl = user.time_to_live.unwrap_or(0);
             let time_to_delete = current_time > ttl;
 
+            let days_until_billing: Option<i32> = user.next_billing_date_timestamp.map(|date| {
+                let current_time = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i32;
+                (date - current_time) / (24 * 60 * 60)
+            });
+
             Ok(Json(ProfileResponse {
                 id: user.id,
                 email: user.email,
@@ -132,6 +141,7 @@ pub async fn get_profile(
                 sub_country: user_settings.sub_country,
                 save_context: user_settings.save_context,
                 require_confirmation: user_settings.require_confirmation,
+                days_until_billing: days_until_billing,
             }))
         }
         None => Err((
