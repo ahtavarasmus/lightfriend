@@ -21,23 +21,23 @@ pub async fn check_user_credits(
 
     // Define costs for each country
     let (message_cost, voice_second_cost, notification_cost) = match country.as_deref() {
-        Some("US") => (0.15, 0.0025, 0.05),  // US: $0.20/msg, $0.20/minute, $0.066/notification
-        Some("FI") => (0.30, 0.005, 0.10),  // Finland: €0.30/msg, €0.25/minute, €0.10/notification
-        Some("UK") => (0.30, 0.005, 0.10),  // UK: £0.30/msg, £0.25/minute, £0.10/notification
-        Some("AU") => (0.30, 0.005, 0.10),  // Australia: A$0.30/msg, A$0.25/minute, A$0.10/notification
-        Some(_) => (0.70, 0.005, 0.25),     // Default rate for unrecognized country codes
+        Some("US") => (0.15, 0.0025, 0.075),  // US: $0.20/msg, $0.20/minute, $0.075/notification
+        Some("FI") => (0.30, 0.005, 0.15),  // Finland: €0.30/msg, €0.25/minute, €0.10/notification
+        Some("UK") => (0.30, 0.005, 0.15),  // UK: £0.30/msg, £0.25/minute, £0.10/notification
+        Some("AU") => (0.30, 0.005, 0.15),  // Australia: A$0.30/msg, A$0.25/minute, A$0.10/notification
+        Some(_) => (0.70, 0.005, 0.35),     // Default rate for unrecognized country codes
         None => {
             // Fallback to phone number based detection
             if user.phone_number.starts_with("+1") {
-                (0.20, 0.0033, 0.066)  // US
+                (0.15, 0.0033, 0.075)  // US
             } else if user.phone_number.starts_with("+358") {
-                (0.30, 0.005, 0.10)  // Finland
+                (0.30, 0.005, 0.15)  // Finland
             } else if user.phone_number.starts_with("+44") {
-                (0.30, 0.005, 0.10)  // UK
+                (0.30, 0.005, 0.15)  // UK
             } else if user.phone_number.starts_with("+61") {
-                (0.30, 0.005, 0.10)  // Australia
+                (0.30, 0.005, 0.15)  // Australia
             } else {
-                (0.70, 0.005, 0.25)  // Default to higher rate for unknown regions
+                (0.70, 0.005, 0.35)  // Default to higher rate for unknown regions
             }
         }
     };
@@ -67,7 +67,7 @@ pub async fn check_user_credits(
     let required_credits_left= match event_type {
         "message" => 1.00,
         "voice" => 0.00,
-        "notification" => 1.00 / 3.00,
+        "notification" => 1.00 / 2.00,
         "digest" => 1.00 * amount.unwrap_or(0) as f32,
         _ => return Err("Invalid event type".to_string()),
     };
@@ -176,23 +176,23 @@ pub fn deduct_user_credits(
 
     // Define costs for each country
     let (message_cost, voice_second_cost, notification_cost) = match country.as_deref() {
-        Some("US") => (0.15, 0.0025, 0.05),  // US: $0.10/msg, $0.20/minute, $0.05/notification
-        Some("FI") => (0.30, 0.005, 0.10),  // Finland: €0.30/msg, €0.25/minute, €0.15/notification
-        Some("UK") => (0.30, 0.005, 0.10),  // UK: £0.30/msg, £0.25/minute, £0.15/notification
-        Some("AU") => (0.30, 0.005, 0.10),  // Australia: A$0.30/msg, A$0.25/minute, A$0.20/notification
-        Some(_) => (0.70, 0.005, 0.25),     // Default rate for unrecognized country codes
+        Some("US") => (0.15, 0.0025, 0.075),  // US: $0.10/msg, $0.20/minute, $0.05/notification
+        Some("FI") => (0.30, 0.005, 0.15),  // Finland: €0.30/msg, €0.25/minute, €0.15/notification
+        Some("UK") => (0.30, 0.005, 0.15),  // UK: £0.30/msg, £0.25/minute, £0.15/notification
+        Some("AU") => (0.30, 0.005, 0.15),  // Australia: A$0.30/msg, A$0.25/minute, A$0.20/notification
+        Some(_) => (0.70, 0.005, 0.35),     // Default rate for unrecognized country codes
         None => {
             // Fallback to phone number based detection
             if user.phone_number.starts_with("+1") {
-                (0.20, 0.0033, 0.066)  // US
+                (0.15, 0.0033, 0.075)  // US
             } else if user.phone_number.starts_with("+358") {
-                (0.30, 0.005, 0.10)  // Finland
+                (0.30, 0.005, 0.15)  // Finland
             } else if user.phone_number.starts_with("+44") {
-                (0.30, 0.005, 0.10)  // UK
+                (0.30, 0.005, 0.15)  // UK
             } else if user.phone_number.starts_with("+61") {
-                (0.30, 0.005, 0.10)  // Australia
+                (0.30, 0.005, 0.15)  // Australia
             } else {
-                (0.70, 0.005, 0.25)  // Default to Finland/UK rate
+                (0.70, 0.005, 0.35)  // Default to Finland/UK rate
             }
         }
     };
@@ -209,7 +209,7 @@ pub fn deduct_user_credits(
     let cost_credits_left = match event_type {
         "message" => 1.00,
         "voice" => amount.unwrap_or(0) as f32 / 60.00,
-        "notification" => 1.00 / 3.00,
+        "notification" => 1.00 / 2.00,
         "digest" => 1.00 * amount.unwrap_or(0) as f32,
         _ => return Err("Invalid event type".to_string()),
     };

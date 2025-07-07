@@ -76,6 +76,7 @@ pub struct ProfileResponse {
     save_context: Option<i32>,
     require_confirmation: bool,
     days_until_billing: Option<i32>,
+    digests_reserved: i32,
 }
 
 use crate::handlers::auth_middleware::AuthUser;
@@ -105,6 +106,22 @@ pub async fn get_profile(
                                                     .unwrap()
                                                     .as_secs() as i32;
 
+            // Get current digest settings
+            let (morning_digest_time, day_digest_time, evening_digest_time) = state.user_core.get_digests(auth_user.user_id)
+                .map_err(|e| {
+                    tracing::error!("Failed to get digest settings: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"error": format!("Failed to get digest settings: {}", e)}))
+                    )
+                })?;
+
+            // Count current active digests
+            let current_count: i32 = [morning_digest_time.as_ref(), day_digest_time.as_ref(), evening_digest_time.as_ref()]
+                .iter()
+                .filter(|&&x| x.is_some())
+                .count() as i32;
+
             let ttl = user.time_to_live.unwrap_or(0);
             let time_to_delete = current_time > ttl;
 
@@ -115,6 +132,8 @@ pub async fn get_profile(
                     .as_secs() as i32;
                 (date - current_time) / (24 * 60 * 60)
             });
+
+            let digests_reserved = current_count * days_until_billing.unwrap_or(30);
 
             Ok(Json(ProfileResponse {
                 id: user.id,
@@ -142,6 +161,7 @@ pub async fn get_profile(
                 save_context: user_settings.save_context,
                 require_confirmation: user_settings.require_confirmation,
                 days_until_billing: days_until_billing,
+                digests_reserved: digests_reserved,
             }))
         }
         None => Err((

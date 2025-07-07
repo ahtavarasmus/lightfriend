@@ -31,7 +31,7 @@ pub fn Billing() -> Html {
             let query = location.query_str();
             if let Ok(params) = UrlSearchParams::new_with_str(query) {
                 if params.has("subscription") && params.get("subscription").unwrap_or_default() == "success" {
-                    success.set(Some("Subscription activated successfully! You can now connect your services at the home and setup monitoring at the 'Proactive' tab if you'd like.".to_string()));
+                    success.set(Some("Subscription activated successfully!".to_string()));
                     active_tab.set(BillingTab::Billing);
                     
                     // Clean up the URL after showing the message
@@ -248,6 +248,7 @@ pub fn Billing() -> Html {
                     }
                 .success-message {
                     border: 1px solid rgba(76, 175, 80, 0.3);
+                    background: none !important;
                     border-radius: 8px;
                     padding: 1rem;
                     margin-bottom: 1.5rem;
@@ -256,6 +257,7 @@ pub fn Billing() -> Html {
                 
                 .success-content {
                     display: flex;
+                    background: none !important;
                     align-items: center;
                     gap: 1rem;
                 }

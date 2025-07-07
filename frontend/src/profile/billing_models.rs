@@ -45,6 +45,7 @@ pub struct UserProfile {
     pub save_context: Option<i32>,
     pub require_confirmation: bool,
     pub days_until_billing: Option<i32>,
+    pub digests_reserved: i32,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]

@@ -43,7 +43,12 @@ pub struct CheckoutButtonProps {
     pub user_email: String,
     pub subscription_type: String,
     pub selected_country: String,
+    #[prop_or(0)]
+    pub selected_topups: i32,
+    #[prop_or(1)]
+    pub selected_digests: i32,
 }
+
 
 #[function_component(CheckoutButton)]
 pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
@@ -51,16 +56,21 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
     let user_email = props.user_email.clone();
     let subscription_type = props.subscription_type.clone();
     let selected_country = props.selected_country.clone();
+    let selected_topups = props.selected_topups;
+    let selected_digests = props.selected_digests;
 
     let onclick = {
         let user_id = user_id.clone();
         let subscription_type = subscription_type.clone();
         let selected_country = selected_country.clone();
+        let selected_topups = selected_topups.clone();
+        let selected_digests = selected_digests.clone();
         
         Callback::from(move |e: MouseEvent| {
             e.prevent_default();
             let user_id = user_id.clone();
             let subscription_type = subscription_type.clone();
+            let selected_topups = selected_topups.clone();
             
             // For Sentinel Plan and "Other" country, show confirmation dialog
             if subscription_type != "basic" && selected_country == "Other" {
@@ -91,8 +101,19 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
                         format!("{}/api/stripe/subscription-checkout/{}", config::get_backend_url(), user_id)
                     };
 
+                    // Create request body with top-ups and digests
+                    let request_body = if selected_topups > 0 {
+                        json!({
+                            "selected_topups": selected_topups
+                        })
+                    } else {
+                        json!({})
+                    };
+
                     let response = Request::post(&endpoint)
                         .header("Authorization", &format!("Bearer {}", token))
+                        .header("Content-Type", "application/json")
+                        .body(request_body.to_string())
                         .send()
                         .await;
 
@@ -119,6 +140,7 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
         <button class="iq-button signup-button" {onclick}><b>{button_text}</b></button>
     }
 }
+
 
 
 
@@ -234,18 +256,18 @@ pub fn pricing(props: &PricingProps) -> Html {
 
     let sentinel_prices: HashMap<String, f64> = HashMap::from([
         ("US".to_string(), 29.00),
-        ("FI".to_string(), 65.00),
-        ("UK".to_string(), 65.00),
-        ("AU".to_string(), 65.00),
-        ("Other".to_string(), 65.00),
+        ("FI".to_string(), 29.00),
+        ("UK".to_string(), 29.00),
+        ("AU".to_string(), 29.00),
+        ("Other".to_string(), 29.00),
     ]);
 
     let oracle_prices: HashMap<String, f64> = HashMap::from([
         ("US".to_string(), 19.00),
-        ("FI".to_string(), 39.00),
-        ("UK".to_string(), 39.00),
-        ("AU".to_string(), 39.00),
-        ("Other".to_string(), 39.00),
+        ("FI".to_string(), 19.00),
+        ("UK".to_string(), 19.00),
+        ("AU".to_string(), 19.00),
+        ("Other".to_string(), 19.00),
     ]);
 
     let basic_prices: HashMap<String, f64> = HashMap::from([
@@ -272,6 +294,35 @@ pub fn pricing(props: &PricingProps) -> Html {
             }
         })
     };
+
+    // State for Oracle plan top-ups
+    let oracle_selected_topups = use_state(|| 0);
+
+    let base_price = oracle_prices.get(&*selected_country).unwrap_or(&0.0);
+
+    let topup_price = if *selected_country == "US" { 
+        0.0 
+    } else { 
+        *oracle_selected_topups as f64 * 5.0 
+    };
+    let total_price = base_price + topup_price;
+
+    let selected_topups_for_checkout = *oracle_selected_topups;
+
+    // State for Sentinel plan extras
+    let sentinel_selected_topups = use_state(|| 0);
+    let sentinel_selected_digests = use_state(|| 0); 
+
+    let sentinel_base_price = sentinel_prices.get(&*selected_country).unwrap_or(&0.0);
+    let sentinel_topup_price = if *selected_country == "US" { 
+        0.0 
+    } else { 
+        *sentinel_selected_topups as f64 * 5.0 
+    };
+    let sentinel_total_price = sentinel_base_price + sentinel_topup_price;
+
+    let sentinel_topups_for_checkout = *sentinel_selected_topups;
+    let sentinel_digests_for_checkout = *sentinel_selected_digests;
 
     html! {
         <div class="pricing-panel">
@@ -437,24 +488,25 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <p class="best-for">{"Answers plus integrations — no monitoring."}</p>
                         <div class="price">
                             {
+                                
                                 if *selected_country == "Other" {
                                     html! {
                                         <>
-                                            <span class="amount">{format!("from €{:.2}", oracle_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                            <span class="amount">{format!("from €{:.2}", total_price)}</span>
                                             <span class="period">{"/month"}</span>
                                         </>
                                     }
                                 } else if *selected_country == "US" {
                                     html! {
                                         <>
-                                            <span class="amount">{format!("${:.2}", oracle_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                            <span class="amount">{format!("${:.2}", total_price)}</span>
                                             <span class="period">{"/month"}</span>
                                         </>
                                     }
                                 } else {
                                     html! {
                                         <>
-                                            <span class="amount">{format!("€{:.2}", oracle_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                            <span class="amount">{format!("€{:.2}", total_price)}</span>
                                             <span class="period">{"/month"}</span>
                                         </>
                                     }
@@ -468,13 +520,79 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 <li>{"📧 Email Integration"}</li>
                                 <li>{"📅 Calendar Integration"}</li>
                                 <li>{"✅ Task Management"}</li>
-                                <li>{"📱 70 Messages per month for:"}</li>
+                                {
+                                    if *selected_country == "US" {
+                                        html! { <li>{"📱 120 Messages per month for:"}</li> }
+                                    } else {
+                                        html! { <li>{"📱 40 Messages per month for:"}</li> }
+                                    }
+                                }
                                 <li class="sub-item">{"   • Voice calls (1 min = 1 message)"}</li>
                                 <li class="sub-item">{"   • Text queries to Lightfriend"}</li>
                                 <li>{"💳 Additional credits for more messages"}</li>
                                 <li>{"✨ Everything in Basic Plan included"}</li>
                             </ul>
                         </div>
+                        
+                        {
+                            // Show top-up selector for non-US countries
+                            if *selected_country != "US" {
+                                let selected_topups_clone = oracle_selected_topups.clone();
+                                let on_topup_change = {
+                                    let selected_topups = oracle_selected_topups.clone();
+                                    Callback::from(move |e: Event| {
+                                        if let Some(target) = e.target_dyn_into::<HtmlSelectElement>() {
+                                            if let Ok(value) = target.value().parse::<i32>() {
+                                                selected_topups.set(value);
+                                            }
+                                        }
+                                    })
+                                };
+                                
+                                html! {
+                                    <div class="oracle-topup-integrated">
+                                        <div class="topup-section">
+                                            <h4>{"Add Message Packs"}</h4>
+                                            <p class="topup-description">{"Each pack adds 20 messages for €5/month"}</p>
+                                            
+                                            <div class="topup-selector-inline">
+                                                <div class="quantity-selector-inline">
+                                                    <label for="oracle-topups">{"Message Packs:"}</label>
+                                                    <select id="oracle-topups" onchange={on_topup_change}>
+                                                        { for (0..=10).map(|i| html! {
+                                                            <option value={i.to_string()} selected={*selected_topups_clone == i}>
+                                                                {if i == 0 { "None".to_string() } else { format!("{} pack{}", i, if i == 1 { "" } else { "s" }) }}
+                                                            </option>
+                                                        })}
+                                                    </select>
+                                                </div>
+                                                
+                                                {
+                                                    if *selected_topups_clone > 0 {
+                                                        html! {
+                                                            <div class="topup-summary-inline">
+                                                                <div class="summary-item">
+                                                                    <span class="summary-label">{"Extra Messages:"}</span>
+                                                                    <span class="summary-value">{format!("{}", *selected_topups_clone * 20)}</span>
+                                                                </div>
+                                                                <div class="summary-item">
+                                                                    <span class="summary-label">{"Extra Cost:"}</span>
+                                                                    <span class="summary-value">{format!("€{}/month", *selected_topups_clone * 5)}</span>
+                                                                </div>
+                                                            </div>
+                                                        }
+                                                    } else {
+                                                        html! {}
+                                                    }
+                                                }
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
                     </div>
                     {
                         if props.is_logged_in {
@@ -499,6 +617,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                         user_email={props.user_email.clone()} 
                                         subscription_type="oracle"
                                         selected_country={(*selected_country).clone()}
+                                        selected_topups={selected_topups_for_checkout}
                                     />
                                 }
                             } else if props.sub_tier.as_ref().unwrap() == &"tier 1.5".to_string() {
@@ -512,6 +631,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                         user_email={props.user_email.clone()} 
                                         subscription_type="oracle"
                                         selected_country={(*selected_country).clone()}
+                                        selected_topups={selected_topups_for_checkout}
                                     />
                                 }
                             }
@@ -552,21 +672,21 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 if *selected_country == "Other" {
                                     html! {
                                         <>
-                                            <span class="amount">{format!("from €{:.2}", sentinel_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                            <span class="amount">{format!("from €{:.2}", sentinel_total_price)}</span>
                                             <span class="period">{"/month"}</span>
                                         </>
                                     }
                                 } else if *selected_country == "US" {
                                     html! {
                                         <>
-                                            <span class="amount">{format!("${:.2}", sentinel_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                            <span class="amount">{format!("${:.2}", sentinel_total_price)}</span>
                                             <span class="period">{"/month"}</span>
                                         </>
                                     }
                                 } else {
                                     html! {
                                         <>
-                                            <span class="amount">{format!("€{:.2}", sentinel_prices.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                            <span class="amount">{format!("€{:.2}", sentinel_total_price)}</span>
                                             <span class="period">{"/month"}</span>
                                         </>
                                     }
@@ -580,7 +700,13 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 <li>{"⚡ Set temporary monitoring for specific messages (like package delivery)"}</li>
                                 <li>{"⭐ Priority sender notifications"}</li>
                                 <li>{"📊 Daily digest summaries (up to 3 per day)"}</li>
-                                <li>{"📱 120 Messages per month for:"}</li>
+                                {
+                                    if *selected_country == "US" {
+                                        html! { <li>{"📱 200 Messages per month for:"}</li> }
+                                    } else {
+                                        html! { <li>{"📱 40 Messages per month for:"}</li> }
+                                    }
+                                }
                                 <li class="sub-item">{"   • Daily digests"}</li>
                                 <li class="sub-item">{"   • Voice calls (1 min = 1 message)"}</li>
                                 <li class="sub-item">{"   • Text queries to Lightfriend"}</li>
@@ -589,6 +715,71 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 <li>{"✨ Everything in Oracle Plan included"}</li>
                             </ul>
                         </div>
+                        
+                        {
+                            // Seamless extras selection within Sentinel plan card
+                            html! {
+                                <div class="sentinel-extras-integrated">
+                                    {
+                                        // Show top-up selector for non-US countries
+                                        if *selected_country != "US" {
+                                            let selected_topups_clone = sentinel_selected_topups.clone();
+                                            let on_topup_change = {
+                                                let selected_topups = sentinel_selected_topups.clone();
+                                                Callback::from(move |e: Event| {
+                                                    if let Some(target) = e.target_dyn_into::<HtmlSelectElement>() {
+                                                        if let Ok(value) = target.value().parse::<i32>() {
+                                                            selected_topups.set(value);
+                                                        }
+                                                    }
+                                                })
+                                            };
+                                            
+                                            html! {
+                                                <div class="extras-section">
+                                                    <h4>{"Add Message Packs"}</h4>
+                                                    <p class="extras-description">{"Each pack adds 20 Messages for €5/month"}</p>
+                                                    
+                                                    <div class="extras-selector-inline">
+                                                        <div class="quantity-selector-inline">
+                                                            <label for="sentinel-topups">{"Message Packs:"}</label>
+                                                            <select id="sentinel-topups" onchange={on_topup_change}>
+                                                                { for (0..=10).map(|i| html! {
+                                                                    <option value={i.to_string()} selected={*selected_topups_clone == i}>
+                                                                        {if i == 0 { "None".to_string() } else { format!("{} pack{}", i, if i == 1 { "" } else { "s" }) }}
+                                                                    </option>
+                                                                })}
+                                                            </select>
+                                                        </div>
+                                                        
+                                                        {
+                                                            if *selected_topups_clone > 0 {
+                                                                html! {
+                                                                    <div class="extras-summary-inline">
+                                                                        <div class="summary-item">
+                                                                            <span class="summary-label">{"Extra Messages:"}</span>
+                                                                            <span class="summary-value">{format!("{}", *selected_topups_clone * 20)}</span>
+                                                                        </div>
+                                                                        <div class="summary-item">
+                                                                            <span class="summary-label">{"Extra Cost:"}</span>
+                                                                            <span class="summary-value">{format!("€{}/month", *selected_topups_clone * 5)}</span>
+                                                                        </div>
+                                                                    </div>
+                                                                }
+                                                            } else {
+                                                                html! {}
+                                                            }
+                                                        }
+                                                    </div>
+                                                </div>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                                </div>
+                            }
+                        }
                     </div>
                     {
                         if props.is_logged_in {
@@ -613,6 +804,8 @@ pub fn pricing(props: &PricingProps) -> Html {
                                         user_email={props.user_email.clone()} 
                                         subscription_type="sentinel_plan"
                                         selected_country={(*selected_country).clone()}
+                                        selected_topups={sentinel_topups_for_checkout}
+                                        selected_digests={sentinel_digests_for_checkout}
                                     />
                                 }
                             } else if props.sub_tier.as_ref().unwrap() == &"tier 2".to_string() {
@@ -626,6 +819,8 @@ pub fn pricing(props: &PricingProps) -> Html {
                                         user_email={props.user_email.clone()} 
                                         subscription_type="sentinel_plan"
                                         selected_country={(*selected_country).clone()}
+                                        selected_topups={sentinel_topups_for_checkout}
+                                        selected_digests={sentinel_digests_for_checkout}
                                     />
                                 }
                             }
@@ -649,6 +844,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                 </div>
             </div>
 
+
             <div class="topup-pricing">
                 <h2>{format!("Overage Rates for {}", *selected_country)}</h2>
                 <p>{"When you exceed your quota, these rates apply. Enable auto-top-up to automatically add credits when you run low. Unused credits carry over indefinitely. These are can used to answer user initiated questions, send notifications from priority senders and daily digests."}</p>
@@ -663,14 +859,12 @@ pub fn pricing(props: &PricingProps) -> Html {
                                             html! {
                                                 <>
                                                     <span class="amount">{format!("${:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0))}</span>
-                                                    <span class="period">{" per message"}</span>
                                                 </>
                                             }
                                         } else {
                                             html! {
                                                 <>
                                                     <span class="amount">{format!("€{:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0))}</span>
-                                                    <span class="period">{" per message"}</span>
                                                 </>
                                             }
                                         }
@@ -691,7 +885,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                         } else {
                                             html! {
                                                 <>
-                                                    <span class="amount">{format!("€{:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0)/&3.0)}</span>
+                                                    <span class="amount">{format!("€{:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0)/&2.0)}</span>
                                                     <span class="period">{" per notification"}</span>
                                                 </>
                                             }
@@ -740,7 +934,13 @@ pub fn pricing(props: &PricingProps) -> Html {
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
-                            <td>{"Base Messages (40/70/120 per month respectively)"}</td>
+                            <td>{
+                                if *selected_country == "US" {
+                                    "Base Messages (40/120/200 per month respectively)"
+                                } else {
+                                    "Base Messages (40/40/40 per month respectively)"
+                                }
+                            }</td>
                             <td>{"✅"}</td>
                             <td>{"✅"}</td>
                             <td>{"✅"}</td>
@@ -864,11 +1064,11 @@ pub fn pricing(props: &PricingProps) -> Html {
                     </details>
                     <details>
                         <summary>{"What counts as a Message?"}</summary>
-                        <p>{"Messages can be used for voice calls (1 minute = 1 Message) or text queries (1 query = 1 Message). On the Sentinel Plan they can also be used for receiving daily digests (1 digest = 1 Message) or notifications from priority senders (1 notification = 1/3 Message). Critical message monitoring and custom waiting checks (Sentinel Plan only) don't count against your quota."}</p>
+                        <p>{"Messages can be used for voice calls (1 minute = 1 Message) or text queries (1 query = 1 Message). On the Sentinel Plan they can also be used for receiving daily digests (1 digest = 1 Message) or notifications from priority senders (1 notification = 1/2 Message). Critical message monitoring and custom waiting checks (Sentinel Plan only) don't count against your quota."}</p>
                     </details>
                     <details>
                         <summary>{"How do credits work?"}</summary>
-                        <p>{"Credits can be used for additional messages beyond your monthly limit. Credit rates vary by country ($0.15 per message in US, €0.30 elsewhere). Enable auto-top-up to automatically purchase credits when you run low. Unused credits never expire."}</p>
+                        <p>{"Credits can be used for additional messages beyond your monthly limit. Enable auto-top-up to automatically purchase credits when you run low. Unused credits never expire."}</p>
                     </details>
                     <details>
                         <summary>{"How does automatic monitoring work?"}</summary>
@@ -1404,6 +1604,172 @@ pub fn pricing(props: &PricingProps) -> Html {
                     transform: none;
                     box-shadow: none;
                     background: rgba(30, 144, 255, 0.3);
+                }
+
+
+                .oracle-topup-integrated {
+                    margin-top: 2rem;
+                    padding: 1.5rem;
+                    background: rgba(20, 20, 20, 0.6);
+                    border: 1px solid rgba(30, 144, 255, 0.2);
+                    border-radius: 16px;
+                }
+
+                .sentinel-extras-integrated {
+                    margin: 2rem auto;
+                    padding: 2rem;
+                    background: rgba(30, 30, 30, 0.7);
+                    border: 1px solid rgba(30, 144, 255, 0.15);
+                    border-radius: 16px;
+                    max-width: 600px;
+                }
+
+                .extras-section {
+                    margin-bottom: 2rem;
+                }
+
+                .extras-section:last-child {
+                    margin-bottom: 0;
+                }
+
+                .extras-section h4 {
+                    color: #7EB2FF;
+                    font-size: 1.3rem;
+                    margin-bottom: 0.5rem;
+                    text-align: center;
+                }
+
+                .extras-description {
+                    color: #b0b0b0;
+                    font-size: 0.95rem;
+                    text-align: center;
+                    margin-bottom: 1.5rem;
+                }
+
+                .extras-selector-inline {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 1rem;
+                }
+
+                .extras-summary-inline {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 1rem;
+                    background: rgba(30, 144, 255, 0.1);
+                    border-radius: 8px;
+                    margin-top: 0.5rem;
+                }
+
+                .topup-section h4 {
+                    color: #7EB2FF;
+                    font-size: 1.3rem;
+                    margin-bottom: 0.5rem;
+                    text-align: center;
+                }
+
+                .topup-description {
+                    color: #b0b0b0;
+                    font-size: 0.95rem;
+                    text-align: center;
+                    margin-bottom: 1.5rem;
+                }
+
+                .topup-selector-inline {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 1rem;
+                }
+
+                .quantity-selector-inline {
+                    display: flex;
+                    align-items: center;
+                    gap: 1rem;
+                    justify-content: center;
+                }
+
+                .quantity-selector-inline label {
+                    color: #7EB2FF;
+                    font-size: 1rem;
+                    font-weight: 500;
+                    min-width: 120px;
+                }
+
+                .quantity-selector-inline select {
+                    padding: 0.6rem 1rem;
+                    font-size: 0.95rem;
+                    border-radius: 8px;
+                    border: 1px solid rgba(30, 144, 255, 0.3);
+                    background: rgba(30, 30, 30, 0.9);
+                    color: #fff;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                    min-width: 140px;
+                }
+
+                .quantity-selector-inline select:hover {
+                    border-color: rgba(30, 144, 255, 0.5);
+                }
+
+                .topup-summary-inline {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    padding: 1rem;
+                    background: rgba(30, 144, 255, 0.1);
+                    border-radius: 8px;
+                    margin-top: 0.5rem;
+                }
+
+                .summary-item {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 0.25rem;
+                }
+
+                .summary-label {
+                    color: #7EB2FF;
+                    font-size: 0.9rem;
+                    font-weight: 500;
+                }
+
+                .summary-value {
+                    color: #fff;
+                    font-size: 1rem;
+                    font-weight: 600;
+                }
+
+                @media (max-width: 768px) {
+                    .topup-controls {
+                        grid-template-columns: 1fr;
+                        gap: 1rem;
+                    }
+                    
+                    .oracle-topup-selector {
+                        margin: 2rem auto;
+                    }
+                    
+                    .topup-card {
+                        padding: 1.5rem;
+                    }
+
+                    .quantity-selector-inline {
+                        flex-direction: column;
+                        align-items: center;
+                        gap: 0.5rem;
+                    }
+
+                    .quantity-selector-inline label {
+                        min-width: auto;
+                        text-align: center;
+                    }
+
+                    .topup-summary-inline {
+                        flex-direction: column;
+                        gap: 1rem;
+                    }
                 }
 
                 @media (max-width: 968px) {

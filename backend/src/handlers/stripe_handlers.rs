@@ -33,6 +33,11 @@ pub struct BuyCreditsRequest {
     pub amount_dollars: f32,
 }
 
+#[derive(serde::Deserialize)]
+pub struct OracleCheckoutBody {
+    pub selected_topups: Option<u64>,   // defaults to 0 if omitted
+}
+
 pub async fn create_basic_subscription_checkout(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -179,8 +184,11 @@ pub async fn create_oracle_subscription_checkout(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Path(user_id): Path<i32>,
+    Json(body): Json<OracleCheckoutBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     println!("Starting create_oracle_subscription_checkout for user_id: {}", user_id);
+    let selected_topups = body.selected_topups.unwrap_or(0);
+
 
     // Validate user_id
     if user_id <= 0 {
@@ -255,7 +263,7 @@ pub async fn create_oracle_subscription_checkout(
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
 
     // Select price ID based on user's phone number
-    let price_id = if user.phone_number.starts_with("+1") {
+    let base_price_id = if user.phone_number.starts_with("+1") {
         std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_US")
     } else if user.phone_number.starts_with("+358") {
         std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_FI")
@@ -267,6 +275,24 @@ pub async fn create_oracle_subscription_checkout(
         // Default to other price for other countries
         std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_OTHER")
     }.expect("Stripe price ID not found for region");
+
+    let topup_price_id = std::env::var("STRIPE_TOPUP_PRICE_ID").expect("STRIPE_TOPUP_PRICE_ID not found");
+
+    let mut line_items = vec![
+        stripe::CreateCheckoutSessionLineItems {
+            price: Some(base_price_id.to_string()),
+            quantity: Some(1),
+            ..Default::default()
+        }
+    ];
+
+    if selected_topups > 0 {
+        line_items.push(stripe::CreateCheckoutSessionLineItems {
+            price: Some(topup_price_id.to_string()),
+            quantity: Some(selected_topups as u64),   //  N × €top-up
+            ..Default::default()
+        });
+    }
     
     let checkout_session = CheckoutSession::create(
         &client,
@@ -274,13 +300,7 @@ pub async fn create_oracle_subscription_checkout(
             success_url: Some(&format!("{}/billing?subscription=success", domain_url)),
             cancel_url: Some(&format!("{}/billing?subscription=canceled", domain_url)),
             mode: Some(stripe::CheckoutSessionMode::Subscription),
-            line_items: Some(vec![
-                stripe::CreateCheckoutSessionLineItems {
-                    price: Some(price_id),
-                    quantity: Some(1),
-                    ..Default::default()
-                }
-            ]),
+            line_items: Some(line_items),
             customer: Some(customer_id.parse().unwrap()),
             allow_promotion_codes: Some(true),
             billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
@@ -322,9 +342,11 @@ pub async fn create_subscription_checkout(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Path(user_id): Path<i32>,
+    Json(body): Json<OracleCheckoutBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     println!("Starting create_subscription_checkout for user_id: {}", user_id);
 
+    let selected_topups = body.selected_topups.unwrap_or(0);
     // Validate user_id
     if user_id <= 0 {
         return Err((
@@ -398,7 +420,7 @@ pub async fn create_subscription_checkout(
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
 
     // Select price ID based on user's phone number
-    let price_id = if user.phone_number.starts_with("+1") {
+    let base_price_id = if user.phone_number.starts_with("+1") {
         std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_US")
     } else if user.phone_number.starts_with("+358") {
         std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_FI")
@@ -410,6 +432,24 @@ pub async fn create_subscription_checkout(
         // Default to other price for other countries
         std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER")
     }.expect("Stripe price ID not found for region");
+
+    let topup_price_id = std::env::var("STRIPE_TOPUP_PRICE_ID").expect("STRIPE_TOPUP_PRICE_ID not found");
+
+    let mut line_items = vec![
+        stripe::CreateCheckoutSessionLineItems {
+            price: Some(base_price_id.to_string()),
+            quantity: Some(1),
+            ..Default::default()
+        }
+    ];
+
+    if selected_topups > 0 {
+        line_items.push(stripe::CreateCheckoutSessionLineItems {
+            price: Some(topup_price_id.to_string()),
+            quantity: Some(selected_topups as u64),   //  N × €top-up
+            ..Default::default()
+        });
+    }
     
     let checkout_session = CheckoutSession::create(
         &client,
@@ -417,13 +457,7 @@ pub async fn create_subscription_checkout(
             success_url: Some(&format!("{}/billing?subscription=success", domain_url)),
             cancel_url: Some(&format!("{}/billing?subscription=canceled", domain_url)),
             mode: Some(stripe::CheckoutSessionMode::Subscription),
-            line_items: Some(vec![
-                stripe::CreateCheckoutSessionLineItems {
-                    price: Some(price_id),
-                    quantity: Some(1),
-                    ..Default::default()
-                }
-            ]),
+            line_items: Some(line_items),
             customer: Some(customer_id.parse().unwrap()),
             allow_promotion_codes: Some(true),
             billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
@@ -794,6 +828,26 @@ struct SubscriptionInfo {
     tier: &'static str,
 }
 
+/// Quantity of top-ups in this subscription (0 if none)
+fn topup_quantity(items: &[stripe::SubscriptionItem]) -> i64 {
+    let topup_id = std::env::var("STRIPE_TOPUP_PRICE_ID").unwrap_or_default();
+    items.iter()
+         .find(|it| it.price.as_ref().map(|p| p.id.as_str()) == Some(topup_id.as_str()))
+         .and_then(|it| it.quantity)
+         .map(|q| q as i64)                  // cast each u64 → i64
+         .unwrap_or(0)
+}
+
+fn base_price_id(items: &[stripe::SubscriptionItem]) -> Option<String> {
+    let topup_id = std::env::var("STRIPE_TOPUP_PRICE_ID").unwrap_or_default();
+    items.iter()
+         .find(|it| it.price.as_ref().map(|p| p.id.as_str()) != Some(topup_id.as_str()))
+         .and_then(|it| it.price.as_ref())
+         .map(|p| p.id.to_string())
+}
+
+
+
 // Helper function to extract subscription info from price ID
 fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
     // Default values
@@ -882,6 +936,97 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
     info
 }
 
+fn is_oracle_price_id(price_id: &str) -> bool {
+    const COUNTRIES: [&str; 5] = ["US", "FI", "UK", "AU", "OTHER"];
+
+    COUNTRIES.iter().any(|cty| {
+        let var_name = format!("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_{}", cty);
+        // If the env-var is missing, simply skip that entry.
+        std::env::var(var_name).map_or(false, |v| v == price_id)
+    })
+}
+
+fn is_sentinel_price_id(price_id: &str) -> bool {
+    const COUNTRIES: [&str; 5] = ["US", "FI", "UK", "AU", "OTHER"];
+
+    COUNTRIES.iter().any(|cty| {
+        let var_name = format!("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_{}", cty);
+        // If the env-var is missing, simply skip that entry.
+        std::env::var(var_name).map_or(false, |v| v == price_id)
+    })
+}
+
+/// Make sure the user keeps only as many digests as their credits allow.
+///
+/// Rules
+/// -----
+/// 1. Try to keep morning + evening + day if possible.
+/// 2. If credits turn negative, drop **day** first.
+/// 3. Still negative?  Drop **evening**.
+/// 4. **Morning is never removed**; if it would still be negative we just keep
+///    morning and leave credits at 0.
+///
+/// Returns the updated credit balance _after_ any digest removals.
+///
+/// Call from the Sentinel section of your webhook **before** you
+/// write `sub_credits` to the user table.
+fn fit_digests_to_credits(
+    state:   &AppState,
+    user_id: i32,
+    base_credits: f32,         // 40.0
+    topups: i64,               // number of top-ups
+    days_until_billing: i64,   // e.g. 30
+) -> Option<f32> {
+    // Helper to convert Option<String> triple into (owned) mutable vars
+    let (mut morning, mut day, mut evening) = {
+        // (morning, day, evening) Options returned from DB
+        state.user_core.get_digests(user_id)
+             .unwrap_or((None, None, None))
+    };
+
+    // How many (active) digests at any given time?
+    let count_digests = |m:&Option<String>, d:&Option<String>, e:&Option<String>| -> i64 {
+        let mut c = 0;
+        if m.is_some() { c += 1; }
+        if d.is_some() { c += 1; }
+        if e.is_some() { c += 1; }
+        c
+    };
+
+    // Reusable closure for “credits left after deductions”
+    let calc_balance = |digest_cnt: i64| -> f32 {
+        base_credits + 20.0 * topups as f32 - (days_until_billing * digest_cnt) as f32
+    };
+
+    // Current balance
+    let mut balance = calc_balance(count_digests(&morning,&day,&evening));
+
+    // If negative, start dropping digests in required order
+    if balance < 0.0 && day.is_some() {
+        day = None;
+        balance = calc_balance(count_digests(&morning,&day,&evening));
+    }
+    if balance < 0.0 && evening.is_some() {
+        evening = None;
+        balance = calc_balance(count_digests(&morning,&day,&evening));
+    }
+    // Morning never removed; if still negative, clamp at 0
+    if balance < 0.0 {
+        balance = 0.0;
+    }
+
+    // Persist the possibly-changed digest configuration
+    state.user_core.update_digests(
+        user_id,
+        morning.as_deref(),
+        day.as_deref(),
+        evening.as_deref(),
+    ).ok()?;
+
+    Some(balance)
+}
+
+
 pub async fn stripe_webhook(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -936,23 +1081,26 @@ pub async fn stripe_webhook(
                 };
 
                 if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
+                    let items        = &subscription.items.data;
+                    let topups       = topup_quantity(items);
+                    let base_price   = match base_price_id(items) {
+                        Some(id) => id,
+                        None => {
+                            tracing::warn!("subscription without base price – skipping");
+                            return Ok(StatusCode::OK);
+                        }
+                    };
+                    let sub_info = extract_subscription_info(&base_price);
 
                     if let Some(price_id) = subscription.items.data.first()
                         .and_then(|item| item.price.as_ref())
                         .map(|price| price.id.to_string())
                     {
+
                         // Extract subscription info (both country and tier)
                         let sub_info = extract_subscription_info(&price_id);
-                        
-                        // Cancel existing subscriptions of different tiers before updating
-                        if let Err(e) = cancel_existing_subscriptions_of_different_tier(
-                            &client,
-                            &customer_id.to_string(),
-                            sub_info.tier,
-                        ).await {
-                            tracing::error!("Failed to cancel existing subscriptions of different tier: {:?}", e);
-                            // Continue processing even if cancellation fails - this is not critical enough to stop the webhook
-                        }
+                        let is_sentinel_price_id = is_sentinel_price_id(&price_id);
+                        let is_oracle_price_id = is_oracle_price_id(&price_id);
                         
                         // Update subscription country
                         if let Err(e) = state.user_core.update_sub_country(user.id, sub_info.country) {
@@ -964,43 +1112,63 @@ pub async fn stripe_webhook(
                             tracing::error!("Failed to update subscription tier: {}", e);
                         }
 
-                        let mut messages = 40.00;
+                        let messages: f32;
 
                         println!("sub_tier: {}", sub_info.tier);
+
+                        let oracle_us_id = std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_US")
+                                .unwrap_or_default();
+
+                        let sentinel_us_id = std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_US")
+                                .unwrap_or_default();
+
+                        // Calculate days until next billing for the tier 2 sentinel plans
+                        let days_until_billing = Some(subscription.current_period_end).map(|date| {
+                            let current_time = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs() as i32;
+                            (date - current_time as i64) / (24 * 60 * 60)
+                        }).unwrap_or(30); // Default to 30 days if we can't calculate
+
+                        // Get user's active digests and count them
+                        let amount_of_digests = match state.user_core.get_digests(user.id) {
+                            Ok((morning, day, evening)) => {
+                                let mut count = 0;
+                                if morning.is_some() { count += 1; }
+                                if day.is_some() { count += 1; }
+                                if evening.is_some() { count += 1; }
+                                count as i64
+                            },
+                            Err(e) => {
+                                tracing::error!("Failed to get user digests: {}", e);
+                                0 // Default to 0 if there's an error
+                            }
+                        };
                         
-                        if sub_info.tier == "tier 2" {
-                            tracing::info!("User subscribed to tier 2");
-                            // Calculate days until next billing
-                            let days_until_billing = Some(subscription.current_period_end).map(|date| {
-                                let current_time = std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap()
-                                    .as_secs() as i32;
-                                (date - current_time as i64) / (24 * 60 * 60)
-                            }).unwrap_or(30); // Default to 30 days if we can't calculate
-
-                            // Get user's active digests and count them
-                            let amount_of_digests = match state.user_core.get_digests(user.id) {
-                                Ok((morning, day, evening)) => {
-                                    let mut count = 0;
-                                    if morning.is_some() { count += 1; }
-                                    if day.is_some() { count += 1; }
-                                    if evening.is_some() { count += 1; }
-                                    count as i64
-                                },
-                                Err(e) => {
-                                    tracing::error!("Failed to get user digests: {}", e);
-                                    0 // Default to 0 if there's an error
-                                }
-                            };
-
+                        if base_price == oracle_us_id {
+                            messages = 120.0;
+                        } else if is_oracle_price_id {
+                            // any other Oracle variant → 40 + 20×top-ups
+                            messages = 40.0 + 20.0 * topups as f32;
+                        } else if base_price == sentinel_us_id {
+                            messages = 200.00 - (days_until_billing * amount_of_digests) as f32;
+                        } else if is_sentinel_price_id {
+                            let new_balance = fit_digests_to_credits(
+                                &state,
+                                user.id,
+                                40.00,
+                                topups,
+                                days_until_billing,
+                            ).unwrap_or(40.00);
+                            messages = new_balance;
+                        } else if sub_info.tier == "tier 2" {
+                            // legacy sub
                             messages = 120.00 - (days_until_billing * amount_of_digests) as f32;
                             println!("with messages: {}", messages);
-                        } else if sub_info.tier == "tier 1.5" {
-                            println!("User subscribed to tier 1.5");
-                            messages = 70.00;
                         } else {
                             println!("User subscribed to tier 1");
+                            messages = 40.00;
                         }
 
 
@@ -1020,7 +1188,6 @@ pub async fn stripe_webhook(
                         tracing::info!("Updated subscription info for user {}: country={:#?}, tier={}", 
                             user.id, sub_info.country, sub_info.tier);
                     }
-
                 }
             }
         },

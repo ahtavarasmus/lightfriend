@@ -43,39 +43,9 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
 
     // Calculate usage estimates for one-time credits
     let one_time_credits = user_profile.credits;
-    let one_time_minutes = if one_time_credits > 0.0 {
-        (one_time_credits / voice_second_cost / 60.0).floor()
-    } else {
-        0.0
-    };
-    let one_time_seconds = if one_time_credits > 0.0 {
-        (one_time_credits / voice_second_cost % 60.0).floor()
-    } else {
-        0.0
-    };
-    let one_time_messages = if one_time_credits > 0.0 {
-        (one_time_credits / message_cost).floor()
-    } else {
-        0.0
-    };
 
     // Calculate usage estimates for monthly quota
     let monthly_credits = user_profile.credits_left;
-    let monthly_minutes = if monthly_credits > 0.0 {
-        (monthly_credits / voice_second_cost / 60.0).floor()
-    } else {
-        0.0
-    };
-    let monthly_seconds = if monthly_credits > 0.0 {
-        (monthly_credits / voice_second_cost % 60.0).floor()
-    } else {
-        0.0
-    };
-    let monthly_messages = if monthly_credits > 0.0 {
-        (monthly_credits / message_cost).floor()
-    } else {
-        0.0
-    };
 
     // Function to update auto top-up settings and refresh the profile
     let update_auto_topup = {

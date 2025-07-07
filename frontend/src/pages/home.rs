@@ -187,6 +187,15 @@ pub fn Home() -> Html {
                                                     <span class="credit-label">{"Monthly Message Quota"}</span>
                                                     <span class="credit-value">{profile.credits_left as i32}{" Messages"}</span>
                                                     {
+                                                        if profile.digests_reserved > 0 {
+                                                            html! {
+                                                                <span class="credit-label">{" + ("}{profile.digests_reserved as i32}{" reserved for digests)"}</span>
+                                                            }
+                                                        } else {
+                                                            html! {}
+                                                        }
+                                                    }
+                                                    {
                                                         if let Some(days) = profile.days_until_billing {
                                                             html! {
                                                                 <span class="reset-timer">
@@ -206,7 +215,7 @@ pub fn Home() -> Html {
                                                         }
                                                     }
                                                     <div class="credit-tooltip">
-                                                        {"Your monthly quota Message quota. Can be used to ask questions, voice calls(1 Message = 1 minute) or to receive priority sender notifications(1 Message = 3 notifications). Not enough? Buy overage credits or trade in unused digest slots for Messages."}
+                                                        {"Your monthly quota Message quota. Can be used to ask questions, voice calls(1 Message = 1 minute) or to receive priority sender notifications(1 Message = 2 notifications). Not enough? Buy overage credits or trade in unused digest slots for Messages."}
                                                     </div>
                                                 </div>
                                             }
