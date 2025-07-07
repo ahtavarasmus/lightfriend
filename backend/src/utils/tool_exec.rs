@@ -48,7 +48,7 @@ pub async fn get_weather(location: &str, units: &str) -> Result<String, Box<dyn 
     };
 
     let weather_url = format!(
-        "https://api.pirateweather.net/forecast/{}/{},{}?units={}&exclude=minutely,hourly,daily,alerts",
+        "https://api.pirateweather.net/forecast/{}/{},{}?units={}&exclude=minutely,daily,alerts",
         pirate_weather_key,
         lat,
         lon,
@@ -70,22 +70,51 @@ pub async fn get_weather(location: &str, units: &str) -> Result<String, Box<dyn 
     let wind_speed = current["windSpeed"].as_f64().unwrap_or(0.0);
     let description = current["summary"].as_str().unwrap_or("unknown weather");
 
-
     let (temp_unit, speed_unit) = match units {
         "imperial" => ("Fahrenheit", "miles per hour"),
         _ => ("Celsius", "meters per second")
     };
 
+    println!("{:#?}", weather_data);
+    // Process hourly forecast
+    let mut hourly_forecast = String::new();
+    if let Some(hourly) = weather_data["hourly"]["data"].as_array() {
+        // Get next 6 hours
+        for (i, hour) in hourly.iter().take(6).enumerate() {
+            if let (Some(temp), Some(precip_prob)) = (
+                hour["temperature"].as_f64(),
+                hour["precipProbability"].as_f64()
+            ) {
+                if i == 0 {
+                    hourly_forecast.push_str("\n\nHourly forecast:");
+                }
+                let time = hour["time"].as_i64().unwrap_or(0);
+                let datetime = chrono::DateTime::from_timestamp(time, 0)
+                    .map(|dt| dt.format("%H:%M").to_string())
+                    .unwrap_or_else(|| "unknown time".to_string());
+                
+                hourly_forecast.push_str(&format!(
+                    "\n{}: {} degrees {} with {}% chance of precipitation",
+                    datetime,
+                    temp.round(),
+                    temp_unit,
+                    (precip_prob * 100.0).round()
+                ));
+            }
+        }
+    }
+
     let response = format!(
         "The weather in {} is {} with a temperature of {} degrees {}. \
-        The humidity is {}% and wind speed is {} {}.",
+        The humidity is {}% and wind speed is {} {}.{}",
         location_name,
         description.to_lowercase(),
         temp.round(),
         temp_unit,
         humidity.round(),
         wind_speed.round(),
-        speed_unit
+        speed_unit,
+        hourly_forecast
     );
 
     Ok(response)
@@ -93,27 +122,28 @@ pub async fn get_weather(location: &str, units: &str) -> Result<String, Box<dyn 
 
 
 pub async fn ask_perplexity(message: &str, system_prompt: &str) -> Result<String, Box<dyn Error>> {
-    let api_key = std::env::var("PERPLEXITY_API_KEY").expect("PERPLEXITY_API_KEY must be set");
+    let api_key = std::env::var("OPENROUTER_API_KEY").expect("OPENROUTER_API_KEY must be set");
     let client = reqwest::Client::new();
     
     let payload = json!({
-        "model": "sonar-pro",
+        "model": "perplexity/sonar-pro",
         "messages": [
-                {
-                    "role": "system",
-                    "content": system_prompt, 
-                },
-                {
-                    "role": "user",
-                    "content": message
-                },
+            {
+                "role": "system",
+                "content": system_prompt, 
+            },
+            {
+                "role": "user",
+                "content": message
+            },
         ]
     });
 
     let response = client
-        .post("https://api.perplexity.ai/chat/completions")
-        .header("accept", "application/json")
-        .header("content-type", "application/json")
+        .post("https://openrouter.ai/api/v1/chat/completions")
+        .header("HTTP-Referer", "https://lightfriend.ai")
+        .header("X-Title", "Lightfriend")
+        .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", api_key))
         .json(&payload)
         .send()
