@@ -415,7 +415,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                             <p>{"Subscription includes:"}</p>
                             <ul class="quota-list">
                                 <li>{"🔍 Internet Search (Perplexity)"}</li>
-                                <li>{"☀️ Weather Updates"}</li>
+                                <li>{"☀️ Weather Search"}</li>
                                 <li>{"📱 40 Messages per month for:"}</li>
                                 <li class="sub-item">{"   • Voice calls (1 min = 1 Message)"}</li>
                                 <li class="sub-item">{"   • Text queries to Lightfriend (1 message = 1 Message)"}</li>
@@ -958,7 +958,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                             <td>{"✅"}</td>
                         </tr>
                         <tr>
-                            <td>{"Weather Search"}</td>
+                            <td>{"Weather Search and forecast of the next 6 hours"}</td>
                             <td>{"✅"}</td>
                             <td>{"✅"}</td>
                             <td>{"✅"}</td>

@@ -1131,6 +1131,11 @@ pub async fn send_notification(
     content_type: String,
     first_message: Option<String>,
 ) {
+    // Get current timestamp for message history
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
     // Get user info
     let user = match state.user_core.find_by_id(user_id) {
         Ok(Some(user)) => user,
@@ -1195,7 +1200,7 @@ pub async fn send_notification(
                 user.preferred_number
                     .unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set")),
                 content_type.clone(), // Notification type
-                first_message.unwrap_or("Hello, I have a critical notification to tell you about".to_string()),
+                first_message.clone().unwrap_or("Hello, I have a critical notification to tell you about".to_string()),
                 notification.clone().to_string(),
                 user.id.to_string(),
                 user_settings.timezone,
@@ -1208,6 +1213,37 @@ pub async fn send_notification(
                         }
                     }
                     tracing::debug!("Successfully initiated call notification for user {}", user.id);
+                    
+                    // Store notification in message history
+                    let first_msg = first_message.unwrap_or("Hello, I have a critical notification to tell you about".to_string());
+                    let assistant_first_message = crate::models::user_models::NewMessageHistory {
+                        user_id: user.id,
+                        role: "assistant".to_string(),
+                        encrypted_content: first_msg,
+                        tool_name: None,
+                        tool_call_id: None,
+                        created_at: current_time,
+                        conversation_id: conversation.conversation_sid.clone(),
+                    };
+                    
+                    let assistant_notification = crate::models::user_models::NewMessageHistory {
+                        user_id: user.id,
+                        role: "assistant".to_string(),
+                        encrypted_content: notification.to_string(),
+                        tool_name: None,
+                        tool_call_id: None,
+                        created_at: current_time,
+                        conversation_id: conversation.conversation_sid.clone(),
+                    };
+
+                    // Store messages in history
+                    if let Err(e) = state.user_repository.create_message_history(&assistant_first_message) {
+                        tracing::error!("Failed to store first message in history: {}", e);
+                    }
+                    if let Err(e) = state.user_repository.create_message_history(&assistant_notification) {
+                        tracing::error!("Failed to store notification in history: {}", e);
+                    }
+
                     // Log successful call notification
                     if let Err(e) = state.user_repository.log_usage(
                         user_id,
@@ -1259,6 +1295,22 @@ pub async fn send_notification(
                 Ok(response_sid) => {
                     tracing::info!("Successfully sent notification to user {}", user_id);
                     println!("SMS notification sent successfully for user {}", user_id);
+                    
+                    // Store notification in message history
+                    let assistant_notification = crate::models::user_models::NewMessageHistory {
+                        user_id: user.id,
+                        role: "assistant".to_string(),
+                        encrypted_content: notification.to_string(),
+                        tool_name: None,
+                        tool_call_id: None,
+                        created_at: current_time,
+                        conversation_id: conversation.conversation_sid.clone(),
+                    };
+
+                    // Store message in history
+                    if let Err(e) = state.user_repository.create_message_history(&assistant_notification) {
+                        tracing::error!("Failed to store notification in history: {}", e);
+                    }
                     
                     // Log successful SMS notification
                     if let Err(e) = state.user_repository.log_usage(

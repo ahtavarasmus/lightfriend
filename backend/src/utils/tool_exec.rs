@@ -150,7 +150,6 @@ pub async fn ask_perplexity(message: &str, system_prompt: &str) -> Result<String
         .await?;
 
     let response_text = response.text().await?;
-    println!("Raw response: {}", response_text);
     
     // Parse the JSON response
     let response_json: Value = serde_json::from_str(&response_text)?;
