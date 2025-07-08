@@ -643,6 +643,20 @@ pub async fn handle_send_sms_tool_call(
         &user,
     ).await {
         Ok(message_sid) => {
+            let history_entry = crate::models::user_models::NewMessageHistory {
+                user_id: user.id,
+                role: "assistant".to_string(),
+                encrypted_content: payload.message.clone(),
+                tool_name: Some("send_info_to_user_by_sms_during_voice_call".to_string()),
+                tool_call_id: None,
+                created_at: chrono::Utc::now().timestamp() as i32,
+                conversation_id: conversation.conversation_sid.clone(),
+            };
+
+            if let Err(e) = state.user_repository.create_message_history(&history_entry) {
+                tracing::error!("Failed to store send_sms tool message in history: {}", e);
+            }
+
             message_sids.push(message_sid.clone());
             tracing::debug!("Successfully sent main SMS with SID: {}", message_sid);
             
@@ -1326,12 +1340,14 @@ pub async fn handle_whatsapp_confirm_send(
                     None, // No image URL in this case
                 ).await {
                     Ok(_) => {
+                        let sent_msg = format!("WhatsApp message sent to '{}'", clean_room_name);
                         Ok(Json(json!({
                             "status": "success",
-                            "message": format!("WhatsApp message sent to '{}'", clean_room_name),
+                            "message": sent_msg,
                             "room_name": clean_room_name,
                         })))
                     }
+
                     Err(e) => {
                         error!("Failed to send WhatsApp message: {}", e);
                         Err((
@@ -1424,12 +1440,26 @@ pub async fn handle_whatsapp_confirm_send(
                     &user,
                 ).await {
                     Ok(message_sid) => {
+                        // Store assistant confirmation message
+                        let history_entry = crate::models::user_models::NewMessageHistory {
+                            user_id,
+                            role: "assistant".to_string(),
+                            encrypted_content: confirmation_message.clone(),
+                            tool_name: Some("send_whatsapp_message_confirmation_during_voice_call".to_string()),
+                            tool_call_id: None,
+                            created_at: chrono::Utc::now().timestamp() as i32,
+                            conversation_id: conversation.conversation_sid.clone(),
+                        };
+
+                        if let Err(e) = state.user_repository.create_message_history(&history_entry) {
+                            tracing::error!("Failed to store WhatsApp confirmation message in history: {}", e);
+                        }
+
                         // Deduct credits for the confirmation message
                         if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
                             error!("Failed to deduct user credits: {}", e);
-                            // Continue execution even if credit deduction fails
                         }
-                        
+
                         Ok(Json(json!({
                             "status": "success",
                             "message": "WhatsApp confirmation message sent",
@@ -1437,6 +1467,7 @@ pub async fn handle_whatsapp_confirm_send(
                             "message_sid": message_sid
                         })))
                     }
+
                     Err(e) => {
                         error!("Failed to send confirmation SMS: {}", e);
                         Err((
@@ -1768,12 +1799,26 @@ pub async fn handle_calendar_event_confirm(
             &user,
         ).await {
             Ok(message_sid) => {
+                // Store assistant confirmation message
+                let history_entry = crate::models::user_models::NewMessageHistory {
+                    user_id,
+                    role: "assistant".to_string(),
+                    encrypted_content: confirmation_message.clone(),
+                    tool_name: Some("create_calendar_event_confirmation_message_during_voice_call".to_string()),
+                    tool_call_id: None,
+                    created_at: chrono::Utc::now().timestamp() as i32,
+                    conversation_id: conversation.conversation_sid.clone(),
+                };
+
+                if let Err(e) = state.user_repository.create_message_history(&history_entry) {
+                    tracing::error!("Failed to store calendar event confirmation message in history: {}", e);
+                }
+
                 // Deduct credits for the confirmation message
                 if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
                     error!("Failed to deduct user credits: {}", e);
-                    // Continue execution even if credit deduction fails
                 }
-                
+
                 Ok(Json(json!({
                     "status": "success",
                     "message": "Calendar event confirmation sent",
@@ -2415,6 +2460,7 @@ pub async fn handle_email_response_tool_call(
                 &user,
             ).await {
                 Ok(message_sid) => {
+                    // we should add here the call to save the message to history then if this is used
                     // Deduct credits for the confirmation message
                     if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
                         tracing::error!("Failed to deduct user credits: {}", e);

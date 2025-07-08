@@ -277,6 +277,26 @@ pub async fn process_sms(
         }
     };
 
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+
+    // Store user's message in history
+    let user_message = crate::models::user_models::NewMessageHistory {
+        user_id: user.id,
+        role: "user".to_string(),
+        encrypted_content: payload.body.clone(),
+        tool_name: None,
+        tool_call_id: None,
+        created_at: current_time,
+        conversation_id: conversation.conversation_sid.clone(),
+    };
+
+    if let Err(e) = state.user_repository.create_message_history(&user_message) {
+        tracing::error!("Failed to store user message in history: {}", e);
+    }
+
     if user.confirm_send_event.is_some() {
         // Handle confirmation logic
         let confirmation_result = crate::tool_call_utils::confirm::handle_confirmation(
@@ -291,8 +311,27 @@ pub async fn process_sms(
         tracing::info!("Came back from handle_confirmation with should_continue as: {}", confirmation_result.should_continue);
 
         if !confirmation_result.should_continue {
-            if let Some(response) = confirmation_result.response {
-                return response;
+            if let Some((status, headers, Json(twilio_response))) = confirmation_result.response {
+                // Store message in history
+                let history_entry = crate::models::user_models::NewMessageHistory {
+                    user_id: user.id,
+                    role: "assistant".to_string(),
+                    encrypted_content: twilio_response.message.clone(),
+                    tool_name: None,
+                    tool_call_id: None,
+                    created_at: chrono::Utc::now().timestamp() as i32,
+                    conversation_id: conversation.conversation_sid.clone(),
+                };
+                if let Err(e) = state.user_repository.create_message_history(&history_entry) {
+                    tracing::error!("Failed to store assistant confirmation response in history: {}", e);
+                }
+
+                // Return full response
+                return (
+                    status,
+                    headers,
+                    Json(twilio_response), 
+                );
             }
         }
     }
@@ -526,6 +565,35 @@ pub async fn process_sms(
         })
         .collect();
 
+    // right before you convert to ChatCompletionMessage
+    for (idx, msg) in chat_messages.iter().enumerate() {
+        match &msg.content {
+            chat_completion::Content::Text(t) if t.trim().is_empty() => {
+                tracing::error!(
+                    "⚠️ empty TEXT content at index {idx}; role={}",
+                    msg.role
+                );
+            }
+            chat_completion::Content::ImageUrl(urls) => {
+                // helpful if an image-only message dropped its text
+                if urls.iter().all(|u| u.text.as_deref().unwrap_or("").trim().is_empty()) {
+                    tracing::error!("⚠️ image-only message with no text at index {idx}");
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // If you still want the assert afterwards, leave it here
+    assert!(
+        chat_messages.iter().all(|m| match &m.content {
+            chat_completion::Content::Text(t) => !t.trim().is_empty(),
+            _ => true,
+        }),
+        "Found at least one empty content item – see previous log lines"
+    );
+
+
     let result = match client.chat_completion(chat_completion::ChatCompletionRequest::new(
         GPT4_O.to_string(),
         completion_messages.clone(),
@@ -545,6 +613,17 @@ pub async fn process_sms(
             );
         }
     };
+
+    // TODO remove
+    if user.id == 1 {
+        println!("result: {:#?}", result);
+    }
+
+
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
 
     let mut fail = false;
     let mut tool_answers: HashMap<String, String> = HashMap::new(); // tool_call id and answer
@@ -574,6 +653,28 @@ pub async fn process_sms(
                     );
                 }
             };
+
+            for tc in tool_calls {
+                let history_entry = crate::models::user_models::NewMessageHistory {
+                    user_id: user.id,
+                    role: "assistant".to_string(),
+                    // Store the entire tool-call JSON so it can be replayed later
+                    encrypted_content: serde_json::to_string(tc)
+                        .unwrap_or_else(|_| "{}".to_string()),
+                    tool_name: Some(tc
+                        .function
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| "_tool_call".to_string())),
+                    tool_call_id: Some(tc.id.clone()),
+                    created_at: chrono::Utc::now().timestamp() as i32,
+                    conversation_id: conversation.conversation_sid.clone(),
+                };
+
+                if let Err(e) = state.user_repository.create_message_history(&history_entry) {
+                    tracing::error!("Failed to store tool-call message in history: {e}");
+                }
+            }
 
             for tool_call in tool_calls {
                 let tool_call_id = tool_call.id.clone();
@@ -727,7 +828,6 @@ pub async fn process_sms(
                                     }
                                 }
                             }
-
                             // Format the response with all email details and just filenames for attachments
                             let mut response = format!(
                                 "From: {}\nSubject: {}\nDate: {}\n\n{}",
@@ -736,7 +836,6 @@ pub async fn process_sms(
                                 email["date_formatted"],
                                 email["body"]
                             );
-
                             // Add attachment information with just filenames
                             if !uploaded_attachments.is_empty() {
                                 response.push_str("\n\nAttachments:\n");
@@ -744,7 +843,6 @@ pub async fn process_sms(
                                     response.push_str(&format!("- {}\n", filename));
                                 }
                             }
-
                             tool_answers.insert(tool_call_id, response);
                         },
                         Err(e) => {
@@ -772,7 +870,23 @@ pub async fn process_sms(
                         arguments,
                         &user,
                     ).await {
-                        Ok(response) => return response,
+                        Ok((status, headers, Json(twilio_response))) => {
+                            let history_entry = crate::models::user_models::NewMessageHistory {
+                                user_id: user.id,
+                                role: "assistant".to_string(),
+                                encrypted_content: twilio_response.message.clone(),
+                                tool_name: Some("create_calendar_event".to_string()),
+                                tool_call_id: Some(tool_call.id.clone()),
+                                created_at: chrono::Utc::now().timestamp() as i32,
+                                conversation_id: conversation.conversation_sid.clone(),
+                            };
+
+                            if let Err(e) = state.user_repository.create_message_history(&history_entry) {
+                                tracing::error!("Failed to store calendar tool message in history: {}", e);
+                            }
+
+                            return (status, headers, Json(twilio_response));
+                        }
                         Err(e) => {
                             tracing::error!("Failed to handle calendar event creation: {}", e);
                             return (
@@ -803,7 +917,22 @@ pub async fn process_sms(
                         &user,
                         image_url.as_deref(),
                     ).await {
-                        Ok(response) => return response,
+                        Ok((status, headers, Json(twilio_response))) => {
+                            // Store the assistant's sent message in history
+                            let history_entry = crate::models::user_models::NewMessageHistory {
+                                user_id: user.id,
+                                role: "assistant".to_string(),
+                                encrypted_content: twilio_response.message.clone(),
+                                tool_name: Some("send_whatsapp_message".to_string()),
+                                tool_call_id: Some(tool_call.id.clone()),
+                                created_at: chrono::Utc::now().timestamp() as i32,
+                                conversation_id: conversation.conversation_sid.clone(),
+                            };
+                            if let Err(e) = state.user_repository.create_message_history(&history_entry) {
+                                tracing::error!("Failed to store WhatsApp tool message in history: {}", e);
+                            }
+                            return (status, headers, Json(twilio_response));
+                        }
                         Err(e) => {
                             tracing::error!("Failed to handle WhatsApp message sending: {}", e);
                         }
@@ -820,7 +949,22 @@ pub async fn process_sms(
                         &user,
                         image_url.as_deref(),
                     ).await {
-                        Ok(response) => return response,
+                        Ok((status, headers, Json(twilio_response))) => {
+                            let history_entry = crate::models::user_models::NewMessageHistory {
+                                user_id: user.id,
+                                role: "assistant".to_string(),
+                                encrypted_content: twilio_response.message.clone(),
+                                tool_name: Some("send_telegram_message".to_string()),
+                                tool_call_id: Some(tool_call.id.clone()),
+                                created_at: chrono::Utc::now().timestamp() as i32,
+                                conversation_id: conversation.conversation_sid.clone(),
+                            };
+                            if let Err(e) = state.user_repository.create_message_history(&history_entry) {
+                                tracing::error!("Failed to store send telegram message tool message in history: {}", e);
+                            }
+                            return (status, headers, Json(twilio_response));
+                        }
+
                         Err(e) => {
                             tracing::error!("Failed to handle Telegram message sending: {}", e);
                             return (
@@ -918,6 +1062,8 @@ pub async fn process_sms(
                 tool_calls: result.choices[0].message.tool_calls.clone(),
                 tool_call_id: None,
             });
+
+
             // Add the tool response
             if let Some(tool_calls) = &result.choices[0].message.tool_calls {
                 for tool_call in tool_calls {
@@ -925,6 +1071,10 @@ pub async fn process_sms(
                         Some(ans) => ans.clone(),
                         None => "".to_string(),
                     };
+                    // TODO remove
+                    if user.id == 1 {
+                        println!("response: {}", tool_answer);
+                    }
                     follow_up_messages.push(chat_completion::ChatCompletionMessage {
                         role: chat_completion::MessageRole::tool,
                         content: chat_completion::Content::Text(tool_answer),
@@ -1028,8 +1178,53 @@ pub async fn process_sms(
 
     let processing_time_secs = start_time.elapsed().as_secs(); // Calculate processing time
 
+    // Store tool responses in history
+    for (tool_call_id, tool_response) in tool_answers.iter() {
+        let tool_message = crate::models::user_models::NewMessageHistory {
+            user_id: user.id,
+            role: "tool".to_string(),
+            encrypted_content: tool_response.clone(),
+            tool_name: None, // We could store this if needed
+            tool_call_id: Some(tool_call_id.clone()),
+            created_at: current_time,
+            conversation_id: conversation.conversation_sid.clone(),
+        };
+
+        if let Err(e) = state.user_repository.create_message_history(&tool_message) {
+            tracing::error!("Failed to store tool response in history: {}", e);
+        }
+    }
+
+
+
+    // Clean up old message history based on save_context setting
+    let save_context = user_settings.save_context.unwrap_or(0);
+    if let Err(e) = state.user_repository.delete_old_message_history(
+        user.id,
+        Some(&conversation.conversation_sid),
+        save_context as i64
+    ) {
+        tracing::error!("Failed to clean up old message history: {}", e);
+    }
+
+    let assistant_message = crate::models::user_models::NewMessageHistory {
+        user_id: user.id,
+        role: "assistant".to_string(),
+        encrypted_content: final_response_with_notice.clone(),
+        tool_name: None,
+        tool_call_id: None,
+        created_at: current_time,
+        conversation_id: conversation.conversation_sid.clone(),
+    };
+
+    // Store messages in history
+    if let Err(e) = state.user_repository.create_message_history(&assistant_message) {
+        tracing::error!("Failed to store assistant message in history: {}", e);
+    }
+
     // If in test mode, skip sending the actual message and return the response directly
     if is_test {
+
         // Log the test usage without actually sending the message
         if let Err(e) = state.user_repository.log_usage(
             user.id,
@@ -1087,10 +1282,6 @@ pub async fn process_sms(
             // Log the SMS usage metadata and store message history
             tracing::debug!("status of the message: {}", status);
             
-            let current_time = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i32;
 
             // Log usage
             if let Err(e) = state.user_repository.log_usage(
@@ -1108,61 +1299,6 @@ pub async fn process_sms(
                 tracing::error!("Failed to log SMS usage: {}", e);
             }
 
-            // Store user's message in history
-            let user_message = crate::models::user_models::NewMessageHistory {
-                user_id: user.id,
-                role: "user".to_string(),
-                encrypted_content: payload.body.clone(),
-                tool_name: None,
-                tool_call_id: None,
-                created_at: current_time,
-                conversation_id: conversation.conversation_sid.clone(),
-            };
-
-            // Store assistant's response in history
-            let assistant_message = crate::models::user_models::NewMessageHistory {
-                user_id: user.id,
-                role: "assistant".to_string(),
-                encrypted_content: final_response_with_notice.clone(),
-                tool_name: None,
-                tool_call_id: None,
-                created_at: current_time,
-                conversation_id: conversation.conversation_sid.clone(),
-            };
-
-            // Store messages in history
-            if let Err(e) = state.user_repository.create_message_history(&user_message) {
-                tracing::error!("Failed to store user message in history: {}", e);
-            }
-            if let Err(e) = state.user_repository.create_message_history(&assistant_message) {
-                tracing::error!("Failed to store assistant message in history: {}", e);
-            }
-
-            // Store tool responses in history
-            for (tool_call_id, tool_response) in tool_answers.iter() {
-                let tool_message = crate::models::user_models::NewMessageHistory {
-                    user_id: user.id,
-                    role: "tool".to_string(),
-                    encrypted_content: tool_response.clone(),
-                    tool_name: None, // We could store this if needed
-                    tool_call_id: Some(tool_call_id.clone()),
-                    created_at: current_time,
-                    conversation_id: conversation.conversation_sid.clone(),
-                };
-
-                if let Err(e) = state.user_repository.create_message_history(&tool_message) {
-                    tracing::error!("Failed to store tool response in history: {}", e);
-                }
-            }
-            // Clean up old message history based on save_context setting
-            let save_context = user_settings.save_context.unwrap_or(0);
-            if let Err(e) = state.user_repository.delete_old_message_history(
-                user.id,
-                Some(&conversation.conversation_sid),
-                save_context as i64
-            ) {
-                tracing::error!("Failed to clean up old message history: {}", e);
-            }
 
             if should_charge {
                 // Only deduct credits if we should charge

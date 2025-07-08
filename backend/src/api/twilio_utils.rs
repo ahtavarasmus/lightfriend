@@ -825,30 +825,12 @@ pub async fn send_conversation_message(
     media_sid: Option<&String>,
     user: &User,
 ) -> Result<String, Box<dyn Error>> {
-    // If this is a non-free reply message, we should redact previous free reply messages
-    if redact && !body.contains("(free reply)") {
-        // Fetch recent messages
-        let messages = match crate::api::twilio_sms::fetch_conversation_messages(conversation_sid).await {
-            Ok(msgs) => msgs,
-            Err(e) => {
-                eprintln!("Failed to fetch messages for redaction: {}", e);
-                vec![] // Continue with sending the message even if fetching fails
-            }
-        };
 
-        // Find and redact free reply messages until we hit a non-free reply message
-        for msg in messages {
-            if msg.author == "lightfriend" && msg.body.contains("(free reply)") {
-                let redacted_body = redact_sensitive_info(&msg.body).await;
-                if let Err(e) = redact_message(conversation_sid, &msg.sid, &redacted_body, &user).await {
-                    eprintln!("Failed to redact free reply message {}: {}", msg.sid, e);
-                }
-            } else if msg.author == "lightfriend" {
-                // Stop when we hit a non-free reply message
-                break;
-            }
-        }
-    }
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+
 
     // Check if user has SMS discount tier and use their credentials if they do
     let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {

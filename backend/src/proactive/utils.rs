@@ -533,6 +533,11 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 messages.len()
             );
 
+            // return if no new nothing
+            if messages.is_empty() && calendar_events.is_empty() {
+                return Ok(());
+            }
+
             // Prepare digest data
             let digest_data = DigestData {
                 messages,
