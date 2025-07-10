@@ -995,7 +995,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
 }
 
 // Prompt for generating an SMS digest
-const DIGEST_PROMPT: &str = r#"You are an AI called lightfriend that creates concise SMS digests of messages and calendar events.
+const DIGEST_PROMPT: &str = r#"You are an AI called lightfriend that creates concise SMS digests of messages and calendar events. You have helping user keep on top of their unread messages and possible next calendar events. Not all messages are as important, hightlight the ones that might be and just mention shortly the ones that seem like they can wait. 
 
 Rules
 • Absolute length limit: 480 characters.
@@ -1005,6 +1005,7 @@ Rules
 • Start each item on a new line; you may prefix items with a hyphen (“-”) if helpful, but keep the newline.
 • Put truly critical or actionable items first.
 • Mention the platform (EMAIL / WHATSAPP / CALENDAR) only when it adds essential context.
+• Add timestamp to messages when it makes sense and vague time like .
 • For calendar, include only events starting within the next few hours.
 
 Return JSON with a single field:

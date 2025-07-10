@@ -500,7 +500,7 @@ pub async fn validate_twilio_signature(
         }
     };
 
-    let is_self_hosted= std::env::var("ENVIRONMENT") != Ok("self_hosted".to_string());
+    let is_self_hosted= std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
     let auth_token: String;
     let url: String;
     if is_self_hosted {

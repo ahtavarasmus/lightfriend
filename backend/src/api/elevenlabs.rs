@@ -2192,9 +2192,8 @@ pub async fn handle_whatsapp_fetch_tool_call(
             for (i, msg) in messages.iter().take(20).enumerate() {
 
                 response_text.push_str(&format!(
-                    "Message {} from {} in chat {}, sent on {}: {}. ",
+                    "Message {} in chat {}, sent on {}: {}. ",
                     i + 1,
-                    msg.sender_display_name,
                     msg.room_name,
                     msg.formatted_timestamp,
                     msg.content

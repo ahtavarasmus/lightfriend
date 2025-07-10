@@ -21,7 +21,7 @@ pub fn create_openai_client(
     state: &Arc<AppState>,
 ) -> Result<OpenAIClient, Box<dyn std::error::Error>> {
 
-    let is_self_hosted= std::env::var("ENVIRONMENT") != Ok("self_hosted".to_string());
+    let is_self_hosted= std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
     let api_key: String;
     if is_self_hosted {
 
