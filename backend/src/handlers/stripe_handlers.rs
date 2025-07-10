@@ -114,6 +114,22 @@ pub async fn create_basic_subscription_checkout(
         )),
     };
 
+    // Check for existing active subscription
+    let existing_subscription = stripe::Subscription::list(
+        &client,
+        &stripe::ListSubscriptions {
+            customer: Some(customer_id.parse().unwrap()),
+            status: Some(stripe::SubscriptionStatusFilter::Active),
+            limit: Some(1),
+            ..Default::default()
+        },
+    ).await.map_err(|e| {
+        println!("Error fetching existing subscriptions: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to check existing subscriptions"})),
+        )
+    })?;
 
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
 
@@ -130,36 +146,59 @@ pub async fn create_basic_subscription_checkout(
         std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_OTHER")
     }.expect("Stripe price ID not found for region");
     
+    let success_url = format!("{}/billing?subscription=success", domain_url);
+    let cancel_url = format!("{}/billing?subscription=canceled", domain_url);
+    let mut create_params = CreateCheckoutSession {
+        success_url: Some(&success_url),
+        cancel_url: Some(&cancel_url),
+        mode: Some(stripe::CheckoutSessionMode::Subscription),
+        line_items: Some(vec![
+            stripe::CreateCheckoutSessionLineItems {
+                price: Some(price_id),
+                quantity: Some(1),
+                ..Default::default()
+            }
+        ]),
+        customer: Some(customer_id.parse().unwrap()),
+        allow_promotion_codes: Some(true),
+        billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
+        automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
+            enabled: true,
+            liability: None,
+        }),
+        tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
+            enabled: true,
+        }),
+        customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
+            address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
+            name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto),
+            shipping: None,
+        }),
+        ..Default::default()
+    };
+
+    let success_url1 = format!("{}/billing?subscription=changed", domain_url);
+    if !existing_subscription.data.is_empty() {
+        if let Some(current_subscription) = existing_subscription.data.first() {
+            println!("Found existing subscription: {}", current_subscription.id);
+            // Proceed with existing subscription logic
+            let mut metadata = std::collections::HashMap::new();
+            metadata.insert("replacing_subscription".to_string(), current_subscription.id.to_string());
+            metadata.insert("plan_change".to_string(), "true".to_string());
+            metadata.insert("user_id".to_string(), user_id.to_string());
+            
+            create_params.subscription_data = Some(stripe::CreateCheckoutSessionSubscriptionData {
+                metadata: Some(metadata),
+                ..Default::default()
+            });
+
+            create_params.success_url = Some(&success_url1);
+        }
+    }
+
     let checkout_session = CheckoutSession::create(
         &client,
-        CreateCheckoutSession {
-            success_url: Some(&format!("{}/billing?subscription=success", domain_url)),
-            cancel_url: Some(&format!("{}/billing?subscription=canceled", domain_url)),
-            mode: Some(stripe::CheckoutSessionMode::Subscription),
-            line_items: Some(vec![
-                stripe::CreateCheckoutSessionLineItems {
-                    price: Some(price_id),
-                    quantity: Some(1),
-                    ..Default::default()
-                }
-            ]),
-            customer: Some(customer_id.parse().unwrap()),
-            allow_promotion_codes: Some(true),
-            billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
-            automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
-                enabled: true,
-                liability: None,
-            }),
-            tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
-                enabled: true,
-            }),
-            customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
-                address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
-                name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto),
-                shipping: None,
-            }),
-            ..Default::default()
-        },
+        create_params,
     )
     .await
     .map_err(|e| {
@@ -259,6 +298,23 @@ pub async fn create_oracle_subscription_checkout(
         )),
     };
 
+    // Check for existing active subscription
+    let existing_subscription = stripe::Subscription::list(
+        &client,
+        &stripe::ListSubscriptions {
+            customer: Some(customer_id.parse().unwrap()),
+            status: Some(stripe::SubscriptionStatusFilter::Active),
+            limit: Some(1),
+            ..Default::default()
+        },
+    ).await.map_err(|e| {
+        println!("Error fetching existing subscriptions: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to check existing subscriptions"})),
+        )
+    })?;
+
 
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
 
@@ -293,31 +349,54 @@ pub async fn create_oracle_subscription_checkout(
             ..Default::default()
         });
     }
+
+
+    let success_url = format!("{}/billing?subscription=success", domain_url);
+    let cancel_url = format!("{}/billing?subscription=canceled", domain_url);
+    let mut create_params = CreateCheckoutSession {
+        success_url: Some(&success_url),
+        cancel_url: Some(&cancel_url),
+        mode: Some(stripe::CheckoutSessionMode::Subscription),
+        line_items: Some(line_items),
+        customer: Some(customer_id.parse().unwrap()),
+        allow_promotion_codes: Some(true),
+        billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
+        automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
+            enabled: true,
+            liability: None,
+        }),
+        tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
+            enabled: true,
+        }),
+        customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
+            address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
+            name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto),
+            shipping: None,
+        }),
+        ..Default::default()
+    };
+    let success_url1 = format!("{}/billing?subscription=changed", domain_url);    // If user has an existing subscription, add metadata to handle the transition
+    if let Some(current_subscription) = existing_subscription.data.first() {
+        println!("Found existing subscription: {}", current_subscription.id);
+        
+        // Create metadata to track the subscription change
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("replacing_subscription".to_string(), current_subscription.id.to_string());
+        metadata.insert("plan_change".to_string(), "true".to_string());
+        metadata.insert("user_id".to_string(), user_id.to_string());
+        
+        create_params.subscription_data = Some(stripe::CreateCheckoutSessionSubscriptionData {
+            metadata: Some(metadata),
+            ..Default::default()
+        });
+
+        // Update success URL to indicate plan change
+        create_params.success_url = Some(&success_url1);
+    }
     
     let checkout_session = CheckoutSession::create(
         &client,
-        CreateCheckoutSession {
-            success_url: Some(&format!("{}/billing?subscription=success", domain_url)),
-            cancel_url: Some(&format!("{}/billing?subscription=canceled", domain_url)),
-            mode: Some(stripe::CheckoutSessionMode::Subscription),
-            line_items: Some(line_items),
-            customer: Some(customer_id.parse().unwrap()),
-            allow_promotion_codes: Some(true),
-            billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
-            automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
-                enabled: true,
-                liability: None,
-            }),
-            tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
-                enabled: true,
-            }),
-            customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
-                address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
-                name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto),
-                shipping: None,
-            }),
-            ..Default::default()
-        },
+        create_params, 
     )
     .await
     .map_err(|e| {
@@ -416,6 +495,22 @@ pub async fn create_subscription_checkout(
         )),
     };
 
+    // Check for existing active subscription
+    let existing_subscription = stripe::Subscription::list(
+        &client,
+        &stripe::ListSubscriptions {
+            customer: Some(customer_id.parse().unwrap()),
+            status: Some(stripe::SubscriptionStatusFilter::Active),
+            limit: Some(1),
+            ..Default::default()
+        },
+    ).await.map_err(|e| {
+        println!("Error fetching existing subscriptions: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to check existing subscriptions"})),
+        )
+    })?;
 
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
 
@@ -450,31 +545,55 @@ pub async fn create_subscription_checkout(
             ..Default::default()
         });
     }
+
     
+    let success_url = format!("{}/billing?subscription=success", domain_url);
+    let cancel_url = format!("{}/billing?subscription=canceled", domain_url);
+    let mut create_params = CreateCheckoutSession {
+        success_url: Some(&success_url),
+        cancel_url: Some(&cancel_url),
+        mode: Some(stripe::CheckoutSessionMode::Subscription),
+        line_items: Some(line_items),
+        customer: Some(customer_id.parse().unwrap()),
+        allow_promotion_codes: Some(true),
+        billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
+        automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
+            enabled: true,
+            liability: None,
+        }),
+        tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
+            enabled: true,
+        }),
+        customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
+            address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
+            name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto),
+            shipping: None,
+        }),
+        ..Default::default()
+    };
+
+    let success_url1 = format!("{}/billing?subscription=changed", domain_url);
+    if let Some(current_subscription) = existing_subscription.data.first() {
+        println!("Found existing subscription: {}", current_subscription.id);
+        
+        // Create metadata to track the subscription change
+        let mut metadata = std::collections::HashMap::new();
+        metadata.insert("replacing_subscription".to_string(), current_subscription.id.to_string());
+        metadata.insert("plan_change".to_string(), "true".to_string());
+        metadata.insert("user_id".to_string(), user_id.to_string());
+        
+        create_params.subscription_data = Some(stripe::CreateCheckoutSessionSubscriptionData {
+            metadata: Some(metadata),
+            ..Default::default()
+        });
+
+        // Update success URL to indicate plan change
+        create_params.success_url = Some(&success_url1);
+    }
+
     let checkout_session = CheckoutSession::create(
         &client,
-        CreateCheckoutSession {
-            success_url: Some(&format!("{}/billing?subscription=success", domain_url)),
-            cancel_url: Some(&format!("{}/billing?subscription=canceled", domain_url)),
-            mode: Some(stripe::CheckoutSessionMode::Subscription),
-            line_items: Some(line_items),
-            customer: Some(customer_id.parse().unwrap()),
-            allow_promotion_codes: Some(true),
-            billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
-            automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
-                enabled: true,
-                liability: None,
-            }),
-            tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
-                enabled: true,
-            }),
-            customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
-                address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
-                name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto),
-                shipping: None,
-            }),
-            ..Default::default()
-        },
+        create_params,
     )
     .await
     .map_err(|e| {
@@ -1081,6 +1200,70 @@ pub async fn stripe_webhook(
                 };
 
                 // Get the base price ID from the subscription items
+                let base_price = subscription.items.data.first()
+                    .and_then(|item| item.price.as_ref())
+                    .map(|price| price.id.to_string())
+                    .ok_or_else(|| {
+                        tracing::error!("No price found in subscription items");
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "Invalid subscription data"})),
+                        )
+                    })?;
+
+                let new_sub_info = extract_subscription_info(&base_price);
+
+                // Always check and cancel existing subscriptions when a new one is created
+                if event.type_ == stripe::EventType::CustomerSubscriptionCreated {
+                    tracing::info!("New subscription created, checking for existing subscriptions to cancel");
+                    
+                    // List all active subscriptions for the customer
+                    let existing_subscriptions = stripe::Subscription::list(
+                        &client,
+                        &stripe::ListSubscriptions {
+                            customer: Some(customer_id.clone()),
+                            status: Some(stripe::SubscriptionStatusFilter::Active),
+                            ..Default::default()
+                        },
+                    ).await.map_err(|e| {
+                        tracing::error!("Failed to list existing subscriptions: {}", e);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "Failed to check existing subscriptions"})),
+                        )
+                    })?;
+
+                    // Cancel all existing subscriptions except the new one
+                    for existing_sub in existing_subscriptions.data.iter() {
+                        if existing_sub.id != subscription.id {
+                            tracing::info!("Canceling existing subscription: {}", existing_sub.id);
+                            if let Err(e) = Subscription::update(
+                                &client,
+                                &existing_sub.id,
+                                UpdateSubscription {
+                                    cancel_at_period_end: Some(true),
+                                    ..Default::default()
+                                },
+                            ).await {
+                                tracing::error!("Failed to cancel subscription {}: {}", existing_sub.id, e);
+                            } else {
+                                tracing::info!("Successfully scheduled cancellation for subscription: {}", existing_sub.id);
+                            }
+                        }
+                    }
+                }
+
+                // Skip processing subscription updates that are part of a plan change
+                let is_subscription_change = subscription.metadata.get("plan_change")
+                    .map(|val| val == "true")
+                    .unwrap_or(false);
+
+                if event.type_ == stripe::EventType::CustomerSubscriptionUpdated && is_subscription_change {
+                    tracing::info!("Skipping subscription update as it's part of a plan change");
+                    return Ok(StatusCode::OK);
+                }
+
+                // Get the base price ID from the subscription items
                 let base_price = if let Some(first_item) = subscription.items.data.first() {
                     if let Some(price) = &first_item.price {
                         price.id.to_string()
@@ -1095,11 +1278,6 @@ pub async fn stripe_webhook(
 
                 // Extract subscription info to determine the tier
                 let new_sub_info = extract_subscription_info(&base_price);
-
-                // Cancel existing subscriptions of different tiers
-                if let Err(e) = cancel_existing_subscriptions_of_different_tier(&client, &customer_id.as_str(), new_sub_info.tier).await {
-                    tracing::error!("Failed to cancel existing subscriptions: {:?}", e);
-                }
 
                 if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
                     let items        = &subscription.items.data;
@@ -1220,70 +1398,89 @@ pub async fn stripe_webhook(
                     stripe::Expandable::Object(customer) => customer.id,
                 };
                 
-                if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
-                    // Get the tier of the deleted subscription
-                    let deleted_sub_tier = if let Some(first_item) = subscription.items.data.first() {
-                        if let Some(price) = &first_item.price {
-                            let sub_info = extract_subscription_info(&price.id.to_string());
-                            Some(sub_info.tier)
-                        } else {
-                            None
-                        }
-                    } else {
-                        None
-                    };
+                // Check if this deletion is part of a subscription change/upgrade
+                let is_subscription_change = subscription.metadata.get("plan_change")
+                    .map(|val| val == "true")
+                    .unwrap_or(false);
 
-                    // List all active subscriptions for the customer
-                    let active_subs = Subscription::list(
+                if is_subscription_change {
+                    tracing::info!("Subscription deletion is part of a plan change, skipping tier update");
+                    return Ok(StatusCode::OK);
+                }
+                
+                if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
+                    // Check for other active subscriptions
+                    let active_subscriptions = stripe::Subscription::list(
                         &client,
-                        &ListSubscriptions {
-                            customer: Some(customer_id.parse().unwrap()),
+                        &stripe::ListSubscriptions {
+                            customer: Some(customer_id.clone()),
                             status: Some(stripe::SubscriptionStatusFilter::Active),
                             ..Default::default()
                         },
-                    ).await;
+                    ).await.map_err(|e| {
+                        tracing::error!("Failed to list subscriptions: {}", e);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(json!({"error": "Failed to check existing subscriptions"})),
+                        )
+                    })?;
 
-                    match active_subs {
-                        Ok(subs) => {
-                            // Find the highest tier among remaining active subscriptions
-                            let highest_remaining_tier = subs.data.iter()
+                    // Get the tier of the subscription being deleted
+                    let deleted_tier = subscription.items.data.first()
+                        .and_then(|item| item.price.as_ref())
+                        .map(|price| extract_subscription_info(&price.id).tier);
+
+                    // Only update subscription info if the deleted subscription's tier matches the current tier
+                    let current_tier = state.user_repository.get_subscription_tier(user.id)
+                        .map_err(|e| {
+                            tracing::error!("Failed to get current subscription tier: {}", e);
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(json!({"error": "Failed to get current subscription tier"})),
+                            )
+                        })?;
+
+                    if deleted_tier == current_tier.as_deref() {
+                        if active_subscriptions.data.is_empty() {
+                            // No active subscriptions left, clear subscription tier and country
+                            tracing::info!("No active subscriptions remaining, clearing subscription info");
+                            if let Err(e) = state.user_repository.set_subscription_tier(user.id, None) {
+                                tracing::error!("Failed to clear subscription tier: {}", e);
+                            }
+                            if let Err(e) = state.user_core.update_sub_country(user.id, None) {
+                                tracing::error!("Failed to clear subscription country: {}", e);
+                            }
+                        } else {
+                            // Find the highest tier among remaining subscriptions
+                            let highest_tier = active_subscriptions.data.iter()
                                 .filter_map(|sub| {
                                     sub.items.data.first()
                                         .and_then(|item| item.price.as_ref())
-                                        .map(|price| extract_subscription_info(&price.id.to_string()).tier)
+                                        .map(|price| extract_subscription_info(&price.id))
                                 })
                                 .max_by(|a, b| {
                                     // Compare tiers (tier 2 > tier 1.5 > tier 1)
-                                    if a == &"tier 2" { std::cmp::Ordering::Greater }
-                                    else if b == &"tier 2" { std::cmp::Ordering::Less }
-                                    else if a == &"tier 1.5" { std::cmp::Ordering::Greater }
-                                    else if b == &"tier 1.5" { std::cmp::Ordering::Less }
-                                    else { std::cmp::Ordering::Equal }
+                                    match (a.tier, b.tier) {
+                                        ("tier 2", _) => std::cmp::Ordering::Greater,
+                                        (_, "tier 2") => std::cmp::Ordering::Less,
+                                        ("tier 1.5", "tier 1") => std::cmp::Ordering::Greater,
+                                        ("tier 1", "tier 1.5") => std::cmp::Ordering::Less,
+                                        _ => std::cmp::Ordering::Equal,
+                                    }
                                 });
 
-                            match (deleted_sub_tier, highest_remaining_tier) {
-                                // If deleted subscription was the highest tier or no other subs exist
-                                (Some(deleted_tier), None) => {
-                                    tracing::info!("Clearing subscription info as deleted tier {} was the only/highest tier", deleted_tier);
-                                    if let Err(e) = state.user_repository.set_subscription_tier(user.id, None) {
-                                        tracing::error!("Failed to clear subscription tier: {}", e);
-                                    }
-                                    if let Err(e) = state.user_core.update_sub_country(user.id, None) {
-                                        tracing::error!("Failed to clear subscription country: {}", e);
-                                    }
-                                },
-                                (Some(deleted_tier), Some(remaining_tier)) => {
-                                    tracing::info!("Deleted tier {}, but keeping higher/equal tier {}", deleted_tier, remaining_tier);
-                                    // No need to clear subscription info as user still has an active subscription
-                                },
-                                _ => {
-                                    tracing::warn!("Could not determine subscription tiers");
+                            if let Some(tier_info) = highest_tier {
+                                tracing::info!("Updating subscription tier to {} based on remaining subscriptions", tier_info.tier);
+                                if let Err(e) = state.user_repository.set_subscription_tier(user.id, Some(tier_info.tier)) {
+                                    tracing::error!("Failed to update subscription tier: {}", e);
+                                }
+                                if let Err(e) = state.user_core.update_sub_country(user.id, tier_info.country) {
+                                    tracing::error!("Failed to update subscription country: {}", e);
                                 }
                             }
-                        },
-                        Err(e) => {
-                            tracing::error!("Failed to list active subscriptions: {}", e);
                         }
+                    } else {
+                        tracing::info!("Deleted subscription tier ({:?}) doesn't match current tier ({:?}), skipping update", deleted_tier, current_tier);
                     }
                 }
             }
