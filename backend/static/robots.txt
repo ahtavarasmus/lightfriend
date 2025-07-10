@@ -1,5 +1,4 @@
 User-agent: *
 Allow: /
 Disallow: /api/
-Sitemap: https://lightfriend.quest/sitemap.xml
-
+Sitemap: https://lightfriend.ai/sitemap.xml

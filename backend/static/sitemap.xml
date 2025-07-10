@@ -1,38 +1,43 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
-        <loc>https://lightfriend.quest/</loc>
-        <lastmod>2025-03-27</lastmod>
+        <loc>https://lightfriend.ai</loc>
+        <lastmod>2025-07-10</lastmod>
         <changefreq>weekly</changefreq>
         <priority>1.0</priority>
     </url>
     <url>
-        <loc>https://lightfriend.quest/register</loc>
-        <lastmod>2025-03-27</lastmod>
-        <changefreq>monthly</changefreq>
-        <priority>0.9</priority>
+        <loc>https://lightfriend.ai/pricing</loc>
+        <lastmod>2025-07-10</lastmod>
+        <changefreq>weekly</changefreq>
+        <priority>1.0</priority>
     </url>
     <url>
-        <loc>https://lightfriend.quest/login</loc>
-        <lastmod>2025-03-27</lastmod>
-        <changefreq>monthly</changefreq>
-        <priority>0.9</priority>
-    </url>
-    <url>
-        <loc>https://lightfriend.quest/the-other-stuff</loc>
-        <lastmod>2025-03-27</lastmod>
+        <loc>https://lightfriend.ai/faq</loc>
+        <lastmod>2025-07-10</lastmod>
         <changefreq>weekly</changefreq>
         <priority>0.9</priority>
     </url>
-
     <url>
-        <loc>https://lightfriend.quest/terms</loc>
+        <loc>https://lightfriend.ai/register</loc>
+        <lastmod>2025-07-10</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.9</priority>
+    </url>
+    <url>
+        <loc>https://lightfriend.ai/login</loc>
+        <lastmod>2025-07-10</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.9</priority>
+    </url>
+    <url>
+        <loc>https://lightfriend.ai/terms</loc>
         <lastmod>2025-03-27</lastmod>
         <changefreq>monthly</changefreq>
         <priority>0.8</priority>
     </url>
     <url>
-        <loc>https://lightfriend.quest/privacy</loc>
+        <loc>https://lightfriend.ai/privacy</loc>
         <lastmod>2025-03-27</lastmod>
         <changefreq>monthly</changefreq>
         <priority>0.8</priority>
