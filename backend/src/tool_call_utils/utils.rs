@@ -7,6 +7,8 @@ use crate::twilio_sms::TwilioMessageResponse;
 use std::env;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use crate::AppState;
+use std::sync::Arc;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ChatMessage {
@@ -15,14 +17,38 @@ pub struct ChatMessage {
 }
 
 // Function to create OpenAI client
-pub fn create_openai_client() -> Result<OpenAIClient, Box<dyn std::error::Error>> {
-    let api_key = env::var("OPENROUTER_API_KEY")?;
-    
-    OpenAIClient::builder()
-        .with_endpoint("https://openrouter.ai/api/v1")
-        .with_api_key(api_key)
-        .build()
-        .map_err(|e| e.into())
+pub fn create_openai_client(
+    state: &Arc<AppState>,
+) -> Result<OpenAIClient, Box<dyn std::error::Error>> {
+
+    let is_self_hosted= std::env::var("ENVIRONMENT") != Ok("self_hosted".to_string());
+    let api_key: String;
+    if is_self_hosted {
+
+        api_key = match state.user_core.get_settings_for_tier3() {
+            Ok((_, _, Some(api_key), _, _, _)) => {
+                tracing::info!("✅ Successfully retrieved self hosted Twilio Auth Token");
+                api_key
+            },
+            Err(e) => {
+                tracing::error!("❌ Failed to get self hosted Twilio Auth Token: {}", e);
+                return Err("❌ Failed to get self hosted Twilio Auth Token".into());
+            },
+            _ => {
+                tracing::error!("❌ Failed to get self hosted Twilio Auth Token");
+                return Err("❌ Failed to get self hosted Twilio Auth Token".into());
+            }
+        };
+    } else {
+        api_key = env::var("OPENROUTER_API_KEY")?;
+        
+    }
+
+        OpenAIClient::builder()
+            .with_endpoint("https://openrouter.ai/api/v1")
+            .with_api_key(api_key)
+            .build()
+            .map_err(|e| e.into())
 }
 
 // Function to create evaluation tool properties

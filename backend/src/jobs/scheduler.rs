@@ -256,6 +256,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                         if !waiting_checks.is_empty() {
                                             // Check if any waiting checks match the message
                                             if let Ok((check_id_option, message, first_message)) = crate::proactive::utils::check_waiting_check_match(
+                                                &state,
                                                 &email_content,
                                                 &waiting_checks,
                                             ).await {
@@ -306,7 +307,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     }
 
                                     // Check message importance based on criticality
-                                    match crate::proactive::utils::check_message_importance(&emails_content).await {
+                                    match crate::proactive::utils::check_message_importance(&state, &emails_content).await {
                                         Ok((is_critical, message, first_message)) => {
                                             if is_critical {
                                                 let message = message.unwrap_or("Critical email found, check email to see it (failed to fetch actual content, pls report)".to_string());

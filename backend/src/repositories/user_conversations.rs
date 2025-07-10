@@ -1,5 +1,7 @@
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
+use std::sync::Arc;
+use crate::AppState;
 use std::error::Error;
 use chrono::Local;
 use crate::{
@@ -21,6 +23,7 @@ impl UserConversations {
 
     pub async fn create_conversation_for_user(
         &self, 
+        state: &Arc<AppState>,
         user: &User,
         twilio_number: String
     ) -> Result<Conversation, Box<dyn Error>> {
@@ -28,7 +31,7 @@ impl UserConversations {
 
         let user_number = user.phone_number.clone();
         
-        let (conv_sid, service_sid) = create_twilio_conversation_for_participant(user, twilio_number.clone()).await?;
+        let (conv_sid, service_sid) = create_twilio_conversation_for_participant(&state, user, twilio_number.clone()).await?;
         
         let new_conversation = NewConversation {
             user_id: user.id,
@@ -73,7 +76,10 @@ impl UserConversations {
             .optional()
     }
 
-    pub async fn delete_conversation(&self, conversation_sid: &str) -> Result<(), Box<dyn Error>> {
+    pub async fn delete_conversation(
+        &self, 
+        conversation_sid: &str
+    ) -> Result<(), Box<dyn Error>> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // Then delete the conversation record from the database
@@ -87,6 +93,7 @@ impl UserConversations {
 
     pub async fn get_conversation(
         &self,
+        state: &Arc<AppState>,
         user: &User,
         twilio_number: String,
     ) -> Result<Conversation, Box<dyn Error>> {
@@ -99,17 +106,17 @@ impl UserConversations {
                 // used to just reset the conversation if problems
                 if false {
                     // Delete the Twilio conversation first
-                    crate::api::twilio_utils::delete_twilio_conversation(&conversation.conversation_sid, &user).await?;
+                    crate::api::twilio_utils::delete_twilio_conversation(&state, &conversation.conversation_sid, &user).await?;
                     // Then delete the conversation from our database
                     self.delete_conversation(&conversation.conversation_sid).await?;
                     // Create a new conversation
-                    return self.create_conversation_for_user(user, twilio_number).await;
+                    return self.create_conversation_for_user(&state, user, twilio_number).await;
 
                 }
                 
                 
                 // Fetch and log participants
-                match crate::api::twilio_utils::fetch_conversation_participants(&user, &conversation.conversation_sid).await {
+                match crate::api::twilio_utils::fetch_conversation_participants(&state, &user, &conversation.conversation_sid).await {
                     Ok(participants) => {
                         println!("Conversation participants:");
                         for participant in participants {
@@ -129,7 +136,7 @@ impl UserConversations {
                 println!("No active conversation found for user {} with number {}", user.phone_number, twilio_number);
                 println!("Creating a new one");
                 // Create a new conversation since none exists
-                self.create_conversation_for_user(user, twilio_number).await
+                self.create_conversation_for_user(&state, user, twilio_number).await
             }
         }
 

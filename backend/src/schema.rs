@@ -190,6 +190,14 @@ diesel::table! {
         number_of_digests_locked -> Integer,
         require_confirmation -> Bool,
         critical_enabled -> Nullable<Text>,
+        encrypted_twilio_account_sid -> Nullable<Text>,
+        encrypted_twilio_auth_token -> Nullable<Text>,
+        encrypted_openrouter_api_key -> Nullable<Text>,
+        server_url -> Nullable<Text>,
+        encrypted_geoapify_key -> Nullable<Text>,
+        encrypted_pirate_weather_key -> Nullable<Text>,
+        server_instance_id -> Nullable<Text>,
+        server_instance_last_ping_timestamp -> Nullable<Integer>,
     }
 }
 

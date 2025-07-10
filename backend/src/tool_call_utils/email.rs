@@ -118,7 +118,7 @@ pub async fn handle_fetch_emails(state: &Arc<AppState>, user_id: i32) -> String 
 
 pub async fn handle_fetch_specific_email(state: &Arc<AppState>, user_id: i32, query: &str) -> String {
     // Create OpenAI client for email selection
-    let client = match crate::tool_call_utils::utils::create_openai_client() {
+    let client = match crate::tool_call_utils::utils::create_openai_client(&state) {
         Ok(client) => client,
         Err(e) => {
             eprintln!("Failed to create OpenAI client: {}", e);

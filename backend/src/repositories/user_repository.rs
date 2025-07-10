@@ -38,8 +38,8 @@ impl UserRepository {
     pub fn get_conversation_history(
         &self,
         user_id: i32,
-        conversation_id: &str,
         limit: i64,
+        include_tools: bool,
     ) -> Result<Vec<crate::models::user_models::MessageHistory>, diesel::result::Error> {
         use crate::schema::message_history;
         use diesel::prelude::*;
@@ -47,14 +47,24 @@ impl UserRepository {
 
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
+        let user_messages: Vec<crate::models::user_models::MessageHistory>;
         // First, get the user messages to establish time boundaries
-        let user_messages = message_history::table
-            .filter(message_history::user_id.eq(user_id))
-            .filter(message_history::conversation_id.eq(conversation_id))
-            .filter(message_history::role.eq("user"))
-            .order_by(message_history::created_at.desc())
-            .limit(limit)
-            .load::<crate::models::user_models::MessageHistory>(&mut conn)?;
+        if include_tools {
+            user_messages = message_history::table
+                .filter(message_history::user_id.eq(user_id))
+                .filter(message_history::role.eq("user"))
+                .order_by(message_history::created_at.desc())
+                .limit(limit)
+                .load::<crate::models::user_models::MessageHistory>(&mut conn)?;
+        } else {
+            user_messages = message_history::table
+                .filter(message_history::user_id.eq(user_id))
+                .filter(message_history::role.ne("tool"))
+                .filter(message_history::role.eq("user"))
+                .order_by(message_history::created_at.desc())
+                .limit(limit)
+                .load::<crate::models::user_models::MessageHistory>(&mut conn)?;
+        }
 
         if user_messages.is_empty() {
             return Ok(Vec::new());
@@ -66,7 +76,6 @@ impl UserRepository {
         // Now get all messages from the oldest user message onwards
         let encrypted_messages = message_history::table
             .filter(message_history::user_id.eq(user_id))
-            .filter(message_history::conversation_id.eq(conversation_id))
             .filter(message_history::created_at.ge(oldest_timestamp))
             .order_by(message_history::created_at.desc())
 

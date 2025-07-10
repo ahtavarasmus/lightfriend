@@ -204,6 +204,7 @@ pub async fn fetch_assistant(
             } else if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "voice", None).await {
                 // Get conversation for the user
                 let conversation = match state.user_conversations.get_conversation(
+                    &state,
                     &user, 
                     user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
                 ).await {
@@ -223,6 +224,7 @@ pub async fn fetch_assistant(
                 // Send insufficient credits message
                 let error_message = "Insufficient credits to make a voice call".to_string();
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    &state,
                     &conversation.conversation_sid,
                     &conversation.twilio_number,
                     &error_message,
@@ -290,6 +292,26 @@ pub async fn fetch_assistant(
 
             dynamic_variables.insert("timezone".to_string(), json!(timezone_str));
             dynamic_variables.insert("timezone_offset_from_utc".to_string(), json!(offset));
+
+            // Pick a small, even number of messages – 4‒8 is plenty
+            let history_limit = 6;
+            let history: Vec<crate::models::user_models::MessageHistory> = match state.user_repository
+                .get_conversation_history(user.id, history_limit, /*include_tools=*/false)
+            {
+                Ok(h)  => h,
+                Err(e) => {
+                    tracing::error!("Failed to fetch history: {:?}", e);
+                    Vec::new()
+                }
+            };
+            let history_string = history
+                .iter()
+                .rev()                       // oldest → newest
+                .map(|m| format!("{}: {}", m.role, m.encrypted_content))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            dynamic_variables.insert("conversation_history".to_string(), json!(history_string));
 
 
             let charge_back_threshold= std::env::var("CHARGE_BACK_THRESHOLD")
@@ -595,7 +617,7 @@ pub async fn handle_send_sms_tool_call(
     };
 
     // Get conversation for the user
-    let conversation = match state.user_conversations.get_conversation(&user, user.preferred_number.clone().unwrap()).await {
+    let conversation = match state.user_conversations.get_conversation(&state, &user, user.preferred_number.clone().unwrap()).await {
         Ok(conv) => conv,
         Err(e) => {
             error!("Failed to get conversation: {}", e);
@@ -635,6 +657,7 @@ pub async fn handle_send_sms_tool_call(
 
     // Send the main message using Twilio
     match crate::api::twilio_utils::send_conversation_message(
+        &state,
         &conversation.conversation_sid,
         &conversation.twilio_number,
         &payload.message,
@@ -643,19 +666,6 @@ pub async fn handle_send_sms_tool_call(
         &user,
     ).await {
         Ok(message_sid) => {
-            let history_entry = crate::models::user_models::NewMessageHistory {
-                user_id: user.id,
-                role: "assistant".to_string(),
-                encrypted_content: payload.message.clone(),
-                tool_name: Some("send_info_to_user_by_sms_during_voice_call".to_string()),
-                tool_call_id: None,
-                created_at: chrono::Utc::now().timestamp() as i32,
-                conversation_id: conversation.conversation_sid.clone(),
-            };
-
-            if let Err(e) = state.user_repository.create_message_history(&history_entry) {
-                tracing::error!("Failed to store send_sms tool message in history: {}", e);
-            }
 
             message_sids.push(message_sid.clone());
             tracing::debug!("Successfully sent main SMS with SID: {}", message_sid);
@@ -753,7 +763,7 @@ pub async fn handle_shazam_tool_call(
 }
 
 pub async fn handle_perplexity_tool_call(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<MessageCallPayload>,
 ) -> Json<serde_json::Value> {
@@ -761,7 +771,7 @@ pub async fn handle_perplexity_tool_call(
 
     let system_prompt = "You are assisting an AI voice calling service. The questions you receive are from voice conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read aloud 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. Use natural language sentence structure 5. When listing multiple points, use simple numbering (1, 2, 3) or natural language transitions (First... Second... Finally...) 6. Focus on the most relevant information that addresses the user's immediate needs 7. If specific numbers, dates, or proper names are important, spell them out clearly 8. Format numerical data in a way that's easy to read aloud (e.g., twenty-five percent instead of 25%) Your responses will be incorporated into a voice conversation, so clarity and natural flow are essential.";
     
-    match crate::utils::tool_exec::ask_perplexity(&payload.message, system_prompt).await {
+    match crate::utils::tool_exec::ask_perplexity(&state, &payload.message, system_prompt).await {
         Ok(response) => {
             Json(json!({
                 "response": response
@@ -1415,6 +1425,7 @@ pub async fn handle_whatsapp_confirm_send(
 
                 // Get conversation for the user
                 let conversation = match state.user_conversations.get_conversation(
+                    &state,
                     &user, 
                     user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
                 ).await {
@@ -1432,6 +1443,7 @@ pub async fn handle_whatsapp_confirm_send(
 
                 // Send the confirmation SMS
                 match crate::api::twilio_utils::send_conversation_message(
+                    &state,
                     &conversation.conversation_sid,
                     &conversation.twilio_number,
                     &confirmation_message,
@@ -1440,20 +1452,6 @@ pub async fn handle_whatsapp_confirm_send(
                     &user,
                 ).await {
                     Ok(message_sid) => {
-                        // Store assistant confirmation message
-                        let history_entry = crate::models::user_models::NewMessageHistory {
-                            user_id,
-                            role: "assistant".to_string(),
-                            encrypted_content: confirmation_message.clone(),
-                            tool_name: Some("send_whatsapp_message_confirmation_during_voice_call".to_string()),
-                            tool_call_id: None,
-                            created_at: chrono::Utc::now().timestamp() as i32,
-                            conversation_id: conversation.conversation_sid.clone(),
-                        };
-
-                        if let Err(e) = state.user_repository.create_message_history(&history_entry) {
-                            tracing::error!("Failed to store WhatsApp confirmation message in history: {}", e);
-                        }
 
                         // Deduct credits for the confirmation message
                         if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
@@ -1577,6 +1575,7 @@ pub async fn handle_telegram_confirm_send(
 
             // Get conversation for the user
             let conversation = match state.user_conversations.get_conversation(
+                &state,
                 &user, 
                 user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
             ).await {
@@ -1594,6 +1593,7 @@ pub async fn handle_telegram_confirm_send(
 
             // Send the confirmation SMS
             match crate::api::twilio_utils::send_conversation_message(
+                &state,
                 &conversation.conversation_sid,
                 &conversation.twilio_number,
                 &confirmation_message,
@@ -1739,6 +1739,7 @@ pub async fn handle_calendar_event_confirm(
     } else {
         // Get conversation for the user
         let conversation = match state.user_conversations.get_conversation(
+            &state,
             &user, 
             user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
         ).await {
@@ -1791,6 +1792,7 @@ pub async fn handle_calendar_event_confirm(
 
         // Send the confirmation SMS
         match crate::api::twilio_utils::send_conversation_message(
+            &state,
             &conversation.conversation_sid,
             &conversation.twilio_number,
             &confirmation_message,
@@ -1799,20 +1801,6 @@ pub async fn handle_calendar_event_confirm(
             &user,
         ).await {
             Ok(message_sid) => {
-                // Store assistant confirmation message
-                let history_entry = crate::models::user_models::NewMessageHistory {
-                    user_id,
-                    role: "assistant".to_string(),
-                    encrypted_content: confirmation_message.clone(),
-                    tool_name: Some("create_calendar_event_confirmation_message_during_voice_call".to_string()),
-                    tool_call_id: None,
-                    created_at: chrono::Utc::now().timestamp() as i32,
-                    conversation_id: conversation.conversation_sid.clone(),
-                };
-
-                if let Err(e) = state.user_repository.create_message_history(&history_entry) {
-                    tracing::error!("Failed to store calendar event confirmation message in history: {}", e);
-                }
 
                 // Deduct credits for the confirmation message
                 if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
@@ -2435,6 +2423,7 @@ pub async fn handle_email_response_tool_call(
 
             // Get conversation for the user
             let conversation = match state.user_conversations.get_conversation(
+                &state,
                 &user, 
                 user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
             ).await {
@@ -2452,6 +2441,7 @@ pub async fn handle_email_response_tool_call(
 
             // Send the confirmation SMS
             match crate::api::twilio_utils::send_conversation_message(
+                &state,
                 &conversation.conversation_sid,
                 &conversation.twilio_number,
                 &confirmation_message,
@@ -2724,7 +2714,7 @@ pub async fn make_notification_call(
             .expect("SHAZAM_PHONE_NUMBER not set"));
 
     // Get conversation before spawning the task
-    let conversation = match state.user_conversations.get_conversation(&user, user_preferred_number.clone()).await {
+    let conversation = match state.user_conversations.get_conversation(&state, &user, user_preferred_number.clone()).await {
         Ok(conv) => conv,
         Err(e) => {
             error!("Failed to get conversation before spawning status check task: {}", e);
@@ -2758,6 +2748,7 @@ pub async fn make_notification_call(
 
     // Send the SMS notification
     if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+        &state,
         &conversation_sid,
         &twilio_number,
         &notification_sms,
@@ -2778,12 +2769,12 @@ pub async fn make_notification_call(
 }
 
 pub async fn handle_weather_tool_call(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<LocationCallPayload>,
 ) -> Json<serde_json::Value> {
     
-    match crate::utils::tool_exec::get_weather(&payload.location, &payload.units).await {
+    match crate::utils::tool_exec::get_weather(&state, &payload.location, &payload.units).await {
         Ok(weather_info) => {
             Json(json!({
                 "response": weather_info

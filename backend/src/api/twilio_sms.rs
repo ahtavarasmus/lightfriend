@@ -46,31 +46,6 @@ struct TwilioMessagesResponse {
     messages: Vec<TwilioMessageResponse>,
 }
 
-pub async fn fetch_conversation_messages(conversation_sid: &str) -> Result<Vec<TwilioMessageResponse>, Box<dyn Error>> {
-    let account_sid = env::var("TWILIO_ACCOUNT_SID")?;
-    let auth_token = env::var("TWILIO_AUTH_TOKEN")?;
-
-    let client = Client::new();
-    let url = format!(
-        "https://conversations.twilio.com/v1/Conversations/{}/Messages",
-        conversation_sid
-    );
-
-    let response = client
-        .get(&url)
-        .basic_auth(&account_sid, Some(&auth_token))
-        .query(&[("Order", "desc"), ("PageSize", "15")])
-        .send()
-        .await?;
-
-    if !response.status().is_success() {
-        return Err(format!("Failed to fetch messages: {}", response.status()).into());
-    }
-
-    let messages_response: TwilioMessagesResponse = response.json().await?;
-    Ok(messages_response.messages)
-}
-
 #[derive(Deserialize, Clone)]
 pub struct MediaItem {
     pub content_type: String,
@@ -263,7 +238,7 @@ pub async fn process_sms(
         }
     }
 
-    let conversation = match state.user_conversations.get_conversation(&user, payload.to).await {
+    let conversation = match state.user_conversations.get_conversation(&state, &user, payload.to).await {
         Ok(conv) => conv,
         Err(e) => {
             tracing::error!("Failed to ensure conversation exists: {}", e);
@@ -311,27 +286,8 @@ pub async fn process_sms(
         tracing::info!("Came back from handle_confirmation with should_continue as: {}", confirmation_result.should_continue);
 
         if !confirmation_result.should_continue {
-            if let Some((status, headers, Json(twilio_response))) = confirmation_result.response {
-                // Store message in history
-                let history_entry = crate::models::user_models::NewMessageHistory {
-                    user_id: user.id,
-                    role: "assistant".to_string(),
-                    encrypted_content: twilio_response.message.clone(),
-                    tool_name: None,
-                    tool_call_id: None,
-                    created_at: chrono::Utc::now().timestamp() as i32,
-                    conversation_id: conversation.conversation_sid.clone(),
-                };
-                if let Err(e) = state.user_repository.create_message_history(&history_entry) {
-                    tracing::error!("Failed to store assistant confirmation response in history: {}", e);
-                }
-
-                // Return full response
-                return (
-                    status,
-                    headers,
-                    Json(twilio_response), 
-                );
+            if let Some(response) = confirmation_result.response {
+                return response;
             }
         }
     }
@@ -413,7 +369,7 @@ pub async fn process_sms(
             // Extract media SID from URL
             if let Some(media_sid) = media_url.split("/Media/").nth(1) {
                 tracing::debug!("Attempting to delete media with SID: {}", media_sid);
-                match crate::api::twilio_utils::delete_twilio_message_media(&media_sid, &user).await {
+                match crate::api::twilio_utils::delete_twilio_message_media(&state, &media_sid, &user).await {
                     Ok(_) => tracing::debug!("Successfully deleted media: {}", media_sid),
                     Err(e) => tracing::error!("Failed to delete media {}: {}", media_sid, e),
                 }
@@ -432,8 +388,8 @@ pub async fn process_sms(
             let history = state.user_repository
                 .get_conversation_history(
                     user.id,
-                    &conversation.conversation_sid,
                     save_context as i64,
+                    true,
                 )
                 .unwrap_or_default();
 
@@ -534,7 +490,7 @@ pub async fn process_sms(
         crate::tool_call_utils::tasks::get_create_tasks_tool(),
     ];
 
-    let client = match create_openai_client() {
+    let client = match create_openai_client(&state) {
         Ok(client) => client,
         Err(e) => {
             tracing::error!("Failed to create OpenAI client: {}", e);
@@ -717,7 +673,7 @@ pub async fn process_sms(
                     let query = format!("User info: {}. Query: {}", user_info, c.query);
 
                     let sys_prompt = format!("You are assisting an AI text messaging service. The questions you receive are from text messaging conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. When listing multiple points, use simple numbering (1, 2, 3) 5. Focus on the most relevant information that addresses the user's immediate needs. This is what you should know about the user who this information is going to in their own words: {}", user_info);
-                    match crate::utils::tool_exec::ask_perplexity(&query, &sys_prompt).await {
+                    match crate::utils::tool_exec::ask_perplexity(&state, &query, &sys_prompt).await {
                         Ok(answer) => {
                             tracing::debug!("Successfully received Perplexity answer");
                             tool_answers.insert(tool_call_id, answer);
@@ -744,7 +700,7 @@ pub async fn process_sms(
                     let location= c.location;
                     let units= c.units;
 
-                    match crate::utils::tool_exec::get_weather(&location, &units).await {
+                    match crate::utils::tool_exec::get_weather(&state, &location, &units).await {
                         Ok(answer) => {
                             tracing::debug!("Successfully received weather answer");
                             tool_answers.insert(tool_call_id, answer);
@@ -805,7 +761,8 @@ pub async fn process_sms(
                                                     
                                                     // Upload to Twilio
                                                     match crate::api::twilio_utils::upload_media_to_twilio(
-&conversation.service_sid,
+                                                        &state,
+                                                        &conversation.service_sid,
                                                         &bytes,
                                                         &content_type,
                                                         &filename,
@@ -1030,7 +987,7 @@ pub async fn process_sms(
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "delete_sms_conversation_history" {
                     tracing::debug!("Executing delete_sms_conversation_history tool call");
-                    match crate::api::twilio_utils::delete_bot_conversations(&user.phone_number, &user).await {
+                    match crate::api::twilio_utils::delete_bot_conversations(&state, &user.phone_number, &user).await {
                         Ok(_) => {
                             tool_answers.insert(tool_call_id, "Successfully deleted all bot conversations.".to_string());
                         }
@@ -1271,6 +1228,7 @@ pub async fn process_sms(
 
     // Send the actual message if not in test mode
     match crate::api::twilio_utils::send_conversation_message(
+        &state,
         &conversation.conversation_sid,
         &conversation.twilio_number,
         &clean_response,

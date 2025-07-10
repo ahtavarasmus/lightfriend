@@ -267,6 +267,7 @@ pub async fn handle_create_calendar_event(
             Ok(_) => {
                 let success_msg = format!("Calendar event '{}' created for {}", args.summary, formatted_time);
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    &state,
                     conversation_sid,
                     twilio_number,
                     &success_msg,
@@ -287,6 +288,7 @@ pub async fn handle_create_calendar_event(
             Err((status, error_json)) => {
                 let error_msg = format!("Failed to create calendar event: {}", error_json.0.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error"));
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    &state,
                     conversation_sid,
                     twilio_number,
                     &error_msg,
@@ -334,6 +336,7 @@ pub async fn handle_create_calendar_event(
     ) {
         tracing::error!("Failed to set temporary variable: {}", e);
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+            &state,
             conversation_sid,
             twilio_number,
             "Failed to prepare calendar event creation. (not charged, contact rasmus@ahtava.com)",
@@ -354,6 +357,7 @@ pub async fn handle_create_calendar_event(
 
     // Send the confirmation message
     match crate::api::twilio_utils::send_conversation_message(
+        &state,
         conversation_sid,
         twilio_number,
         &confirmation_msg,

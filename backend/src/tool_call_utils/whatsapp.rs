@@ -192,6 +192,7 @@ pub async fn handle_send_whatsapp_message(
             eprintln!("Failed to search WhatsApp rooms: {}", e);
             let error_msg = "Failed to find WhatsApp contact. Please make sure you're connected to WhatsApp bridge.";
             if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                &state,
                 conversation_sid,
                 twilio_number,
                 error_msg,
@@ -214,6 +215,7 @@ pub async fn handle_send_whatsapp_message(
     if rooms.is_empty() {
         let error_msg = format!("No WhatsApp contacts found matching '{}'.", args.chat_name);
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+            &state,
             conversation_sid,
             twilio_number,
             &error_msg,
@@ -249,6 +251,7 @@ pub async fn handle_send_whatsapp_message(
             Ok(_) => {
                 let success_msg = format!("WhatsApp message: '{}' sent to '{}'", message ,exact_name);
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    &state,
                     conversation_sid,
                     twilio_number,
                     &success_msg,
@@ -269,6 +272,7 @@ pub async fn handle_send_whatsapp_message(
             Err(e) => {
                 let error_msg = format!("Failed to send WhatsApp message: {}", e);
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    &state,
                     conversation_sid,
                     twilio_number,
                     &error_msg,
@@ -304,6 +308,7 @@ pub async fn handle_send_whatsapp_message(
     ) {
         tracing::error!("Failed to set temporary variable: {}", e);
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+            &state,
             conversation_sid,
             twilio_number,
             "Failed to prepare WhatsApp message sending. (not charged, contact rasmus@ahtava.com)",
@@ -339,6 +344,7 @@ pub async fn handle_send_whatsapp_message(
 
     // Send the confirmation message
     match crate::api::twilio_utils::send_conversation_message(
+        &state,
         conversation_sid,
         twilio_number,
         &confirmation_msg,

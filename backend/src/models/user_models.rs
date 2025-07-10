@@ -40,7 +40,7 @@ pub struct User {
     pub stripe_checkout_session_id: Option<String>,
     pub matrix_username: Option<String>,
     pub encrypted_matrix_access_token: Option<String>,
-    pub sub_tier: Option<String>,
+    pub sub_tier: Option<String>, // tier 1(basic), tier 1.5(oracle), tier 2(sentinel), tier 3(self hosted)
     pub matrix_device_id: Option<String>,
     pub credits_left: f32, // free credits that reset every month while in the monthly sub. will always be consumed before one time credits
     pub encrypted_matrix_password: Option<String>,
@@ -414,6 +414,14 @@ pub struct UserSettings {
     pub number_of_digests_locked: i32, // if user wants to change some of the digests for base messages we can lock some digests
     pub require_confirmation: bool, // whether to ask confirmation before sending a message or creating a calendar event
     pub critical_enabled: Option<String>, // whether to inform users about their critical messages immediately and by which way ("sms" or "call")
+    pub encrypted_twilio_account_sid: Option<String>, // for self hosted instance
+    pub encrypted_twilio_auth_token: Option<String>, // for self hosted instance
+    pub encrypted_openrouter_api_key: Option<String>, // for self hosted instance
+    pub server_url: Option<String>, // for self hosted instance
+    pub encrypted_geoapify_key: Option<String>, // for self hosted instance
+    pub encrypted_pirate_weather_key: Option<String>, // for self hosted instance
+    pub server_instance_id: Option<String>, // for self hosted instance (field for pairing code and instance id)
+    pub server_instance_last_ping_timestamp: Option<i32>, // for self hosted instance (used to allow only a single instance ping per day)
 }
 
 #[derive(Insertable)]

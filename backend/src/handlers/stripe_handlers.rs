@@ -1080,6 +1080,27 @@ pub async fn stripe_webhook(
                     stripe::Expandable::Object(customer) => customer.id,
                 };
 
+                // Get the base price ID from the subscription items
+                let base_price = if let Some(first_item) = subscription.items.data.first() {
+                    if let Some(price) = &first_item.price {
+                        price.id.to_string()
+                    } else {
+                        tracing::warn!("No price found in subscription item");
+                        return Ok(StatusCode::OK);
+                    }
+                } else {
+                    tracing::warn!("No items found in subscription");
+                    return Ok(StatusCode::OK);
+                };
+
+                // Extract subscription info to determine the tier
+                let new_sub_info = extract_subscription_info(&base_price);
+
+                // Cancel existing subscriptions of different tiers
+                if let Err(e) = cancel_existing_subscriptions_of_different_tier(&client, &customer_id.as_str(), new_sub_info.tier).await {
+                    tracing::error!("Failed to cancel existing subscriptions: {:?}", e);
+                }
+
                 if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
                     let items        = &subscription.items.data;
                     let topups       = topup_quantity(items);
@@ -1200,14 +1221,70 @@ pub async fn stripe_webhook(
                 };
                 
                 if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
-                    // Clear subscription tier and country
-                    if let Err(e) = state.user_repository.set_subscription_tier(user.id, None) {
-                        tracing::error!("Failed to clear subscription tier: {}", e);
+                    // Get the tier of the deleted subscription
+                    let deleted_sub_tier = if let Some(first_item) = subscription.items.data.first() {
+                        if let Some(price) = &first_item.price {
+                            let sub_info = extract_subscription_info(&price.id.to_string());
+                            Some(sub_info.tier)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    // List all active subscriptions for the customer
+                    let active_subs = Subscription::list(
+                        &client,
+                        &ListSubscriptions {
+                            customer: Some(customer_id.parse().unwrap()),
+                            status: Some(stripe::SubscriptionStatusFilter::Active),
+                            ..Default::default()
+                        },
+                    ).await;
+
+                    match active_subs {
+                        Ok(subs) => {
+                            // Find the highest tier among remaining active subscriptions
+                            let highest_remaining_tier = subs.data.iter()
+                                .filter_map(|sub| {
+                                    sub.items.data.first()
+                                        .and_then(|item| item.price.as_ref())
+                                        .map(|price| extract_subscription_info(&price.id.to_string()).tier)
+                                })
+                                .max_by(|a, b| {
+                                    // Compare tiers (tier 2 > tier 1.5 > tier 1)
+                                    if a == &"tier 2" { std::cmp::Ordering::Greater }
+                                    else if b == &"tier 2" { std::cmp::Ordering::Less }
+                                    else if a == &"tier 1.5" { std::cmp::Ordering::Greater }
+                                    else if b == &"tier 1.5" { std::cmp::Ordering::Less }
+                                    else { std::cmp::Ordering::Equal }
+                                });
+
+                            match (deleted_sub_tier, highest_remaining_tier) {
+                                // If deleted subscription was the highest tier or no other subs exist
+                                (Some(deleted_tier), None) => {
+                                    tracing::info!("Clearing subscription info as deleted tier {} was the only/highest tier", deleted_tier);
+                                    if let Err(e) = state.user_repository.set_subscription_tier(user.id, None) {
+                                        tracing::error!("Failed to clear subscription tier: {}", e);
+                                    }
+                                    if let Err(e) = state.user_core.update_sub_country(user.id, None) {
+                                        tracing::error!("Failed to clear subscription country: {}", e);
+                                    }
+                                },
+                                (Some(deleted_tier), Some(remaining_tier)) => {
+                                    tracing::info!("Deleted tier {}, but keeping higher/equal tier {}", deleted_tier, remaining_tier);
+                                    // No need to clear subscription info as user still has an active subscription
+                                },
+                                _ => {
+                                    tracing::warn!("Could not determine subscription tiers");
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            tracing::error!("Failed to list active subscriptions: {}", e);
+                        }
                     }
-                    if let Err(e) = state.user_core.update_sub_country(user.id, None) {
-                        tracing::error!("Failed to clear subscription country: {}", e);
-                    }
-                    tracing::info!("Cleared subscription info for user {}", user.id);
                 }
             }
         },

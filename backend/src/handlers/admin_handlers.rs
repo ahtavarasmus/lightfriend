@@ -283,7 +283,7 @@ async fn process_broadcast_messages(
 
         let conversation_result = state
             .user_conversations
-            .get_conversation(&user, sender_number.to_string())
+            .get_conversation(&state, &user, sender_number.to_string())
             .await
             .map_err(|e| BroadcastError::ConversationError(e.to_string()));
 
@@ -291,6 +291,7 @@ async fn process_broadcast_messages(
             Ok(conversation) => {
                 let message_with_stop = format!("{}\n\nTo stop receiving updates about new features, reply \"STOP\".", message);
                 match crate::api::twilio_utils::send_conversation_message(
+                    &state,
                     &conversation.conversation_sid,
                     &sender_number,
                     &message_with_stop,

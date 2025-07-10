@@ -84,8 +84,17 @@ use crate::components::idea_widget::IdeaWidget;
 
 
 
+#[derive(Clone, PartialEq)]
+pub enum SelfHostingStatus {
+    SelfHostedSignup,
+    SelfHostedLogin,
+    Normal,
+}
+
 #[derive(Clone, Routable, PartialEq)]
 pub enum Route {
+    #[at("/self-hosted")]
+    SelfHosted,
     #[at("/password-reset")]
     PasswordReset,
     #[at("/faq")]
@@ -116,8 +125,30 @@ pub enum Route {
 use crate::profile::billing_models::UserProfile;
 use gloo_net::http::Request;
 
-fn switch(routes: Route) -> Html {
+fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: bool) -> Html {
+
+    // If in self-hosted mode, redirect to self-hosted page
+    if matches!(self_hosting_status, SelfHostingStatus::SelfHostedSignup | SelfHostingStatus::SelfHostedLogin) {
+        return match routes {
+            Route::SelfHosted => {
+                info!("Rendering Self Hosted page");
+                html! { <Register self_hosting_status={self_hosting_status.clone()} /> }
+            },
+            _ => {
+                html! { <Redirect<Route> to={Route::SelfHosted} /> }
+            }
+        };
+    }
+
     match routes {
+        Route::SelfHosted => {
+            if !logged_in {
+                info!("Rendering Self Hosted page");
+                html! { <Register self_hosting_status={self_hosting_status.clone()} /> }
+            } else {
+                html! { <Redirect<Route> to={Route::Home} /> }
+            }
+        },
         Route::PasswordReset => {
             info!("Rendering Password Reset page");
             html! { <PasswordReset /> }
@@ -233,11 +264,12 @@ pub fn pricing_wrapper() -> Html {
 pub struct NavProps {
     pub logged_in: bool,
     pub on_logout: Callback<()>,
+    pub self_hosting_status: SelfHostingStatus,
 }
 
 #[function_component(Nav)]
 pub fn nav(props: &NavProps) -> Html {
-    let NavProps { logged_in, on_logout } = props;
+    let NavProps { logged_in, on_logout, self_hosting_status } = props;
     let menu_open = use_state(|| false);
     let is_scrolled = use_state(|| false);
 
@@ -310,31 +342,42 @@ let close_menu = {
                 <div class={menu_class}>
                     <button class="close-menu" onclick={close_menu.clone()}>{"✕"}</button>
                     {
-                        html! {
-                            <>
-                                <div onclick={close_menu.clone()}>
-                                    <Link<Route> to={Route::Faq} classes="nav-link">
-                                        {"FAQ"}
-                                    </Link<Route>>
-                                </div>
-                            </>
+                        if !matches!(self_hosting_status, SelfHostingStatus::SelfHostedSignup | SelfHostingStatus::SelfHostedLogin) {
+                            html! {
+                                <>
+                                    <div onclick={close_menu.clone()}>
+                                        <Link<Route> to={Route::Faq} classes="nav-link">
+                                            {"FAQ"}
+                                        </Link<Route>>
+                                    </div>
+                                    <div onclick={close_menu.clone()}>
+                                        <Link<Route> to={Route::Pricing} classes="nav-link">
+                                            {"Pricing"}
+                                        </Link<Route>>
+                                    </div>
+                                </>
+                            }
+                        } else {
+                            html! {}
                         }
-
                     }
-                    <div onclick={close_menu.clone()}>
-                        <Link<Route> to={Route::Pricing} classes="nav-link">
-                            {"Pricing"}
-                        </Link<Route>>
-                    </div>
                     {
                         if *logged_in {
                             html! {
                                 <>
-                                    <div onclick={close_menu.clone()}>
-                                        <Link<Route> to={Route::Billing} classes="nav-profile-link">
-                                            {"Billing"}
-                                        </Link<Route>>
-                                    </div>
+                                    {
+                                        if !matches!(self_hosting_status, SelfHostingStatus::SelfHostedSignup | SelfHostingStatus::SelfHostedLogin) {
+                                            html! {
+                                                <div onclick={close_menu.clone()}>
+                                                    <Link<Route> to={Route::Billing} classes="nav-profile-link">
+                                                        {"Billing"}
+                                                    </Link<Route>>
+                                                </div>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
                                     <button onclick={
                                         let close = close_menu.clone();
                                         let logout = handle_logout.clone();
@@ -366,6 +409,49 @@ let close_menu = {
 #[function_component]
 fn App() -> Html {
     let logged_in = use_state(|| is_logged_in());  // Import is_logged_in from home module
+    let self_hosting_status = use_state(|| SelfHostingStatus::Normal);
+
+    {
+        let self_hosting_status = self_hosting_status.clone();
+        use_effect_with_deps(move |_| {
+            wasm_bindgen_futures::spawn_local(async move {
+                info!("Fetching self-hosting status...");
+                if let Ok(response) = Request::get(&format!("{}/api/self-hosting-status", config::get_backend_url()))
+                    .send()
+                    .await
+                {
+                    if let Ok(status) = response.text().await {
+                        info!("Received self-hosting status: {}", status);
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&status) {
+                            if let Some(status_value) = json.get("status").and_then(|s| s.as_str()) {
+                                match status_value {
+                                    "self-hosted-signup" => {
+                                        info!("Setting status to SelfHostedSignup");
+                                        self_hosting_status.set(SelfHostingStatus::SelfHostedSignup)
+                                    },
+                                    "self-hosted-login" => {
+                                        info!("Setting status to SelfHostedLogin");
+                                        self_hosting_status.set(SelfHostingStatus::SelfHostedLogin)
+                                    },
+                                    _ => {
+                                        info!("Setting status to Normal");
+                                        self_hosting_status.set(SelfHostingStatus::Normal)
+                                    },
+                                }
+                            } else {
+                                self_hosting_status.set(SelfHostingStatus::Normal)
+                            }
+                        } else {
+                            self_hosting_status.set(SelfHostingStatus::Normal)
+                        }
+                    }
+                } else {
+                    info!("Failed to fetch self-hosting status");
+                }
+            });
+            || ()
+        }, ());
+    }
     let handle_logout = {
         Callback::from(move |_| {
             if let Some(window) = window() {
@@ -383,12 +469,9 @@ fn App() -> Html {
     html! {
         <>
             <BrowserRouter>
-                <Nav logged_in={*logged_in} on_logout={handle_logout} />
-                <Switch<Route> render={switch} />
+                <Nav logged_in={*logged_in} on_logout={handle_logout} self_hosting_status={(*self_hosting_status).clone()} />
+                <Switch<Route> render={move |routes| switch(routes, &self_hosting_status, *logged_in)} />
             </BrowserRouter>
-            /*
-            <IdeaWidget />
-            */
         </>
     }
 }

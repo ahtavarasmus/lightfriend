@@ -295,6 +295,57 @@ pub async fn elevenlabs_webhook(
                     }))
                 ));
             }
+
+            let ts = chrono::Utc::now().to_rfc3339();
+            let now_dt   = chrono::Utc::now();
+            let dur_secs = call_duration_secs as u64;   // or adjust to match your type
+            let start_dt = now_dt - std::time::Duration::from_secs(dur_secs);
+
+            // Serialize for message content and for created_at
+            let start_rfc3339 = start_dt.to_rfc3339();        // e.g. "2025-07-09T11:40:12Z"
+            let start_epoch   = start_dt.timestamp() as i32;  // i32 matches your schema
+
+            let end_epoch = now_dt.timestamp() as i32;        // keep “end” as ‘now’
+
+            let call_start = crate::models::user_models::NewMessageHistory {
+                user_id,
+                conversation_id: conversation_id.clone(),
+                role: "system".into(),                 //   <-- not “assistant”
+                encrypted_content: format!("[CALL_START] {}", ts),
+                tool_name: None,
+                tool_call_id: None,
+                created_at: start_epoch,
+            };
+
+            let call_end = crate::models::user_models::NewMessageHistory {
+                user_id,
+                conversation_id: conversation_id.clone(),
+                role: "system".into(),
+                encrypted_content: format!("[CALL_SUMMARY] {}", start_rfc3339), // *no* “Summary of …”
+                tool_name: None,
+                tool_call_id: None,
+                created_at: end_epoch,
+            };
+
+            if let Err(e) = state.user_repository.create_message_history(&call_start) {
+                error!("Failed to create message history: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": "Failed to create message history"
+                    }))
+                ));
+            }
+
+            if let Err(e) = state.user_repository.create_message_history(&call_end) {
+                error!("Failed to create message history: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": "Failed to create message history"
+                    }))
+                ));
+            }
         },
         Ok(None) => {
             error!("No ongoing usage found for user {}", user_id);

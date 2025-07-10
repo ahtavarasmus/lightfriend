@@ -100,6 +100,7 @@ pub async fn handle_confirmation(
                     Ok(_) => {
                         let confirmation_msg = "Calendar event created successfully!";
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                            &state,
                             conversation_sid,
                             twilio_number,
                             confirmation_msg,
@@ -121,6 +122,7 @@ pub async fn handle_confirmation(
                     Err((status, Json(error))) => {
                         let error_msg = format!("Failed to create calendar event: {} (not charged)", error["error"].as_str().unwrap_or("Unknown error"));
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                            &state,
                             conversation_sid,
                             twilio_number,
                             &error_msg,
@@ -143,6 +145,7 @@ pub async fn handle_confirmation(
             "no" => {
                 let cancel_msg = "Calendar event creation cancelled.";
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    &state,
                     conversation_sid,
                     twilio_number,
                     cancel_msg,
@@ -212,6 +215,7 @@ pub async fn handle_confirmation(
                         tracing::info!("SENDING messages since user said yes");
                         let confirmation_msg = format!("Message sent successfully to {}", recipient);
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                            &state,
                             conversation_sid,
                             twilio_number,
                             &confirmation_msg,
@@ -235,6 +239,7 @@ pub async fn handle_confirmation(
                         tracing::debug!("sending failed to send the message to whatsapp sms");
                         let error_msg = format!("Failed to send message: {} (not charged)", e);
                         if let Err(send_err) = crate::api::twilio_utils::send_conversation_message(
+                            &state,
                             conversation_sid,
                             twilio_number,
                             &error_msg,
@@ -258,6 +263,7 @@ pub async fn handle_confirmation(
             "no" => {
                 let cancel_msg = "WhatsApp message cancelled.";
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    &state,
                     conversation_sid,
                     twilio_number,
                     cancel_msg,
@@ -334,6 +340,7 @@ pub async fn handle_confirmation(
                     Ok(_) => {
                         let confirmation_msg = format!("Email response sent successfully to {} regarding '{}'", recipient, subject);
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                            &state,
                             conversation_sid,
                             twilio_number,
                             &confirmation_msg,
@@ -355,6 +362,7 @@ pub async fn handle_confirmation(
                     Err((status, Json(error))) => {
                         let error_msg = format!("Failed to send email response: {} (not charged)", error["error"].as_str().unwrap_or("Unknown error"));
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                            &state,
                             conversation_sid,
                             twilio_number,
                             &error_msg,
@@ -378,6 +386,7 @@ pub async fn handle_confirmation(
 
                 let cancel_msg = "Email response cancelled.";
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    &state,
                     conversation_sid,
                     twilio_number,
                     cancel_msg,

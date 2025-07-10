@@ -275,7 +275,7 @@ async fn main() {
 
     let twilio_routes = Router::new()
         .route("/api/sms/server", post(twilio_sms::handle_regular_sms))
-        .route_layer(middleware::from_fn(api::twilio_utils::validate_twilio_signature));
+        .layer(middleware::from_fn_with_state(state.clone(), api::twilio_utils::validate_twilio_signature));
 
     let user_twilio_routes = Router::new()
         .route("/api/sms/server/{user_id}", post(twilio_sms::handle_incoming_sms))
@@ -326,7 +326,8 @@ async fn main() {
         .route("/api/login", post(auth_handlers::login))
         .route("/api/register", post(auth_handlers::register))
         .route("/api/password-reset/request", post(auth_handlers::request_password_reset))
-        .route("/api/password-reset/verify", post(auth_handlers::verify_password_reset));
+        .route("/api/password-reset/verify", post(auth_handlers::verify_password_reset))
+        .route("/api/self-hosting-status", get(auth_handlers::self_hosted_status));
 
     // Admin routes that need admin authentication
     let admin_routes = Router::new()

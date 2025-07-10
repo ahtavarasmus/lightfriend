@@ -49,6 +49,11 @@ pub struct PasswordResetResponse {
     message: String,
 }
 
+#[derive(Serialize)]
+pub struct SelfHostedStatusResponse {
+    status: String,
+}
+
 pub async fn get_users(
     State(state): State<Arc<AppState>>,
     _auth_user: AuthUser,
@@ -295,7 +300,7 @@ pub async fn request_password_reset(
     println!("Stored OTP {} for email {} with expiration {}", otp, reset_req.email, expiration);
 
     // Get or create a conversation for sending the OTP
-    let conversation = match state.user_conversations.get_conversation(&user, user.preferred_number.clone().unwrap_or_else(|| {
+    let conversation = match state.user_conversations.get_conversation(&state, &user, user.preferred_number.clone().unwrap_or_else(|| {
         std::env::var("FIN_PHONE").expect("FIN_PHONE must be set")
     })).await {
         Ok(conv) => conv,
@@ -310,6 +315,7 @@ pub async fn request_password_reset(
     // Send OTP via conversation message
     let message = format!("Your Lightfriend password reset code is: {}. Valid for 5 minutes.", otp);
     if let Err(_) = crate::api::twilio_utils::send_conversation_message(
+        &state,
         &conversation.conversation_sid,
         &conversation.twilio_number,
         &message,
@@ -629,4 +635,38 @@ pub async fn register(
 
     println!("Registration and login completed successfully");
     Ok(response)
+}
+
+pub async fn self_hosted_status(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<SelfHostedStatusResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Check if environment is self-hosted
+    let env_type = std::env::var("ENVIRONMENT").unwrap_or_else(|_| "normal".to_string());
+    
+    if env_type == "self_hosted" {
+        // Check if there are any users in the database
+        match state.user_core.get_all_users() {
+            Ok(users) => {
+                let status = if users.is_empty() {
+                    "self-hosted-signup"
+                } else {
+                    "self-hosted-login"
+                };
+                println!("status: {}", status);
+                Ok(Json(SelfHostedStatusResponse { status: status.to_string() }))
+            }
+            Err(e) => {
+                println!("Database error while checking users: {}", e);
+                Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Database error"}))
+                ))
+            }
+        }
+    } else {
+        println!("status: normal");
+        Ok(Json(SelfHostedStatusResponse {
+            status: "normal".to_string()
+        }))
+    }
 }

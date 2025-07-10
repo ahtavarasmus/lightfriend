@@ -637,5 +637,67 @@ impl UserCore {
         Ok(timestamp)
     }
 
+    pub fn get_twilio_credentials(&self, user_id: i32) -> Result<(String, String), Box<dyn Error>> {
+        use crate::schema::user_settings;
+        use crate::utils::encryption::decrypt;
+        
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Get the user settings
+        let settings = user_settings::table
+            .filter(user_settings::user_id.eq(user_id))
+            .select((
+                user_settings::encrypted_twilio_account_sid,
+                user_settings::encrypted_twilio_auth_token,
+            ))
+            .first::<(Option<String>, Option<String>)>(&mut conn)?;
+
+        match settings {
+            (Some(encrypted_account_sid), Some(encrypted_auth_token)) => {
+                let account_sid = decrypt(&encrypted_account_sid)?;
+                let auth_token = decrypt(&encrypted_auth_token)?;
+                Ok((account_sid, auth_token))
+            },
+            _ => Err("Twilio credentials not found".into())
+        }
+    }
+    /// Return Twilio credentials for the first user whose `sub_tier` is "tier 3".
+    /// Fails if no such user exists or if either credential is missing.
+    /// Used for self hosted instance
+    pub fn get_settings_for_tier3(
+        &self,
+    ) -> Result<(Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>), Box<dyn std::error::Error>> {
+        use crate::schema::{users, user_settings};
+        use crate::utils::encryption::decrypt;
+        
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Find the first tier 3 user
+        let tier3_user = users::table
+            .filter(users::sub_tier.eq("tier 3"))
+            .first::<User>(&mut conn)?;
+            
+        // Get their settings
+        let settings = user_settings::table
+            .filter(user_settings::user_id.eq(tier3_user.id))
+            .select((
+                user_settings::encrypted_twilio_account_sid,
+                user_settings::encrypted_twilio_auth_token,
+                user_settings::encrypted_openrouter_api_key,
+                user_settings::server_url,
+                user_settings::encrypted_geoapify_key,
+                user_settings::encrypted_pirate_weather_key,
+            ))
+            .first::<(Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>)>(&mut conn)?;
+            
+        match settings {
+            (Some(encrypted_account_sid), Some(encrypted_auth_token), openrouter_api_key, server_url, geoapify_key, pirate_key) => {
+                let account_sid = decrypt(&encrypted_account_sid).ok();
+                let auth_token = decrypt(&encrypted_auth_token).ok();
+                Ok((account_sid, auth_token, openrouter_api_key, server_url, geoapify_key, pirate_key))
+            },
+            _ => Ok((None, None, None, None, None, None))
+        }
+    }
 }
 

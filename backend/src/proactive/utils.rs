@@ -98,10 +98,11 @@ pub struct WaitingCheckMatchResponse {
 /// Determine whether `message` satisfies **one** of the supplied `waiting_checks`.
 /// Returns `(waiting_check_id, sms_message, first_message)`.
 pub async fn check_waiting_check_match(
+    state: &Arc<AppState>,
     message: &str,
     waiting_checks: &Vec<WaitingCheck>,
 ) -> Result<(Option<i32>, Option<String>, Option<String>), Box<dyn std::error::Error>> {
-    let client = create_openai_client()?;
+    let client = create_openai_client(&state)?;
 
     let waiting_checks_str = waiting_checks
         .iter()
@@ -233,10 +234,11 @@ pub struct MatchResponse {
 /// Checks whether a single message is critical.
 /// Returns `(is_critical, what_to_inform, first_message)`.
 pub async fn check_message_importance(
+    state: &Arc<AppState>,
     message: &str,
 ) -> Result<(bool, Option<String>, Option<String>), Box<dyn std::error::Error>> {
     // Build the chat payload ----------------------------------------------
-    let client = create_openai_client()?;
+    let client = create_openai_client(&state)?;
 
 
     let messages = vec![
@@ -546,7 +548,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             };
 
             // Generate the digest
-            let digest_message = match generate_digest(digest_data).await {
+            let digest_message = match generate_digest(&state, digest_data).await {
                 Ok(digest) => format!("Good morning! {}",digest),
                 Err(_) => format!(
                     "Good morning! Here's your morning digest covering the last {} hours. Next digest in {} hours.",
@@ -737,6 +739,11 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                 messages.len()
             );
 
+            // return if no new nothing
+            if messages.is_empty() && calendar_events.is_empty() {
+                return Ok(());
+            }
+
             // Prepare digest data
             let digest_data = DigestData {
                 messages,
@@ -745,7 +752,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             };
 
             // Generate the digest
-            let digest_message = match generate_digest(digest_data).await {
+            let digest_message = match generate_digest(&state, digest_data).await {
                 Ok(digest) => format!("Hello! {}",digest),
                 Err(_) => format!(
                     "Hello! Here's your daily digest covering the last {} hours. Next digest in {} hours.",
@@ -950,6 +957,11 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 messages.len()
             );
 
+            // return if no new nothing
+            if messages.is_empty() && calendar_events.is_empty() {
+                return Ok(());
+            }
+
             // Prepare digest data
             let digest_data = DigestData {
                 messages,
@@ -958,7 +970,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             };
 
             // Generate the digest
-            let digest_message = match generate_digest(digest_data).await {
+            let digest_message = match generate_digest(&state, digest_data).await {
                 Ok(digest) => format!("Good evening! {}",digest),
                 Err(_) => format!(
                     "Hello! Here's your evening digest covering the last {} hours. Next digest in {} hours.",
@@ -999,8 +1011,11 @@ Return JSON with a single field:
 • `digest` – the plain-text SMS message, with newlines separating items.
 "#;
 
-pub async fn generate_digest(data: DigestData) -> Result<String, Box<dyn std::error::Error>> {
-    let client = create_openai_client()?;
+pub async fn generate_digest(
+    state: &Arc<AppState>,
+    data: DigestData
+) -> Result<String, Box<dyn std::error::Error>> {
+    let client = create_openai_client(&state)?;
 
     // Format messages for the prompt
     let messages_str = data.messages
@@ -1177,7 +1192,7 @@ pub async fn send_notification(
     };
 
     // Get the conversation for the user
-    let conversation = match state.user_conversations.get_conversation(&user, sender_number).await {
+    let conversation = match state.user_conversations.get_conversation(&state, &user, sender_number).await {
         Ok(conv) => conv,
         Err(e) => {
             tracing::error!("Failed to ensure conversation exists: {}", e);
@@ -1290,6 +1305,7 @@ pub async fn send_notification(
         _ => {
             // Default to SMS notification
             match crate::api::twilio_utils::send_conversation_message(
+                &state,
                 &conversation.conversation_sid,
                 &conversation.twilio_number,
                 &notification,

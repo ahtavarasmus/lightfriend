@@ -340,6 +340,9 @@ pub async fn send_shazam_answer_to_user(
     };
 
     tracing::info!("Getting conversation for user {} with sender number {}", user_id, sender_number);
+
+    // this requires state to be normal state instead of shazam state, maybe if we activate shazam down the line this can be fixed, but for now its uncompatible
+    /*
     // First check if there are any existing conversations
     let conversation = state
         .user_conversations
@@ -369,6 +372,7 @@ pub async fn send_shazam_answer_to_user(
 
     tracing::info!("Sending message to conversation {}", conversation.conversation_sid);
     match crate::api::twilio_utils::send_conversation_message(
+                    &state,
         &conversation.conversation_sid,
         &conversation.twilio_number,
         message,
@@ -408,6 +412,7 @@ pub async fn send_shazam_answer_to_user(
             return Err("Failed to send shazam response to the user".into());
         }
     }
+    */
 
     Ok(())
 }

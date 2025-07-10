@@ -1,10 +1,13 @@
 use reqwest::Client;
+use std::sync::Arc;
+use crate::AppState;
 use serde::Deserialize;
 use std::env;
 use crate::models::user_models::User;
 use std::error::Error;
 use axum::{
     http::{Request, StatusCode},
+    extract::State,
     middleware,
     response::Response,
     body::{Body, to_bytes},
@@ -59,7 +62,11 @@ pub struct ParticipantsListResponse {
     participants: Vec<ParticipantResponse>,
 }
 
-pub async fn fetch_conversation_participants(user: &User, conversation_sid: &str) -> Result<Vec<ParticipantResponse>, Box<dyn Error>> {
+pub async fn fetch_conversation_participants(
+    state: &Arc<AppState>, 
+    user: &User, 
+    conversation_sid: &str
+) -> Result<Vec<ParticipantResponse>, Box<dyn Error>> {
     // Check if user has SMS discount tier and use their credentials if they do
     let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
         (
@@ -67,6 +74,12 @@ pub async fn fetch_conversation_participants(user: &User, conversation_sid: &str
                 .map_err(|_| format!("Missing TWILIO_ACCOUNT_SID_{}", user.id))?,
             env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
                 .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
+        )
+    } else if user.sub_tier == Some("tier 3".to_string()) {
+        let (account_sid, auth_token) = state.user_core.get_twilio_credentials(user.id)?;
+        (
+            account_sid,
+            auth_token,
         )
     } else {
         (
@@ -92,7 +105,11 @@ pub async fn fetch_conversation_participants(user: &User, conversation_sid: &str
 }
 
 
-pub async fn delete_bot_conversations(user_phone: &str, user: &User) -> Result<(), Box<dyn Error>> {
+pub async fn delete_bot_conversations(
+    state: &Arc<AppState>,
+    user_phone: &str, 
+    user: &User
+) -> Result<(), Box<dyn Error>> {
     // Check if user has SMS discount tier and use their credentials if they do
     let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
         (
@@ -100,6 +117,12 @@ pub async fn delete_bot_conversations(user_phone: &str, user: &User) -> Result<(
                 .map_err(|_| format!("Missing TWILIO_ACCOUNT_SID_{}", user.id))?,
             env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
                 .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
+        )
+    } else if user.sub_tier == Some("tier 3".to_string()) {
+        let (account_sid, auth_token) = state.user_core.get_twilio_credentials(user.id)?;
+        (
+            account_sid,
+            auth_token,
         )
     } else {
         (
@@ -121,7 +144,7 @@ pub async fn delete_bot_conversations(user_phone: &str, user: &User) -> Result<(
     let mut deleted_count = 0;
     for conversation in response.conversations {
         // Check if user is a participant in this conversation
-        let participants = fetch_conversation_participants(&user, &conversation.sid).await?;
+        let participants = fetch_conversation_participants(&state, &user, &conversation.sid).await?;
         let user_is_participant = participants.iter().any(|p| {
             if let Some(binding) = &p.messaging_binding {
                 if let Some(address) = &binding.address {
@@ -148,7 +171,7 @@ pub async fn delete_bot_conversations(user_phone: &str, user: &User) -> Result<(
             let has_bot_messages = messages.messages.iter().any(|msg| msg.author == "lightfriend");
 
             if has_bot_messages {
-                match delete_twilio_conversation(&conversation.sid, &user).await {
+                match delete_twilio_conversation(&state, &conversation.sid, &user).await {
                     Ok(_) => {
                         deleted_count += 1;
                         tracing::debug!("Deleted conversation: {}", conversation.sid);
@@ -165,7 +188,11 @@ pub async fn delete_bot_conversations(user_phone: &str, user: &User) -> Result<(
     Ok(())
 }
 
-pub async fn delete_twilio_conversation(conversation_sid: &str, user: &User) -> Result<(), Box<dyn Error>> {
+pub async fn delete_twilio_conversation(
+    state: &Arc<AppState>,
+    conversation_sid: &str, 
+    user: &User
+) -> Result<(), Box<dyn Error>> {
     // Check if user has SMS discount tier and use their credentials if they do
     let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
         (
@@ -173,6 +200,12 @@ pub async fn delete_twilio_conversation(conversation_sid: &str, user: &User) -> 
                 .map_err(|_| format!("Missing TWILIO_ACCOUNT_SID_{}", user.id))?,
             env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
                 .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
+        )
+    } else if user.sub_tier == Some("tier 3".to_string()) {
+        let (account_sid, auth_token) = state.user_core.get_twilio_credentials(user.id)?;
+        (
+            account_sid,
+            auth_token,
         )
     } else {
         (
@@ -201,7 +234,11 @@ pub async fn delete_twilio_conversation(conversation_sid: &str, user: &User) -> 
 }
 
 
-pub async fn create_twilio_conversation_for_participant(user: &User, proxy_address: String) -> Result<(String, String), Box<dyn Error>> {
+pub async fn create_twilio_conversation_for_participant(
+    state: &Arc<AppState>,
+    user: &User, 
+    proxy_address: String
+) -> Result<(String, String), Box<dyn Error>> {
     // Validate phone numbers
     if !user.phone_number.starts_with("+") {
         return Err("Invalid user phone number format - must start with +".into());
@@ -218,6 +255,12 @@ pub async fn create_twilio_conversation_for_participant(user: &User, proxy_addre
                 .map_err(|_| format!("Missing TWILIO_ACCOUNT_SID_{}", user.id))?,
             env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
                 .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
+        )
+    } else if user.sub_tier == Some("tier 3".to_string()) {
+        let (account_sid, auth_token) = state.user_core.get_twilio_credentials(user.id)?;
+        (
+            account_sid,
+            auth_token,
         )
     } else {
         (
@@ -433,6 +476,7 @@ pub async fn validate_user_twilio_signature(
 }
 
 pub async fn validate_twilio_signature(
+    State(state): State<Arc<AppState>>,
     request: Request<Body>,
     next: middleware::Next,
 ) -> Result<Response, StatusCode> {
@@ -456,29 +500,47 @@ pub async fn validate_twilio_signature(
         }
     };
 
-    // Get the Twilio auth token
-    let auth_token = match std::env::var("TWILIO_AUTH_TOKEN") {
-        Ok(token) => {
-            tracing::info!("✅ Successfully retrieved TWILIO_AUTH_TOKEN");
-            token
-        },
-        Err(e) => {
-            tracing::error!("❌ Failed to get TWILIO_AUTH_TOKEN: {}", e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    };
+    let is_self_hosted= std::env::var("ENVIRONMENT") != Ok("self_hosted".to_string());
+    let auth_token: String;
+    let url: String;
+    if is_self_hosted {
+        (auth_token, url) = match state.user_core.get_settings_for_tier3() {
+            Ok((_, Some(token), _, Some(server_url), _, _)) => {
+                tracing::info!("✅ Successfully retrieved self hosted Twilio Auth Token");
+                (token, server_url)
+            },
+            Err(e) => {
+                tracing::error!("❌ Failed to get self hosted Twilio Auth Token: {}", e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            },
+            _ => {
+                tracing::error!("❌ Failed to get self hosted Twilio Auth Token");
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        };
+    } else {
+        auth_token = match std::env::var("TWILIO_AUTH_TOKEN") {
+            Ok(token) => {
+                tracing::info!("✅ Successfully retrieved TWILIO_AUTH_TOKEN");
+                token
+            },
+            Err(e) => {
+                tracing::error!("❌ Failed to get TWILIO_AUTH_TOKEN: {}", e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        };
 
-    // Get the server URL
-    let url = match std::env::var("SERVER_URL") {
-        Ok(url) => {
-            tracing::info!("✅ Successfully retrieved SERVER_URL");
-            url + "/api/sms/server"
-        },
-        Err(e) => {
-            tracing::error!("❌ Failed to get SERVER_URL: {}", e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    };
+        url = match std::env::var("SERVER_URL") {
+            Ok(url) => {
+                tracing::info!("✅ Successfully retrieved SERVER_URL");
+                url + "/api/sms/server"
+            },
+            Err(e) => {
+                tracing::error!("❌ Failed to get SERVER_URL: {}", e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        };
+    }
 
     // Get request body for validation
     let (parts, body) = request.into_parts();
@@ -543,105 +605,9 @@ pub async fn validate_twilio_signature(
 }
 
 
-
-use openai_api_rs::v1::{
-    chat_completion,
-    types,
-    api::OpenAIClient,
-    common::GPT4_O,
-};
-
-// Function to redact sensitive information from the message body
-async fn redact_sensitive_info(body: &str) -> String {
-    // First apply regex-based redaction for basic PII
-    let re_email = regex::Regex::new(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}").unwrap();
-    let re_phone = regex::Regex::new(r"\b\d{3}-\d{3}-\d{4}\b").unwrap();
-    
-    let redacted = re_email.replace_all(body, "[EMAIL_REDACTED]");
-    let redacted = re_phone.replace_all(&redacted, "[PHONE_REDACTED]");
-    let initial_redacted = redacted.into_owned();
-
-    // Use LLM for advanced content redaction
-    let api_key = match std::env::var("OPENROUTER_API_KEY") {
-        Ok(key) => key,
-        Err(e) => {
-            eprintln!("Failed to get OpenRouter API key: {}", e);
-            return initial_redacted;
-        }
-    };
-
-    let client = match OpenAIClient::builder()
-        .with_endpoint("https://openrouter.ai/api/v1")
-        .with_api_key(api_key)
-        .build() {
-            Ok(client) => client,
-            Err(e) => {
-                eprintln!("Failed to build OpenAI client for redaction: {}", e);
-                return initial_redacted;
-            }
-        };
-
-    let system_prompt = "You are a privacy-focused content redaction system. Your task is to identify and redact sensitive information while preserving the context and meaning of messages. 
-
-    Redact the following types of content:
-    1. Personal identifiable information (PII)
-    2. Private message content from WhatsApp or other messaging platforms
-    3. Specific email content or details
-    4. Calendar event details (except general timing)
-    5. Task/todo content details
-    6. Location information (except general areas)
-    7. Financial information
-    8. Medical information
-    9. Personal relationships and private life details
-    10. Credentials or access-related information
-
-    Guidelines:
-    - Replace sensitive content with descriptive placeholders like [WHATSAPP_MESSAGE_REDACTED], [CALENDAR_EVENT_REDACTED], etc.
-    - Preserve general context and conversation flow
-    - Keep non-sensitive words and general topics intact
-    - Maintain message structure and readability
-    - When in doubt, err on the side of privacy
-    
-    Example:
-    Input: 'WhatsApp message from John: I'll meet you at 123 Main St at 3pm tomorrow for the doctor's appointment about my knee surgery'
-    Output: 'WhatsApp message from [NAME_REDACTED]: I'll meet you at [LOCATION_REDACTED] at 3pm tomorrow for [MEDICAL_APPOINTMENT_REDACTED]'";
-
-    let messages = vec![
-        chat_completion::ChatCompletionMessage {
-            role: chat_completion::MessageRole::system,
-            content: chat_completion::Content::Text(system_prompt.to_string()),
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
-        },
-        chat_completion::ChatCompletionMessage {
-            role: chat_completion::MessageRole::user,
-            content: chat_completion::Content::Text(initial_redacted.clone()),
-            name: None,
-            tool_calls: None,
-            tool_call_id: None,
-        },
-    ];
-
-    let req = chat_completion::ChatCompletionRequest::new(
-        GPT4_O.to_string(),
-        messages,
-    )
-    .max_tokens(150);
-
-    match client.chat_completion(req).await {
-        Ok(result) => {
-            result.choices[0].message.content.clone().unwrap_or(initial_redacted)
-        },
-        Err(e) => {
-            eprintln!("Failed to get LLM redaction: {}", e);
-            initial_redacted
-        }
-    }
-}
-
 // Function to update (redact) a message in Twilio
 pub async fn redact_message(
+    state: &Arc<AppState>,
     conversation_sid: &str,
     message_sid: &str,
     redacted_body: &str,
@@ -654,6 +620,12 @@ pub async fn redact_message(
                 .map_err(|_| format!("Missing TWILIO_ACCOUNT_SID_{}", user.id))?,
             env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
                 .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
+        )
+    } else if user.sub_tier == Some("tier 3".to_string()) {
+        let (account_sid, auth_token) = state.user_core.get_twilio_credentials(user.id)?;
+        (
+            account_sid,
+            auth_token,
         )
     } else {
         (
@@ -693,12 +665,13 @@ pub struct MediaResponse {
 
 // Function to upload media to Twilio Media Content Service
 pub async fn upload_media_to_twilio(
+    state: &Arc<AppState>,
     chat_service_sid: &str,
     file_data: &[u8],
     content_type: &str,
     filename: &str,
     user: &User,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<String, Box<dyn std::error::Error>> {
     // Check if user has SMS discount tier and use their credentials if they do
     let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
         (
@@ -706,6 +679,12 @@ pub async fn upload_media_to_twilio(
                 .map_err(|_| format!("Missing TWILIO_ACCOUNT_SID_{}", user.id))?,
             env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
                 .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
+        )
+    } else if user.sub_tier == Some("tier 3".to_string()) {
+        let (account_sid, auth_token) = state.user_core.get_twilio_credentials(user.id)?;
+        (
+            account_sid,
+            auth_token,
         )
     } else {
         (
@@ -741,9 +720,10 @@ pub async fn upload_media_to_twilio(
 
 
 pub async fn delete_twilio_message_media(
+    state: &Arc<AppState>,
     media_sid: &str,
     user: &User,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), Box<dyn std::error::Error>> {
     // Check if user has SMS discount tier and use their credentials if they do
     let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
         (
@@ -751,6 +731,12 @@ pub async fn delete_twilio_message_media(
                 .map_err(|_| format!("Missing TWILIO_ACCOUNT_SID_{}", user.id))?,
             env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
                 .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
+        )
+    } else if user.sub_tier == Some("tier 3".to_string()) {
+        let (account_sid, auth_token) = state.user_core.get_twilio_credentials(user.id)?;
+        (
+            account_sid,
+            auth_token,
         )
     } else {
         (
@@ -778,46 +764,10 @@ pub async fn delete_twilio_message_media(
     Ok(())
 }
 
-pub async fn delete_media_from_twilio(
-    chat_service_sid: &str,
-    media_sid: String,
-    user: &User,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    // Check if user has SMS discount tier and use their credentials if they do
-    let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
-        (
-            env::var(format!("TWILIO_ACCOUNT_SID_{}", user.id))
-                .map_err(|_| format!("Missing TWILIO_ACCOUNT_SID_{}", user.id))?,
-            env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
-                .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
-        )
-    } else {
-        (
-            env::var("TWILIO_ACCOUNT_SID")?,
-            env::var("TWILIO_AUTH_TOKEN")?,
-        )
-    };
-    let client = Client::new();
-
-    let response = client
-        .delete(format!(
-            "https://mcs.us1.twilio.com/v1/Services/{}/Media/{}",
-            chat_service_sid, media_sid
-        ))
-        .basic_auth(&account_sid, Some(&auth_token))
-        .send()
-        .await?;
-
-    if !response.status().is_success() {
-        return Err(format!("Failed to delete media from Twilio: {} - {}", response.status(), response.text().await?).into());
-    }
-
-    tracing::debug!("Successfully deleted media from Twilio: {}", media_sid);
-    Ok(())
-}
 
 
 pub async fn send_conversation_message(
+    state: &Arc<AppState>,
     conversation_sid: &str, 
     twilio_number: &String,
     body: &str,
@@ -826,11 +776,20 @@ pub async fn send_conversation_message(
     user: &User,
 ) -> Result<String, Box<dyn Error>> {
 
-    let current_time = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
+    // Store assistant confirmation message
+    let history_entry = crate::models::user_models::NewMessageHistory {
+        user_id: user.id,
+        role: "assistant".to_string(),
+        encrypted_content: body.clone().to_string(),
+        tool_name: None,
+        tool_call_id: None,
+        created_at: chrono::Utc::now().timestamp() as i32,
+        conversation_id: conversation_sid.clone().to_string(),
+    };
 
+    if let Err(e) = state.user_repository.create_message_history(&history_entry) {
+        tracing::error!("Failed to store WhatsApp confirmation message in history: {}", e);
+    }
 
     // Check if user has SMS discount tier and use their credentials if they do
     let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
@@ -839,6 +798,12 @@ pub async fn send_conversation_message(
                 .map_err(|_| format!("Missing TWILIO_ACCOUNT_SID_{}", user.id))?,
             env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
                 .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
+        )
+    } else if user.sub_tier == Some("tier 3".to_string()) {
+        let (account_sid, auth_token) = state.user_core.get_twilio_credentials(user.id)?;
+        (
+            account_sid,
+            auth_token,
         )
     } else {
         (
@@ -877,15 +842,6 @@ pub async fn send_conversation_message(
     tracing::debug!("Successfully sent conversation message{} with SID: {}", 
         if media_sid.is_some() { " with media" } else { "" },
         response.sid);
-
-    // Only redact the current message if it's not a free reply message
-    if redact && !body.contains("(free reply)") {
-        // Redact sensitive information using enhanced LLM-based redaction
-        let redacted_body = redact_sensitive_info(&body).await;
-        
-        // Update the message with the redacted body
-        redact_message(conversation_sid, &response.sid, &redacted_body, &user).await?;
-    }
 
     Ok(response.sid)
 }

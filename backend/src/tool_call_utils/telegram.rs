@@ -188,6 +188,7 @@ pub async fn handle_send_telegram_message(
             if rooms.is_empty() {
                 let error_msg = format!("No Telegram contacts found matching '{}'.", args.chat_name);
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    &state,
                     conversation_sid,
                     twilio_number,
                     &error_msg,
@@ -225,6 +226,7 @@ pub async fn handle_send_telegram_message(
             ) {
                 tracing::error!("Failed to set temporary variable: {}", e);
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    &state,
                     conversation_sid,
                     twilio_number,
                     "Failed to prepare Telegram message sending. (not charged, contact rasmus@ahtava.com)",
@@ -261,6 +263,7 @@ pub async fn handle_send_telegram_message(
 
             // Send the confirmation message
             match crate::api::twilio_utils::send_conversation_message(
+                &state,
                 conversation_sid,
                 twilio_number,
                 &confirmation_msg,
@@ -297,6 +300,7 @@ pub async fn handle_send_telegram_message(
             eprintln!("Failed to search Telegram rooms: {}", e);
             let error_msg = "Failed to find Telegram contact. Please make sure you're connected to Telegram bridge.";
             if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                &state,
                 conversation_sid,
                 twilio_number,
                 error_msg,
