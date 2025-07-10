@@ -2129,7 +2129,6 @@ pub async fn handle_telegram_fetch_specific_room_tool_call(
 pub async fn handle_whatsapp_fetch_tool_call(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::debug!("Starting WhatsApp message fetch with time range");
 
@@ -2146,34 +2145,11 @@ pub async fn handle_whatsapp_fetch_tool_call(
         }
     };
 
-    // Extract and parse start_time from query parameters
-    let start_timestamp = match params.get("start_time").and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()) {
-        Some(dt) => dt.timestamp(),
-        None => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "Missing or invalid start_time. Expected RFC3339 format (e.g., '2024-03-16T00:00:00Z')"
-                }))
-            ));
-        }
-    };
-
-    // Extract and parse end_time from query parameters
-    let end_timestamp = match params.get("end_time").and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok()) {
-        Some(dt) => dt.timestamp(),
-        None => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "Missing or invalid end_time. Expected RFC3339 format (e.g., '2024-03-16T00:00:00Z')"
-                }))
-            ));
-        }
-    };
+    // Set start_time to 2 days ago
+    let start_timestamp = (chrono::Utc::now() - chrono::Duration::days(2)).timestamp();
 
     // Fetch messages using the existing utility function
-    match crate::utils::whatsapp_utils::fetch_whatsapp_messages(&state, user_id, start_timestamp, end_timestamp, false).await {
+    match crate::utils::whatsapp_utils::fetch_whatsapp_messages(&state, user_id, start_timestamp, false).await {
         Ok(messages) => {
             if messages.is_empty() {
                 return Ok(Json(json!({

@@ -88,11 +88,8 @@ pub async fn test_fetch_messages(
     // Get a wider time range - last 24 hours
     let now = Utc::now().naive_utc();
     let start_time = (now - chrono::Duration::hours(24)).timestamp();
-    let end_time = now.timestamp()+1000000;
 
-    tracing::info!("Fetching messages from {} to {}", start_time, end_time);
-
-    match crate::utils::whatsapp_utils::fetch_whatsapp_messages(&state, auth_user.user_id, start_time, end_time, false).await {
+    match crate::utils::whatsapp_utils::fetch_whatsapp_messages(&state, auth_user.user_id, start_time, false).await {
         Ok(messages) => {
             tracing::info!("Found {} messages", messages.len());
             
@@ -147,7 +144,7 @@ pub async fn test_fetch_messages(
             
             // Try to fall back to the older fetch_whatsapp_messages method
             tracing::info!("Attempting fallback to fetch_whatsapp_messages method");
-            match fetch_whatsapp_messages(&state, auth_user.user_id, start_time, end_time, false).await {
+            match fetch_whatsapp_messages(&state, auth_user.user_id, start_time, false).await {
                 Ok(fallback_messages) => {
                     tracing::info!("Fallback successful, found {} messages", fallback_messages.len());
                     Ok(Json(WhatsAppMessagesResponse { messages: fallback_messages }))

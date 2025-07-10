@@ -51,14 +51,6 @@ pub fn get_fetch_whatsapp_messages_tool() -> openai_api_rs::v1::chat_completion:
             ..Default::default()
         }),
     );
-    whatsapp_messages_properties.insert(
-        "end".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("End time in RFC3339 format in UTC (e.g., '2024-03-16T00:00:00Z')".to_string()),
-            ..Default::default()
-        }),
-    );
 
     chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
@@ -68,7 +60,7 @@ pub fn get_fetch_whatsapp_messages_tool() -> openai_api_rs::v1::chat_completion:
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(whatsapp_messages_properties),
-                required: Some(vec![String::from("start"), String::from("end")]),
+                required: Some(vec![String::from("start")]),
             },
         },
     }
@@ -162,7 +154,6 @@ pub struct WhatsAppRoomArgs {
 #[derive(Deserialize)]
 pub struct WhatsAppTimeFrame {
     pub start: String,
-    pub end: String,
 }
 
 pub async fn handle_send_whatsapp_message(
@@ -516,19 +507,10 @@ pub async fn handle_fetch_whatsapp_messages(
         }
     };
 
-    let end_time = match chrono::DateTime::parse_from_rfc3339(&time_frame.end) {
-        Ok(dt) => dt.timestamp(),
-        Err(e) => {
-            eprintln!("Failed to parse end time: {}", e);
-            return "Invalid end time format. Please use RFC3339 format.".to_string();
-        }
-    };
-
     match crate::utils::whatsapp_utils::fetch_whatsapp_messages(
         &state,
         user_id,
         start_time,
-        end_time,
         false,
     ).await {
         Ok(messages) => {

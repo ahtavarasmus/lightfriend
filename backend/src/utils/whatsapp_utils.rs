@@ -63,7 +63,6 @@ pub async fn fetch_whatsapp_messages(
     state: &Arc<AppState>,
     user_id: i32,
     start_time: i64,
-    end_time: i64,
     unread_only: bool,
 ) -> Result<Vec<WhatsAppMessage>> {
 
