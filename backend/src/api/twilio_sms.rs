@@ -417,6 +417,9 @@ pub async fn process_sms(
             chat_messages.extend(context_messages);
         }
     }
+    if user.id == 1 {
+        println!("history: {:#?}", chat_messages);
+    }
 
     // Handle image if present
     let mut image_url = None;
@@ -576,11 +579,6 @@ pub async fn process_sms(
     }
 
 
-    let current_time = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
-
     let mut fail = false;
     let mut tool_answers: HashMap<String, String> = HashMap::new(); // tool_call id and answer
     let final_response = match result.choices[0].finish_reason {
@@ -592,6 +590,7 @@ pub async fn process_sms(
         }
         Some(chat_completion::FinishReason::tool_calls) => {
             tracing::debug!("Model requested tool calls - beginning tool execution phase");
+
                         
             let tool_calls = match result.choices[0].message.tool_calls.as_ref() {
                 Some(calls) => {
@@ -610,28 +609,6 @@ pub async fn process_sms(
                 }
             };
 
-            for tc in tool_calls {
-                let history_entry = crate::models::user_models::NewMessageHistory {
-                    user_id: user.id,
-                    role: "assistant".to_string(),
-                    // Store the entire tool-call JSON so it can be replayed later
-                    encrypted_content: serde_json::to_string(tc)
-                        .unwrap_or_else(|_| "{}".to_string()),
-                    tool_name: Some(tc
-                        .function
-                        .name
-                        .clone()
-                        .unwrap_or_else(|| "_tool_call".to_string())),
-                    tool_call_id: Some(tc.id.clone()),
-                    created_at: chrono::Utc::now().timestamp() as i32,
-                    conversation_id: conversation.conversation_sid.clone(),
-                };
-
-                if let Err(e) = state.user_repository.create_message_history(&history_entry) {
-                    tracing::error!("Failed to store tool-call message in history: {e}");
-                }
-            }
-
             for tool_call in tool_calls {
                 let tool_call_id = tool_call.id.clone();
                 tracing::debug!("Processing tool call: {:?} with id: {:?}", tool_call, tool_call_id);
@@ -645,6 +622,31 @@ pub async fn process_sms(
                         continue;
                     },
                 };
+
+                let tool_call_time= std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i32;
+
+                let history_entry = crate::models::user_models::NewMessageHistory {
+                    user_id: user.id,
+                    role: "assistant".to_string(),
+                    // Store the entire tool-call JSON so it can be replayed later
+                    encrypted_content: serde_json::to_string(tool_call)
+                        .unwrap_or_else(|_| "{}".to_string()),
+                    tool_name: Some(tool_call
+                        .function
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| "_tool_call".to_string())),
+                    tool_call_id: Some(tool_call.id.clone()),
+                    created_at: tool_call_time,
+                    conversation_id: conversation.conversation_sid.clone(),
+                };
+
+                if let Err(e) = state.user_repository.create_message_history(&history_entry) {
+                    tracing::error!("Failed to store tool-call message in history: {e}");
+                }
 
                 // Check if user has access to this tool
                 if crate::tool_call_utils::utils::requires_subscription(name, user.sub_tier.clone(), user.discount) {
@@ -1042,6 +1044,29 @@ pub async fn process_sms(
                 }
             }
 
+            let current_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+
+            // Store tool responses in history
+            for (tool_call_id, tool_response) in tool_answers.iter() {
+                let tool_message = crate::models::user_models::NewMessageHistory {
+                    user_id: user.id,
+                    role: "tool".to_string(),
+                    encrypted_content: tool_response.clone(),
+                    tool_name: None, // We could store this if needed
+                    tool_call_id: Some(tool_call_id.clone()),
+                    created_at: current_time,
+                    conversation_id: conversation.conversation_sid.clone(),
+                };
+
+                if let Err(e) = state.user_repository.create_message_history(&tool_message) {
+                    tracing::error!("Failed to store tool response in history: {}", e);
+                }
+            }
+
+
             tracing::debug!("Making follow-up request to model with tool call answers");
             let follow_up_req = chat_completion::ChatCompletionRequest::new(
                 GPT4_O.to_string(),
@@ -1135,23 +1160,6 @@ pub async fn process_sms(
 
     let processing_time_secs = start_time.elapsed().as_secs(); // Calculate processing time
 
-    // Store tool responses in history
-    for (tool_call_id, tool_response) in tool_answers.iter() {
-        let tool_message = crate::models::user_models::NewMessageHistory {
-            user_id: user.id,
-            role: "tool".to_string(),
-            encrypted_content: tool_response.clone(),
-            tool_name: None, // We could store this if needed
-            tool_call_id: Some(tool_call_id.clone()),
-            created_at: current_time,
-            conversation_id: conversation.conversation_sid.clone(),
-        };
-
-        if let Err(e) = state.user_repository.create_message_history(&tool_message) {
-            tracing::error!("Failed to store tool response in history: {}", e);
-        }
-    }
-
 
 
     // Clean up old message history based on save_context setting
@@ -1163,6 +1171,11 @@ pub async fn process_sms(
     ) {
         tracing::error!("Failed to clean up old message history: {}", e);
     }
+
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
 
     let assistant_message = crate::models::user_models::NewMessageHistory {
         user_id: user.id,

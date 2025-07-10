@@ -1005,8 +1005,8 @@ Rules
 • Start each item on a new line; you may prefix items with a hyphen (“-”) if helpful, but keep the newline.
 • Put truly critical or actionable items first.
 • Mention the platform (EMAIL / WHATSAPP / CALENDAR) only when it adds essential context.
-• Add timestamp to messages when it makes sense and vague time like .
-• For calendar, include only events starting within the next few hours.
+• Add timestamp to messages when it makes sense and vague time like in the morning, at night etc.
+• For calendar, include only events starting in few hours unless they are scheduled for next day, then you should mention them.
 
 Return JSON with a single field:
 • `digest` – the plain-text SMS message, with newlines separating items.
