@@ -637,6 +637,76 @@ impl UserCore {
         Ok(timestamp)
     }
 
+    pub fn generate_pairing_code(&self, user_id: i32) -> Result<String, DieselError> {
+        use crate::schema::user_settings;
+        use rand::{thread_rng, Rng};
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+
+        // Get current timestamp for uniqueness
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        loop {
+            // Generate base random part (8 chars)
+            const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+            let mut rng = thread_rng();
+            let random_part: String = (0..8)
+                .map(|_| {
+                    let idx = rng.gen_range(0..CHARSET.len());
+                    CHARSET[idx] as char
+                })
+                .collect();
+
+            // Create unique code combining:
+            // - First 2 chars: User-specific hash (to spread users across the space)
+            // - Next 4 chars: Timestamp-based (for temporal uniqueness)
+            // - Last 8 chars: Random (for entropy)
+            let user_hash = (user_id as u64 * 17 + 255) % 1296; // 36^2 possibilities
+            let time_hash = timestamp % 1679616; // 36^4 possibilities
+            
+            let user_part = Self::encode_base36(user_hash, 2);
+            let time_part = Self::encode_base36(time_hash, 4);
+            
+            let code = format!("{}{}{}", user_part, time_part, random_part);
+
+            // Verify this code doesn't exist anywhere in the database
+            let exists = user_settings::table
+                .filter(user_settings::server_instance_id.eq(&code))
+                .count()
+                .get_result::<i64>(&mut conn)?;
+
+            if exists == 0 {
+                // Update the user settings with the new code
+                diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+                    .set(user_settings::server_instance_id.eq(Some(&code)))
+                    .execute(&mut conn)?;
+
+                return Ok(code);
+            }
+            // If code exists (extremely unlikely), loop will continue and generate a new one
+        }
+    }
+
+    // Helper function to encode numbers in base36 with fixed width
+    fn encode_base36(mut num: u64, width: usize) -> String {
+        const CHARSET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        let mut result = vec!['0'; width];
+        
+        for i in (0..width).rev() {
+            let digit = (num % 36) as usize;
+            result[i] = CHARSET[digit] as char;
+            num /= 36;
+        }
+        
+        result.into_iter().collect()
+    }
+
     pub fn get_twilio_credentials(&self, user_id: i32) -> Result<(String, String), Box<dyn Error>> {
         use crate::schema::user_settings;
         use crate::utils::encryption::decrypt;

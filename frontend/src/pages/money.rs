@@ -95,21 +95,19 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
                     .and_then(|storage| storage.get_item("token").ok())
                     .flatten()
                 {
-                    let endpoint = match subscription_type.as_str() {
-                        "basic" => format!("{}/api/stripe/basic-subscription-checkout/{}", config::get_backend_url(), user_id),
-                        "oracle" => format!("{}/api/stripe/oracle-subscription-checkout/{}", config::get_backend_url(), user_id),
-                        "self_hosting" => format!("{}/api/stripe/self-hosting-subscription-checkout/{}", config::get_backend_url(), user_id),
-                        _ => format!("{}/api/stripe/subscription-checkout/{}", config::get_backend_url(), user_id),
-                    };
+                    let endpoint = format!("{}/api/stripe/unified-subscription-checkout/{}", config::get_backend_url(), user_id);
 
-                    let request_body = if selected_topups > 0 {
-                        json!({
-                            "selected_topups": selected_topups,
-                            "selected_digests": selected_digests
-                        })
-                    } else {
-                        json!({})
-                    };
+                    let request_body = json!({
+                        "subscription_type": match subscription_type.as_str() {
+                            "basic" => "Basic",
+                            "oracle" => "Oracle",
+                            "sentinel_plan" => "Sentinel",
+                            "self_hosting" => "SelfHosting",
+                            _ => "Sentinel"  // Default to Sentinel if unknown
+                        },
+                        "selected_topups": selected_topups,
+                        "selected_digests": selected_digests
+                    });
 
                     let response = Request::post(&endpoint)
                         .header("Authorization", &format!("Bearer {}", token))

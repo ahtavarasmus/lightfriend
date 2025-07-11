@@ -13,6 +13,14 @@ use stripe::{
     ListSubscriptions,
 };
 
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub enum SubscriptionType {
+    Basic,
+    Oracle,
+    Sentinel,
+    SelfHosting,
+}
+
 use serde::{Deserialize, Serialize};
 
 use axum::{
@@ -33,18 +41,22 @@ pub struct BuyCreditsRequest {
     pub amount_dollars: f32,
 }
 
-#[derive(serde::Deserialize)]
-pub struct OracleCheckoutBody {
+#[derive(Deserialize)]
+pub struct SubscriptionCheckoutBody {
+    pub subscription_type: SubscriptionType,
     pub selected_topups: Option<u64>,   // defaults to 0 if omitted
 }
 
-pub async fn create_basic_subscription_checkout(
+pub async fn create_unified_subscription_checkout(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Path(user_id): Path<i32>,
+    Json(body): Json<SubscriptionCheckoutBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     println!("Starting create_subscription_checkout for user_id: {}", user_id);
 
+    let selected_topups = body.selected_topups.unwrap_or(0);
+    
     // Validate user_id
     if user_id <= 0 {
         return Err((
@@ -133,420 +145,72 @@ pub async fn create_basic_subscription_checkout(
 
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
 
-    // Select price ID based on user's phone number
-    let price_id = if user.phone_number.starts_with("+1") {
-        std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_US")
-    } else if user.phone_number.starts_with("+358") {
-        std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_FI")
-    } else if user.phone_number.starts_with("+44") {
-        std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_UK")
-    } else if user.phone_number.starts_with("+61") {
-        std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_AU")
-    } else {
-        std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_OTHER")
-    }.expect("Stripe price ID not found for region");
-    
-    let success_url = format!("{}/billing?subscription=success", domain_url);
-    let cancel_url = format!("{}/billing?subscription=canceled", domain_url);
-    let mut create_params = CreateCheckoutSession {
-        success_url: Some(&success_url),
-        cancel_url: Some(&cancel_url),
-        mode: Some(stripe::CheckoutSessionMode::Subscription),
-        line_items: Some(vec![
-            stripe::CreateCheckoutSessionLineItems {
-                price: Some(price_id),
-                quantity: Some(1),
-                ..Default::default()
+    // Select price ID based on subscription type and user's phone number
+    let base_price_id = match body.subscription_type {
+        SubscriptionType::Basic => {
+            if user.phone_number.starts_with("+1") {
+                std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_US")
+            } else if user.phone_number.starts_with("+358") {
+                std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_FI")
+            } else if user.phone_number.starts_with("+44") {
+                std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_UK")
+            } else if user.phone_number.starts_with("+61") {
+                std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_AU")
+            } else {
+                std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_OTHER")
             }
-        ]),
-        customer: Some(customer_id.parse().unwrap()),
-        allow_promotion_codes: Some(true),
-        billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
-        automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
-            enabled: true,
-            liability: None,
-        }),
-        tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
-            enabled: true,
-        }),
-        customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
-            address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
-            name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto),
-            shipping: None,
-        }),
-        ..Default::default()
-    };
-
-    let success_url1 = format!("{}/billing?subscription=changed", domain_url);
-    if !existing_subscription.data.is_empty() {
-        if let Some(current_subscription) = existing_subscription.data.first() {
-            println!("Found existing subscription: {}", current_subscription.id);
-            // Proceed with existing subscription logic
-            let mut metadata = std::collections::HashMap::new();
-            metadata.insert("replacing_subscription".to_string(), current_subscription.id.to_string());
-            metadata.insert("plan_change".to_string(), "true".to_string());
-            metadata.insert("user_id".to_string(), user_id.to_string());
-            
-            create_params.subscription_data = Some(stripe::CreateCheckoutSessionSubscriptionData {
-                metadata: Some(metadata),
-                ..Default::default()
-            });
-
-            create_params.success_url = Some(&success_url1);
+        },
+        SubscriptionType::Oracle => {
+            if user.phone_number.starts_with("+1") {
+                std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_US")
+            } else if user.phone_number.starts_with("+358") {
+                std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_FI")
+            } else if user.phone_number.starts_with("+44") {
+                std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_UK")
+            } else if user.phone_number.starts_with("+61") {
+                std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_AU")
+            } else {
+                std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_OTHER")
+            }
+        },
+        SubscriptionType::Sentinel => {
+            if user.phone_number.starts_with("+1") {
+                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_US")
+            } else if user.phone_number.starts_with("+358") {
+                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_FI")
+            } else if user.phone_number.starts_with("+44") {
+                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_UK")
+            } else if user.phone_number.starts_with("+61") {
+                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_AU")
+            } else {
+                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER")
+            }
+        },
+        SubscriptionType::SelfHosting => {
+            std::env::var("STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID")
         }
-    }
-
-    let checkout_session = CheckoutSession::create(
-        &client,
-        create_params,
-    )
-    .await
-    .map_err(|e| {
-        println!("Stripe error details: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to create Basic Plan Subscription Checkout Session: {}", e)})),
-        )
-    })?;
-
-    println!("Basic Plan subscription checkout session created successfully");
-    
-    Ok(Json(json!({
-        "url": checkout_session.url.unwrap(),
-        "message": "Redirecting to Stripe Checkout for basic plan subscription"
-    })))
-}
-
-
-
-pub async fn create_oracle_subscription_checkout(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Path(user_id): Path<i32>,
-    Json(body): Json<OracleCheckoutBody>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    println!("Starting create_oracle_subscription_checkout for user_id: {}", user_id);
-    let selected_topups = body.selected_topups.unwrap_or(0);
-
-
-    // Validate user_id
-    if user_id <= 0 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Invalid user ID"})),
-        ));
-    }
-
-    // Check if user is accessing their own data or is an admin
-    if auth_user.user_id != user_id && !auth_user.is_admin {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "Access denied"})),
-        ));
-    }
-
-    // Verify user exists in database
-    let user = state
-        .user_core
-        .find_by_id(user_id)
-        .map_err(|e| {
-            println!("Database error when finding user: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to verify user"})),
-            )
-        })?
-        .ok_or_else(|| {
-            println!("User not found: {}", user_id);
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "User not found"})),
-            )
-        })?;
-
-    // Initialize Stripe client
-    let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY").map_err(|_| {
-        println!("STRIPE_SECRET_KEY not found in environment");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Stripe configuration error"})),
-        )
-    })?;
-    let client = Client::new(stripe_secret_key);
-    println!("Stripe client initialized");
-
-    // Get or create Stripe customer
-    let customer_id = match state.user_repository.get_stripe_customer_id(user_id) {
-        Ok(Some(id)) => id,
-        Ok(None) => {
-            let user = state
-                .user_core
-                .find_by_id(user_id)
-                .map_err(|e| (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Database error: {}", e)})),
-                ))?
-                .ok_or_else(|| (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": "User not found"})),
-                ))?;
-            create_new_customer(&client, user_id, &user.email, &state).await?
-        },
-        Err(e) => return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)})),
-        )),
-    };
-
-    // Check for existing active subscription
-    let existing_subscription = stripe::Subscription::list(
-        &client,
-        &stripe::ListSubscriptions {
-            customer: Some(customer_id.parse().unwrap()),
-            status: Some(stripe::SubscriptionStatusFilter::Active),
-            limit: Some(1),
-            ..Default::default()
-        },
-    ).await.map_err(|e| {
-        println!("Error fetching existing subscriptions: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to check existing subscriptions"})),
-        )
-    })?;
-
-
-    let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
-
-    // Select price ID based on user's phone number
-    let base_price_id = if user.phone_number.starts_with("+1") {
-        std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_US")
-    } else if user.phone_number.starts_with("+358") {
-        std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_FI")
-    } else if user.phone_number.starts_with("+44") {
-        std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_UK")
-    } else if user.phone_number.starts_with("+61") {
-        std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_AU")
-    } else {
-        // Default to other price for other countries
-        std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_OTHER")
     }.expect("Stripe price ID not found for region");
-
-    let topup_price_id = std::env::var("STRIPE_TOPUP_PRICE_ID").expect("STRIPE_TOPUP_PRICE_ID not found");
 
     let mut line_items = vec![
         stripe::CreateCheckoutSessionLineItems {
-            price: Some(base_price_id.to_string()),
+            price: Some(base_price_id),
             quantity: Some(1),
             ..Default::default()
         }
     ];
 
-    if selected_topups > 0 {
-        line_items.push(stripe::CreateCheckoutSessionLineItems {
-            price: Some(topup_price_id.to_string()),
-            quantity: Some(selected_topups as u64),   //  N × €top-up
-            ..Default::default()
-        });
-    }
-
-
-    let success_url = format!("{}/billing?subscription=success", domain_url);
-    let cancel_url = format!("{}/billing?subscription=canceled", domain_url);
-    let mut create_params = CreateCheckoutSession {
-        success_url: Some(&success_url),
-        cancel_url: Some(&cancel_url),
-        mode: Some(stripe::CheckoutSessionMode::Subscription),
-        line_items: Some(line_items),
-        customer: Some(customer_id.parse().unwrap()),
-        allow_promotion_codes: Some(true),
-        billing_address_collection: Some(stripe::CheckoutSessionBillingAddressCollection::Required),
-        automatic_tax: Some(stripe::CreateCheckoutSessionAutomaticTax {
-            enabled: true,
-            liability: None,
-        }),
-        tax_id_collection: Some(stripe::CreateCheckoutSessionTaxIdCollection {
-            enabled: true,
-        }),
-        customer_update: Some(stripe::CreateCheckoutSessionCustomerUpdate {
-            address: Some(stripe::CreateCheckoutSessionCustomerUpdateAddress::Auto),
-            name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto),
-            shipping: None,
-        }),
-        ..Default::default()
-    };
-    let success_url1 = format!("{}/billing?subscription=changed", domain_url);    // If user has an existing subscription, add metadata to handle the transition
-    if let Some(current_subscription) = existing_subscription.data.first() {
-        println!("Found existing subscription: {}", current_subscription.id);
+    // Add top-ups if selected and not Basic plan
+    if selected_topups > 0 && body.subscription_type != SubscriptionType::Basic {
+        let topup_price_id = std::env::var("STRIPE_TOPUP_PRICE_ID")
+            .expect("STRIPE_TOPUP_PRICE_ID not found");
         
-        // Create metadata to track the subscription change
-        let mut metadata = std::collections::HashMap::new();
-        metadata.insert("replacing_subscription".to_string(), current_subscription.id.to_string());
-        metadata.insert("plan_change".to_string(), "true".to_string());
-        metadata.insert("user_id".to_string(), user_id.to_string());
-        
-        create_params.subscription_data = Some(stripe::CreateCheckoutSessionSubscriptionData {
-            metadata: Some(metadata),
-            ..Default::default()
-        });
-
-        // Update success URL to indicate plan change
-        create_params.success_url = Some(&success_url1);
-    }
-    
-    let checkout_session = CheckoutSession::create(
-        &client,
-        create_params, 
-    )
-    .await
-    .map_err(|e| {
-        println!("Stripe error details: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to create Subscription Checkout Session: {}", e)})),
-        )
-    })?;
-
-
-    println!("Subscription checkout session created successfully");
-    
-    // Return the Checkout session URL
-    Ok(Json(json!({
-        "url": checkout_session.url.unwrap(),
-        "message": "Redirecting to Stripe Checkout for subscription"
-    })))
-}
-
-pub async fn create_subscription_checkout(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-    Path(user_id): Path<i32>,
-    Json(body): Json<OracleCheckoutBody>,
-) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    println!("Starting create_subscription_checkout for user_id: {}", user_id);
-
-    let selected_topups = body.selected_topups.unwrap_or(0);
-    // Validate user_id
-    if user_id <= 0 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Invalid user ID"})),
-        ));
-    }
-
-    // Check if user is accessing their own data or is an admin
-    if auth_user.user_id != user_id && !auth_user.is_admin {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "Access denied"})),
-        ));
-    }
-
-    // Verify user exists in database
-    let user = state
-        .user_core
-        .find_by_id(user_id)
-        .map_err(|e| {
-            println!("Database error when finding user: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to verify user"})),
-            )
-        })?
-        .ok_or_else(|| {
-            println!("User not found: {}", user_id);
-            (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "User not found"})),
-            )
-        })?;
-
-    // Initialize Stripe client
-    let stripe_secret_key = std::env::var("STRIPE_SECRET_KEY").map_err(|_| {
-        println!("STRIPE_SECRET_KEY not found in environment");
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Stripe configuration error"})),
-        )
-    })?;
-    let client = Client::new(stripe_secret_key);
-    println!("Stripe client initialized");
-
-    // Get or create Stripe customer
-    let customer_id = match state.user_repository.get_stripe_customer_id(user_id) {
-        Ok(Some(id)) => id,
-        Ok(None) => {
-            let user = state
-                .user_core
-                .find_by_id(user_id)
-                .map_err(|e| (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Database error: {}", e)})),
-                ))?
-                .ok_or_else(|| (
-                    StatusCode::NOT_FOUND,
-                    Json(json!({"error": "User not found"})),
-                ))?;
-            create_new_customer(&client, user_id, &user.email, &state).await?
-        },
-        Err(e) => return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Database error: {}", e)})),
-        )),
-    };
-
-    // Check for existing active subscription
-    let existing_subscription = stripe::Subscription::list(
-        &client,
-        &stripe::ListSubscriptions {
-            customer: Some(customer_id.parse().unwrap()),
-            status: Some(stripe::SubscriptionStatusFilter::Active),
-            limit: Some(1),
-            ..Default::default()
-        },
-    ).await.map_err(|e| {
-        println!("Error fetching existing subscriptions: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to check existing subscriptions"})),
-        )
-    })?;
-
-    let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
-
-    // Select price ID based on user's phone number
-    let base_price_id = if user.phone_number.starts_with("+1") {
-        std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_US")
-    } else if user.phone_number.starts_with("+358") {
-        std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_FI")
-    } else if user.phone_number.starts_with("+44") {
-        std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_UK")
-    } else if user.phone_number.starts_with("+61") {
-        std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_AU")
-    } else {
-        // Default to other price for other countries
-        std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER")
-    }.expect("Stripe price ID not found for region");
-
-    let topup_price_id = std::env::var("STRIPE_TOPUP_PRICE_ID").expect("STRIPE_TOPUP_PRICE_ID not found");
-
-    let mut line_items = vec![
-        stripe::CreateCheckoutSessionLineItems {
-            price: Some(base_price_id.to_string()),
-            quantity: Some(1),
-            ..Default::default()
-        }
-    ];
-
-    if selected_topups > 0 {
         line_items.push(stripe::CreateCheckoutSessionLineItems {
-            price: Some(topup_price_id.to_string()),
-            quantity: Some(selected_topups as u64),   //  N × €top-up
+            price: Some(topup_price_id),
+            quantity: Some(selected_topups as u64),
             ..Default::default()
         });
     }
 
-    
     let success_url = format!("{}/billing?subscription=success", domain_url);
     let cancel_url = format!("{}/billing?subscription=canceled", domain_url);
     let mut create_params = CreateCheckoutSession {
@@ -604,7 +268,6 @@ pub async fn create_subscription_checkout(
         )
     })?;
 
-
     println!("Subscription checkout session created successfully");
     
     // Return the Checkout session URL
@@ -613,6 +276,7 @@ pub async fn create_subscription_checkout(
         "message": "Redirecting to Stripe Checkout for subscription"
     })))
 }
+
 
 pub async fn create_customer_portal_session(
     State(state): State<Arc<AppState>>,
@@ -1321,6 +985,9 @@ pub async fn stripe_webhook(
                         let sentinel_us_id = std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_US")
                                 .unwrap_or_default();
 
+                        let self_hosting_id = std::env::var("STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID")
+                                .unwrap_or_default();
+
                         // Calculate days until next billing for the tier 2 sentinel plans
                         let days_until_billing = Some(subscription.current_period_end).map(|date| {
                             let current_time = std::time::SystemTime::now()
@@ -1361,6 +1028,16 @@ pub async fn stripe_webhook(
                                 days_until_billing,
                             ).unwrap_or(40.00);
                             messages = new_balance;
+                        } else if base_price == self_hosting_id {
+                            // Self-hosting subscription - no messages
+                            messages = 0.0;
+                            // Update subscription tier to tier 3
+                            if let Err(e) = state.user_repository.set_subscription_tier(user.id, Some("tier 3")) {
+                                tracing::error!("Failed to update subscription tier: {}", e);
+                            }
+                            if let Err(e) = state.user_core.generate_pairing_code(user.id) {
+                                tracing::error!("Failed to generate pairing code: {}", e);
+                            }
                         } else if sub_info.tier == "tier 2" {
                             // legacy sub
                             messages = 120.00 - (days_until_billing * amount_of_digests) as f32;

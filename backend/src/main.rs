@@ -363,9 +363,7 @@ async fn main() {
         .route("/api/billing/update-auto-topup/{user_id}", post(billing_handlers::update_topup))
 
         .route("/api/stripe/checkout-session/{user_id}", post(stripe_handlers::create_checkout_session))
-        .route("/api/stripe/subscription-checkout/{user_id}", post(stripe_handlers::create_subscription_checkout))
-        .route("/api/stripe/basic-subscription-checkout/{user_id}", post(stripe_handlers::create_basic_subscription_checkout))
-        .route("/api/stripe/oracle-subscription-checkout/{user_id}", post(stripe_handlers::create_oracle_subscription_checkout))
+        .route("/api/stripe/unified-subscription-checkout/{user_id}", post(stripe_handlers::create_unified_subscription_checkout))
         // TODO can use this on the topping up credits if user already has bought some before
         // .route("/api/stripe/automatic-charge/{user_id}", post(stripe_handlers::automatic_charge))
         .route("/api/stripe/customer-portal/{user_id}", get(stripe_handlers::create_customer_portal_session))
