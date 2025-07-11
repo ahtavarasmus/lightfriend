@@ -310,8 +310,8 @@ pub async fn elevenlabs_webhook(
             let call_start = crate::models::user_models::NewMessageHistory {
                 user_id,
                 conversation_id: conversation_id.clone(),
-                role: "system".into(),                 //   <-- not “assistant”
-                encrypted_content: format!("[CALL_START] {}", ts),
+                role: "system".into(),
+                encrypted_content: format!("[CALL_START] {}", start_rfc3339),
                 tool_name: None,
                 tool_call_id: None,
                 created_at: start_epoch,
@@ -321,11 +321,15 @@ pub async fn elevenlabs_webhook(
                 user_id,
                 conversation_id: conversation_id.clone(),
                 role: "system".into(),
-                encrypted_content: format!("[CALL_SUMMARY] {}", start_rfc3339), // *no* “Summary of …”
+                encrypted_content: format!("[CALL_SUMMARY] {}", call_summary),
                 tool_name: None,
                 tool_call_id: None,
                 created_at: end_epoch,
             };
+
+            if user_id == 1 {
+                println!("adding call summary to message history: {:#?}", call_end);
+            }
 
             if let Err(e) = state.user_repository.create_message_history(&call_start) {
                 error!("Failed to create message history: {}", e);

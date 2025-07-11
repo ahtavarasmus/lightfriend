@@ -455,7 +455,7 @@ pub struct MessageHistory {
     pub conversation_id: String,  // To group messages in the same conversation
 }
 
-#[derive(Insertable)]
+#[derive(Insertable, Debug)]
 #[diesel(table_name = message_history)]
 pub struct NewMessageHistory {
     pub user_id: i32,
