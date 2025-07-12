@@ -24,6 +24,8 @@ mod pages {
     pub mod faq;
     pub mod supported_countries;
     pub mod twilio_self_host_instructions;
+    pub mod llm_self_host_instructions;
+    pub mod self_host_instructions;
 }
 
 mod proactive {
@@ -64,11 +66,11 @@ mod admin {
 use pages::{
     home::Home,
     faq::Faq,
-    twilio_self_host_instructions::TwilioSelfHostInstructions,
     supported_countries::SupportedCountries,
     home::is_logged_in,
     termsprivacy::{TermsAndConditions, PrivacyPolicy},
     money::{Pricing},
+    self_host_instructions::SelfHostInstructions,
 };
 
 use auth::{
@@ -101,8 +103,8 @@ pub enum Route {
     PasswordReset,
     #[at("/faq")]
     Faq,
-    #[at("/twilio-instructions")]
-    TwilioSelfHostInstructions,
+    #[at("/host-instructions")]
+    SelfHostInstructions,
     #[at("/supported-countries")]
     SupportedCountries,
     #[at("/")]
@@ -161,9 +163,9 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
             info!("Rendering FAQ page");
             html! { <Faq /> }
         },
-        Route::TwilioSelfHostInstructions => {
-            info!("Rendering TwilioSelfHostInstructions page");
-            html! { <TwilioSelfHostInstructions /> }
+        Route::SelfHostInstructions=> {
+            info!("Rendering Self Host Instructions page");
+            html! { <SelfHostInstructionsWrapper /> }
         },
         Route::SupportedCountries => {
             info!("Rendering SupportedCountries page");
@@ -208,6 +210,57 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
     }
 }
 
+
+#[function_component(SelfHostInstructionsWrapper)]
+pub fn self_host_instructions_wrapper() -> Html {
+    let profile_data = use_state(|| None::<UserProfile>);
+    
+    {
+        let profile_data = profile_data.clone();
+        
+        use_effect_with_deps(move |_| {
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Some(token) = window()
+                    .and_then(|w| w.local_storage().ok())
+                    .flatten()
+                    .and_then(|storage| storage.get_item("token").ok())
+                    .flatten()
+                {
+                    match Request::get(&format!("{}/api/profile", config::get_backend_url()))
+                        .header("Authorization", &format!("Bearer {}", token))
+                        .send()
+                        .await
+                    {
+                        Ok(response) => {
+                            if let Ok(profile) = response.json::<UserProfile>().await {
+                                profile_data.set(Some(profile));
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                }
+            });
+            
+            || ()
+        }, ());
+    }
+
+    if let Some(profile) = (*profile_data).as_ref() {
+        html! {
+            <SelfHostInstructions
+                is_logged_in={true}
+                sub_tier={profile.sub_tier.clone()}
+            />
+        }
+    } else {
+        html! {
+            <SelfHostInstructions
+                is_logged_in={false}
+                sub_tier={None::<String>}
+            />
+        }
+    }
+}
 
 #[function_component(PricingWrapper)]
 pub fn pricing_wrapper() -> Html {
