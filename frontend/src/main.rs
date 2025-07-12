@@ -23,6 +23,7 @@ mod pages {
     pub mod proactive;
     pub mod faq;
     pub mod supported_countries;
+    pub mod twilio_self_host_instructions;
 }
 
 mod proactive {
@@ -63,6 +64,7 @@ mod admin {
 use pages::{
     home::Home,
     faq::Faq,
+    twilio_self_host_instructions::TwilioSelfHostInstructions,
     supported_countries::SupportedCountries,
     home::is_logged_in,
     termsprivacy::{TermsAndConditions, PrivacyPolicy},
@@ -99,6 +101,8 @@ pub enum Route {
     PasswordReset,
     #[at("/faq")]
     Faq,
+    #[at("/twilio-instructions")]
+    TwilioSelfHostInstructions,
     #[at("/supported-countries")]
     SupportedCountries,
     #[at("/")]
@@ -156,6 +160,10 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
         Route::Faq => {
             info!("Rendering FAQ page");
             html! { <Faq /> }
+        },
+        Route::TwilioSelfHostInstructions => {
+            info!("Rendering TwilioSelfHostInstructions page");
+            html! { <TwilioSelfHostInstructions /> }
         },
         Route::SupportedCountries => {
             info!("Rendering SupportedCountries page");
