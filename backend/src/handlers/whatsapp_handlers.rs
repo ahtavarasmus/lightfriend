@@ -144,7 +144,7 @@ pub async fn test_fetch_messages(
             
             // Try to fall back to the older fetch_whatsapp_messages method
             tracing::info!("Attempting fallback to fetch_whatsapp_messages method");
-            match fetch_whatsapp_messages(&state, auth_user.user_id, start_time, false).await {
+            match fetch_whatsapp_messages(&state, auth_user.user_id, start_time,false).await {
                 Ok(fallback_messages) => {
                     tracing::info!("Fallback successful, found {} messages", fallback_messages.len());
                     Ok(Json(WhatsAppMessagesResponse { messages: fallback_messages }))

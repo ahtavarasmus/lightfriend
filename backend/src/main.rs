@@ -324,10 +324,13 @@ async fn main() {
     let public_routes = Router::new()
         .route("/api/health", get(health_check))
         .route("/api/login", post(auth_handlers::login))
+        .route("/api/self-hosted/login", post(auth_handlers::self_hosted_login))
+        .route("/api/self-hosted/signup", post(auth_handlers::self_hosted_signup))
         .route("/api/register", post(auth_handlers::register))
         .route("/api/password-reset/request", post(auth_handlers::request_password_reset))
         .route("/api/password-reset/verify", post(auth_handlers::verify_password_reset))
-        .route("/api/self-hosting-status", get(auth_handlers::self_hosted_status));
+        .route("/api/self-hosting-status", get(auth_handlers::self_hosted_status))
+        .route("/api/check-pairing", post(auth_handlers::check_pairing));
 
     // Admin routes that need admin authentication
     let admin_routes = Router::new()
@@ -349,6 +352,7 @@ async fn main() {
     let protected_routes = Router::new()
         .route("/api/profile/delete/{user_id}", delete(profile_handlers::delete_user))
         .route("/api/profile/update", post(profile_handlers::update_profile))
+        .route("/api/generate-pairing-code", get(auth_handlers::generate_pairing_code))
         .route("/api/profile/timezone", post(profile_handlers::update_timezone))
         .route("/api/profile/preferred-number", post(profile_handlers::update_preferred_number))
         .route("/api/profile", get(profile_handlers::get_profile))

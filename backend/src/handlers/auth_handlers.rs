@@ -15,10 +15,36 @@ use chrono::{Duration, Utc};
 use serde::Deserialize;
 use std::num::NonZeroU32;
 use governor::{Quota, RateLimiter};
+use rand::distributions::Alphanumeric;
+use uuid::Uuid;
+use std::env;
 
 #[derive(Deserialize)]
 pub struct BroadcastMessageRequest {
     message: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PairingVerificationRequest {
+    pairing_code: String,
+    server_instance_id: String,
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct PairingVerificationResponse {
+    valid: bool,
+    message: String,
+}
+
+#[derive(Deserialize)]
+pub struct SelfHostedSignupRequest {
+    pairing_code: String,
+    password: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct SelfHostedLoginRequest {
+    password: String,
 }
 
 use crate::{
@@ -47,6 +73,11 @@ use serde::Serialize;
 #[derive(Serialize)]
 pub struct PasswordResetResponse {
     message: String,
+}
+
+#[derive(Serialize)]
+pub struct GeneratePairingCodeResponse {
+    pairing_code: String,
 }
 
 #[derive(Serialize)]
@@ -670,3 +701,377 @@ pub async fn self_hosted_status(
         }))
     }
 }
+
+pub async fn self_hosted_signup(
+    State(state): State<Arc<AppState>>,
+    Json(signup_req): Json<SelfHostedSignupRequest>,
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    // Verify we're in self-hosted mode
+    let env_type = std::env::var("ENVIRONMENT").unwrap_or_else(|_| "normal".to_string());
+    if env_type != "self_hosted" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Self-hosted signup is only available in self-hosted mode"}))
+        ));
+    }
+
+    // Check if any users exist
+    let users = state.user_core.get_all_users().map_err(|e| {
+        println!("Database error while checking users: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Database error"}))
+        )
+    })?;
+
+    if !users.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Self-hosted instance is already set up"}))
+        ));
+    }
+
+    // If password is provided, this is the second step (password creation)
+    if let Some(password) = signup_req.password {
+
+        // Hash the password
+        let password_hash = bcrypt::hash(&password, bcrypt::DEFAULT_COST).map_err(|e| {
+            println!("Password hashing failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Password hashing failed"}))
+            )
+        })?;
+
+        // Create the admin user
+        let new_user = NewUser {
+            email: "hosted@local".to_string(),
+            password_hash,
+            phone_number: "+0000000000".to_string(), // Placeholder for self-hosted
+            time_to_live: 0, 
+            verified: true,
+            credits: 0.00,
+            credits_left: 0.00,
+            charge_when_under: false,
+            waiting_checks_count: 0,
+            discount: false,
+        };
+
+        state.user_core.create_user(new_user).map_err(|e| {
+            println!("User creation failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to create admin user"}))
+            )
+        })?;
+
+        // Get the created user for token generation
+        let user = state.user_core.find_by_email("admin@local")
+            .map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to retrieve user"}))
+            ))?
+            .ok_or_else(|| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "User not found after creation"}))
+            ))?;
+
+        // Generate tokens
+        let access_token = encode(
+            &Header::default(),
+            &json!({
+                "sub": user.id,
+                "exp": (Utc::now() + Duration::minutes(15)).timestamp(),
+                "type": "access"
+            }),
+            &EncodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+                .expect("JWT_SECRET_KEY must be set in environment")
+                .as_bytes()),
+        ).map_err(|_| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Token generation failed"}))
+        ))?;
+
+        let refresh_token = encode(
+            &Header::default(),
+            &json!({
+                "sub": user.id,
+                "exp": (Utc::now() + Duration::days(7)).timestamp(),
+                "type": "refresh"
+            }),
+            &EncodingKey::from_secret(std::env::var("JWT_REFRESH_KEY")
+                .expect("JWT_REFRESH_KEY must be set in environment")
+                .as_bytes()),
+        ).map_err(|_| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Token generation failed"}))
+        ))?;
+
+        // Create response with tokens
+        let mut response = Response::new(
+            axum::body::Body::from(
+                Json(json!({
+                    "message": "Self-hosted setup complete",
+                    "token": access_token
+                })).to_string()
+            )
+        );
+
+        let cookie_options = "; HttpOnly; Secure; SameSite=Strict; Path=/";
+        response.headers_mut().insert(
+            "Set-Cookie",
+            format!("access_token={}{}; Max-Age=900", access_token, cookie_options)
+                .parse()
+                .unwrap(),
+        );
+
+        response.headers_mut().insert(
+            "Set-Cookie",
+            format!("refresh_token={}{}; Max-Age=604800", refresh_token, cookie_options)
+                .parse()
+                .unwrap(),
+        );
+
+        response.headers_mut().insert(
+            "Content-Type",
+            "application/json".parse().unwrap()
+        );
+
+        Ok(response)
+    } else {
+        // This is the first step (pairing code verification)
+        // Generate a server instance ID
+        let server_instance_id = Uuid::new_v4().to_string();
+
+        // Send verification request to main server
+        let server_url = env::var("SERVER_URL").expect("SERVER_URL must be set");
+        let client = reqwest::Client::new();
+        let verification_response = client
+            .post(&format!("{}/api/check-pairing", server_url))
+            .json(&PairingVerificationRequest {
+                pairing_code: signup_req.pairing_code.clone(),
+                server_instance_id: server_instance_id.clone(),
+            })
+            .send()
+            .await
+            .map_err(|e| {
+                println!("Failed to send verification request: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Failed to verify pairing code"}))
+                )
+            })?;
+
+        if !verification_response.status().is_success() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Invalid pairing code"}))
+            ));
+        }
+
+        let verification_result = verification_response.json::<PairingVerificationResponse>().await
+            .map_err(|e| {
+                println!("Failed to parse verification response: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Failed to verify pairing code"}))
+                )
+            })?;
+
+        if !verification_result.valid {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": verification_result.message}))
+            ));
+        }
+
+        // Store the server instance ID to this self hosted instance
+        state.user_core.set_server_instance_id_to_self_hosted(server_instance_id.as_str()).map_err(|e| {
+            println!("Failed to set server instance ID: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to set server instance ID"}))
+            )
+        })?;
+
+        Ok(Response::new(
+            axum::body::Body::from(
+                Json(json!({
+                    "message": "Pairing code verified. Please create a password."
+                })).to_string()
+            )
+        ))
+    }
+}
+
+pub async fn check_pairing(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<PairingVerificationRequest>,
+) -> Result<Json<PairingVerificationResponse>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Attempting to verify pairing code for server instance: {}", req.server_instance_id);
+
+    // Verify the pairing code and update server instance ID
+    match state.user_core.verify_pairing_code(&req.pairing_code, &req.server_instance_id) {
+        Ok(true) => {
+            println!("Pairing code verified successfully for server instance: {}", req.server_instance_id);
+            Ok(Json(PairingVerificationResponse {
+                valid: true,
+                message: "Pairing code verified successfully".to_string(),
+            }))
+        },
+        Ok(false) => {
+            println!("Invalid pairing code provided for server instance: {}", req.server_instance_id);
+            Ok(Json(PairingVerificationResponse {
+                valid: false,
+                message: "Invalid pairing code".to_string(),
+            }))
+        },
+        Err(e) => {
+            println!("Database error while verifying pairing code: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to verify pairing code due to database error"}))
+            ))
+        }
+    }
+}
+
+// generates a new pairing code for the user. normally this is done on stripe subscription webhook.
+pub async fn generate_pairing_code(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser, 
+) -> Result<Json<GeneratePairingCodeResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Generate a random 6-character pairing code
+    let pairing_code: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(6)
+        .map(char::from)
+        .collect::<String>()
+        .to_uppercase();
+
+    // Save the new pairing code 
+    if let Err(e) = state.user_core.set_server_instance_id(auth_user.user_id, &pairing_code.as_str()) {
+        println!("Failed to save pairing code: {}", e);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to generate pairing code"}))
+        ));
+    }
+
+    Ok(Json(GeneratePairingCodeResponse {
+        pairing_code
+    }))
+}
+
+pub async fn self_hosted_login(
+    State(state): State<Arc<AppState>>,
+    Json(login_req): Json<SelfHostedLoginRequest>,
+) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
+    // Verify we're in self-hosted mode
+    let env_type = std::env::var("ENVIRONMENT").unwrap_or_else(|_| "normal".to_string());
+    if env_type != "self_hosted" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Self-hosted login is only available in self-hosted mode"}))
+        ));
+    }
+
+    // Find the admin user
+    let user = match state.user_core.find_by_email("admin@local") {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                Json(json!({"error": "Self-hosted instance not set up"}))
+            ));
+        }
+        Err(_) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Database error"}))
+            ));
+        }
+    };
+
+    // Verify password
+    match bcrypt::verify(&login_req.password, &user.password_hash) {
+        Ok(valid) => {
+            if !valid {
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({"error": "Invalid password"}))
+                ));
+            }
+        }
+        Err(_) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Password verification failed"}))
+            ));
+        }
+    }
+
+    // Generate tokens
+    let access_token = encode(
+        &Header::default(),
+        &json!({
+            "sub": user.id,
+            "exp": (Utc::now() + Duration::minutes(15)).timestamp(),
+            "type": "access"
+        }),
+        &EncodingKey::from_secret(std::env::var("JWT_SECRET_KEY")
+            .expect("JWT_SECRET_KEY must be set in environment")
+            .as_bytes()),
+    ).map_err(|_| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": "Token generation failed"}))
+    ))?;
+
+    let refresh_token = encode(
+        &Header::default(),
+        &json!({
+            "sub": user.id,
+            "exp": (Utc::now() + Duration::days(7)).timestamp(),
+            "type": "refresh"
+        }),
+        &EncodingKey::from_secret(std::env::var("JWT_REFRESH_KEY")
+            .expect("JWT_REFRESH_KEY must be set in environment")
+            .as_bytes()),
+    ).map_err(|_| (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": "Token generation failed"}))
+    ))?;
+
+    // Create response with tokens
+    let mut response = Response::new(
+        axum::body::Body::from(
+            Json(json!({
+                "message": "Login successful",
+                "token": access_token
+            })).to_string()
+        )
+    );
+
+    let cookie_options = "; HttpOnly; Secure; SameSite=Strict; Path=/";
+    response.headers_mut().insert(
+        "Set-Cookie",
+        format!("access_token={}{}; Max-Age=900", access_token, cookie_options)
+            .parse()
+            .unwrap(),
+    );
+
+    response.headers_mut().insert(
+        "Set-Cookie",
+        format!("refresh_token={}{}; Max-Age=604800", refresh_token, cookie_options)
+            .parse()
+            .unwrap(),
+    );
+
+    response.headers_mut().insert(
+        "Content-Type",
+        "application/json".parse().unwrap()
+    );
+
+    Ok(response)
+}
+

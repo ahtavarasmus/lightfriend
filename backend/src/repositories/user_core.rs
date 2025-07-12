@@ -614,6 +614,17 @@ impl UserCore {
         Ok(critical_enabled)
     }
 
+    pub fn verify_pairing_code(&self, pairing_code: &str, server_instance_id: &str) -> Result<bool, DieselError> {
+        // Try to find a user with the given pairing code
+        if let Some(user_id) = self.find_user_by_pairing_code(pairing_code)? {
+            // If user found, update their server instance ID
+            self.set_server_instance_id(user_id, server_instance_id)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     pub fn update_next_billing_date(&self, user_id: i32, timestamp: i32) -> Result<(), DieselError> {
         use crate::schema::users;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -707,6 +718,20 @@ impl UserCore {
         result.into_iter().collect()
     }
 
+    pub fn find_user_by_pairing_code(&self, pairing_code: &str) -> Result<Option<i32>, DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Search for a user_settings record with matching server_instance_id
+        let user_id = user_settings::table
+            .filter(user_settings::server_instance_id.eq(pairing_code))
+            .select(user_settings::user_id)
+            .first::<i32>(&mut conn)
+            .optional()?;
+            
+        Ok(user_id)
+    }
+
     pub fn get_twilio_credentials(&self, user_id: i32) -> Result<(String, String), Box<dyn Error>> {
         use crate::schema::user_settings;
         use crate::utils::encryption::decrypt;
@@ -731,9 +756,43 @@ impl UserCore {
             _ => Err("Twilio credentials not found".into())
         }
     }
-    /// Return Twilio credentials for the first user whose `sub_tier` is "tier 3".
-    /// Fails if no such user exists or if either credential is missing.
-    /// Used for self hosted instance
+    pub fn set_server_instance_id(&self, user_id: i32, server_instance_id: &str) -> Result<(), DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+
+        // Update the server_instance_id
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::server_instance_id.eq(Some(server_instance_id)))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    // for self hosted instance
+    pub fn set_server_instance_id_to_self_hosted(&self, server_instance_id: &str) -> Result<(), DieselError> {
+        use crate::schema::{users, user_settings};
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Get the first user from the users table
+        let first_user = users::table
+            .order(users::id.asc())
+            .first::<User>(&mut conn)?;
+            
+        // Ensure user settings exist for this user
+        self.ensure_user_settings_exist(first_user.id)?;
+
+        // Update the server_instance_id for this user
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(first_user.id)))
+            .set(user_settings::server_instance_id.eq(Some(server_instance_id)))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    // for self hosted instance
     pub fn get_settings_for_tier3(
         &self,
     ) -> Result<(Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>), Box<dyn std::error::Error>> {
@@ -742,9 +801,8 @@ impl UserCore {
         
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
-        // Find the first tier 3 user
+        // Find the first user(should be only one)
         let tier3_user = users::table
-            .filter(users::sub_tier.eq("tier 3"))
             .first::<User>(&mut conn)?;
             
         // Get their settings
