@@ -2,15 +2,15 @@ use yew::prelude::*;
 use web_sys::MouseEvent;
 
 #[derive(Properties, PartialEq)]
-pub struct TwilioSelfHostInstructionsProps {
+pub struct VoiceSelfHostInstructionsProps {
     #[prop_or_default]
     pub is_logged_in: bool,
     #[prop_or_default]
     pub sub_tier: Option<String>,
 }
 
-#[function_component(TwilioSelfHostInstructions)]
-pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) -> Html {
+#[function_component(VoiceSelfHostInstructions)]
+pub fn llm_self_host_instructions(props: &VoiceSelfHostInstructionsProps) -> Html {
     let modal_visible = use_state(|| false);
     let selected_image = use_state(|| String::new());
 
@@ -35,36 +35,31 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
             <section class="instructions-section">
                 <div class="instruction-block overview-block">
                     <div class="instruction-content">
-                        <h2>{"What is Twilio and what does it do?"}</h2>
-                        <p>{"Twilio powers all SMS and voice communication in Lightfriend, enabling your AI assistant to send/receive messages and make calls through a dedicated phone number. Setting up your own Twilio account gives you full control over communications while ensuring privacy."}</p>
+                        <h2>{"What is ElevenLabs and what does it do?"}</h2>
+                        <p>{""}</p>
                     </div>
                 </div>
 
                 <div class="instruction-block">
                     <div class="instruction-content">
                         <h2>{"Expected Costs"}</h2>
-                        <p>{"With typical usage (around 5 messages per day), expect to pay approximately $5+ per month. This includes a phone number (€1-15/month) and message costs. For details, visit "}<a href="https://www.twilio.com/en-us/sms/pricing/us" target="_blank" style="color: #7EB2FF; text-decoration: underline;">{"Twilio's pricing page"}</a>{"."}</p>
+                        <p>{""}</p>
                     </div>
                 </div>
+
                 <div class="instruction-block">
                     <div class="instruction-content">
-                        <h2>{"Sign up and Add Funds"}</h2>
+                        <h2>{""}</h2>
                         <ul>
-                            <li>{"Go to Twilio's website (twilio.com) and click 'Sign up'"}</li>
-                            <li>{"Complete the registration process with your email and other required information"}</li>
-                            <li>{"Once registered, you'll need to add funds to your account:"}</li>
-                            <li>{"1. Click on 'Admin' in the top right"}</li>
-                            <li>{"2. Select 'Account billing' from the dropdown"}</li>
-                            <li>{"3. Click 'Add funds' on the new billing page that opens up and input desired amount (minimum usually $20)"}</li>
-                            <li>{"After adding funds, your account will be ready to purchase a phone number"}</li>
+                            <li>{""}</li>
                         </ul>
                     </div>
                     <div class="instruction-image">
                         <img 
-                            src="/assets/billing-twilio.png" 
-                            alt="Navigating to Twilio Billing Page" 
+                            src="" 
+                            alt="" 
                             loading="lazy"
-                            onclick={let open_modal = open_modal.clone(); let src = "/assets/billing-twilio.png".to_string(); 
+                            onclick={let open_modal = open_modal.clone(); let src = "".to_string(); 
                                 Callback::from(move |_| open_modal.emit(src.clone()))}
                             style="cursor: pointer;"
                         />
@@ -73,22 +68,17 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
 
                 <div class="instruction-block">
                     <div class="instruction-content">
-                        <h2>{"Buy a phone number"}</h2>
+                        <h2>{""}</h2>
                         <ul>
-                            <li>{"1. On the Twilio Dashboard, click on the 'Phone Numbers' button in the left sidebar when 'Develop' is selected above."}</li>
-                            <li>{"2. Click the 'Buy a number' button under the new sub menu"}</li>
-                            <li>{"3. Use the country search box to select your desired country"}</li>
-                            <li>{"4. (Optional) Use advanced search options to find specific number types"}</li>
-                            <li>{"5. Check the capabilities column to ensure the number supports your needs (Voice, SMS, MMS, etc.)"}</li>
-                            <li>{"6. Click the 'Buy' button next to your chosen number and follow the steps"}</li>
+                            <li>{""}</li>
                         </ul>
                         {
                             if props.is_logged_in {
                                 html! {
                                     <div class="input-field">
-                                        <label for="phone-number">{"Your Twilio Phone Number:"}</label>
+                                        <label for="api-key">{""}</label>
                                         <div class="input-with-button">
-                                            <input type="text" id="phone-number" placeholder="+1234567890" />
+                                            <input type="text" id="api-key" placeholder="sk-or-v1-..." />
                                             <button class="save-button">{"Save"}</button>
                                         </div>
                                     </div>
@@ -100,54 +90,10 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
                     </div>
                     <div class="instruction-image">
                         <img 
-                            src="/assets/number-twilio.png" 
-                            alt="Buy Twilio Phone Number Image" 
+                            src="" 
+                            alt="" 
                             loading="lazy"
-                            onclick={let open_modal = open_modal.clone(); let src = "/assets/number-twilio.png".to_string(); 
-                                Callback::from(move |_| open_modal.emit(src.clone()))}
-                            style="cursor: pointer;"
-                        />
-                    </div>
-                </div>
-
-                <div class="instruction-block">
-                    <div class="instruction-content">
-                        <h2>{"Finding Credentials"}</h2>
-                        <ul>
-                            <li>{"1. Click on the 'Account Dashboard' in the left sidebar"}</li>
-                            <li>{"2. Find and copy your 'Account SID' from the dashboard"}</li>
-                            <li>{"3. Reveal and copy your 'Auth Token' from the dashboard"}</li>
-                        </ul>
-                        {
-                            if props.is_logged_in {
-                                html! {
-                                    <>
-                                        <div class="input-field">
-                                            <label for="account-sid">{"Your Account SID:"}</label>
-                                            <div class="input-with-button">
-                                                <input type="text" id="account-sid" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
-                                            </div>
-                                        </div>
-                                        <div class="input-field">
-                                            <label for="auth-token">{"Your Auth Token:"}</label>
-                                            <div class="input-with-button">
-                                                <input type="password" id="auth-token" placeholder="your_auth_token_here" />
-                                            </div>
-                                        </div>
-                                        <button class="save-button">{"Save"}</button>
-                                    </>
-                                }
-                            } else {
-                                html! {}
-                            }
-                        }
-                    </div>
-                    <div class="instruction-image">
-                        <img 
-                            src="/assets/creds-twilio.png" 
-                            alt="Twilio Credentials Dashboard" 
-                            loading="lazy"
-                            onclick={let open_modal = open_modal.clone(); let src = "/assets/creds-twilio.png".to_string(); 
+                            onclick={let open_modal = open_modal.clone(); let src = "".to_string(); 
                                 Callback::from(move |_| open_modal.emit(src.clone()))}
                             style="cursor: pointer;"
                         />

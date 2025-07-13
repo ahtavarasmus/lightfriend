@@ -277,7 +277,7 @@ let on_timezone_update = {
             }
             
             { 
-                if (*user_profile).sub_tier != "self_hosted" {
+                if (*user_profile).sub_tier != Some("self_hosted".to_string()) {
                     html! {
                         <div class="profile-field">
                             <span class="field-label">{"Email"}</span>

@@ -34,19 +34,39 @@ pub fn llm_self_host_instructions(props: &AISelfHostInstructionsProps) -> Html {
         <div class="instructions-page">
             <div class="instructions-background"></div>
             <section class="instructions-section">
+                <div class="instruction-block overview-block">
+                    <div class="instruction-content">
+                        <h2>{"What is OpenRouter and what does it do?"}</h2>
+                        <p>{"OpenRouter powers all the AI features in Lightfriend, including SMS conversations and monitoring. It provides access to leading AI models like GPT-4 and Claude, giving you full control over costs and usage."}</p>
+                    </div>
+                </div>
+
                 <div class="instruction-block">
                     <div class="instruction-content">
-                        <h2>{""}</h2>
+                        <h2>{"Expected Costs"}</h2>
+                        <p>{"Under normal usage, expect to cost less than $1 per month. You only pay for what you use, with no monthly fees."}</p>
+                    </div>
+                </div>
+
+                <div class="instruction-block">
+                    <div class="instruction-content">
+                        <h2>{"Sign up and Add Balance"}</h2>
                         <ul>
-                            <li>{""}</li>
+                            <li>{"Go to OpenRouter's website (openrouter.ai) and click 'Sign up'"}</li>
+                            <li>{"Complete the registration process with your email"}</li>
+                            <li>{"Once registered, you'll need to add funds to your account:"}</li>
+                            <li>{"1. Click on 'Credits' in the top right dropdown"}</li>
+                            <li>{"2. Click 'Add Credits' and select your desired amount($10 is fine) and complete the transaction"}</li>
+                            <li>{"3. Click 'Manage' to enable auto top up (optional, but recommended)"}</li>
+                            <li>{"After adding funds, your account will be ready to create an API key"}</li>
                         </ul>
                     </div>
                     <div class="instruction-image">
                         <img 
-                            src="" 
-                            alt="" 
+                            src="/assets/billing-openrouter.png" 
+                            alt="OpenRouter Billing Page" 
                             loading="lazy"
-                            onclick={let open_modal = open_modal.clone(); let src = "".to_string(); 
+                            onclick={let open_modal = open_modal.clone(); let src = "/assets/billing-openrouter.png".to_string(); 
                                 Callback::from(move |_| open_modal.emit(src.clone()))}
                             style="cursor: pointer;"
                         />
@@ -55,17 +75,19 @@ pub fn llm_self_host_instructions(props: &AISelfHostInstructionsProps) -> Html {
 
                 <div class="instruction-block">
                     <div class="instruction-content">
-                        <h2>{""}</h2>
+                        <h2>{"Create API Key"}</h2>
                         <ul>
-                            <li>{""}</li>
+                            <li>{"1. Click 'Keys' in the top right dropdown"}</li>
+                            <li>{"2. Click 'Create API Key' to generate a new API key"}</li>
+                            <li>{"Give your key a descriptive name (e.g., 'lightfriend') and press 'Create'"}</li>
                         </ul>
                         {
                             if props.is_logged_in {
                                 html! {
                                     <div class="input-field">
-                                        <label for="phone-number">{""}</label>
+                                        <label for="api-key">{"Your OpenRouter API Key:"}</label>
                                         <div class="input-with-button">
-                                            <input type="text" id="phone-number" placeholder="+1234567890" />
+                                            <input type="text" id="api-key" placeholder="sk-or-v1-..." />
                                             <button class="save-button">{"Save"}</button>
                                         </div>
                                     </div>
@@ -77,31 +99,10 @@ pub fn llm_self_host_instructions(props: &AISelfHostInstructionsProps) -> Html {
                     </div>
                     <div class="instruction-image">
                         <img 
-                            src="" 
-                            alt="" 
+                            src="/assets/creds-openrouter.png" 
+                            alt="OpenRouter API Keys Page" 
                             loading="lazy"
-                            onclick={let open_modal = open_modal.clone(); let src = "".to_string(); 
-                                Callback::from(move |_| open_modal.emit(src.clone()))}
-                            style="cursor: pointer;"
-                        />
-                    </div>
-                </div>
-
-                <div class="instruction-block">
-                    <div class="instruction-content">
-                        <h2>{""}</h2>
-                        <ul>
-                            <li>{""}</li>
-                            <li>{""}</li>
-                            <li>{""}</li>
-                        </ul>
-                    </div>
-                    <div class="instruction-image">
-                        <img 
-                            src="" 
-                            alt="" 
-                            loading="lazy"
-                            onclick={let open_modal = open_modal.clone(); let src = "".to_string(); 
+                            onclick={let open_modal = open_modal.clone(); let src = "/assets/creds-openrouter.png".to_string(); 
                                 Callback::from(move |_| open_modal.emit(src.clone()))}
                             style="cursor: pointer;"
                         />

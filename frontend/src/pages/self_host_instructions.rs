@@ -2,14 +2,13 @@ use yew::prelude::*;
 use web_sys::{MouseEvent, window};
 use crate::pages::twilio_self_host_instructions::TwilioSelfHostInstructions;
 use crate::pages::llm_self_host_instructions::AISelfHostInstructions;
+use crate::pages::voice_self_host_instructions::VoiceSelfHostInstructions;
 
 #[derive(Clone, PartialEq)]
 pub enum InstructionPage {
     Twilio,
     AI,
-    // Add more pages here as needed
-    // Example: Database,
-    // Example: Environment,
+    Voice,
 }
 
 #[derive(Properties, PartialEq)]
@@ -37,7 +36,12 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
     let next_page = {
         let current_page = current_page.clone();
         Callback::from(move |_: MouseEvent| {
-            current_page.set(InstructionPage::AI);
+            let next = match *current_page {
+                InstructionPage::Twilio => InstructionPage::AI,
+                InstructionPage::AI => InstructionPage::Voice,
+                InstructionPage::Voice => InstructionPage::Twilio,
+            };
+            current_page.set(next);
             if let Some(window) = window() {
                 let _ = window.scroll_to_with_x_and_y(0.0, 0.0);
             }
@@ -64,6 +68,14 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
                     <img src="/assets/openrouter-logo.png" alt="OpenRouter Logo" class="tab-logo" />
                     {"OpenRouter Setup"}
                 </button>
+                <button 
+                    class={classes!("tab-button", (*current_page == InstructionPage::Voice).then(|| "active"))}
+                    onclick={let switch_page = switch_page.clone(); 
+                        Callback::from(move |_| switch_page.emit(InstructionPage::Voice))}
+                >
+                    <img src="/assets/elevenlabs-logo.png" alt="Elevenlabs Logo" class="tab-logo" />
+                    {"ElevenLabs Setup"}
+                </button>
             </div>
 
             <div class="instructions-content">
@@ -81,7 +93,12 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
                                 sub_tier={props.sub_tier.clone()}
                             />
                         },
-                        // Add more matches here as more pages are added
+                        InstructionPage::Voice => html! {
+                            <VoiceSelfHostInstructions 
+                                is_logged_in={props.is_logged_in}
+                                sub_tier={props.sub_tier.clone()}
+                            />
+                        },
                     }
                 }
             </div>
