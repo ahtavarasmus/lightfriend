@@ -292,6 +292,7 @@ pub async fn update_profile(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     println!("Updating profile with notification type: {:?}", update_req.notification_type);
  
+    let is_self_hosted= std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
     use regex::Regex;
     let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
     if !email_regex.is_match(&update_req.email) {

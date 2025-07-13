@@ -16,6 +16,7 @@ pub struct NewUser {
     pub charge_when_under: bool,
     pub waiting_checks_count: i32,
     pub discount: bool,
+    pub sub_tier: Option<String>,
 }
 
 #[derive(Deserialize)]

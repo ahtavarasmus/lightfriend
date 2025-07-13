@@ -613,15 +613,19 @@ impl UserCore {
 
         Ok(critical_enabled)
     }
-
-    pub fn verify_pairing_code(&self, pairing_code: &str, server_instance_id: &str) -> Result<bool, DieselError> {
+    pub fn verify_pairing_code(&self, pairing_code: &str, server_instance_id: &str) -> Result<(bool, Option<String>), DieselError> {
         // Try to find a user with the given pairing code
         if let Some(user_id) = self.find_user_by_pairing_code(pairing_code)? {
             // If user found, update their server instance ID
             self.set_server_instance_id(user_id, server_instance_id)?;
-            Ok(true)
+            
+            // Get the user's phone number
+            let user = self.find_by_id(user_id)?;
+            let phone_number = user.map(|u| u.phone_number);
+            
+            Ok((true, phone_number))
         } else {
-            Ok(false)
+            Ok((false, None))
         }
     }
 
@@ -772,7 +776,7 @@ impl UserCore {
     }
 
     // for self hosted instance
-    pub fn set_server_instance_id_to_self_hosted(&self, server_instance_id: &str) -> Result<(), DieselError> {
+    pub fn update_instance_id_to_self_hosted(&self, server_instance_id: &str) -> Result<(), DieselError> {
         use crate::schema::{users, user_settings};
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
@@ -780,7 +784,7 @@ impl UserCore {
         let first_user = users::table
             .order(users::id.asc())
             .first::<User>(&mut conn)?;
-            
+
         // Ensure user settings exist for this user
         self.ensure_user_settings_exist(first_user.id)?;
 
@@ -788,7 +792,6 @@ impl UserCore {
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(first_user.id)))
             .set(user_settings::server_instance_id.eq(Some(server_instance_id)))
             .execute(&mut conn)?;
-
         Ok(())
     }
 

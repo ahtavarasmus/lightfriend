@@ -276,29 +276,37 @@ let on_timezone_update = {
                 }
             }
             
-            <div class="profile-field">
-                <span class="field-label">{"Email"}</span>
-                {
-                    if *is_editing {
-                        html! {
-                            <input
-                                type="email"
-                                class="profile-input"
-                value={(*email).to_string()}
-                                placeholder="your@email.com"
-                onchange={let email = email.clone(); move |e: Event| {
-                    let input: HtmlInputElement = e.target_unchecked_into();
-                    email.set(input.value());
-                }}
-                            />
-                        }
-                    } else {
-                        html! {
-                            <span class="field-value">{&(*user_profile).email}</span>
-                        }
+            { 
+                if (*user_profile).sub_tier != "self_hosted" {
+                    html! {
+                        <div class="profile-field">
+                            <span class="field-label">{"Email"}</span>
+                            {
+                                if *is_editing {
+                                    html! {
+                                        <input
+                                            type="email"
+                                            class="profile-input"
+                            value={(*email).to_string()}
+                                            placeholder="your@email.com"
+                            onchange={let email = email.clone(); move |e: Event| {
+                                let input: HtmlInputElement = e.target_unchecked_into();
+                                email.set(input.value());
+                            }}
+                                        />
+                                    }
+                                } else {
+                                    html! {
+                                        <span class="field-value">{&(*user_profile).email}</span>
+                                    }
+                                }
+                            }
+                        </div>
                     }
+                } else {
+                    html! {}
                 }
-            </div>
+            }
             
             <div class="profile-field">
                 <span class="field-label">{"Phone"}</span>

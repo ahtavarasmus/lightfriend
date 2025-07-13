@@ -51,7 +51,9 @@ pub async fn check_user_credits(
         _ => false,
     };
 
-    if is_free {
+    let is_self_hosted= std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
+
+    if is_free || is_self_hosted {
         return Ok(());
     }
 
@@ -155,6 +157,7 @@ pub fn deduct_user_credits(
         }
     };
 
+
     // Check if the event type is free based on discount_tier
     let is_free = match user.discount_tier.as_deref() {
         Some("full") => true,
@@ -163,7 +166,9 @@ pub fn deduct_user_credits(
         _ => false,
     };
 
-    if is_free {
+    let is_self_hosted= std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
+
+    if is_free || is_self_hosted {
         return Ok(());
     }
 

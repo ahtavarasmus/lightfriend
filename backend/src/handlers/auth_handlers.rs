@@ -33,6 +33,7 @@ pub struct PairingVerificationRequest {
 #[derive(Deserialize, Serialize)]
 pub struct PairingVerificationResponse {
     valid: bool,
+    number: String,
     message: String,
 }
 
@@ -558,6 +559,7 @@ pub async fn register(
         charge_when_under: false,
         waiting_checks_count: 0,
         discount: false,
+        sub_tier: None,
     };
 
     state.user_core.create_user(new_user).map_err(|e| {
@@ -743,29 +745,6 @@ pub async fn self_hosted_signup(
             )
         })?;
 
-        // Create the admin user
-        let new_user = NewUser {
-            email: "hosted@local".to_string(),
-            password_hash,
-            phone_number: "+0000000000".to_string(), // Placeholder for self-hosted
-            time_to_live: 0, 
-            verified: true,
-            credits: 0.00,
-            credits_left: 0.00,
-            charge_when_under: false,
-            waiting_checks_count: 0,
-            discount: false,
-        };
-
-        state.user_core.create_user(new_user).map_err(|e| {
-            println!("User creation failed: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to create admin user"}))
-            )
-        })?;
-
-        // Get the created user for token generation
         let user = state.user_core.find_by_email("admin@local")
             .map_err(|e| (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -775,6 +754,22 @@ pub async fn self_hosted_signup(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "User not found after creation"}))
             ))?;
+
+        if user.password_hash == "".to_string() {
+            // Update the password since it's empty
+            state.user_core.update_password(user.email.as_str(), password_hash.as_str()).map_err(|e| {
+                println!("Failed to set password for the self hosted: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": "Failed to set password for the self hosted instance"}))
+                )
+            })?;
+        } else {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "Password can only be set once"}))
+            ));
+        }
 
         // Generate tokens
         let access_token = encode(
@@ -885,9 +880,31 @@ pub async fn self_hosted_signup(
             ));
         }
 
-        // Store the server instance ID to this self hosted instance
-        state.user_core.set_server_instance_id_to_self_hosted(server_instance_id.as_str()).map_err(|e| {
-            println!("Failed to set server instance ID: {}", e);
+        // Create the admin user
+        let new_user = NewUser {
+            email: "admin@local".to_string(),
+            password_hash: "".to_string(),
+            phone_number: verification_result.number,
+            time_to_live: 0, 
+            verified: true,
+            credits: 0.00,
+            credits_left: 0.00,
+            charge_when_under: false,
+            waiting_checks_count: 0,
+            discount: false,
+            sub_tier: Some("self-hosted".to_string()),
+        };
+
+        state.user_core.create_user(new_user).map_err(|e| {
+            println!("User creation failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to create admin user"}))
+            )
+        })?;
+
+        state.user_core.update_instance_id_to_self_hosted(server_instance_id.as_str()).map_err(|e| {
+            println!("Failed to set profile for the self hosted: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "Failed to set server instance ID"}))
@@ -912,17 +929,19 @@ pub async fn check_pairing(
 
     // Verify the pairing code and update server instance ID
     match state.user_core.verify_pairing_code(&req.pairing_code, &req.server_instance_id) {
-        Ok(true) => {
+        Ok((true, number)) => {
             println!("Pairing code verified successfully for server instance: {}", req.server_instance_id);
             Ok(Json(PairingVerificationResponse {
                 valid: true,
+                number: number.unwrap_or("".to_string()),
                 message: "Pairing code verified successfully".to_string(),
             }))
         },
-        Ok(false) => {
+        Ok((false, number)) => {
             println!("Invalid pairing code provided for server instance: {}", req.server_instance_id);
             Ok(Json(PairingVerificationResponse {
                 valid: false,
+                number: number.unwrap_or("".to_string()),
                 message: "Invalid pairing code".to_string(),
             }))
         },
