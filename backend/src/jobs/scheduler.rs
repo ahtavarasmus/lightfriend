@@ -9,6 +9,7 @@ use std::env;
 
 use crate::handlers::imap_handlers;
 use crate::api::twilio_utils;
+use reqwest::StatusCode;
 
 async fn initialize_matrix_clients(state: Arc<AppState>) {
     tracing::debug!("Starting Matrix client initialization...");
@@ -664,6 +665,88 @@ pub async fn start_scheduler(state: Arc<AppState>) {
     }).expect("Failed to create calendar notification job");
 
     sched.add(calendar_notification_job).await.expect("Failed to add calendar notification job to scheduler");
+
+    // Create a job that runs daily to check self-hosted instance status
+    let state_clone = Arc::clone(&state);
+    let self_host_check_job = Job::new_async("0 0 0 * * *", move |_, _| {  // Run at midnight every day
+        let state = state_clone.clone();
+        Box::pin(async move {
+            debug!("Running self-hosted instance status check...");
+            
+            // Get user with self-hosted subscription
+            match state.user_core.get_all_users() {
+                Ok(users) => {
+                    for user in users {
+                        if let Ok(Some(tier)) = state.user_repository.get_subscription_tier(user.id) {
+                            if tier == "self_hosted" {
+                                // Get server instance ID
+                                if let Ok(settings) = state.user_core.get_user_settings(user.id) {
+                                    if let Some(instance_id) = settings.server_instance_id {
+                                        // Get current timestamp
+                                        let current_timestamp = chrono::Utc::now().timestamp() as i32;
+                                        
+                                        // Check if we've already pinged today
+                                        if let Some(last_ping) = settings.server_instance_last_ping_timestamp {
+                                            let last_ping_date = chrono::NaiveDateTime::from_timestamp_opt(last_ping as i64, 0)
+                                                .map(|dt| dt.date());
+                                            let current_date = chrono::NaiveDateTime::from_timestamp_opt(current_timestamp as i64, 0)
+                                                .map(|dt| dt.date());
+                                            
+                                            if let (Some(last), Some(current)) = (last_ping_date, current_date) {
+                                                if last == current {
+                                                    debug!("Already pinged self-hosted instance today, skipping");
+                                                    continue;
+                                                }
+                                            }
+                                        }
+
+                                        // Send ping request
+                                        let client = reqwest::Client::new();
+                                        let server_url = env::var("SERVER_URL").unwrap_or_else(|_| "https://lightfriend.ai".to_string());
+                                        let ping_url = format!("{}/api/self-host-ping", server_url);
+                                        
+                                        match client.post(&ping_url)
+                                            .json(&serde_json::json!({
+                                                "instance_id": instance_id
+                                            }))
+                                            .send()
+                                            .await 
+                                        {
+                                            Ok(response) => {
+                                                if response.status() != StatusCode::OK {
+                                                    error!("Self-hosted instance ping failed with status: {}", response.status());
+                                                    // Update user's subscription tier to None
+                                                    if let Err(e) = state.user_core.update_subscription_tier(user.id, Some("self_hosted_inactive")) {
+                                                        error!("Failed to update subscription tier: {}", e);
+                                                    }
+                                                } else {
+                                                    debug!("Self-hosted instance ping successful");
+                                                    // Update last ping timestamp
+                                                    if let Err(e) = state.user_core.update_server_instance_last_ping(user.id, current_timestamp) {
+                                                        error!("Failed to update last ping timestamp: {}", e);
+                                                    }
+                                                }
+                                            },
+                                            Err(e) => {
+                                                error!("Failed to send self-hosted instance ping: {}", e);
+                                                // Update user's subscription tier to self_hosted_inactive
+                                                if let Err(e) = state.user_repository.set_subscription_tier(user.id, Some("self_hosted_inactive")) {
+                                                    error!("Failed to update subscription tier: {}", e);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                Err(e) => error!("Failed to fetch users for self-hosted instance check: {}", e),
+            }
+        })
+    }).expect("Failed to create self-host check job");
+
+    sched.add(self_host_check_job).await.expect("Failed to add self-host check job to scheduler");
 
     // Start the scheduler
     sched.start().await.expect("Failed to start scheduler");

@@ -330,7 +330,8 @@ async fn main() {
         .route("/api/password-reset/request", post(auth_handlers::request_password_reset))
         .route("/api/password-reset/verify", post(auth_handlers::verify_password_reset))
         .route("/api/self-hosting-status", get(auth_handlers::self_hosted_status))
-        .route("/api/check-pairing", post(auth_handlers::check_pairing));
+        .route("/api/check-pairing", post(auth_handlers::check_pairing))
+        .route("/api/self-host-ping", post(auth_handlers::self_host_ping));
 
     // Admin routes that need admin authentication
     let admin_routes = Router::new()

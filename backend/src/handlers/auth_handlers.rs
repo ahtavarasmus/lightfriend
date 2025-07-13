@@ -20,6 +20,11 @@ use uuid::Uuid;
 use std::env;
 
 #[derive(Deserialize)]
+pub struct SelfHostPingRequest {
+    instance_id: String,
+}
+
+#[derive(Deserialize)]
 pub struct BroadcastMessageRequest {
     message: String,
 }
@@ -980,6 +985,35 @@ pub async fn generate_pairing_code(
     Ok(Json(GeneratePairingCodeResponse {
         pairing_code
     }))
+}
+
+pub async fn self_host_ping(
+    State(state): State<Arc<AppState>>,
+    Json(ping_req): Json<SelfHostPingRequest>,
+) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+    tracing::debug!("Received self-host ping from instance: {}", ping_req.instance_id);
+
+    // Find user with this instance ID
+    match state.user_core.find_user_by_pairing_code(&ping_req.instance_id) {
+        Ok(Some(user_id)) => {
+            tracing::debug!("Self-host ping successful for instance: {}", ping_req.instance_id);
+            Ok(StatusCode::OK)
+        },
+        Ok(None) => {
+            tracing::error!("Invalid instance ID received in ping: {}", ping_req.instance_id);
+            Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "Invalid instance ID"}))
+            ))
+        },
+        Err(e) => {
+            tracing::error!("Database error while processing ping: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Database error"}))
+            ))
+        }
+    }
 }
 
 pub async fn self_hosted_login(

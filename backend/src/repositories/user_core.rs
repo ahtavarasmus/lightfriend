@@ -640,6 +640,32 @@ impl UserCore {
         Ok(())
     }
 
+    pub fn update_subscription_tier(&self, user_id: i32, tier: Option<&str>) -> Result<(), DieselError> {
+        use crate::schema::users;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        diesel::update(users::table.find(user_id))
+            .set(users::sub_tier.eq(tier))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn update_server_instance_last_ping(&self, user_id: i32, timestamp: i32) -> Result<(), DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+
+        // Update the last ping timestamp
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::server_instance_last_ping_timestamp.eq(timestamp))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
     pub fn get_next_billing_date(&self, user_id: i32) -> Result<Option<i32>, DieselError> {
         use crate::schema::users;
         let mut conn = self.pool.get().expect("Failed to get DB connection");

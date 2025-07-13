@@ -36,14 +36,14 @@ pub fn llm_self_host_instructions(props: &VoiceSelfHostInstructionsProps) -> Htm
                 <div class="instruction-block overview-block">
                     <div class="instruction-content">
                         <h2>{"What is ElevenLabs and what does it do?"}</h2>
-                        <p>{""}</p>
+                        <p>{"ElevenLabs powers all the voice features in Lightfriend, including voice calls and voice messages. It provides high-quality, natural-sounding text-to-speech capabilities that make your AI interactions more engaging and personal."}</p>
                     </div>
                 </div>
 
                 <div class="instruction-block">
                     <div class="instruction-content">
                         <h2>{"Expected Costs"}</h2>
-                        <p>{""}</p>
+                        <p>{"ElevenLabs offers a Free plan that includes 15 minutes of voice calling per month. For more extensive usage, their €5/month plan provides 50 minutes of voice calling per month."}</p>
                     </div>
                 </div>
 
