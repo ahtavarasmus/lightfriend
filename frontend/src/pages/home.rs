@@ -176,87 +176,132 @@ pub fn Home() -> Html {
                 <div class="dashboard-container">
                     <h1 class="panel-title">{"Dashboard"}</h1>
                     <div class="status-section">
-                        <div class="credits-info">
-                            {
-                                if let Some(profile) = (*profile_data).as_ref() {
-                                    html! {
-                                        <div class="credits-grid">
+
+                    <div class="credits-info">
+                        {
+                            if let Some(profile) = (*profile_data).as_ref() {
+                                html! {
+                                    <div class="credits-grid">
+                                        {
                                             if let Some(ref tier) = profile.sub_tier {
-                                            if profile.credits_left > 0.0 {
-                                                <div class="credit-item" tabindex="0">
-                                                    <span class="credit-label">{"Monthly Message Quota"}</span>
-                                                    <span class="credit-value">{profile.credits_left as i32}{" Messages"}</span>
-                                                    {
-                                                        if profile.digests_reserved > 0 {
-                                                            html! {
-                                                                <span class="credit-label">{" + ("}{profile.digests_reserved as i32}{" reserved for digests)"}</span>
-                                                            }
-                                                        } else {
-                                                            html! {}
-                                                        }
-                                                    }
-                                                    {
-                                                        if let Some(days) = profile.days_until_billing {
-                                                            html! {
-                                                                <span class="reset-timer">
-                                                                    {
-                                                                        if days == 0 {
-                                                                            "Resets today".to_string()
-                                                                        } else if days == 1 {
-                                                                            "Resets in 1 day".to_string()
-                                                                        } else {
-                                                                            format!("Resets in {} days", days)
+                                                html! {
+                                                    <>
+                                                        {
+                                                            match tier.as_str() {
+                                                                "self_hosted" => html! {
+                                                                    <div class="credit-item" tabindex="0">
+                                                                        <span class="credit-label">{"Self-Hosted Instance"}</span>
+                                                                        <Link<Route> to={Route::SelfHostInstructions} classes="host-instructions-link">
+                                                                            {"View Self-Host Instructions →"}
+                                                                        </Link<Route>>
+                                                                    </div>
+                                                                },
+                                                                "tier 3" => html! {
+                                                                    <div class="credit-item" tabindex="0">
+                                                                        <span class="credit-label">{"Pairing Code"}</span>
+                                                                        <span class="credit-value">{"XXXX-XXXX-XXXX"}</span>
+                                                                    </div>
+                                                                },
+                                                                _ => {
+                                                                    if profile.credits_left > 0.0 {
+                                                                        html! {
+                                                                            <div class="credit-item" tabindex="0">
+                                                                                <span class="credit-label">{"Monthly Message Quota"}</span>
+                                                                                <span class="credit-value">{profile.credits_left as i32}{" Messages"}</span>
+                                                                                {
+                                                                                    if profile.digests_reserved > 0 {
+                                                                                        html! {
+                                                                                            <span class="credit-label">{" + ("}{profile.digests_reserved as i32}{" reserved for digests)"}</span>
+                                                                                        }
+                                                                                    } else {
+                                                                                        html! {}
+                                                                                    }
+                                                                                }
+                                                                                {
+                                                                                    if let Some(days) = profile.days_until_billing {
+                                                                                        html! {
+                                                                                            <span class="reset-timer">
+                                                                                                {
+                                                                                                    if days == 0 {
+                                                                                                        "Resets today".to_string()
+                                                                                                    } else if days == 1 {
+                                                                                                        "Resets in 1 day".to_string()
+                                                                                                    } else {
+                                                                                                        format!("Resets in {} days", days)
+                                                                                                    }
+                                                                                                }
+                                                                                            </span>
+                                                                                        }
+                                                                                    } else {
+                                                                                        html! {}
+                                                                                    }
+                                                                                }
+                                                                                <div class="credit-tooltip">
+                                                                                    {"Your monthly quota Message quota. Can be used to ask questions, voice calls(1 Message = 1 minute) or to receive priority sender notifications(1 Message = 2 notifications). Not enough? Buy overage credits or trade in unused digest slots for Messages."}
+                                                                                </div>
+                                                                            </div>
                                                                         }
+                                                                    } else {
+                                                                        html! {}
                                                                     }
-                                                                </span>
+                                                                }
                                                             }
-                                                        } else {
-                                                            html! {}
                                                         }
-                                                    }
-                                                    <div class="credit-tooltip">
-                                                        {"Your monthly quota Message quota. Can be used to ask questions, voice calls(1 Message = 1 minute) or to receive priority sender notifications(1 Message = 2 notifications). Not enough? Buy overage credits or trade in unused digest slots for Messages."}
-                                                    </div>
-                                                </div>
-                                            }
-                                            if profile.credits_left <= 0.0 && profile.credits <= 0.0 {
-                                                <div class="credit-warning">
-                                                    {
-                                                        if let Some(days) = profile.days_until_billing {
-                                                            if days == 0 {
-                                                                "Monthly quota used. Credits reset today!".to_string()
-                                                            } else if days == 1 {
-                                                                "Monthly quota used. Credits reset in 1 day.".to_string()
+                                                        {
+                                                            if profile.credits_left <= 0.0 && profile.credits <= 0.0 {
+                                                                html! {
+                                                                    <div class="credit-warning">
+                                                                        {
+                                                                            if let Some(days) = profile.days_until_billing {
+                                                                                if days == 0 {
+                                                                                    "Monthly quota used. Credits reset today!".to_string()
+                                                                                } else if days == 1 {
+                                                                                    "Monthly quota used. Credits reset in 1 day.".to_string()
+                                                                                } else {
+                                                                                    format!("Monthly quota used. Credits reset in {} days.", days)
+                                                                                }
+                                                                            } else {
+                                                                                "Monthly quota used. Wait for next month or buy overage credits.".to_string()
+                                                                            }
+                                                                        }
+                                                                    </div>
+                                                                }
                                                             } else {
-                                                                format!("Monthly quota used. Credits reset in {} days.", days)
+                                                                html! {}
                                                             }
-                                                        } else {
-                                                            "Monthly quota used. Wait for next month or buy overage credits.".to_string()
                                                         }
-                                                    }
-                                                </div>
+                                                        {
+                                                            if profile.credits > 0.0 {
+                                                                html! {
+                                                                    <div class="credit-item" tabindex="0">
+                                                                        <span class="credit-label">{"Overage Credits"}</span>
+                                                                        <span class="credit-value">{format!("{:.2}€", profile.credits)}</span>
+                                                                        <div class="credit-tooltip">
+                                                                            {"Additional credits you can purchase and use when monthly quota is depleted. Can be bought in advance and used for sending messages, voice calls or receiving notifications from priority senders."}
+                                                                        </div>
+                                                                    </div>
+                                                                }
+                                                            } else {
+                                                                html! {}
+                                                            }
+                                                        }
+                                                    </>
+                                                }
+                                            } else {
+                                                html! {
+                                                    <div class="credit-warning">
+                                                        {"No active subscription. Check out our pricing to get started!"}
+                                                    </div>
+                                                }
                                             }
-                                        } else {
-                                            <div class="credit-warning">
-                                                {"No active subscription. Check out our pricing to get started!"}
-                                            </div>
                                         }
-                                        if profile.credits > 0.0 {
-                                            <div class="credit-item" tabindex="0">
-                                                <span class="credit-label">{"Overage Credits"}</span>
-                                                <span class="credit-value">{format!("{:.2}€", profile.credits)}</span>
-                                                <div class="credit-tooltip">
-                                                    {"Additional credits you can purchase and use when monthly quota is depleted. Can be bought in advance and used for sending messages, voice calls or receiving notifications from priority senders."}
-                                                </div>
-                                            </div>
-                                            }
-                                        </div>
-                                    }
-                                } else {
-                                    html! {}
+                                    </div>
                                 }
+                            } else {
+                                html! {}
                             }
-                        </div>
+                        }
+                    </div>
                         {
                             if let Some(profile) = (*profile_data).as_ref() {
                                 if profile.sub_tier.is_none() {
@@ -482,1514 +527,463 @@ pub fn Home() -> Html {
             <style>
                 {r#"
 
-                    .producthunt-demo {
-                        padding: 2rem 0;
-                        text-align: center;
-                    }
-
-                    .producthunt-iframe-container {
-                        margin: 2rem auto;
-                        max-width: 500px;
-                        width: 100%;
-                        display: flex;
-                        justify-content: center;
-                    }
-
-                    @media (max-width: 520px) {
-                        .producthunt-iframe-container iframe {
-                            width: 100%;
-                            height: auto;
-                            min-height: 405px;
-                        }
-                    }
-
-                    .problems {
-                        padding: 6rem 2rem;
-                        text-align: center;
-                        background: linear-gradient(to bottom, #2d2d2d, #1a1a1a);
-                    }
-
-                    .problems h2 {
-                        font-size: 3rem;
-                        margin-bottom: 2rem;
-                        color: #7EB2FF;
-                    }
-
-                    .challenges-grid {
-                        display: grid;
-                        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                        gap: 2rem;
-                        margin-top: 4rem;
-                        padding: 2rem;
-                    }
-
-                    .challenge-item {
-                        padding: 2rem;
-                        border: 1px solid rgba(30, 144, 255, 0.2);
-                        border-radius: 12px;
-                        background: linear-gradient(to bottom, rgba(30, 144, 255, 0.05), rgba(30, 144, 255, 0.02));
-                        transition: all 0.3s ease;
-                    }
-
-                    .challenge-item:hover {
-                        transform: translateY(-5px);
-                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
-                        border-color: rgba(30, 144, 255, 0.4);
-                    }
-
-                    .challenge-item h3 {
-                        color: #1E90FF;
-                        font-size: 1.5rem;
-                        margin-bottom: 1rem;
-                    }
-
-                    .challenge-item p {
-                        color: #999;
-                        font-size: 1rem;
-                        line-height: 1.6;
-                    }
-
-                    .transformation {
-                        padding: 6rem 2rem;
-                        text-align: center;
-                        background: linear-gradient(to bottom, #1a1a1a, #2d2d2d);
-                    }
-
-                    .transformation h2 {
-                        font-size: 3rem;
-                        margin-bottom: 1rem;
-                        color: #7EB2FF;
-                    }
-
-                    .benefits-grid {
-                        display: grid;
-                        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                        gap: 2rem;
-                        margin-top: 4rem;
-                        padding: 2rem;
-                    }
-
-                    .benefit-item {
-                        padding: 2rem;
-                        border: 1px solid rgba(30, 144, 255, 0.2);
-                        border-radius: 12px;
-                        background: linear-gradient(to bottom, rgba(30, 144, 255, 0.05), transparent);
-                        transition: all 0.3s ease;
-                    }
-
-                    .benefit-item:hover {
-                        transform: translateY(-5px);
-                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
-                        border-color: rgba(30, 144, 255, 0.4);
-                    }
-
-                    .benefit-item h3 {
-                        color: #1E90FF;
-                        font-size: 1.5rem;
-                        margin-bottom: 1rem;
-                    }
-
-                    .video-demo {
-                        margin-top: 2rem;
-                        padding: 1.5rem;
-                        background: rgba(30, 144, 255, 0.05);
-                        border-radius: 12px;
-                        border: 1px solid rgba(30, 144, 255, 0.2);
-                    }
-
-                    .video-demo p {
-                        color: #7EB2FF;
-                        margin-bottom: 1rem;
-                        font-size: 1.1rem;
-                    }
-
-                    .demo-link {
-                        display: inline-flex;
-                        align-items: center;
-                        gap: 0.5rem;
-                        padding: 0.8rem 1.5rem;
-                        background: linear-gradient(45deg, #1E90FF, #4169E1);
-                        color: white;
-                        text-decoration: none;
-                        border-radius: 8px;
-                        font-size: 1rem;
-                        transition: all 0.3s ease;
-                        border: none;
-                        cursor: pointer;
-                    }
-
-                    .demo-link:hover {
-                        transform: translateY(-2px);
-                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
-                    }
-
-                    /* Add responsive styles for the video demo */
-                    @media (max-width: 768px) {
-                        .video-demo {
-                            padding: 1rem;
-                            margin-top: 1.5rem;
-                        }
-
-                        .video-demo p {
-                            font-size: 1rem;
-                        }
-
-                        .demo-link {
-                            padding: 0.6rem 1.2rem;
-                            font-size: 0.9rem;
-                        }
-                    }
-
-                    .how-it-works {
-                        padding: 6rem 2rem;
-                        text-align: center;
-                    }
-
-                    .how-it-works h2 {
-                        font-size: 3rem;
-                        margin-bottom: 1rem;
-                        text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
-                    }
-
-                    .how-it-works > p {
-                        color: #7EB2FF;
-                        margin-bottom: 4rem;
-                        font-size: 1.2rem;
-                    }
-
-                    .steps-grid {
-                        display: grid;
-                        grid-template-columns: repeat(3, 1fr);
-                        gap: 2rem;
-                        margin-top: 4rem;
-                    }
-
-                    .step {
-                        background: rgba(255, 255, 255, 0.03);
-                        border-radius: 16px;
-                        padding: 2.5rem;
-                        border: 1px solid rgba(30, 144, 255, 0.2);
-                        backdrop-filter: blur(5px);
-                        transition: all 0.3s ease;
-                        position: relative;
-                        overflow: hidden;
-                    }
-
-                    .step::before {
-                        content: '';
-                        position: absolute;
-                        top: 0;
-                        left: 0;
-                        right: 0;
-                        height: 1px;
-                        background: linear-gradient(
-                            90deg,
-                            transparent,
-                            rgba(30, 144, 255, 0.3),
-                            transparent
-                        );
-                    }
-
-                    .step:hover {
-                        transform: translateY(-5px);
-                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
-                        border-color: rgba(30, 144, 255, 0.4);
-                    }
-
-                    .step h3 {
-                        color: #1E90FF;
-                        font-size: 1.5rem;
-                        margin-bottom: 1.5rem;
-                        font-weight: 600;
-                    }
-
-                    .step p {
-                        color: #999;
-                        font-size: 1rem;
-                        line-height: 1.6;
-                    }
-
-                    /* Add step numbers */
-                    .step::after {
-                        content: '';
-                        position: absolute;
-                        top: 1rem;
-                        right: 1rem;
-                        width: 30px;
-                        height: 30px;
-                        border-radius: 50%;
-                        border: 2px solid rgba(30, 144, 255, 0.3);
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        font-size: 0.9rem;
-                        color: #1E90FF;
-                    }
-
-                    .step:nth-child(1)::after {
-                        content: '1';
-                    }
-
-                    .step:nth-child(2)::after {
-                        content: '2';
-                    }
-
-                    .step:nth-child(3)::after {
-                        content: '3';
-                    }
-
-                    /* Shazam Showcase Section */
-                    .shazam-showcase {
-                        padding: 6rem 2rem;
-                        text-align: center;
-                        position: relative;
-                        background: linear-gradient(
-                            to bottom,
-                            rgba(30, 144, 255, 0.05),
-                            transparent
-                        );
-                        border-top: 1px solid rgba(30, 144, 255, 0.1);
-                        border-bottom: 1px solid rgba(30, 144, 255, 0.1);
-                    }
-
-                    .shazam-showcase h2 {
-                        font-size: 3rem;
-                        margin-bottom: 3rem;
-                        text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
-                        background: linear-gradient(45deg, #fff, #7EB2FF);
-                        -webkit-background-clip: text;
-                        -webkit-text-fill-color: transparent;
-                    }
-
-                    .showcase-content {
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                        gap: 4rem;
-                        max-width: 1200px;
-                        margin: 0 auto;
-                    }
-
-                    .showcase-text {
-                        text-align: left;
-                        flex: 1;
-                        max-width: 600px;
-                        padding: 2rem;
-                        background: rgba(30, 144, 255, 0.05);
-                        border-radius: 16px;
-                        border: 1px solid rgba(30, 144, 255, 0.2);
-                        backdrop-filter: blur(5px);
-                    }
-
-                    .showcase-text h3 {
-                        color: #1E90FF;
-                        font-size: 1.5rem;
-                        margin-bottom: 1.5rem;
-                    }
-
-                    .showcase-text ol {
-                        list-style: none;
-                        counter-reset: shazam-steps;
-                        padding: 0;
-                        margin: 0;
-                    }
-
-                    .showcase-text ol li {
-                        counter-increment: shazam-steps;
-                        padding: 1rem 0;
-                        padding-left: 3rem;
-                        position: relative;
-                        color: #999;
-                        font-size: 1.1rem;
-                    }
-
-                    .showcase-text ol li::before {
-                        content: counter(shazam-steps);
-                        position: absolute;
-                        left: 0;
-                        top: 50%;
-                        transform: translateY(-50%);
-                        width: 32px;
-                        height: 32px;
-                        background: rgba(30, 144, 255, 0.1);
-                        border: 1px solid rgba(30, 144, 255, 0.3);
-                        border-radius: 50%;
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        color: #1E90FF;
-                        font-weight: bold;
-                    }
-
-                    .showcase-highlight {
-                        margin-top: 2rem;
-                        padding: 1rem;
-                        background: rgba(30, 144, 255, 0.1);
-                        border-radius: 8px;
-                        color: #7EB2FF;
-                        font-size: 1.1rem;
-                        text-align: center;
-                    }
-
-                    /* Responsive design for Shazam showcase */
-                    @media (max-width: 768px) {
-                        .shazam-showcase {
-                            padding: 4rem 1rem;
-                        }
-
-                        .shazam-showcase h2 {
-                            font-size: 2rem;
-                            margin-bottom: 2rem;
-                        }
-
-                        .showcase-content {
-                            flex-direction: column;
-                            gap: 2rem;
-                        }
-
-                        .showcase-text {
-                            padding: 1.5rem;
-                        }
-
-                        .showcase-text ol li {
-                            font-size: 1rem;
-                        }
-
-                        .showcase-highlight {
-                            font-size: 1rem;
-                        }
-                    }
-
-                    .landing-page {
-                        position: relative;
-                        min-height: 100vh;
-                        background-color: #1a1a1a;
-                        color: #ffffff;
-                        font-family: system-ui, -apple-system, sans-serif;
-                        margin: 0 auto;
-                        width: 100%;
-                        overflow-x: hidden;
-                        box-sizing: border-box;
-                    }
-
-                    @media (max-width: 768px) {
-                        .landing-page {
-                            padding: 0;
-                        }
-
-                        .hero {
-                            padding: 2rem 1rem;
-                            padding-top: 100px;
-                        }
-                       
-                        .hero-subtitle {
-                            font-size: 1rem;
-                            padding: 0 1rem;
-                        }
-
-                        .features {
-                            padding: 3rem 1rem;
-                        }
-                        
-                        .features h2 {
-                            font-size: 1.75rem;
-                            padding: 0 1rem;
-                        }
-
-                        .features-grid {
-                            padding: 1rem;
-                            margin-top: 2rem;
-                        }
-
-                        .how-it-works {
-                            padding: 3rem 1rem;
-                        }
-
-                        .how-it-works h2 {
-                            font-size: 1.75rem;
-                        }
-
-                        .steps-grid {
-                            grid-template-columns: 1fr;
-                            gap: 1.5rem;
-                            padding: 0 1rem;
-                        }
-
-                        .shazam-showcase {
-                            padding: 3rem 1rem;
-                        }
-
-                        .shazam-showcase h2 {
-                            font-size: 1.75rem;
-                        }
-
-                        .showcase-text {
-                            padding: 1.5rem;
-                        }
-
-                        .footer-cta {
-                            padding: 3rem 1rem;
-                        }
-
-                        .footer-cta h2 {
-                            font-size: 2rem;
-                        }
-
-                        .footer-cta .subtitle {
-                            font-size: 1rem;
-                        }
-
-                        .footer-content {
-                            padding: 0 1rem;
-                        }
-
-                        .feature-item {
-                            padding: 1.5rem;
-                        }
-
-                        .development-links {
-                            padding: 0 1rem;
-                        }
-                    }
-
-
-
-                    .footer-cta {
-                        padding: 6rem 0;
-                        background: linear-gradient(
-                            to bottom,
-                            transparent,
-                            rgba(30, 144, 255, 0.05)
-                        );
-                        border-top: 1px solid rgba(30, 144, 255, 0.1);
-                        text-align: left;
-                        position: relative;
-                    }
-
-                    .footer-content {
-                        max-width: 800px;
-                        margin: 0 auto;
-                        padding: 0 2rem;
-                        width: 100%;
-                        box-sizing: border-box;
-                    }
-
-                    .footer-cta h2 {
-                        font-size: 3.5rem;
-                        margin-bottom: 1.5rem;
-                        background: linear-gradient(45deg, #fff, #7EB2FF);
-                        -webkit-background-clip: text;
-                        -webkit-text-fill-color: transparent;
-                        font-weight: 700;
-                    }
-
-                    .footer-cta .subtitle {
-                        font-size: 1.2rem;
-                        color: #999;
-                        margin-bottom: 2.5rem;
-                        line-height: 1.6;
-                    }
-
-                    .hero {
-                        padding: 6rem 0;
-                        text-align: center;
-                    }
-
-                    .producthunt-badge {
-                        margin-bottom: 2rem;
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                    }
-
-                    @media (max-width: 768px) {
-                        .producthunt-badge {
-                            margin-bottom: 1.5rem;
-                        }
-                        
-                        .producthunt-badge img {
-                            width: 200px;
-                            height: auto;
-                        }
-                    }
-
-
-                    .hero-subtitle {
-                        font-size: 1.2rem;
-                        color: #999;
-                        max-width: 600px;
-                        margin: 0 auto 3rem;
-                        line-height: 1.6;
-                    }
-
-                    .hero-cta {
-                        background: linear-gradient(
-                            45deg,
-                            #1E90FF,
-                            #4169E1
-                        );
-                        color: white;
-                        border: none;
-                        padding: 1rem 2.5rem;
-                        border-radius: 8px;
-                        font-size: 1.1rem;
-                        cursor: pointer;
-                        transition: all 0.3s ease;
-                        display: inline-flex;
-                        align-items: center;
-                        gap: 0.5rem;
-                        position: relative;
-                        overflow: hidden;
-                    }
-
-                    .hero-cta::before {
-                        content: '';
-                        position: absolute;
-                        top: 0;
-                        left: 0;
-                        width: 100%;
-                        height: 100%;
-                        background: linear-gradient(
-                            45deg,
-                            transparent,
-                            rgba(255, 255, 255, 0.1),
-                            transparent
-                        );
-                        transform: translateX(-100%);
-                        transition: transform 0.6s;
-                    }
-
-                    .hero-cta::after {
-                        content: '→';
-                    }
-
-                    .hero-cta:hover::before {
-                        transform: translateX(100%);
-                    }
-
-                    .hero-cta:hover {
-                        transform: translateY(-2px);
-                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
-                    }
-
-
-                    .hero::before {
-                        top: 10%;
-                        left: 5%;
-                        animation: float 20s infinite alternate;
-                    }
-
-                    .hero::after {
-                        bottom: 10%;
-                        right: 5%;
-                        animation: float 15s infinite alternate-reverse;
-                    }
-
-                    @keyframes float {
-                        0% {
-                            transform: translate(0, 0);
-                        }
-                        100% {
-                            transform: translate(20px, 20px);
-                        }
-                    }
-
-                    .features {
-                        padding: 6rem 0;
-                        text-align: center;
-                    }
-
-                    .features h2 {
-                        font-size: 3rem;
-                        margin-bottom: 1rem;
-                    }
-
-                    .features > p {
-                        color: #999;
-                        margin-bottom: 4rem;
-                        font-size: 1.2rem;
-                    }
-
-                    .features-grid {
-                        display: grid;
-                        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-                        gap: 2rem;
-                        text-align: center;
-                        margin-top: 4rem;
-                        padding: 2rem;
-                        max-width: 100%;
-                        overflow-x: hidden;
-                    }
-
-                    .feature-item {
-                        padding: 2rem;
-                        border: 1px solid rgba(30, 144, 255, 0.2); /* dodgerblue with opacity */
-                        border-radius: 12px;
-                        background: linear-gradient(
-                            to bottom,
-                            rgba(30, 144, 255, 0.05),
-                            rgba(30, 144, 255, 0.02)
-                        );
-                        transition: all 0.3s ease;
-                    }
-
-                    .feature-item:hover {
-                        transform: translateY(-5px);
-                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
-                        border-color: rgba(30, 144, 255, 0.4);
-                    }
-
-                    .feature-item h3 {
-                        margin: 1rem 0;
-                        font-size: 1.2rem;
-                        color: #1E90FF; /* dodgerblue */
-                    }
-
-                    .feature-item p {
-                        color: #999;
-                        font-size: 0.9rem;
-                        line-height: 1.5;
-                    }
-
-                    /* Add a subtle blue glow to the section title */
-                    .features h2 {
-                        font-size: 3rem;
-                        margin-bottom: 1rem;
-                        text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
-                    }
-
-                    /* Optional: Add blue accent to the subtitle */
-                    .features > p {
-                        color: #7EB2FF;
-                        margin-bottom: 4rem;
-                        font-size: 1.2rem;
-                    }
-
-
-                    .panel-title {
-                        font-size: 2.5rem;
-                        background: linear-gradient(45deg, #fff, #7EB2FF);
-                        -webkit-background-clip: text;
-                        -webkit-text-fill-color: transparent;
-                        margin: 0 0 1.5rem 0;
-                        text-align: center;
-                    }
-
-                    .back-link {
-                        color: #1E90FF;
-                        text-decoration: none;
-                        font-size: 0.9rem;
-                        transition: color 0.3s ease;
-                    }
-
-                    .back-link:hover {
-                        color: #7EB2FF;
-                    }
-
-                    .info-section {
-                        max-height: 400px;
-                        overflow-y: auto;
-                        scrollbar-width: thin;
-                        scrollbar-color: rgba(30, 144, 255, 0.5) rgba(30, 144, 255, 0.1);
-                        border-radius: 12px;
-                        margin: 1.5rem 0;
-                        text-align: center;
-                    }
-
-                    .info-section::-webkit-scrollbar {
-                        width: 8px;
-                    }
-
-                    .info-section::-webkit-scrollbar-track {
-                        background: rgba(30, 144, 255, 0.1);
-                        border-radius: 4px;
-                    }
-
-                    .info-section::-webkit-scrollbar-thumb {
-                        background: rgba(30, 144, 255, 0.5);
-                        border-radius: 4px;
-                    }
-
-                    .info-section::-webkit-scrollbar-thumb:hover {
-                        background: rgba(30, 144, 255, 0.7);
-                    }
-
                     .status-section {
-                        display: flex;
-                        align-items: center;
-                        justify-content: space-between;
-                        margin-bottom: 1.5rem;
-                    }
-
-                    .section-title {
-                        color: #7EB2FF;
-                        font-size: 1.5rem;
-                        margin: 0;
-                    }
-
-                    .subscription-promo {
-                        background: linear-gradient(45deg, rgba(30, 144, 255, 0.1), rgba(65, 105, 225, 0.1));
-                        border: 1px solid rgba(30, 144, 255, 0.2);
-                        border-radius: 8px;
-                        padding: 0.75rem 1.25rem;
-                        margin-left: 1rem;
-                        flex-shrink: 0;
-                    }
-
-                    .subscription-promo p {
-                        color: #7EB2FF;
-                        font-size: 0.9rem;
-                        margin: 0 0 0.5rem 0;
-                    }
-
-                    .promo-link {
-                        color: #1E90FF;
-                        text-decoration: none;
-                        font-size: 0.9rem;
-                        display: inline-flex;
-                        align-items: center;
-                        transition: all 0.3s ease;
-                    }
-
-                    .promo-link:hover {
-                        color: #7EB2FF;
-                        transform: translateX(5px);
-                    }
-
-                    @media (max-width: 768px) {
-                        .status-section {
-                            flex-direction: column;
-                            align-items: flex-start;
-                        }
-
-                        .subscription-promo {
-                            margin: 1rem 0 0 0;
-                            width: 100%;
-                        }
-                    }
-
-                    .phone-display {
-                        margin: 2rem 0;
-                    }
-
-
-                    .phone-number {
-                        font-family: monospace;
-                        font-size: 1.5rem !important;
-                        color: white;
-                        letter-spacing: 2px;
-                    }
-
-                    .instruction-text {
-                        color: #999;
-                        font-size: 0.9rem;
-                        margin-top: 1rem;
-                    }
-
-                    .feature-status, .calendar-section {
-                        margin-top: 3rem;
-                        text-align: left;
-                        padding: 2rem;
-                        background: rgba(30, 30, 30, 0.7);
-                        border-radius: 12px;
-                        border: 1px solid rgba(30, 144, 255, 0.1);
-                        backdrop-filter: blur(10px);
-                    }
-
-                    .calendar-section {
-                        margin-top: 0;
-                    }
-
-                    .feature-status h3 {
-                        color: #7EB2FF;
-                        font-size: 1.1rem;
-                        margin: 1rem 0 0.5rem 0;
-                    }
-
-                    .feature-status h3:first-child {
-                        margin-top: 0;
-                    }
-
-                    .feature-status h4 {
-                        color: #7EB2FF;
-                        font-size: 0.9rem;
-                        margin: 1rem 0 0.5rem 0;
-                    }
-
-                    .feature-status h3:first-child {
-                        margin-top: 0;
-                    }
-
-                    .feature-status ul {
-                        list-style: none;
-                        padding: 0;
-                        margin: 0 0 1.5rem 0;
-                    }
-
-                    .feature-status li {
-                        color: #999;
-                        font-size: 0.9rem;
-                        padding: 0.3rem 0;
-                        padding-left: 1.5rem;
-                        position: relative;
-                    }
-
-                    .feature-status li::before {
-                        content: '•';
-                        position: absolute;
-                        left: 0.5rem;
-                        color: #1E90FF;
-                    }
-
-                    .feature-suggestion {
-                        margin-top: 1rem;
-                        color: #999;
-                        font-size: 0.9rem;
-                    }
-
-                    .feature-suggestion a {
-                        color: #1E90FF;
-                        text-decoration: none;
-                        transition: color 0.3s ease;
-                    }
-
-                    .feature-suggestion a:hover {
-                        color: #7EB2FF;
-                        text-decoration: underline;
-                    }
-
-                    .warning-card {
-                        background: rgba(255, 193, 7, 0.1);
-                        border: 1px solid rgba(255, 193, 7, 0.2);
-                        border-radius: 12px;
-                        padding: 1.5rem;
-                        text-align: center;
-                        margin: 1.5rem 0;
-                    }
-
-                    .warning-card a {
-                        color: #1E90FF;
-                        text-decoration: none;
-                        transition: color 0.3s ease;
-                    }
-
-                    .warning-card a:hover {
-                        color: #7EB2FF;
-                    }
-
-                    .warning-icon {
-                        font-size: 1.5rem;
-                        margin-right: 0.5rem;
-                    }
-
-                    .action-button {
-                        background: linear-gradient(45deg, #1E90FF, #4169E1);
-                        color: white;
-                        border: none;
-                        width: 100%;
-                        padding: 1rem;
-                        border-radius: 8px;
-                        font-size: 1rem;
-                        cursor: pointer;
-                        transition: all 0.3s ease;
-                        margin-top: 1.5rem;
-                    }
-
-                    .action-button:hover {
-                        transform: translateY(-2px);
-                        box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
-                    }
-
-                    /* Responsive design */
-                    @media (max-width: 768px) {
-                        .dashboard-panel {
-                            padding: 2rem;
-                        }
-
-                        .panel-header {
-                            flex-direction: column;
-                            text-align: center;
-                            gap: 1rem;
-                        }
-
-                        .phone-number {
-                            font-size: 1.5rem;
-                        }
-
-                        .panel-title {
-                            font-size: 1.75rem;
-                        }
-                    }
-
-                    .instruction-text {
-                        color: #999;
-                        font-size: 0.9rem;
-                        margin-top: 1rem;
-                    }
-
-                    .dashboard-container {
-                        min-height: 100vh;
-
-                        border-radius: 12px;
-                        background: #1a1a1a;
-                        padding: 3rem 2rem;
-                        width: 100%;
-                        max-width: 800px;
-                        margin: 4rem auto;
-                    }
-
-                    .dashboard-tabs {
-                        display: flex;
-                        gap: 1rem;
-                        margin-bottom: 2rem;
-                        border-bottom: 1px solid rgba(30, 144, 255, 0.1);
-                        padding-bottom: 1rem;
-                        flex-wrap: wrap;
-                    }
-
-                    .tab-button {
-                        background: transparent;
-                        border: none;
-                        color: #999;
-                        padding: 0.5rem 1rem;
-                        cursor: pointer;
-                        font-size: 1rem;
-                        transition: all 0.3s ease;
-                        position: relative;
-                        white-space: nowrap;
-                        flex: 1;
-                        min-width: fit-content;
-                    }
-
-                    @media (max-width: 480px) {
-                        .dashboard-tabs {
-                            gap: 0.5rem;
-                            justify-content: center;
-                        }
-
-                        .tab-button {
-                            padding: 0.5rem 0.75rem;
-                            font-size: 0.9rem;
-                        }
-                    }
-
-                    .tab-button::after {
-                        content: '';
-                        position: absolute;
-                        bottom: -1rem;
-                        left: 0;
-                        width: 100%;
-                        height: 2px;
-                        background: transparent;
-                        transition: background-color 0.3s ease;
-                    }
-
-                    .tab-button.active {
-                        color: white;
-                    }
-
-                    .tab-button.active::after {
-                        background: #1E90FF;
-                    }
-
-                    .tab-button:hover {
-                        color: #7EB2FF;
-                    }
-
-                    .development-links {
-                        margin-top: 2rem;
-                        font-size: 0.9rem;
-                        color: #666;
-                    }
-
-                    .development-links p {
-                        margin: 0.5rem 0;
-                    }
-
-                    .development-links a {
-                        color: #007bff;
-                        text-decoration: none;
-                        position: relative;
-                        padding: 0 2px;
-                        transition: all 0.3s ease;
-                    }
-
-                    .development-links a::after {
-                        content: '';
-                        position: absolute;
-                        width: 100%;
-                        height: 1px;
-                        bottom: -2px;
-                        left: 0;
-                        background: linear-gradient(90deg, #1E90FF, #4169E1);
-                        transform: scaleX(0);
-                        transform-origin: bottom right;
-                        transition: transform 0.3s ease;
-                    }
-
-                    .development-links a:hover {
-                        color: #7EB2FF;
-                        text-shadow: 0 0 8px rgba(30, 144, 255, 0.3);
-                    }
-
-                    .nice-link {
-                        color: #007bff;
-                        text-decoration: none;
-                        position: relative;
-                        padding: 0 2px;
-                        transition: all 0.3s ease;
-                    }
-
-                    .nice-link::after {
-                        content: '';
-                        position: absolute;
-                        width: 100%;
-                        height: 1px;
-                        bottom: -2px;
-                        left: 0;
-                        background: linear-gradient(90deg, #1E90FF, #4169E1);
-                        transform: scaleX(0);
-                        transform-origin: bottom right;
-                        transition: transform 0.3s ease;
-                    }
-
-                    .nice-link:hover {
-                        color: #7EB2FF;
-                        text-shadow: 0 0 8px rgba(30, 144, 255, 0.3);
-                    }
-
-                    .nice-link:hover::after {
-                        transform: scaleX(1);
-                        transform-origin: bottom left;
-                    }
-
-                    .development-links a:hover::after {
-                        transform: scaleX(1);
-                        transform-origin: bottom left;
-                    }
-
-                    /* Blog Styles */
-                    .blog-container {
-                        max-width: 800px;
-                        margin: 0 auto;
-                        padding: 2rem;
-                        margin-top: 74px;
-                        min-height: 100vh;
-                    }
-
-                    .blog-post {
-                        background: rgba(30, 30, 30, 0.7);
-                        border: 1px solid rgba(30, 144, 255, 0.1);
-                        border-radius: 16px;
-                        padding: 3rem;
-                        backdrop-filter: blur(10px);
-                        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-                    }
-
-                    .blog-header {
-                        margin-bottom: 3rem;
-                        text-align: center;
-                    }
-
-                    .blog-header h1 {
-                        font-size: 2.5rem;
-                        margin-bottom: 1rem;
-                        background: linear-gradient(45deg, #fff, #7EB2FF);
-                        -webkit-background-clip: text;
-                        -webkit-text-fill-color: transparent;
-                        line-height: 1.2;
-                    }
-
-                    .blog-meta {
-                        color: #999;
-                        font-size: 0.9rem;
-                        display: flex;
-                        justify-content: center;
-                        gap: 1rem;
-                    }
-
-                    .blog-content {
-                        color: #e0e0e0;
-                        line-height: 1.8;
-                    }
-
-                    .blog-content h2 {
-                        color: #7EB2FF;
-                        font-size: 1.8rem;
-                        margin: 2rem 0 1rem;
-                    }
-
-                    .blog-content p {
-                        margin-bottom: 1.5rem;
-                        font-size: 1.1rem;
-                    }
-
-                    .blog-image {
-                        max-width: 40%;
-                        height: auto;
-                        margin: 2rem 0;
-                        border-radius: 8px;
-                        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-                        display: block;
-                    }
-
-                    .blog-content ul {
-                        margin-bottom: 1.5rem;
-                        padding-left: 1.5rem;
-                        list-style-type: disc;
-                        color: #e0e0e0;
-                    }
-
-                    .blog-content li {
-                        margin-bottom: 0.5rem;
-                        font-size: 1.1rem;
-                        line-height: 1.6;
-                    }
-
-                    .blog-content a {
-                        color: #1E90FF;
-                        text-decoration: none;
-                        position: relative;
-                        padding: 0 2px;
-                        transition: all 0.3s ease;
-                    }
-
-                    .blog-content a::after {
-                        content: '';
-                        position: absolute;
-                        width: 100%;
-                        height: 1px;
-                        bottom: -2px;
-                        left: 0;
-                        background: linear-gradient(90deg, #1E90FF, #4169E1);
-                        transform: scaleX(0);
-                        transform-origin: bottom right;
-                        transition: transform 0.3s ease;
-                    }
-
-                    .blog-content a:hover {
-                        color: #7EB2FF;
-                        text-shadow: 0 0 8px rgba(30, 144, 255, 0.3);
-                    }
-
-                    .blog-content a:hover::after {
-                        transform: scaleX(1);
-                        transform-origin: bottom left;
-                    }
-
-                    .blog-navigation {
-                        margin-top: 3rem;
-                        padding-top: 2rem;
-                        border-top: 1px solid rgba(30, 144, 255, 0.1);
-                    }
-
-                    .blog-nav-link {
-                        display: inline-block;
-                        color: #1E90FF;
-                        text-decoration: none;
-                        font-size: 1.1rem;
-                        transition: all 0.3s ease;
-                    }
-
-                    .blog-nav-link:hover {
-                        color: #7EB2FF;
-                        transform: translateX(5px);
-                    }
-
-                    .out-of-credits-warning {
-                        color: #ff4444;
-                        font-weight: bold;
-                        padding: 0.5rem 1rem;
-                        animation: pulse 2s infinite;
-                    }
-
-                    .credits-info {
-                        width: 100%;
-                        margin-bottom: 1rem;
-                    }
-
-                    .credits-grid {
-                        display: grid;
-                        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-                        gap: 1rem;
-                        width: 100%;
-                    }
-
-                    .credit-item {
-                        background: rgba(30, 144, 255, 0.05);
-                        border: 1px solid rgba(30, 144, 255, 0.1);
-                        border-radius: 8px;
-                        padding: 0.75rem;
-                        display: flex;
-                        flex-direction: column;
-                        align-items: center;
-                        gap: 0.25rem;
-                        position: relative;
-                        cursor: pointer;
-                        transition: all 0.3s ease;
-                        outline: none;
-                    }
-
-                    .credit-item:hover,
-                    .credit-item:focus {
-                        background: rgba(30, 144, 255, 0.1);
-                        border-color: rgba(30, 144, 255, 0.2);
-                    }
-
-                    .credit-tooltip {
-                        position: absolute;
-                        bottom: calc(100% + 10px);
-                        left: 50%;
-                        transform: translateX(-50%);
-                        background: rgba(0, 0, 0, 0.9);
-                        color: #fff;
-                        padding: 1rem;
-                        border-radius: 8px;
-                        font-size: 0.80rem;
-                        width: max-content;
-                        max-width: 350px;
-                        z-index: 1000;
-                        opacity: 0;
-                        visibility: hidden;
-                        transition: all 0.3s ease;
-                        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-                        border: 1px solid rgba(30, 144, 255, 0.2);
-                        text-align: center;
-                    }
-
-                    .credit-tooltip::after {
-                        content: '';
-                        position: absolute;
-                        top: 100%;
-                        left: 50%;
-                        transform: translateX(-50%);
-                        border-width: 8px;
-                        border-style: solid;
-                        border-color: rgba(0, 0, 0, 0.9) transparent transparent transparent;
-                    }
-
-                    .credit-item:hover .credit-tooltip,
-                    .credit-item:focus .credit-tooltip {
-                        opacity: 1;
-                        visibility: visible;
-                    }
-
-                    @media (max-width: 768px) {
-                        .credit-item {
-                            padding: 1rem;
-                        }
-
-                        .credit-tooltip {
-                            position: fixed;
-                            bottom: 20px;
-                            left: 50%;
-                            transform: translateX(-50%);
-                            width: 90%;
-                            max-width: 300px;
-                            z-index: 1001;
-                        }
-
-                        .credit-tooltip::after {
-                            display: none;
-                        }
-                    }
-
-                    .credit-label {
-                        color: #999;
-                        font-size: 0.8rem;
-                        text-transform: uppercase;
-                        letter-spacing: 0.5px;
-                    }
-
-                    .credit-value {
-                        color: #7EB2FF;
-                        font-size: 1.1rem;
-                        font-weight: 500;
-                    }
-
-                    .credit-voice-time {
-                        color: #999;
-                        font-size: 0.85rem;
-                        margin-top: -0.2rem;
-                    }
-
-                    .reset-timer {
-                        display: block;
-                        color: #999;
-                        font-size: 0.8rem;
-                        margin-top: 0.3rem;
-                    }
-
-                    .credit-warning {
-                        grid-column: 1 / -1;
-                        color: #ff4444;
-                        font-size: 0.9rem;
-                        text-align: center;
-                        padding: 0.5rem;
-                        background: rgba(255, 68, 68, 0.1);
-                        border-radius: 6px;
-                        margin-top: 0.5rem;
-                    }
-
-                    .ready-status {
-                        color: #00ff00;
-                        font-weight: 500;
-                        padding: 0.5rem 1rem;
-                    }
-
-                    @keyframes pulse {
-                        0% {
-                            opacity: 1;
-                        }
-                        50% {
-                            opacity: 0.7;
-                        }
-                        100% {
-                            opacity: 1;
-                        }
-                    }
-
-                    .blog-content ul {
-                        margin-bottom: 1.5rem;
-                        padding-left: 1.5rem;
-                        list-style-type: disc;
-                        color: #e0e0e0;
-                    }
-
-                    .blog-content li {
-                        margin-bottom: 0.5rem;
-                        font-size: 1.1rem;
-                        line-height: 1.6;
-                    }
-
-                    .blog-navigation {
-                        margin-top: 3rem;
-                        padding-top: 2rem;
-                        border-top: 1px solid rgba(30, 144, 255, 0.1);
-                    }
-
-                    .blog-nav-link {
-                        display: inline-block;
-                        color: #1E90FF;
-                        text-decoration: none;
-                        font-size: 1.1rem;
-                        transition: all 0.3s ease;
-                    }
-
-                    .blog-nav-link:hover {
-                        color: #7EB2FF;
-                        transform: translateX(5px);
-                    }
-
-                    @media (max-width: 768px) {
-                        .blog-container {
-                            padding: 1rem;
-                        }
-
-                        .blog-post {
-                            padding: 1.5rem;
-                        }
-
-                        .blog-header h1 {
-                            font-size: 2rem;
-                        }
-
-                        .blog-content h2 {
-                            font-size: 1.5rem;
-                        }
-
-                        .blog-content p {
-                            font-size: 1rem;
-                        }
-                    }
-                    /* Notification Toggle Switch Styles */
-                    .notification-home-settings {
-                        margin-top: 2rem !important;
-                        padding: 1.5rem !important;
-                        background: rgba(30, 30, 30, 0.7) !important;
-                        border: 1px solid rgba(30, 144, 255, 0.1) !important;
-                        border-radius: 12px !important;
-                        margin-bottom: 2rem !important;
-                    }
-
-                    .notification-home-settings .notify-toggle {
-                        display: flex !important;
-                        align-items: center !important;
-                        justify-content: space-between !important;
-                        margin-bottom: 1rem !important;
-                    }
-
-                    .notification-home-settings .toggle-status {
-                        margin-right: 1rem !important;
-                        color: #999 !important;
-                    }
-
-                    .notification-home-settings .notification-description {
-                        color: #999 !important;
-                        font-size: 0.9rem !important;
-                        margin-top: 0.5rem !important;
-                    }
-                    /* Ensure switch styles are not overridden */
-                    /* Switch styling */
-                    .switch {
-                        position: relative !important;
-                        display: inline-block !important;
-                        width: 60px !important;
-                        height: 34px !important;
-                        margin-left: 1rem !important;
-                    }
-
-                    .switch input {
-                        opacity: 0 !important;
-                        width: 0 !important;
-                        height: 0 !important;
-                    }
-
-                    .slider {
-                        position: absolute !important;
-                        cursor: pointer !important;
-                        top: 0 !important;
-                        left: 0 !important;
-                        right: 0 !important;
-                        bottom: 0 !important;
-                        background-color: #666 !important;
-                        transition: .4s !important;
-                        border-radius: 34px !important;
-                        border: 1px solid rgba(255, 255, 255, 0.1) !important;
-                    }
-
-                    .slider:before {
-                        position: absolute !important;
-                        content: "" !important;
-                        height: 26px !important;
-                        width: 26px !important;
-                        left: 4px !important;
-                        bottom: 4px !important;
-                        background-color: white !important;
-                        transition: .4s !important;
-                        border-radius: 50% !important;
-                        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2) !important;
-                    }
-
-                    input:checked + .slider {
-                        background-color: #1E90FF !important;
-                    }
-
-                    input:checked + .slider:before {
-                        transform: translateX(26px) !important;
-                    }
-
-                    input:focus + .slider {
-                        box-shadow: 0 0 1px rgba(30, 144, 255, 0.5) !important;
-                    }
-
-                    .slider.round {
-                        border-radius: 34px !important;
-                    }
-
-                    .slider.round:before {
-                        border-radius: 50% !important;
-                    }
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+}
+
+.credits-info {
+    width: 100%;
+    margin-bottom: 1rem;
+}
+
+.credits-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 1rem;
+    width: 100%;
+}
+
+.credit-item {
+    background: rgba(30, 144, 255, 0.05);
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    border-radius: 8px;
+    padding: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    outline: none;
+}
+
+.credit-item:hover,
+.credit-item:focus {
+    background: rgba(30, 144, 255, 0.1);
+    border-color: rgba(30, 144, 255, 0.2);
+}
+
+.credit-tooltip {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.9);
+    color: #fff;
+    padding: 1rem;
+    border-radius: 8px;
+    font-size: 0.80rem;
+    width: max-content;
+    max-width: 350px;
+    z-index: 1000;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    text-align: center;
+}
+
+.credit-tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border-width: 8px;
+    border-style: solid;
+    border-color: rgba(0, 0, 0, 0.9) transparent transparent transparent;
+}
+
+.credit-item:hover .credit-tooltip,
+.credit-item:focus .credit-tooltip {
+    opacity: 1;
+    visibility: visible;
+}
+
+.credit-label {
+    color: #999;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.credit-value {
+    color: #7EB2FF;
+    font-size: 1.1rem;
+    font-weight: 500;
+}
+
+.reset-timer {
+    display: block;
+    color: #999;
+    font-size: 0.8rem;
+    margin-top: 0.3rem;
+}
+
+.credit-warning {
+    grid-column: 1 / -1;
+    color: #ff4444;
+    font-size: 0.9rem;
+    text-align: center;
+    padding: 0.5rem;
+    background: rgba(255, 68, 68, 0.1);
+    border-radius: 6px;
+    margin-top: 0.5rem;
+}
+
+.subscription-promo {
+    background: linear-gradient(45deg, rgba(30, 144, 255, 0.1), rgba(65, 105, 225, 0.1));
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    border-radius: 8px;
+    padding: 0.75rem 1.25rem;
+    margin-left: 1rem;
+    flex-shrink: 0;
+}
+
+.promo-link {
+    color: #1E90FF;
+    text-decoration: none;
+    font-size: 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    transition: all 0.3s ease;
+}
+
+.promo-link:hover {
+    color: #7EB2FF;
+    transform: translateX(5px);
+}
+
+.phone-selector {
+    /* No specific styles defined in the original CSS for this class */
+}
+
+.selector-btn {
+    /* No specific styles defined in the original CSS for this class */
+}
+
+.phone-display {
+    margin: 2rem 0;
+}
+
+.phone-number-item {
+    /* No specific styles defined in the original CSS for this class */
+}
+
+.selected {
+    /* No specific styles defined in the original CSS for this class */
+}
+
+.number-info {
+    /* No specific styles defined in the original CSS for this class */
+}
+
+.country {
+    /* No specific styles defined in the original CSS for this class */
+}
+
+.number {
+    /* No specific styles defined in the original CSS for this class */
+}
+
+.selected-indicator {
+    /* No specific styles defined in the original CSS for this class */
+}
+
+.dashboard-container {
+    min-height: 100vh;
+    border-radius: 12px;
+    background: #1a1a1a;
+    padding: 3rem 2rem;
+    width: 100%;
+    max-width: 800px;
+    margin: 4rem auto;
+}
+
+.panel-title {
+    font-size: 2.5rem;
+    background: linear-gradient(45deg, #fff, #7EB2FF);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin: 0 0 1.5rem 0;
+    text-align: center;
+}
+
+.dashboard-tabs {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    border-bottom: 1px solid rgba(30, 144, 255, 0.1);
+    padding-bottom: 1rem;
+    flex-wrap: wrap;
+}
+
+.tab-button {
+    background: transparent;
+    border: none;
+    color: #999;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+    position: relative;
+    white-space: nowrap;
+    flex: 1;
+    min-width: fit-content;
+}
+
+.tab-button::after {
+    content: '';
+    position: absolute;
+    bottom: -1rem;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: transparent;
+    transition: background-color 0.3s ease;
+}
+
+.tab-button.active {
+    color: white;
+}
+
+.tab-button.active::after {
+    background: #1E90FF;
+}
+
+.tab-button:hover {
+    color: #7EB2FF;
+}
+
+.connections-tab {
+    /* No specific styles defined in the original CSS for this class */
+}
+
+.feature-status {
+    margin-top: 3rem;
+    text-align: left;
+    padding: 2rem;
+    background: rgba(30, 30, 30, 0.7);
+    border-radius: 12px;
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    backdrop-filter: blur(10px);
+}
+
+.feature-status h4 {
+    color: #7EB2FF;
+    font-size: 0.9rem;
+    margin: 1rem 0 0.5rem 0;
+}
+
+.feature-status ul {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 1.5rem 0;
+}
+
+.feature-status li {
+    color: #999;
+    font-size: 0.9rem;
+    padding: 0.3rem 0;
+    padding-left: 1.5rem;
+    position: relative;
+}
+
+.feature-status li::before {
+    content: '•';
+    position: absolute;
+    left: 0.5rem;
+    color: #1E90FF;
+}
+
+.feature-suggestion {
+    margin-top: 1rem;
+    color: #999;
+    font-size: 0.9rem;
+}
+
+.feature-suggestion a {
+    color: #1E90FF;
+    text-decoration: none;
+    transition: color 0.3s ease;
+}
+
+.feature-suggestion a:hover {
+    color: #7EB2FF;
+    text-decoration: underline;
+}
+
+.personal-tab {
+    /* No specific styles defined in the original CSS for this class */
+}
+
+.loading-profile {
+    /* No specific styles defined in the original CSS for this class */
+}
+
+.dashboard-footer {
+    /* No specific styles defined in the original CSS for this class */
+}
+
+.development-links {
+    margin-top: 2rem;
+    font-size: 0.9rem;
+    color: #666;
+}
+
+.development-links p {
+    margin: 0.5rem 0;
+}
+
+.development-links a {
+    color: #007bff;
+    text-decoration: none;
+    position: relative;
+    padding: 0 2px;
+    transition: all 0.3s ease;
+}
+
+.development-links a::after {
+    content: '';
+    position: absolute;
+    width: 100%;
+    height: 1px;
+    bottom: -2px;
+    left: 0;
+    background: linear-gradient(90deg, #1E90FF, #4169E1);
+    transform: scaleX(0);
+    transform-origin: bottom right;
+    transition: transform 0.3s ease;
+}
+
+.development-links a:hover {
+    color: #7EB2FF;
+    text-shadow: 0 0 8px rgba(30, 144, 255, 0.3);
+}
+
+.development-links a:hover::after {
+    transform: scaleX(1);
+    transform-origin: bottom left;
+}
+
+.legal-links {
+    /* No specific styles defined in the original CSS for this class */
+}
+
+.switch {
+    position: relative !important;
+    display: inline-block !important;
+    width: 60px !important;
+    height: 34px !important;
+    margin-left: 1rem !important;
+}
+
+.switch input {
+    opacity: 0 !important;
+    width: 0 !important;
+    height: 0 !important;
+}
+
+.slider {
+    position: absolute !important;
+    cursor: pointer !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    background-color: #666 !important;
+    transition: .4s !important;
+    border-radius: 34px !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.slider:before {
+    position: absolute !important;
+    content: "" !important;
+    height: 26px !important;
+    width: 26px !important;
+    left: 4px !important;
+    bottom: 4px !important;
+    background-color: white !important;
+    transition: .4s !important;
+    border-radius: 50% !important;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2) !important;
+}
+
+input:checked + .slider {
+    background-color: #1E90FF !important;
+}
+
+input:checked + .slider:before {
+    transform: translateX(26px) !important;
+}
+
+input:focus + .slider {
+    box-shadow: 0 0 1px rgba(30, 144, 255, 0.5) !important;
+}
+
+.slider.round {
+    border-radius: 34px !important;
+}
+
+.slider.round:before {
+    border-radius: 50% !important;
+}
+
+@media (max-width: 768px) {
+    .status-section {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .subscription-promo {
+        margin: 1rem 0 0 0;
+        width: 100%;
+    }
+
+    .credit-item {
+        padding: 1rem;
+    }
+
+    .credit-tooltip {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 90%;
+        max-width: 300px;
+        z-index: 1001;
+    }
+
+    .credit-tooltip::after {
+        display: none;
+    }
+
+    .dashboard-container {
+        padding: 2rem;
+    }
+
+    .panel-title {
+        font-size: 1.75rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .dashboard-tabs {
+        gap: 0.5rem;
+        justify-content: center;
+    }
+
+    .tab-button {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.9rem;
+    }
+}
                  
                 "#}
             </style>
