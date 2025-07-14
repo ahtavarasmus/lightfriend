@@ -103,6 +103,7 @@ pub fn Home() -> Html {
     let error = use_state(|| None::<String>);
     let is_expanded = use_state(|| false);
     let active_tab = use_state(|| DashboardTab::Connections);
+    let show_confirm_modal = use_state(|| false);
     let navigator = use_navigator().unwrap();
 
 
@@ -191,16 +192,138 @@ pub fn Home() -> Html {
                                                                 "self_hosted" => html! {
                                                                     <div class="credit-item" tabindex="0">
                                                                         <span class="credit-label">{"Self-Hosted Instance"}</span>
-                                                                        <Link<Route> to={Route::SelfHostInstructions} classes="host-instructions-link">
-                                                                            {"View Self-Host Instructions →"}
-                                                                        </Link<Route>>
+                                                                        <div class="host-instructions-container">
+                                                                            <Link<Route> to={Route::SelfHostInstructions} classes="host-instructions-button">
+                                                                                <span class="button-text">{"View Self-Host Instructions"}</span>
+                                                                                <span class="button-icon">{"→"}</span>
+                                                                            </Link<Route>>
+                                                                        </div>
                                                                     </div>
                                                                 },
-                                                                "tier 3" => html! {
+                                                                "tier 2" => html! {
+                                                                    <>
                                                                     <div class="credit-item" tabindex="0">
-                                                                        <span class="credit-label">{"Pairing Code"}</span>
-                                                                        <span class="credit-value">{"XXXX-XXXX-XXXX"}</span>
+                                                                    {
+                                                                        if let Some(ref code) = &profile.pairing_code {
+                                                                            if code.len() > 10 {
+                                                                                html! {
+                                                                                    <>
+                                                                                    <span class="credit-label">{"Server Instance Connected"}</span>
+                                                                                    <div class="host-instructions-container">
+                                                                                        <Link<Route> to={Route::SelfHostInstructions} classes="host-instructions-button">
+                                                                                            <span class="button-text">{"View Self-Host Instructions"}</span>
+                                                                                            <span class="button-icon">{"→"}</span>
+                                                                                        </Link<Route>>
+                                                                                    </div>
+                                                                                    </>
+                                                                                }
+                                                                            } else {
+                                                                                html! {
+                                                                                    <>
+                                                                                    <span class="credit-label">{"Pairing Code"}</span>
+                                                                                    <span class="credit-value">{code}</span>
+                                                                                    <div class="host-instructions-container">
+                                                                                        <Link<Route> to={Route::SelfHostInstructions} classes="host-instructions-button">
+                                                                                            <span class="button-text">{"View Self-Host Instructions"}</span>
+                                                                                            <span class="button-icon">{"→"}</span>
+                                                                                        </Link<Route>>
+                                                                                    </div>
+                                                                                    </>
+                                                                                }
+                                                                            }
+                                                                        } else {
+                                                                            html! {
+                                                                                <>
+                                                                                <span class="credit-label">{"Server Instance"}</span>
+                                                                                <div class="host-instructions-container">
+                                                                                    <Link<Route> to={Route::SelfHostInstructions} classes="host-instructions-button">
+                                                                                        <span class="button-text">{"View Self-Host Instructions"}</span>
+                                                                                        <span class="button-icon">{"→"}</span>
+                                                                                    </Link<Route>>
+                                                                                </div>
+                                                                                </>
+                                                                            }
+                                                                        }
+                                                                    }
+
+                                                                    <div class="pairing-code-section">
+                                                                        <button 
+                                                                            class="generate-code-btn"
+                                                                            onclick={{
+                                                                                let show_confirm_modal = show_confirm_modal.clone();
+                                                                                Callback::from(move |_| show_confirm_modal.set(true))
+                                                                            }}
+                                                                        >
+                                                                            {"Generate New Pairing Code"}
+                                                                        </button>
+                                                                        <p class="warning-note">{"Note: Generating a new code will disconnect any existing server instance."}</p>
                                                                     </div>
+
+                                                                    if *show_confirm_modal {
+                                                                        <div class="modal-overlay" onclick={{
+                                                                            let show_confirm_modal = show_confirm_modal.clone();
+                                                                            Callback::from(move |_| show_confirm_modal.set(false))
+                                                                        }}>
+                                                                            <div class="modal-content" onclick={{
+                                                                                Callback::from(|e: MouseEvent| {
+                                                                                    e.stop_propagation();
+                                                                                })
+                                                                            }}>
+                                                                                <h3>{"Confirm New Pairing Code"}</h3>
+                                                                                <p>{"Are you sure you want to generate a new pairing code? This will disconnect any existing server instance and it will stop working."}</p>
+                                                                                <div class="modal-buttons">
+                                                                                    <button 
+                                                                                        class="cancel-btn"
+                                                                                        onclick={{
+                                                                                            let show_confirm_modal = show_confirm_modal.clone();
+                                                                                            Callback::from(move |_| show_confirm_modal.set(false))
+                                                                                        }}
+                                                                                    >
+                                                                                        {"Cancel"}
+                                                                                    </button>
+                                                                                    <button 
+                                                                                        class="confirm-btn"
+                                                                                        onclick={{
+                                                                                            let profile_data = profile_data.clone();
+                                                                                            let show_confirm_modal = show_confirm_modal.clone();
+                                                                                            Callback::from(move |_| {
+                                                                                                let profile_data = profile_data.clone();
+                                                                                                if let Some(token) = window()
+                                                                                                    .and_then(|w| w.local_storage().ok())
+                                                                                                    .flatten()
+                                                                                                    .and_then(|storage| storage.get_item("token").ok())
+                                                                                                    .flatten()
+                                                                                                {
+                                                                                                    wasm_bindgen_futures::spawn_local(async move {
+                                                                                                        let response = Request::post(&format!("{}/api/profile/generate-pairing-code", config::get_backend_url()))
+                                                                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                                                                            .send()
+                                                                                                            .await;
+                                                                                                        
+                                                                                                        if let Ok(response) = response {
+                                                                                                            if let Ok(json) = response.json::<serde_json::Value>().await {
+                                                                                                                if let Some(new_code) = json.get("pairing_code").and_then(|v| v.as_str()) {
+                                                                                                                    if let Some(mut current_profile) = (*profile_data).clone() {
+                                                                                                                        current_profile.pairing_code = Some(new_code.to_string());
+                                                                                                                        profile_data.set(Some(current_profile));
+                                                                                                                    }
+                                                                                                                }
+                                                                                                            }
+                                                                                                        }
+                                                                                                    });
+                                                                                                }
+                                                                                                show_confirm_modal.set(false);
+                                                                                            })
+                                                                                        }}
+                                                                                    >
+                                                                                        {"Generate New Code"}
+                                                                                    </button>
+                                                                                </div>
+                                                                            </div>
+                                                                        </div>
+                                                                    }
+                                                                    </div>
+                                                                        </>
                                                                 },
                                                                 _ => {
                                                                     if profile.credits_left > 0.0 {
@@ -561,6 +684,48 @@ pub fn Home() -> Html {
     outline: none;
 }
 
+.host-instructions-container {
+    width: 100%;
+    margin-top: 1rem;
+}
+
+.host-instructions-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 1rem;
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+    text-decoration: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(30, 144, 255, 0.2);
+}
+
+.host-instructions-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3);
+    background: linear-gradient(45deg, #4169E1, #1E90FF);
+}
+
+.button-text {
+    flex-grow: 1;
+    text-align: center;
+}
+
+.button-icon {
+    font-size: 1.2rem;
+    transition: transform 0.3s ease;
+}
+
+.host-instructions-button:hover .button-icon {
+    transform: translateX(4px);
+}
+
 .credit-item:hover,
 .credit-item:focus {
     background: rgba(30, 144, 255, 0.1);
@@ -657,6 +822,128 @@ pub fn Home() -> Html {
 .promo-link:hover {
     color: #7EB2FF;
     transform: translateX(5px);
+}
+
+.pairing-code-section {
+    margin-top: 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.generate-code-btn {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(30, 144, 255, 0.2);
+}
+
+.generate-code-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3);
+    background: linear-gradient(45deg, #4169E1, #1E90FF);
+}
+
+.warning-note {
+    color: #ff6b6b;
+    font-size: 0.8rem;
+    text-align: center;
+    max-width: 250px;
+    margin: 0.5rem 0;
+}
+
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    backdrop-filter: blur(5px);
+}
+
+.modal-content {
+    background: #1a1a1a;
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    border-radius: 12px;
+    padding: 2rem;
+    max-width: 500px;
+    width: 90%;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    animation: modalFadeIn 0.3s ease;
+}
+
+@keyframes modalFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.modal-content h3 {
+    color: #fff;
+    margin: 0 0 1rem 0;
+    font-size: 1.5rem;
+}
+
+.modal-content p {
+    color: #999;
+    margin: 0 0 1.5rem 0;
+    line-height: 1.5;
+}
+
+.modal-buttons {
+    display: flex;
+    gap: 1rem;
+    justify-content: flex-end;
+}
+
+.cancel-btn {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #999;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+}
+
+.cancel-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+.confirm-btn {
+    background: linear-gradient(45deg, #ff4444, #ff6b6b);
+    color: white;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(255, 68, 68, 0.2);
+}
+
+.confirm-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(255, 68, 68, 0.3);
+    background: linear-gradient(45deg, #ff6b6b, #ff4444);
 }
 
 .phone-selector {

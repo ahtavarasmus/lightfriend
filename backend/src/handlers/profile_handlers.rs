@@ -77,6 +77,7 @@ pub struct ProfileResponse {
     require_confirmation: bool,
     days_until_billing: Option<i32>,
     digests_reserved: i32,
+    pairing_code: Option<String>,
 }
 
 use crate::handlers::auth_middleware::AuthUser;
@@ -131,6 +132,7 @@ pub async fn get_profile(
                     .unwrap()
                     .as_secs() as i32;
                 (date - current_time) / (24 * 60 * 60)
+
             });
 
             let digests_reserved = current_count * days_until_billing.unwrap_or(30);
@@ -162,6 +164,7 @@ pub async fn get_profile(
                 require_confirmation: user_settings.require_confirmation,
                 days_until_billing: days_until_billing,
                 digests_reserved: digests_reserved,
+                pairing_code: user_settings.server_instance_id,
             }))
         }
         None => Err((
@@ -292,7 +295,6 @@ pub async fn update_profile(
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     println!("Updating profile with notification type: {:?}", update_req.notification_type);
  
-    let is_self_hosted= std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
     use regex::Regex;
     let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
     if !email_regex.is_match(&update_req.email) {

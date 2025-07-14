@@ -3,12 +3,14 @@ use web_sys::{MouseEvent, window};
 use crate::pages::twilio_self_host_instructions::TwilioSelfHostInstructions;
 use crate::pages::llm_self_host_instructions::AISelfHostInstructions;
 use crate::pages::voice_self_host_instructions::VoiceSelfHostInstructions;
+use crate::pages::server_self_host_instructions::ServerSelfHostInstructions;
 
 #[derive(Clone, PartialEq)]
 pub enum InstructionPage {
     Twilio,
     AI,
     Voice,
+    Server,
 }
 
 #[derive(Properties, PartialEq)]
@@ -37,9 +39,10 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
         let current_page = current_page.clone();
         Callback::from(move |_: MouseEvent| {
             let next = match *current_page {
+                InstructionPage::Server => InstructionPage::Twilio,
                 InstructionPage::Twilio => InstructionPage::AI,
                 InstructionPage::AI => InstructionPage::Voice,
-                InstructionPage::Voice => InstructionPage::Twilio,
+                InstructionPage::Voice => InstructionPage::Server,
             };
             current_page.set(next);
             if let Some(window) = window() {
@@ -52,6 +55,14 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
         <div class="instructions-container">
             <h1 class="main-header">{"Self-Host Instructions"}</h1>
             <div class="instructions-tabs">
+                <button 
+                    class={classes!("tab-button", (*current_page == InstructionPage::Server).then(|| "active"))}
+                    onclick={let switch_page = switch_page.clone(); 
+                        Callback::from(move |_| switch_page.emit(InstructionPage::Server))}
+                >
+                    <img src="/assets/cloudron-logo.png" alt="Cloudron Logo" class="tab-logo" />
+                    {"Server Setup"}
+                </button>
                 <button 
                     class={classes!("tab-button", (*current_page == InstructionPage::Twilio).then(|| "active"))}
                     onclick={let switch_page = switch_page.clone(); 
@@ -81,6 +92,13 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
             <div class="instructions-content">
                 {
                     match *current_page {
+
+                        InstructionPage::Server => html! {
+                            <ServerSelfHostInstructions 
+                                is_logged_in={props.is_logged_in}
+                                sub_tier={props.sub_tier.clone()}
+                            />
+                        },
                         InstructionPage::Twilio => html! {
                             <TwilioSelfHostInstructions 
                                 is_logged_in={props.is_logged_in}

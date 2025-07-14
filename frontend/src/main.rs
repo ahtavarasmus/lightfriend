@@ -26,6 +26,7 @@ mod pages {
     pub mod twilio_self_host_instructions;
     pub mod llm_self_host_instructions;
     pub mod voice_self_host_instructions;
+    pub mod server_self_host_instructions;
     pub mod self_host_instructions;
 }
 

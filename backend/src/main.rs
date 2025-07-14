@@ -48,6 +48,7 @@ mod handlers {
     pub mod google_tasks_auth;
     pub mod telegram_auth;
     pub mod telegram_handlers;
+    pub mod self_host_handlers;
 }
 
 mod utils {
@@ -111,6 +112,7 @@ use repositories::user_repository::UserRepository;
 use repositories::user_conversations::UserConversations;
 
 use handlers::auth_handlers;
+use handlers::self_host_handlers;
 use handlers::profile_handlers;
 use handlers::billing_handlers;
 use handlers::admin_handlers;
@@ -324,14 +326,14 @@ async fn main() {
     let public_routes = Router::new()
         .route("/api/health", get(health_check))
         .route("/api/login", post(auth_handlers::login))
-        .route("/api/self-hosted/login", post(auth_handlers::self_hosted_login))
-        .route("/api/self-hosted/signup", post(auth_handlers::self_hosted_signup))
         .route("/api/register", post(auth_handlers::register))
         .route("/api/password-reset/request", post(auth_handlers::request_password_reset))
         .route("/api/password-reset/verify", post(auth_handlers::verify_password_reset))
-        .route("/api/self-hosting-status", get(auth_handlers::self_hosted_status))
-        .route("/api/check-pairing", post(auth_handlers::check_pairing))
-        .route("/api/self-host-ping", post(auth_handlers::self_host_ping));
+        .route("/api/self-hosted/signup", post(self_host_handlers::self_hosted_signup))
+        .route("/api/self-hosted/login", post(self_host_handlers::self_hosted_login))
+        .route("/api/self-hosting-status", get(self_host_handlers::self_hosted_status))
+        .route("/api/check-pairing", post(self_host_handlers::check_pairing))
+        .route("/api/self-host-ping", post(self_host_handlers::self_host_ping));
 
     // Admin routes that need admin authentication
     let admin_routes = Router::new()
@@ -353,7 +355,7 @@ async fn main() {
     let protected_routes = Router::new()
         .route("/api/profile/delete/{user_id}", delete(profile_handlers::delete_user))
         .route("/api/profile/update", post(profile_handlers::update_profile))
-        .route("/api/generate-pairing-code", get(auth_handlers::generate_pairing_code))
+        .route("/api/profile/generate-pairing-code", post(self_host_handlers::generate_pairing_code))
         .route("/api/profile/timezone", post(profile_handlers::update_timezone))
         .route("/api/profile/preferred-number", post(profile_handlers::update_preferred_number))
         .route("/api/profile", get(profile_handlers::get_profile))
