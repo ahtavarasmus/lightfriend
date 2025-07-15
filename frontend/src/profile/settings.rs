@@ -198,6 +198,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     days_until_billing: (*user_profile).days_until_billing.clone(),
                                     digests_reserved: (*user_profile).digests_reserved.clone(),
                                     pairing_code: (*user_profile).pairing_code.clone(),
+                                    server_ip: (*user_profile).server_ip.clone(),
                                 };
 
                                 // Notify parent component

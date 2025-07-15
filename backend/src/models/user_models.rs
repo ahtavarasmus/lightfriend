@@ -422,6 +422,7 @@ pub struct UserSettings {
     pub encrypted_pirate_weather_key: Option<String>, // for self hosted instance
     pub server_instance_id: Option<String>, // for self hosted instance (field for pairing code and instance id)
     pub server_instance_last_ping_timestamp: Option<i32>, // for self hosted instance (used to allow only a single instance ping per day)
+    pub server_ip: Option<String>, // for self hosted instance
 }
 
 #[derive(Insertable)]

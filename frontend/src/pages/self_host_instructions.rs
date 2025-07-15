@@ -19,6 +19,8 @@ pub struct SelfHostInstructionsProps {
     pub is_logged_in: bool,
     #[prop_or_default]
     pub sub_tier: Option<String>,
+    #[prop_or_default]
+    pub server_ip: Option<String>,
 }
 
 #[function_component(SelfHostInstructions)]
@@ -60,7 +62,7 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
                     onclick={let switch_page = switch_page.clone(); 
                         Callback::from(move |_| switch_page.emit(InstructionPage::Server))}
                 >
-                    <img src="/assets/cloudron-logo.png" alt="Cloudron Logo" class="tab-logo" />
+                    <img src="/assets/hostinger-logo.png" alt="" class="tab-logo" />
                     {"Server Setup"}
                 </button>
                 <button 
@@ -97,6 +99,7 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
                             <ServerSelfHostInstructions 
                                 is_logged_in={props.is_logged_in}
                                 sub_tier={props.sub_tier.clone()}
+                                server_ip={props.server_ip.clone()}
                             />
                         },
                         InstructionPage::Twilio => html! {

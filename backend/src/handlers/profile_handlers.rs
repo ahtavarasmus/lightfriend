@@ -78,6 +78,8 @@ pub struct ProfileResponse {
     days_until_billing: Option<i32>,
     digests_reserved: i32,
     pairing_code: Option<String>,
+    server_ip: Option<String>,
+
 }
 
 use crate::handlers::auth_middleware::AuthUser;
@@ -165,6 +167,7 @@ pub async fn get_profile(
                 days_until_billing: days_until_billing,
                 digests_reserved: digests_reserved,
                 pairing_code: user_settings.server_instance_id,
+                server_ip: user_settings.server_ip
             }))
         }
         None => Err((

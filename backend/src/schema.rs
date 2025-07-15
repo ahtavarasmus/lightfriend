@@ -198,6 +198,7 @@ diesel::table! {
         encrypted_pirate_weather_key -> Nullable<Text>,
         server_instance_id -> Nullable<Text>,
         server_instance_last_ping_timestamp -> Nullable<Integer>,
+        server_ip -> Nullable<Text>,
     }
 }
 

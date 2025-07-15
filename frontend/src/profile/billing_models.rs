@@ -47,6 +47,7 @@ pub struct UserProfile {
     pub days_until_billing: Option<i32>,
     pub digests_reserved: i32,
     pub pairing_code: Option<String>,
+    pub server_ip: Option<String>,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]

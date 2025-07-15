@@ -252,6 +252,7 @@ pub fn self_host_instructions_wrapper() -> Html {
             <SelfHostInstructions
                 is_logged_in={true}
                 sub_tier={profile.sub_tier.clone()}
+                server_ip={profile.server_ip.clone()}
             />
         }
     } else {
@@ -259,6 +260,7 @@ pub fn self_host_instructions_wrapper() -> Html {
             <SelfHostInstructions
                 is_logged_in={false}
                 sub_tier={None::<String>}
+                server_ip={None::<String>}
             />
         }
     }

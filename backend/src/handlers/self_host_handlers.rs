@@ -63,6 +63,11 @@ pub struct SelfHostedStatusResponse {
 
 
 #[derive(Deserialize)]
+pub struct UpdateServerIpRequest {
+    server_ip: String,
+}
+
+#[derive(Deserialize)]
 pub struct SetupSubdomainRequest {
     ip_address: String,
 }
@@ -466,6 +471,27 @@ pub async fn self_host_ping(
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "Database error"}))
+            ))
+        }
+    }
+}
+
+pub async fn update_server_ip(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(req): Json<UpdateServerIpRequest>,
+) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+    // Update the server_ip in user_settings
+    match state.user_core.update_server_ip(auth_user.user_id, &req.server_ip) {
+        Ok(_) => {
+            tracing::debug!("Successfully updated server IP for user: {}", auth_user.user_id);
+            Ok(StatusCode::OK)
+        },
+        Err(e) => {
+            tracing::error!("Failed to update server IP: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to update server IP"}))
             ))
         }
     }
