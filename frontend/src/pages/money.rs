@@ -99,11 +99,9 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
 
                     let request_body = json!({
                         "subscription_type": match subscription_type.as_str() {
-                            "basic" => "Basic",
-                            "oracle" => "Oracle",
-                            "sentinel_plan" => "Sentinel",
+                            "hosted" => "Hosted",
                             "self_hosting" => "SelfHosting",
-                            _ => "Sentinel"  // Default to Sentinel if unknown
+                            _ => "Hosted"  // Default to Hosted if unknown
                         },
                         "selected_topups": selected_topups,
                         "selected_digests": selected_digests
@@ -163,6 +161,8 @@ pub struct PricingCardProps {
     pub on_topup_change: Option<Callback<i32>>,
     #[prop_or(0)]
     pub selected_digests: i32,
+    #[prop_or(false)]
+    pub coming_soon: bool,
 }
 
 #[function_component(PricingCard)]
@@ -173,7 +173,15 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         format!("{}{:.2}", props.currency, props.price)
     };
 
-    let button = if props.is_logged_in {
+    let effective_tier = if props.subscription_type == "hosted" {
+        "tier 2".to_string()
+    } else {
+        props.subscription_type.clone()
+    };
+
+    let button = if props.coming_soon {
+        html! { <button class="iq-button coming-soon" disabled=true><b>{"Coming Soon"}</b></button> }
+    } else if props.is_logged_in {
         if !props.verified {
             let onclick = Callback::from(|e: MouseEvent| {
                 e.prevent_default();
@@ -182,7 +190,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                 }
             });
             html! { <button class="iq-button verify-required" onclick={onclick}><b>{"Verify Account to Subscribe"}</b></button> }
-        } else if props.sub_tier.as_ref() == Some(&props.subscription_type) {
+        } else if props.sub_tier.as_ref() == Some(&effective_tier) {
             html! { <button class="iq-button current-plan" disabled=true><b>{"Current Plan"}</b></button> }
         } else {
             html! {
@@ -220,7 +228,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                 if props.is_popular {
                     html! { <div class="popular-tag">{"Most Popular"}</div> }
                 } else if props.is_premium {
-                    html! { <div class="premium-tag">{if ["FI", "UK"].contains(&props.selected_country.as_str()) { "EU-Hosted 24/7 Monitoring" } else { "All-Inclusive Monitoring" }}</div> }
+                    html! { <div class="premium-tag">{if ["FI", "UK"].contains(&props.selected_country.as_str()) { "Secure EU-Hosted Monitoring with GDPR Compliance" } else { "Secure Hosted Monitoring with GDPR Compliance" }}</div> }
                 } else if props.is_self_hosting {
                     html! { <div class="premium-tag">{"Maximum Privacy"}</div> }
                 } else {
@@ -235,7 +243,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     <span class="period">{"/month"}</span>
                 </div>
                 <div class="includes">
-                    <p>{"Subscription includes:"}</p>
                     <ul class="quota-list">
                         { for props.features.iter().flat_map(|feature| {
                             let main_item = html! { <li>{feature.text.clone()}</li> };
@@ -260,6 +267,17 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     }
                 }
             </div>
+            {
+                if props.is_self_hosting {
+                    html! {
+                        <div class="learn-more-section">
+                            <a href="/host-instructions" class="learn-more-link">{"Learn how self-hosting works"}</a>
+                        </div>
+                    }
+                } else {
+                    html! {}
+                }
+            }
             {button}
         </div>
     }
@@ -331,9 +349,9 @@ pub struct FeatureComparisonProps {
 #[function_component(FeatureComparison)]
 pub fn feature_comparison(props: &FeatureComparisonProps) -> Html {
     let base_messages_text = if props.selected_country == "US" {
-        "Base Messages (40/120/200 messages per month)"
+        "Base Messages (200 messages per month)"
     } else {
-        "Base Messages (40/40/40 messages per month)"
+        "Base Messages (40 messages per month)"
     };
 
     html! {
@@ -343,9 +361,7 @@ pub fn feature_comparison(props: &FeatureComparisonProps) -> Html {
                 <thead>
                     <tr>
                         <th>{"Feature"}</th>
-                        <th>{"Basic Plan"}</th>
-                        <th>{"Oracle Plan"}</th>
-                        <th>{"Sentinel Plan"}</th>
+                        <th>{"Hosted Plan"}</th>
                         <th>{"Easy Self-Hosting Plan"}</th>
                     </tr>
                 </thead>
@@ -354,20 +370,14 @@ pub fn feature_comparison(props: &FeatureComparisonProps) -> Html {
                         <td>{"Voice calling and SMS interface"}</td>
                         <td>{"✅"}</td>
                         <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
                     </tr>
                     <tr>
                         <td>{base_messages_text}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
                         <td>{"✅"}</td>
                         <td>{"Connect your own Twilio"}</td>
                     </tr>
                     <tr>
                         <td>{"Buy Additional Messages"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
                         <td>{"✅"}</td>
                         <td>{"Direct from Twilio"}</td>
                     </tr>
@@ -375,13 +385,9 @@ pub fn feature_comparison(props: &FeatureComparisonProps) -> Html {
                         <td>{"Perplexity AI Web Search"}</td>
                         <td>{"✅"}</td>
                         <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
                     </tr>
                     <tr>
                         <td>{"Weather Search and forecast of the next 6 hours"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
                         <td>{"✅"}</td>
                         <td>{"✅"}</td>
                     </tr>
@@ -389,104 +395,79 @@ pub fn feature_comparison(props: &FeatureComparisonProps) -> Html {
                         <td>{"Photo Analysis & Translation (US & AUS only)"}</td>
                         <td>{"✅"}</td>
                         <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
                     </tr>
                     <tr>
                         <td>{"QR Code Scanning (US & AUS only)"}</td>
                         <td>{"✅"}</td>
                         <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
                     </tr>
                     <tr>
                         <td>{"WhatsApp Integration"}</td>
-                        <td>{"❌"}</td>
-                        <td>{"✅"}</td>
                         <td>{"✅"}</td>
                         <td>{"✅"}</td>
                     </tr>
                     <tr>
                         <td>{"Email Integration"}</td>
-                        <td>{"❌"}</td>
-                        <td>{"✅"}</td>
                         <td>{"✅"}</td>
                         <td>{"✅"}</td>
                     </tr>
                     <tr>
                         <td>{"Calendar Integration"}</td>
-                        <td>{"❌"}</td>
-                        <td>{"✅"}</td>
                         <td>{"✅"}</td>
                         <td>{"✅"}</td>
                     </tr>
                     <tr>
                         <td>{"Task Management"}</td>
-                        <td>{"❌"}</td>
-                        <td>{"✅"}</td>
                         <td>{"✅"}</td>
                         <td>{"✅"}</td>
                     </tr>
                     <tr>
                         <td>{"24/7 Critical Message Monitoring"}</td>
-                        <td>{"❌"}</td>
-                        <td>{"❌"}</td>
                         <td>{"✅"}</td>
                         <td>{"✅"}</td>
                     </tr>
                     <tr>
                         <td>{"Morning, Day and Evening Digests"}</td>
-                        <td>{"❌"}</td>
-                        <td>{"❌"}</td>
                         <td>{"✅"}</td>
                         <td>{"✅"}</td>
                     </tr>
                     <tr>
                         <td>{"Custom Waiting Checks"}</td>
-                        <td>{"❌"}</td>
-                        <td>{"❌"}</td>
                         <td>{"✅"}</td>
                         <td>{"✅"}</td>
                     </tr>
                     <tr>
                         <td>{"Priority Sender Notifications"}</td>
-                        <td>{"❌"}</td>
-                        <td>{"❌"}</td>
                         <td>{"✅"}</td>
                         <td>{"✅"}</td>
                     </tr>
                     <tr>
                         <td>{"Private VPS with Cloudron OS"}</td>
                         <td>{"❌"}</td>
-                        <td>{"❌"}</td>
-                        <td>{"❌"}</td>
                         <td>{"✅"}</td>
                     </tr>
                     <tr>
                         <td>{"Easy Lightfriend Setup via Cloudron"}</td>
                         <td>{"❌"}</td>
-                        <td>{"❌"}</td>
-                        <td>{"❌"}</td>
                         <td>{"✅"}</td>
                     </tr>
                     <tr>
-                        <td>{"Complete Data Privacy (Self-Hosted)"}</td>
-                        <td>{"❌"}</td>
-                        <td>{"❌"}</td>
-                        <td>{"❌"}</td>
-                        <td>{"✅"}</td>
+                        <td>{"Privacy Level"}</td>
+                        <td>{"High (Encrypted, No Sharing)"}</td>
+                        <td>{"Maximum (Zero Access)"}</td>
+                    </tr>
+                    <tr>
+                        <td>{"Hosting Location"}</td>
+                        <td>{"EU Servers (GDPR Compliant)"}</td>
+                        <td>{"Your Private VPS"}</td>
                     </tr>
                     <tr>
                         <td>{"All Future Features Included"}</td>
-                        <td>{"❌"}</td>
-                        <td>{"❌"}</td>
-                        <td>{"❌"}</td>
+                        <td>{"✅"}</td>
                         <td>{"✅"}</td>
                     </tr>
                     <tr>
                         <td>{"Priority Support"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
                         <td>{"✅"}</td>
                         <td>{"✅"}</td>
                     </tr>
@@ -579,28 +560,12 @@ pub fn pricing(props: &PricingProps) -> Html {
         );
     }
 
-    let sentinel_prices: HashMap<String, f64> = HashMap::from([
+    let hosted_prices: HashMap<String, f64> = HashMap::from([
         ("US".to_string(), 29.00),
         ("FI".to_string(), 29.00),
         ("UK".to_string(), 29.00),
         ("AU".to_string(), 29.00),
         ("Other".to_string(), 29.00),
-    ]);
-
-    let oracle_prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 19.00),
-        ("FI".to_string(), 19.00),
-        ("UK".to_string(), 19.00),
-        ("AU".to_string(), 19.00),
-        ("Other".to_string(), 19.00),
-    ]);
-
-    let basic_prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 8.00),
-        ("FI".to_string(), 15.00),
-        ("UK".to_string(), 15.00),
-        ("AU".to_string(), 15.00),
-        ("Other".to_string(), 15.00),
     ]);
 
     let self_hosting_prices: HashMap<String, f64> = HashMap::from([
@@ -628,24 +593,15 @@ pub fn pricing(props: &PricingProps) -> Html {
         })
     };
 
-    let oracle_selected_topups = use_state(|| 0);
-    let oracle_base_price = oracle_prices.get(&*selected_country).unwrap_or(&0.0);
-    let oracle_topup_price = if *selected_country == "US" {
+    let hosted_selected_topups = use_state(|| 0);
+    let hosted_selected_digests = use_state(|| 0);
+    let hosted_base_price = hosted_prices.get(&*selected_country).unwrap_or(&0.0);
+    let hosted_topup_price = if *selected_country == "US" {
         0.0
     } else {
-        *oracle_selected_topups as f64 * 5.0
+        *hosted_selected_topups as f64 * 5.0
     };
-    let oracle_total_price = oracle_base_price + oracle_topup_price;
-
-    let sentinel_selected_topups = use_state(|| 0);
-    let sentinel_selected_digests = use_state(|| 0);
-    let sentinel_base_price = sentinel_prices.get(&*selected_country).unwrap_or(&0.0);
-    let sentinel_topup_price = if *selected_country == "US" {
-        0.0
-    } else {
-        *sentinel_selected_topups as f64 * 5.0
-    };
-    let sentinel_total_price = sentinel_base_price + sentinel_topup_price;
+    let hosted_total_price = hosted_base_price + hosted_topup_price;
 
     let self_hosting_selected_topups = use_state(|| 0);
     let self_hosting_selected_digests = use_state(|| 0);
@@ -657,148 +613,37 @@ pub fn pricing(props: &PricingProps) -> Html {
     };
     let self_hosting_total_price = self_hosting_base_price + self_hosting_topup_price;
 
-    let basic_features = vec![
+    let hosted_features = vec![
         Feature {
-            text: "🔍 Internet Search (Perplexity)".to_string(),
+            text: "All integrations & monitoring".to_string(),
             sub_items: vec![],
         },
         Feature {
-            text: "☀️ Weather Search".to_string(),
+            text: "Hosted in secure EU servers".to_string(),
             sub_items: vec![],
         },
         Feature {
-            text: "📱 40 Messages per month for:".to_string(),
-            sub_items: vec![
-                "Voice calls (1 min = 1 Message)".to_string(),
-                "Text queries to Lightfriend (1 message = 1 Message)".to_string(),
-            ],
-        },
-        Feature {
-            text: "💳 Additional credits for more messages".to_string(),
-            sub_items: vec![],
-        },
-    ];
-
-    let oracle_message_text = if *selected_country == "US" {
-        "📱 120 Messages per month for:"
-    } else {
-        "📱 40 Messages per month for:"
-    };
-    let oracle_features = vec![
-        Feature {
-            text: "💬 WhatsApp Integration".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: "📧 Email Integration".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: "📅 Calendar Integration".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: "✅ Task Management".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: oracle_message_text.to_string(),
-            sub_items: vec![
-                "Voice calls (1 min = 1 message)".to_string(),
-                "Text queries to Lightfriend".to_string(),
-            ],
-        },
-        Feature {
-            text: "💳 Additional credits for more messages".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: "✨ Everything in Basic Plan included".to_string(),
-            sub_items: vec![],
-        },
-    ];
-
-    let sentinel_message_text = if *selected_country == "US" {
-        "📱 200 Messages per month for:"
-    } else {
-        "📱 40 Messages per month for:"
-    };
-    let sentinel_features = vec![
-        Feature {
-            text: "🔔 24/7 monitoring for critical messages (included)".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: "⚡ Set temporary monitoring for specific messages (like package delivery)".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: "⭐ Priority sender notifications".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: "📊 Daily digest summaries (up to 3 per day)".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: sentinel_message_text.to_string(),
-            sub_items: vec![
-                "Daily digests".to_string(),
-                "Voice calls (1 min = 1 message)".to_string(),
-                "Text queries to Lightfriend".to_string(),
-                "Priority sender notifications".to_string(),
-            ],
-        },
-        Feature {
-            text: "💳 Additional credits for more messages".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: "✨ Everything in Oracle Plan included".to_string(),
+            text: "GDPR compliant".to_string(),
             sub_items: vec![],
         },
     ];
 
     let self_hosting_features = vec![
         Feature {
-            text: "🔒 Private Server with Zero External Access".to_string(),
-            sub_items: vec![
-                "Your data stays on your own server".to_string(),
-                "Complete privacy and data ownership".to_string(),
-                "No one else can access your data".to_string(),
-            ],
+            text: "Run on your private server".to_string(),
+            sub_items: vec!["Zero external access".to_string()],
         },
         Feature {
-            text: "🚀 Simple 3-Step Setup (No Technical Skills Needed)".to_string(),
-            sub_items: vec![
-                "1. Get server with pre-installed Cloudron OS".to_string(),
-                "2. Install Lightfriend with one click".to_string(),
-                "3. Follow guided service setup".to_string(),
-            ],
+            text: "Easy setup with Cloudron".to_string(),
+            sub_items: vec!["No coding required".to_string()],
         },
         Feature {
-            text: "🔌 Guided Service Integration".to_string(),
-            sub_items: vec![
-                "Easy Twilio setup for messaging".to_string(),
-                "Simple OpenRouter setup for AI".to_string(),
-                "Optional: ElevenLabs for voice".to_string(),
-            ],
+            text: "Automatic updates & backups".to_string(),
+            sub_items: vec![],
         },
         Feature {
-            text: "🛡️ Managed Server Environment".to_string(),
-            sub_items: vec![
-                "Automatic updates and backups".to_string(),
-                "Built-in security features".to_string(),
-                "Easy server management via Cloudron".to_string(),
-            ],
-        },
-        Feature {
-            text: "✨ Everything in Sentinel Plan Included".to_string(),
-            sub_items: vec![
-                "All monitoring features".to_string(),
-                "All integrations and automations".to_string(),
-                "Priority support for setup help".to_string(),
-            ],
+            text: "Includes all hosted features".to_string(),
+            sub_items: vec![],
         },
     ];
 
@@ -855,143 +700,58 @@ pub fn pricing(props: &PricingProps) -> Html {
             }
 
             <div class="pricing-grid">
-                <div class="self-host-row">
-                    {
-                        if props.is_logged_in && props.user_id == 1 {
-                            html! {
-                                <>
-                                <div class="pricing-card open-source">
-                                    <div class="open-source-tag">{"Open Source"}</div>
-                                    <div class="card-header">
-                                        <h3>{"DIY Open Source"}</h3>
-                                        <p class="best-for">{"For developers and tech enthusiasts who want to self-host from source"}</p>
-                                        <div class="price">
-                                            <span class="amount">{"$0"}</span>
-                                            <span class="period">{"/month"}</span>
-                                        </div>
-                                        <div class="includes">
-                                            <p>{"What you get:"}</p>
-                                            <ul class="quota-list">
-                                                <li>{"🔓 Full source code access"}</li>
-                                                <li>{"🛠️ Complete control over deployment"}</li>
-                                                <li>{"🔧 Ability to modify and customize"}</li>
-                                                <li>{"📦 All features available"}</li>
-                                                <li class="warning-item">{"⚠️ Requires:"}</li>
-                                                <li class="sub-item warning-text">{"Technical knowledge"}</li>
-                                                <li class="sub-item warning-text">{"Server management skills"}</li>
-                                                <li class="sub-item warning-text">{"Security expertise"}</li>
-                                                <li class="sub-item warning-text">{"Time for setup & maintenance"}</li>
-                                            </ul>
-                                        </div>
-                                    </div>
-                                    <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer" class="iq-button github-button">
-                                        <b>{"View on GitHub"}</b>
-                                    </a>
-                                </div>
-                                <PricingCard
-                                    plan_name="Easy Self-Hosted"
-                                    best_for="Simple installation, no coding required, complete privacy."
-                                    price={self_hosting_total_price}
-                                    currency={if *selected_country == "US" { "$" } else { "€" }}
-                                    features={self_hosting_features}
-                                    subscription_type="self_hosting"
-                                    is_popular=true
-                                    is_premium=false
-                                    is_self_hosting=true
-                                    user_id={props.user_id}
-                                    user_email={props.user_email.clone()}
-                                    is_logged_in={props.is_logged_in}
-                                    verified={props.verified}
-                                    sub_tier={props.sub_tier.clone()}
-                                    selected_country={(*selected_country).clone()}
-                                    show_topup_selector=false
-                                    selected_topups=0
-                                    on_topup_change={None::<Callback<i32>>}
-                                    selected_digests=0
-                                />
-                                </>
-                            }
-                        } else {
-                            html! {}
-                        }
-                    }
-                </div>
-                <div class="hosted-row">
-                    <PricingCard
-                        plan_name="Basic Plan"
-                        best_for="Simple AI tools - hosted in EU."
-                        price={*basic_prices.get(&*selected_country).unwrap_or(&0.0)}
-                        currency={if *selected_country == "US" { "$" } else { "€" }}
-                        features={basic_features}
-                        subscription_type="basic"
-                        is_popular=false
-                        is_premium=false
-                        is_self_hosting=false
-                        user_id={props.user_id}
-                        user_email={props.user_email.clone()}
-                        is_logged_in={props.is_logged_in}
-                        verified={props.verified}
-                        sub_tier={props.sub_tier.clone()}
-                        selected_country={(*selected_country).clone()}
-                        show_topup_selector=false
-                        selected_topups=0
-                        on_topup_change={None::<Callback<i32>>}
-                        selected_digests=0
-                    />
-                    <PricingCard
-                        plan_name="Oracle Plan"
-                        best_for="Essential integrations without monitoring - hosted in EU."
-                        price={oracle_total_price}
-                        currency={if *selected_country == "US" { "$" } else { "€" }}
-                        features={oracle_features}
-                        subscription_type="oracle"
-                        is_popular=false
-                        is_premium=false
-                        is_self_hosting=false
-                        user_id={props.user_id}
-                        user_email={props.user_email.clone()}
-                        is_logged_in={props.is_logged_in}
-                        verified={props.verified}
-                        sub_tier={props.sub_tier.clone()}
-                        selected_country={(*selected_country).clone()}
-                        show_topup_selector={*selected_country != "US"}
-                        selected_topups={*oracle_selected_topups}
-                        on_topup_change={if *selected_country != "US" { Some(Callback::from({
-                            let oracle_selected_topups = oracle_selected_topups.clone();
-                            move |value: i32| oracle_selected_topups.set(value)
-                        })) } else { None }}
-                        selected_digests=0
-                    />
-                    <PricingCard
-                        plan_name="Sentinel Plan"
-                        best_for="Full-featured cloud service with 24/7 monitoring - hosted in EU."
-                        price={sentinel_total_price}
-                        currency={if *selected_country == "US" { "$" } else { "€" }}
-                        features={sentinel_features}
-                        subscription_type="sentinel_plan"
-                        is_popular=false
-                        is_premium=true
-                        is_self_hosting=false
-                        user_id={props.user_id}
-                        user_email={props.user_email.clone()}
-                        is_logged_in={props.is_logged_in}
-                        verified={props.verified}
-                        sub_tier={props.sub_tier.clone()}
-                        selected_country={(*selected_country).clone()}
-                        show_topup_selector={*selected_country != "US"}
-                        selected_topups={*sentinel_selected_topups}
-                        on_topup_change={if *selected_country != "US" { Some(Callback::from({
-                            let sentinel_selected_topups = sentinel_selected_topups.clone();
-                            move |value: i32| sentinel_selected_topups.set(value)
-                        })) } else { None }}
-                        selected_digests={*sentinel_selected_digests}
-                    />
-                </div>
+                <PricingCard
+                    plan_name="Hosted Plan"
+                    best_for="Full-featured cloud service with 24/7 monitoring - hosted in EU."
+                    price={hosted_total_price}
+                    currency={if *selected_country == "US" { "$" } else { "€" }}
+                    features={hosted_features}
+                    subscription_type="hosted"
+                    is_popular=false
+                    is_premium=true
+                    is_self_hosting=false
+                    user_id={props.user_id}
+                    user_email={props.user_email.clone()}
+                    is_logged_in={props.is_logged_in}
+                    verified={props.verified}
+                    sub_tier={props.sub_tier.clone()}
+                    selected_country={(*selected_country).clone()}
+                    show_topup_selector={*selected_country != "US"}
+                    selected_topups={*hosted_selected_topups}
+                    on_topup_change={if *selected_country != "US" { Some(Callback::from({
+                        let hosted_selected_topups = hosted_selected_topups.clone();
+                        move |value: i32| hosted_selected_topups.set(value)
+                    })) } else { None }}
+                    selected_digests={*hosted_selected_digests}
+                    coming_soon={false}
+                />
+                <PricingCard
+                    plan_name="Easy Self-Hosting Plan"
+                    best_for="Simple installation, no coding required, complete privacy."
+                    price={self_hosting_total_price}
+                    currency={if *selected_country == "US" { "$" } else { "€" }}
+                    features={self_hosting_features}
+                    subscription_type="self_hosting"
+                    is_popular=true
+                    is_premium=false
+                    is_self_hosting=true
+                    user_id={props.user_id}
+                    user_email={props.user_email.clone()}
+                    is_logged_in={props.is_logged_in}
+                    verified={props.verified}
+                    sub_tier={props.sub_tier.clone()}
+                    selected_country={(*selected_country).clone()}
+                    show_topup_selector={false}
+                    selected_topups=0
+                    on_topup_change={None::<Callback<i32>>}
+                    selected_digests=0
+                    coming_soon={true}
+                />
             </div>
 
             <div class="topup-pricing">
                 <h2>{format!("Overage Rates for {}", *selected_country)}</h2>
-                <p>{"When you exceed your quota, these rates apply. Enable auto-top-up to automatically add credits when you run low. Unused credits carry over indefinitely. These are can used to answer user initiated questions, send notifications from priority senders and daily digests."}</p>
+                <p>{"When you exceed your quota on the Hosted Plan, these rates apply. Enable auto-top-up to automatically add credits when you run low. Unused credits carry over indefinitely. These are can used to answer user initiated questions, send notifications from priority senders and daily digests. On the Easy Self-Hosting Plan credits are bought directly from twilio."}</p>
                 <div class="topup-packages">
                     <div class="pricing-card main">
                         <div class="card-header">
@@ -1063,16 +823,9 @@ pub fn pricing(props: &PricingProps) -> Html {
                     <div class="options-grid">
                         <div class="option-card">
                             <h3>{"Request New Number"}</h3>
-                            <p>{"Need a phone number? We can provide numbers in select countries like US, Finland, UK, and Australia. Due to regulatory restrictions, we cannot provide numbers in many countries including Germany, India, most African countries, and parts of Asia. If your country isn't listed in the pricing above, contact us to check availability."}</p>
+                            <p>{"Need a phone number? We can provide numbers in select countries like US, Finland, UK, and Australia. Due to regulatory restrictions, we cannot provide numbers in many countries including Germany, India, most African countries, and parts of Asia. If your country isn't listed in the pricing above, contact us to check availability or consider the Easy Self-Hosting Plan where you can connect your own Twilio account."}</p>
                             <a href={format!("mailto:rasmus@ahtava.com?subject=Country%20Availability%20Inquiry%20for%20{}&body=Hey,%0A%0AIs%20the%20service%20available%20in%20{}%3F%0A%0AThanks,%0A",(*country_name).clone(), (*country_name).clone())}>
                                 <button class="iq-button signup-button">{"Check Number Availability"}</button>
-                            </a>
-                        </div>
-                        <div class="option-card">
-                            <h3>{"Bring Your Own Number"}</h3>
-                            <p>{"Use your own Twilio number to get 50% off any plan and enable service in ANY country. Perfect for regions where we can't directly provide numbers (like Germany, India, African countries). This option lets you use our service worldwide while managing your own number through Twilio."}</p>
-                            <a href={format!("mailto:rasmus@ahtava.com?subject=Bring%20my%20own%20Twilio%20number%20from%20{}&body=Hey,%0A%0AI'm%20interested%20in%20bringing%20my%20own%20Twilio%20number%20from%20{}.%0A%0AThanks,%0A", (*selected_country).clone(), (*selected_country).clone())}>
-                                <button class="iq-button signup-button">{"Contact Us to Set Up"}</button>
                             </a>
                         </div>
                     </div>
@@ -1088,7 +841,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     </details>
                     <details>
                         <summary>{"What counts as a Message?"}</summary>
-                        <p>{"Messages can be used for voice calls (1 minute = 1 Message) or text queries (1 query = 1 Message). On the Sentinel and Easy Self-Hosting Plans, they can also be used for receiving daily digests (1 digest = 1 Message) or notifications from priority senders (1 notification = 1/2 Message). Critical message monitoring and custom waiting checks (Sentinel and Easy Self-Hosting Plans only) don't count against your quota."}</p>
+                        <p>{"Messages can be used for voice calls (1 minute = 1 Message) or text queries (1 query = 1 Message). They can also be used for receiving daily digests (1 digest = 1 Message) or notifications from priority senders (1 notification = 1/2 Message). Critical message monitoring and custom waiting checks don't count against your quota."}</p>
                     </details>
                     <details>
                         <summary>{"How do credits work?"}</summary>
@@ -1100,11 +853,23 @@ pub fn pricing(props: &PricingProps) -> Html {
                     </details>
                     <details>
                         <summary>{"What is the Easy Self-Hosting Plan?"}</summary>
-                        <p>{"The Easy Self-Hosting Plan provides a private VPS with Cloudron OS pre-installed, allowing you to run Lightfriend on your own server for maximum privacy and control. No technical background is required—just install Lightfriend from the Cloudron App Store. It includes all Sentinel Plan features, future updates, and ensures zero external access to your data."}</p>
+                        <p>{"The Easy Self-Hosting Plan provides a private VPS with Cloudron OS pre-installed, allowing you to run Lightfriend on your own server for maximum privacy and control. No technical background is required—just install Lightfriend from the Cloudron App Store. It includes all features, future updates, and ensures zero external access to your data."}</p>
+                    </details>
+                    <details>
+                        <summary>{"How private is the Hosted Plan?"}</summary>
+                        <p>{"Very—we process data securely on EU servers, comply with GDPR, and never sell or share info. Features like WhatsApp require server handling, but we designed it with privacy in mind. If you want zero-access proof (no trust required), choose Easy Self-Hosting."}</p>
+                    </details>
+                    <details>
+                        <summary>{"Why charge monthly for self-hosting?"}</summary>
+                        <p>{"The fee covers the simplified setup (no coding needed), managed Cloudron environment, automatic updates, subdomain, and ongoing support. You own your data and server, but we handle the heavy lifting to make it effortless."}</p>
+                    </details>
+                    <details>
+                        <summary>{"Can I self-host for free?"}</summary>
+                        <p>{"Yes, the core code is open-source on GitHub for developers comfortable with manual setup. For non-technical users, we recommend the Easy Self-Hosting Plan, which includes a pre-configured VPS, one-click Cloudron install, automatic updates, and priority support."}</p>
                     </details>
                     <details>
                         <summary>{"Is the service available in my country?"}</summary>
-                        <p>{"Service availability and features vary by country. The Basic and Oracle Plans may be limited or unavailable in countries where we can't provide local phone numbers (including many parts of Asia, Africa, and some European countries). The Easy Self-Hosting Plan is available worldwide as it runs on your own server. For full service availability, you can either: 1) Request a new number availability for your country, or 2) Bring your own Twilio number to enable service worldwide and get 50% off any plan. Contact us to check availability for your specific location."}</p>
+                        <p>{"Service availability and features vary by country. The Hosted Plan may be limited or unavailable in countries where we can't provide local phone numbers (including many parts of Asia, Africa, and some European countries). The Easy Self-Hosting Plan is available worldwide as it runs on your own server and you can connect your own Twilio account. Contact us to check availability for your specific location."}</p>
                     </details>
                 </div>
             </div>
@@ -1113,6 +878,8 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <p class="footnote">{"* Gen Z spends 4-7 hours daily on phones, often regretting 60% of social media time. "}<a href="https://explodingtopics.com/blog/smartphone-usage-stats" target="_blank" rel="noopener noreferrer">{"Read the study"}</a></p>
                 <p class="footnote">{"The dumbphone is sold separately and is not included in any plan."}</p>
                 <p class="footnote">{"All data processed & stored in EU-based servers compliant with GDPR, except for the Easy Self-Hosting Plan, which is stored on your private server."}</p>
+                <p class="footnote">{"For developers: Check out the open-source repo on GitHub if you'd like to self-host from source (requires technical setup)."}</p>
+                <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer" class="github-link">{"View GitHub Repo"}</a>
             </div>
 
             <div class="legal-links">
@@ -1123,19 +890,38 @@ pub fn pricing(props: &PricingProps) -> Html {
 
             <style>
                 {r#"
-                .pricing-grid .self-host-row {
-                    display: grid;
-                    grid-template-columns: repeat(2, 1fr);
-                    gap: 2rem;
-                    max-width: 1200px;
-                    margin: 0 auto;
+                .learn-more-section {
+                    text-align: center;
+                    margin-top: 1.5rem;
+                    margin-bottom: 1rem;
                 }
 
-                .pricing-grid .self-host-row .pricing-card {
-                    max-width: 500px;
-                    margin: 0 auto;
-                    width: 100%;
+                .learn-more-link {
+                    color: #1E90FF;
+                    text-decoration: none;
+                    font-size: 1.1rem;
+                    font-weight: 500;
+                    transition: color 0.3s ease;
                 }
+
+                .learn-more-link:hover {
+                    color: #7EB2FF;
+                    text-decoration: underline;
+                }
+                .pricing-grid {
+                    display: grid;
+                    grid-template-columns: repeat(2, 1fr);
+                    gap: 4rem;
+                    max-width: 1200px;
+                    margin: 4rem auto;
+                }
+
+                @media (max-width: 968px) {
+                    .pricing-grid {
+                        grid-template-columns: 1fr;
+                    }
+                }
+
                 .pricing-panel {
                     position: relative;
                     min-height: 100vh;
@@ -1230,47 +1016,6 @@ pub fn pricing(props: &PricingProps) -> Html {
                     border-color: rgba(30, 144, 255, 0.5);
                 }
 
-                .pricing-grid {
-                    display: flex;
-                    flex-direction: column;
-                    gap: 4rem;
-                    max-width: 1600px;
-                    margin: 4rem auto;
-                }
-
-                .pricing-grid .self-host-row {
-                    display: grid;
-                    grid-template-columns: repeat(2, 1fr);
-                    gap: 2rem;
-                }
-
-                .pricing-grid .hosted-row {
-                    display: grid;
-                    grid-template-columns: repeat(3, 1fr);
-                    gap: 2rem;
-                }
-
-                @media (max-width: 1200px) {
-                    .pricing-grid .self-host-row {
-                        grid-template-columns: 1fr;
-                        gap: 2rem;
-                    }
-                }
-
-                @media (max-width: 968px) {
-                    .pricing-grid .hosted-row {
-                        grid-template-columns: repeat(2, 1fr);
-                        gap: 2rem;
-                    }
-                }
-
-                @media (max-width: 768px) {
-                    .pricing-grid .hosted-row {
-                        grid-template-columns: 1fr;
-                        gap: 2rem;
-                    }
-                }
-
                 .pricing-card {
                     background: rgba(30, 30, 30, 0.8);
                     border: 1px solid rgba(30, 144, 255, 0.15);
@@ -1305,48 +1050,6 @@ pub fn pricing(props: &PricingProps) -> Html {
                 .pricing-card.self-hosting:hover {
                     box-shadow: 0 8px 32px rgba(0, 255, 255, 0.2);
                     border-color: rgba(0, 255, 255, 0.5);
-                }
-
-                .pricing-card.open-source {
-                    background: rgba(40, 40, 40, 0.85);
-                    border: 2px solid rgba(88, 166, 255, 0.3);
-                }
-
-                .pricing-card.open-source:hover {
-                    box-shadow: 0 8px 32px rgba(88, 166, 255, 0.2);
-                    border-color: rgba(88, 166, 255, 0.5);
-                }
-
-                .open-source-tag {
-                    position: absolute;
-                    top: -12px;
-                    left: 24px;
-                    background: linear-gradient(45deg, #58a6ff, #1f6feb);
-                    color: white;
-                    padding: 0.5rem 1rem;
-                    border-radius: 20px;
-                    font-size: 0.9rem;
-                    font-weight: 500;
-                }
-
-                .warning-item {
-                    color: #ff9494 !important;
-                    margin-top: 1rem;
-                }
-
-                .warning-text {
-                    color: #ff9494 !important;
-                }
-
-                .github-button {
-                    background: linear-gradient(45deg, #2f363d, #24292f) !important;
-                    border: 1px solid rgba(88, 166, 255, 0.3) !important;
-                }
-
-                .github-button:hover {
-                    background: linear-gradient(45deg, #24292f, #2f363d) !important;
-                    border-color: rgba(88, 166, 255, 0.5) !important;
-                    box-shadow: 0 4px 20px rgba(88, 166, 255, 0.3) !important;
                 }
 
                 .popular-tag {
@@ -1407,12 +1110,6 @@ pub fn pricing(props: &PricingProps) -> Html {
                     margin-top: 2rem;
                 }
 
-                .includes p {
-                    color: #7EB2FF;
-                    font-size: 1.1rem;
-                    margin-bottom: 1rem;
-                }
-
                 .quota-list {
                     list-style: none;
                     padding: 0;
@@ -1439,7 +1136,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                 }
 
                 .feature-comparison {
-                    max-width: 1200px;
+                    max-width: 1000px;
                     margin: 4rem auto;
                     background: rgba(30, 30, 30, 0.8);
                     border: 1px solid rgba(30, 144, 255, 0.15);
@@ -1561,9 +1258,11 @@ pub fn pricing(props: &PricingProps) -> Html {
 
                 .options-grid {
                     display: grid;
-                    grid-template-columns: repeat(2, 1fr);
+                    grid-template-columns: 1fr;
                     gap: 2rem;
                     margin-top: 2rem;
+                    max-width: 600px;
+                    margin: 2rem auto;
                 }
 
                 .option-card {
@@ -1627,7 +1326,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     gap: 1rem;
                 }
 
-                .details {
+                details {
                     background: rgba(30, 30, 30, 0.8);
                     border: 1px solid rgba(30, 144, 255, 0.15);
                     border-radius: 12px;
@@ -1635,7 +1334,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     transition: all 0.3s ease;
                 }
 
-                .details:hover {
+                details:hover {
                     border-color: rgba(30, 144, 255, 0.3);
                 }
 
@@ -1671,6 +1370,17 @@ pub fn pricing(props: &PricingProps) -> Html {
                 }
 
                 .footnote a:hover {
+                    color: #1E90FF;
+                }
+
+                .github-link {
+                    color: #7EB2FF;
+                    font-size: 0.9rem;
+                    text-decoration: none;
+                    transition: color 0.3s ease;
+                }
+
+                .github-link:hover {
                     color: #1E90FF;
                 }
 
@@ -1730,6 +1440,17 @@ pub fn pricing(props: &PricingProps) -> Html {
                     transform: none;
                     box-shadow: none;
                     background: rgba(30, 144, 255, 0.3);
+                }
+
+                .iq-button.coming-soon {
+                    background: rgba(255, 165, 0, 0.3);
+                    border: 1px solid rgba(255, 165, 0, 0.5);
+                    cursor: default;
+                }
+
+                .iq-button.coming-soon:hover {
+                    transform: none;
+                    box-shadow: none;
                 }
 
                 .sentinel-extras-integrated {
@@ -1828,28 +1549,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     font-weight: 600;
                 }
 
-                @media (max-width: 1200px) {
-                    .pricing-grid {
-                        grid-template-columns: repeat(2, 1fr);
-                    }
-                    
-                    .pricing-card.open-source {
-                        grid-column: 1 / -1;
-                        max-width: 500px;
-                        margin: 0 auto 2rem;
-                    }
-                }
-
                 @media (max-width: 968px) {
-                    .pricing-grid {
-                        grid-template-columns: 1fr;
-                    }
-                    
-                    .pricing-card.open-source {
-                        max-width: 100%;
-                        margin: 0 0 2rem;
-                    }
-
                     .pricing-header h1 {
                         font-size: 2.5rem;
                     }
@@ -1865,7 +1565,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     }
 
                     .feature-comparison table {
-                        min-width: 800px;
+                        min-width: 600px;
                     }
                 }
 

@@ -15,9 +15,7 @@ use stripe::{
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub enum SubscriptionType {
-    Basic,
-    Oracle,
-    Sentinel,
+    Hosted,
     SelfHosting,
 }
 
@@ -147,33 +145,7 @@ pub async fn create_unified_subscription_checkout(
 
     // Select price ID based on subscription type and user's phone number
     let base_price_id = match body.subscription_type {
-        SubscriptionType::Basic => {
-            if user.phone_number.starts_with("+1") {
-                std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_US")
-            } else if user.phone_number.starts_with("+358") {
-                std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_FI")
-            } else if user.phone_number.starts_with("+44") {
-                std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_UK")
-            } else if user.phone_number.starts_with("+61") {
-                std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_AU")
-            } else {
-                std::env::var("STRIPE_SUBSCRIPTION_BASIC_PRICE_ID_OTHER")
-            }
-        },
-        SubscriptionType::Oracle => {
-            if user.phone_number.starts_with("+1") {
-                std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_US")
-            } else if user.phone_number.starts_with("+358") {
-                std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_FI")
-            } else if user.phone_number.starts_with("+44") {
-                std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_UK")
-            } else if user.phone_number.starts_with("+61") {
-                std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_AU")
-            } else {
-                std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_OTHER")
-            }
-        },
-        SubscriptionType::Sentinel => {
+        SubscriptionType::Hosted => {
             if user.phone_number.starts_with("+1") {
                 std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_US")
             } else if user.phone_number.starts_with("+358") {
@@ -200,7 +172,7 @@ pub async fn create_unified_subscription_checkout(
     ];
 
     // Add top-ups if selected and not Basic plan
-    if selected_topups > 0 && body.subscription_type != SubscriptionType::Basic {
+    if selected_topups > 0 && body.subscription_type != SubscriptionType::SelfHosting {
         let topup_price_id = std::env::var("STRIPE_TOPUP_PRICE_ID")
             .expect("STRIPE_TOPUP_PRICE_ID not found");
         
