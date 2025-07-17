@@ -152,6 +152,7 @@ pub async fn ask_perplexity(
     system_prompt: &str
 ) -> Result<String, Box<dyn Error>> {
 
+    println!("message for perplexity: {}", message);
     let client = create_openai_client(&state)?;
 
     let messages = vec![
@@ -179,6 +180,7 @@ pub async fn ask_perplexity(
     let response = client.chat_completion(request).await?;
     
     let content = response.choices[0].message.content.clone().unwrap_or_default();
+    println!("content: {}", content);
 
     Ok(content)
 }
