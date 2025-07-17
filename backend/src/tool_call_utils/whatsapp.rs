@@ -457,14 +457,14 @@ pub async fn handle_fetch_whatsapp_room_messages(
                     if i == 0 {
                         response.push_str(&format!("{}. {} at {}:\n{}", 
                             i + 1, 
-                            msg.sender_display_name,
+                            msg.room_name,
                             msg.formatted_timestamp,
                             content
                         ));
                     } else {
                         response.push_str(&format!("\n\n{}. {} at {}:\n{}", 
                             i + 1, 
-                            msg.sender_display_name,
+                            msg.room_name,
                             msg.formatted_timestamp,
                             content
                         ));
@@ -526,17 +526,15 @@ pub async fn handle_fetch_whatsapp_messages(
                     };
                     
                     if i == 0 {
-                        response.push_str(&format!("{}. {} in {} at {}:\n{}", 
+                        response.push_str(&format!("{}. {} at {}:\n{}", 
                             i + 1, 
-                            msg.sender_display_name,
                             msg.room_name,
                             msg.formatted_timestamp,
                             content
                         ));
                     } else {
-                        response.push_str(&format!("\n\n{}. {} in {} at {}:\n{}", 
+                        response.push_str(&format!("\n\n{}. {} at {}:\n{}", 
                             i + 1, 
-                            msg.sender_display_name,
                             msg.room_name,
                             msg.formatted_timestamp,
                             content
