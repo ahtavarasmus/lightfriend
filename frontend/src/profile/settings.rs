@@ -199,6 +199,9 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     digests_reserved: (*user_profile).digests_reserved.clone(),
                                     pairing_code: (*user_profile).pairing_code.clone(),
                                     server_ip: (*user_profile).server_ip.clone(),
+                                    twilio_sid: (*user_profile).twilio_sid.clone(),
+                                    twilio_token: (*user_profile).twilio_token.clone(),
+                                    openrouter_api_key: (*user_profile).openrouter_api_key.clone(),
                                 };
 
                                 // Notify parent component

@@ -21,12 +21,45 @@ pub struct SelfHostInstructionsProps {
     pub sub_tier: Option<String>,
     #[prop_or_default]
     pub server_ip: Option<String>,
+    #[prop_or_default]
+    pub twilio_phone: Option<String>,
+    #[prop_or_default]
+    pub twilio_sid: Option<String>,
+    #[prop_or_default]
+    pub twilio_token: Option<String>,
+    #[prop_or_default]
+    pub openrouter_api_key: Option<String>,
 }
 
 #[function_component(SelfHostInstructions)]
 pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
-    let current_page = use_state(|| InstructionPage::Twilio);
-    
+    let is_logged_in = props.is_logged_in;
+    let sub_tier = props.sub_tier.clone();
+
+    let server_applicable = is_logged_in && sub_tier.as_ref().map_or(false, |t| t == "tier 3");
+    let twilio_applicable = is_logged_in && sub_tier.as_ref().map_or(false, |t| t == "self_hosted");
+    let ai_applicable = twilio_applicable;
+    let voice_applicable = twilio_applicable;
+
+    let is_server_filled = props.server_ip.as_deref().map_or(false, |s| !s.is_empty());
+    let is_twilio_filled = [&props.twilio_phone, &props.twilio_sid, &props.twilio_token]
+        .iter()
+        .all(|o| o.as_deref().map_or(false, |s| !s.is_empty()));
+    let is_ai_filled = props.openrouter_api_key.as_deref().map_or(false, |s| !s.is_empty());
+    let is_voice_filled = false;
+
+    let initial_page = if is_logged_in {
+        match sub_tier.as_ref().map(|s| s.as_str()) {
+            Some("tier 3") => InstructionPage::Server,
+            Some("self_hosted") => InstructionPage::Twilio,
+            _ => InstructionPage::Server,
+        }
+    } else {
+        InstructionPage::Twilio
+    };
+
+    let current_page = use_state(|| initial_page);
+
     let switch_page = {
         let current_page = current_page.clone();
         Callback::from(move |page: InstructionPage| {
@@ -53,41 +86,66 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
         })
     };
 
+    let get_title = |applicable: bool, is_server: bool| {
+        if !is_logged_in {
+            "Please log in to configure this setup.".to_string()
+        } else {
+            let tier_matches = if is_server {
+                sub_tier.as_ref().map_or(false, |t| t == "tier 3")
+            } else {
+                sub_tier.as_ref().map_or(false, |t| t == "self_hosted")
+            };
+            if tier_matches {
+                "".to_string()
+            } else if sub_tier.is_none() || sub_tier.as_ref().map(|t| t != "tier 3" && t != "self_hosted").unwrap_or(false) {
+                "Please subscribe to the self-hosted subscription to access this setup.".to_string()
+            } else if is_server {
+                "Fill this on your lightfriend.ai account (you are currently in the self hosted version)".to_string()
+            } else {
+                "Fill this on your self hosted lightfriend server (you are currently in main lightfriend.ai server)".to_string()
+            }
+        }
+    };
+
     html! {
         <div class="instructions-container">
             <h1 class="main-header">{"Self-Host Instructions"}</h1>
             <div class="instructions-tabs">
                 <button 
-                    class={classes!("tab-button", (*current_page == InstructionPage::Server).then(|| "active"))}
+                    class={classes!("tab-button", (*current_page == InstructionPage::Server).then(|| "active"), server_applicable.then(|| if is_server_filled { "completed" } else { "" }), (!server_applicable).then(|| "disabled"))}
                     onclick={let switch_page = switch_page.clone(); 
                         Callback::from(move |_| switch_page.emit(InstructionPage::Server))}
+                    title={get_title(server_applicable, true)}
                 >
                     <img src="/assets/hostinger-logo.png" alt="" class="tab-logo" />
-                    {"Server Setup"}
+                    {if !server_applicable { "Server Setup".to_string() } else if is_server_filled { "Server Setup (Ready)".to_string() } else { "Server Setup (Required)".to_string() }}
                 </button>
                 <button 
-                    class={classes!("tab-button", (*current_page == InstructionPage::Twilio).then(|| "active"))}
+                    class={classes!("tab-button", (*current_page == InstructionPage::Twilio).then(|| "active"), twilio_applicable.then(|| if is_twilio_filled { "completed" } else { "" }), (!twilio_applicable).then(|| "disabled"))}
                     onclick={let switch_page = switch_page.clone(); 
                         Callback::from(move |_| switch_page.emit(InstructionPage::Twilio))}
+                    title={get_title(twilio_applicable, false)}
                 >
                     <img src="/assets/twilio-logo.png" alt="Twilio Logo" class="tab-logo" />
-                    {"Twilio Setup"}
+                    {if !twilio_applicable { "Twilio Setup".to_string() } else if is_twilio_filled { "Twilio Setup (Ready)".to_string() } else { "Twilio Setup (Required)".to_string() }}
                 </button>
                 <button 
-                    class={classes!("tab-button", (*current_page == InstructionPage::AI).then(|| "active"))}
+                    class={classes!("tab-button", (*current_page == InstructionPage::AI).then(|| "active"), ai_applicable.then(|| if is_ai_filled { "completed" } else { "" }), (!ai_applicable).then(|| "disabled"))}
                     onclick={let switch_page = switch_page.clone(); 
                         Callback::from(move |_| switch_page.emit(InstructionPage::AI))}
+                    title={get_title(ai_applicable, false)}
                 >
                     <img src="/assets/openrouter-logo.png" alt="OpenRouter Logo" class="tab-logo" />
-                    {"OpenRouter Setup"}
+                    {if !ai_applicable { "OpenRouter Setup".to_string() } else if is_ai_filled { "OpenRouter Setup (Ready)".to_string() } else { "OpenRouter Setup (Required)".to_string() }}
                 </button>
                 <button 
-                    class={classes!("tab-button", (*current_page == InstructionPage::Voice).then(|| "active"))}
+                    class={classes!("tab-button", (*current_page == InstructionPage::Voice).then(|| "active"), voice_applicable.then(|| if is_voice_filled { "completed" } else { "" }), (!voice_applicable).then(|| "disabled"))}
                     onclick={let switch_page = switch_page.clone(); 
                         Callback::from(move |_| switch_page.emit(InstructionPage::Voice))}
+                    title={get_title(voice_applicable, false)}
                 >
                     <img src="/assets/elevenlabs-logo.png" alt="Elevenlabs Logo" class="tab-logo" />
-                    {"ElevenLabs Setup"}
+                    {if !voice_applicable { "ElevenLabs Setup".to_string() } else if is_voice_filled { "ElevenLabs Setup (Ready)".to_string() } else { "ElevenLabs Setup (Optional)".to_string() }}
                 </button>
             </div>
 
@@ -100,24 +158,32 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
                                 is_logged_in={props.is_logged_in}
                                 sub_tier={props.sub_tier.clone()}
                                 server_ip={props.server_ip.clone()}
+                                message={get_title(server_applicable, true)}
                             />
                         },
                         InstructionPage::Twilio => html! {
                             <TwilioSelfHostInstructions 
                                 is_logged_in={props.is_logged_in}
                                 sub_tier={props.sub_tier.clone()}
+                                twilio_phone={props.twilio_phone.clone()}
+                                twilio_sid={props.twilio_sid.clone()}
+                                twilio_token={props.twilio_token.clone()}
+                                message={get_title(twilio_applicable, false)}
                             />
                         },
                         InstructionPage::AI => html! {
                             <AISelfHostInstructions 
                                 is_logged_in={props.is_logged_in}
                                 sub_tier={props.sub_tier.clone()}
+                                api_key={props.openrouter_api_key.clone()}
+                                message={get_title(ai_applicable, false)}
                             />
                         },
                         InstructionPage::Voice => html! {
                             <VoiceSelfHostInstructions 
                                 is_logged_in={props.is_logged_in}
                                 sub_tier={props.sub_tier.clone()}
+                                message={get_title(voice_applicable, false)}
                             />
                         },
                     }
@@ -197,6 +263,37 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
                     color: #fff;
                 }
 
+                .tab-button.completed {
+                    border-color: rgba(50, 205, 50, 0.5);
+                    color: #fff;
+                }
+
+                .tab-button.completed:hover {
+                    border-color: rgba(50, 205, 50, 0.7);
+                }
+
+                .tab-button.completed.active {
+                    border-color: rgba(50, 205, 50, 0.7);
+                }
+
+                .tab-button.disabled {
+                    color: #666;
+                    border-color: rgba(30, 144, 255, 0.05);
+                    font-size: 0.9rem;
+                    opacity: 0.8;
+                }
+
+                .tab-button.disabled:hover {
+                    border-color: rgba(30, 144, 255, 0.05);
+                    color: #666;
+                }
+
+                .tab-button.disabled.active {
+                    background: rgba(30, 144, 255, 0.05);
+                    border-color: rgba(30, 144, 255, 0.3);
+                    color: #999;
+                }
+
                 .instructions-content {
                     flex: 1;
                     width: 100%;
@@ -253,4 +350,3 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
         </div>
     }
 }
-

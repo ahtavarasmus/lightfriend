@@ -68,16 +68,79 @@ pub struct UpdateServerIpRequest {
 }
 
 #[derive(Deserialize)]
+pub struct UpdateTwilioPhoneRequest {
+    twilio_phone: String,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateTwilioCredsRequest {
+    account_sid: String,
+    auth_token: String,
+}
+
+pub async fn update_twilio_phone(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(req): Json<UpdateTwilioPhoneRequest>,
+) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_core.update_preferred_number(auth_user.user_id, &req.twilio_phone) {
+        Ok(_) => {
+            tracing::debug!("Successfully updated Twilio phone for user: {}", auth_user.user_id);
+            Ok(StatusCode::OK)
+        },
+        Err(e) => {
+            tracing::error!("Failed to update Twilio phone: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to update Twilio phone"}))
+            ))
+        }
+    }
+}
+
+pub async fn update_twilio_creds(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(req): Json<UpdateTwilioCredsRequest>,
+) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_core.update_twilio_credentials(auth_user.user_id, &req.account_sid, &req.auth_token) {
+        Ok(_) => {
+            tracing::debug!("Successfully updated Twilio credentials for user: {}", auth_user.user_id);
+            Ok(StatusCode::OK)
+        },
+        Err(e) => {
+            tracing::error!("Failed to update Twilio credentials: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to update Twilio credentials"}))
+            ))
+        }
+    }
+}
+
+use roxmltree::{Document, Node};
+use reqwest;
+use tracing;
+
+#[derive(serde::Deserialize)]
 pub struct SetupSubdomainRequest {
-    ip_address: String,
+    pub ip_address: String,
 }
 
-#[derive(Serialize)]
+#[derive(serde::Serialize)]
 pub struct SetupSubdomainResponse {
-    subdomain: String,
-    status: String,
+    pub subdomain: String,
+    pub status: String,
 }
 
+#[derive(Debug, Clone)]
+struct DnsHost {
+    name: String,
+    record_type: String,
+    address: String,
+    mx_pref: Option<u32>,
+    ttl: u32,
+}
 
 pub async fn setup_subdomain(
     State(state): State<Arc<AppState>>,
@@ -95,38 +158,174 @@ pub async fn setup_subdomain(
         "https://api.namecheap.com/xml.response"
     };
 
-    // Construct the subdomain
-    let subdomain = format!("{}.lightfriend.ai", auth_user.user_id);
-    let sld = "lightfriend"; // SLD is the domain name without TLD
-    let tld = "ai"; // TLD is the top-level domain
+    let sld = "lightfriend";
+    let tld = "ai";
+    let subdomain_name = auth_user.user_id.to_string();
+    let subdomain = format!("{}.lightfriend.ai", subdomain_name);
+    let target_ip = req.ip_address.clone();
 
-    // Construct the API URL
-    let api_url = format!(
-        "{}?ApiUser={}&ApiKey={}&UserName={}&Command=namecheap.domains.dns.setCustom&ClientIp={}&SLD={}&TLD={}&NameServers={}",
-        base_url, api_user, api_key, api_user, client_ip, sld, tld, req.ip_address
-    );
-
-    // Make the API request
     let client = reqwest::Client::new();
-    let response = client
-        .get(&api_url)
-        .send()
-        .await
-        .map_err(|e| {
+
+    // Helper function to make API request and return XML string if successful
+    async fn make_api_request(client: &reqwest::Client, url: &str) -> Result<String, (StatusCode, Json<serde_json::Value>)> {
+        let response = client.get(url).send().await.map_err(|e| {
             tracing::error!("Failed to make Namecheap API request: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to make API request"}))
-            )
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to make API request"})))
         })?;
 
-    // Simple success check based on HTTP status
-    if !response.status().is_success() {
-        tracing::error!("Namecheap API request failed with status: {}", response.status());
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "Failed to set up subdomain"}))
-        ));
+        if !response.status().is_success() {
+            tracing::error!("Namecheap API request failed with status: {}", response.status());
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "API request failed"}))));
+        }
+
+        let text = response.text().await.map_err(|e| {
+            tracing::error!("Failed to read API response: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to read API response"})))
+        })?;
+
+        let doc = Document::parse(&text).map_err(|e| {
+            tracing::error!("Failed to parse XML: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to parse API response"})))
+        })?;
+
+        let status = doc.root().descendants().find(|n| n.has_tag_name("ApiResponse")).and_then(|n| n.attribute("Status"));
+        if status != Some("OK") {
+            let error_msg = doc.root().descendants().find(|n| n.has_tag_name("Error")).map(|n| n.text().unwrap_or("Unknown error")).unwrap_or("Unknown error");
+            tracing::error!("API response error: {}", error_msg);
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": error_msg}))));
+        }
+
+        Ok(text)
+    }
+
+    // Step 1: Check if using our DNS with getList
+    let get_list_url = format!(
+        "{}?ApiUser={}&ApiKey={}&UserName={}&Command=namecheap.domains.dns.getList&ClientIp={}&SLD={}&TLD={}",
+        base_url, api_user, api_key, api_user, client_ip, sld, tld
+    );
+
+    let xml = make_api_request(&client, &get_list_url).await?;
+    let doc = Document::parse(&xml).unwrap();
+
+    let is_using_our_dns = doc.descendants()
+        .find(|n| n.has_tag_name("DomainDNSGetListResult"))
+        .and_then(|n| n.attribute("IsUsingOurDNS"))
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
+    if !is_using_our_dns {
+        // Set to default DNS
+        let set_default_url = format!(
+            "{}?ApiUser={}&ApiKey={}&UserName={}&Command=namecheap.domains.dns.setDefault&ClientIp={}&SLD={}&TLD={}",
+            base_url, api_user, api_key, api_user, client_ip, sld, tld
+        );
+
+        let xml = make_api_request(&client, &set_default_url).await?;
+        let doc = Document::parse(&xml).unwrap();
+
+        let updated = doc.descendants()
+            .find(|n| n.has_tag_name("DomainDNSSetDefaultResult"))
+            .and_then(|n| n.attribute("Updated"))
+            .map(|v| v == "true")
+            .unwrap_or(false);
+
+        if !updated {
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to set default DNS"}))));
+        }
+    }
+
+    // Step 2: Get current hosts
+    let get_hosts_url = format!(
+        "{}?ApiUser={}&ApiKey={}&UserName={}&Command=namecheap.domains.dns.getHosts&ClientIp={}&SLD={}&TLD={}",
+        base_url, api_user, api_key, api_user, client_ip, sld, tld
+    );
+
+    let xml = make_api_request(&client, &get_hosts_url).await?;
+    let doc = Document::parse(&xml).unwrap();
+
+    let hosts_result = doc.descendants().find(|n| n.has_tag_name("DomainDNSGetHostsResult")).ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({"error": "Missing DomainDNSGetHostsResult in response"}))
+    ))?;
+
+    let mut hosts: Vec<DnsHost> = vec![];
+
+    for host_node in hosts_result.children().filter(|n| n.has_tag_name("host")) {
+        let name = host_node.attribute("Name").unwrap_or("").to_string();
+        let record_type = host_node.attribute("Type").unwrap_or("").to_string();
+        let address = host_node.attribute("Address").unwrap_or("").to_string();
+        let mx_pref = host_node.attribute("MXPref").and_then(|s| s.parse::<u32>().ok());
+        let ttl = host_node.attribute("TTL").and_then(|s| s.parse::<u32>().ok()).unwrap_or(1800);
+
+        hosts.push(DnsHost {
+            name,
+            record_type,
+            address,
+            mx_pref,
+            ttl,
+        });
+    }
+
+    // Step 3: Check if subdomain exists and update or add
+    let mut found = false;
+    for host in hosts.iter_mut() {
+        if host.name == subdomain_name && host.record_type == "A" {
+            found = true;
+            if host.address == target_ip {
+                // Already set to the same IP
+                return Ok(Json(SetupSubdomainResponse {
+                    subdomain,
+                    status: "success".to_string(),
+                }));
+            } else {
+                // Override with new IP
+                host.address = target_ip.clone();
+            }
+            break; // Assuming only one A record per hostname
+        }
+    }
+
+    if !found {
+        // Add new A record
+        hosts.push(DnsHost {
+            name: subdomain_name,
+            record_type: "A".to_string(),
+            address: target_ip,
+            mx_pref: Some(10),
+            ttl: 1800,
+        });
+    }
+
+    // Step 4: Set the updated hosts
+    let mut set_hosts_params = format!(
+        "{}?ApiUser={}&ApiKey={}&UserName={}&Command=namecheap.domains.dns.setHosts&ClientIp={}&SLD={}&TLD={}",
+        base_url, api_user, api_key, api_user, client_ip, sld, tld
+    );
+
+    for (i, host) in hosts.iter().enumerate() {
+        let idx = i + 1;
+        set_hosts_params.push_str(&format!("&HostName{}={}", idx, host.name));
+        set_hosts_params.push_str(&format!("&RecordType{}={}", idx, host.record_type));
+        set_hosts_params.push_str(&format!("&Address{}={}", idx, host.address));
+        set_hosts_params.push_str(&format!("&TTL{}={}", idx, host.ttl));
+        if let Some(mx_pref) = host.mx_pref {
+            if host.record_type == "MX" {
+                set_hosts_params.push_str(&format!("&MXPref{}={}", idx, mx_pref));
+            }
+        }
+    }
+
+    let xml = make_api_request(&client, &set_hosts_params).await?;
+    let doc = Document::parse(&xml).unwrap();
+
+    let is_success = doc.descendants()
+        .find(|n| n.has_tag_name("DomainDNSSetHostsResult"))
+        .and_then(|n| n.attribute("IsSuccess"))
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
+    if !is_success {
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "Failed to set hosts"}))));
     }
 
     Ok(Json(SetupSubdomainResponse {
@@ -485,7 +684,18 @@ pub async fn update_server_ip(
     match state.user_core.update_server_ip(auth_user.user_id, &req.server_ip) {
         Ok(_) => {
             tracing::debug!("Successfully updated server IP for user: {}", auth_user.user_id);
-            Ok(StatusCode::OK)
+
+            // Call setup_subdomain to update DNS if necessary
+            let setup_req = SetupSubdomainRequest {
+                ip_address: req.server_ip.clone(),
+            };
+            match setup_subdomain(State(state.clone()), auth_user.clone(), Json(setup_req)).await {
+                Ok(_) => Ok(StatusCode::OK),
+                Err(e) => {
+                    tracing::error!("Failed to setup subdomain: {:?}", e);
+                    Err(e)
+                }
+            }
         },
         Err(e) => {
             tracing::error!("Failed to update server IP: {}", e);

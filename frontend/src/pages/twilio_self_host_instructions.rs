@@ -1,5 +1,9 @@
 use yew::prelude::*;
-use web_sys::MouseEvent;
+use web_sys::{MouseEvent, window};
+use gloo_net::http::Request;
+use wasm_bindgen_futures::spawn_local;
+use serde_json::json;
+use crate::config;
 
 #[derive(Properties, PartialEq)]
 pub struct TwilioSelfHostInstructionsProps {
@@ -7,12 +11,206 @@ pub struct TwilioSelfHostInstructionsProps {
     pub is_logged_in: bool,
     #[prop_or_default]
     pub sub_tier: Option<String>,
+    #[prop_or_default]
+    pub twilio_phone: Option<String>,
+    #[prop_or_default]
+    pub twilio_sid: Option<String>,
+    #[prop_or_default]
+    pub twilio_token: Option<String>,
+    #[prop_or_default]
+    pub message: String,
 }
 
 #[function_component(TwilioSelfHostInstructions)]
 pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) -> Html {
     let modal_visible = use_state(|| false);
     let selected_image = use_state(|| String::new());
+
+    let phone_number = use_state(|| props.twilio_phone.clone().unwrap_or_default());
+    let account_sid = use_state(|| props.twilio_sid.clone().unwrap_or_default());
+    let auth_token = use_state(|| props.twilio_token.clone().unwrap_or_default());
+
+    let phone_save_status = use_state(|| None::<Result<(), String>>);
+    let creds_save_status = use_state(|| None::<Result<(), String>>);
+    {
+        let phone_number = phone_number.clone();
+        let account_sid = account_sid.clone();
+        let auth_token = auth_token.clone();
+        use_effect_with_deps(
+            move |(new_phone, new_sid, new_token)| {
+                if let Some(phone) = new_phone {
+                    if phone != &*phone_number {
+                        phone_number.set(phone.clone());
+                    }
+                }
+                if let Some(sid) = new_sid {
+                    if sid != &*account_sid {
+                        account_sid.set(sid.clone());
+                    }
+                }
+                if let Some(token) = new_token {
+                    if token != &*auth_token {
+                        auth_token.set(token.clone());
+                    }
+                }
+                || {}
+            },
+            (
+                props.twilio_phone.clone(),
+                props.twilio_sid.clone(),
+                props.twilio_token.clone(),
+            ),
+        );
+    }
+
+    let on_phone_change = {
+        let phone_number = phone_number.clone();
+        Callback::from(move |e: Event| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            phone_number.set(input.value());
+        })
+    };
+
+    let on_sid_change = {
+        let account_sid = account_sid.clone();
+        Callback::from(move |e: Event| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            account_sid.set(input.value());
+        })
+    };
+
+    let on_token_change = {
+        let auth_token = auth_token.clone();
+        Callback::from(move |e: Event| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            auth_token.set(input.value());
+        })
+    };
+
+    let on_save_phone = {
+        let phone_number = phone_number.clone();
+        let phone_save_status = phone_save_status.clone();
+        Callback::from(move |_| {
+            let phone_number = phone_number.clone();
+            let phone_save_status = phone_save_status.clone();
+            
+            let val = (*phone_number).clone();
+            if val.is_empty() || !val.starts_with('+') || val.len() < 10 || !val[1..].chars().all(|c| c.is_ascii_digit()) || val.starts_with("...") {
+                phone_save_status.set(Some(Err("Invalid phone number format".to_string())));
+                return;
+            }
+            
+            phone_save_status.set(None);
+            
+            spawn_local(async move {
+                if let Some(token) = window()
+                    .and_then(|w| w.local_storage().ok())
+                    .flatten()
+                    .and_then(|storage| storage.get_item("token").ok())
+                    .flatten()
+                {
+                    let result = Request::post(&format!("{}/api/profile/twilio-phone", config::get_backend_url()))
+                        .header("Authorization", &format!("Bearer {}", token))
+                        .json(&json!({
+                            "twilio_phone": *phone_number
+                        }))
+                        .unwrap()
+                        .send()
+                        .await;
+
+                    match result {
+                        Ok(response) => {
+                            if response.status() == 401 {
+                                // Token is invalid or expired
+                                if let Some(window) = window() {
+                                    if let Ok(Some(storage)) = window.local_storage() {
+                                        let _ = storage.remove_item("token");
+                                    }
+                                }
+                                phone_save_status.set(Some(Err("Session expired. Please log in again.".to_string())));
+                            } else if response.ok() {
+                                phone_save_status.set(Some(Ok(())));
+                            } else {
+                                phone_save_status.set(Some(Err("Failed to save Twilio phone".to_string())));
+                            }
+                        }
+                        Err(_) => {
+                            phone_save_status.set(Some(Err("Network error occurred".to_string())));
+                        }
+                    }
+                } else {
+                    phone_save_status.set(Some(Err("Please log in to save Twilio phone".to_string())));
+                }
+            });
+        })
+    };
+
+    let on_save_creds = {
+        let account_sid = account_sid.clone();
+        let auth_token = auth_token.clone();
+        let creds_save_status = creds_save_status.clone();
+        Callback::from(move |_| {
+            let account_sid = account_sid.clone();
+            let auth_token = auth_token.clone();
+            let creds_save_status = creds_save_status.clone();
+            
+            let sid_val = (*account_sid).clone();
+            if sid_val.len() != 34 || !sid_val.starts_with("AC") || !sid_val[2..].chars().all(|c| c.is_ascii_hexdigit()) || sid_val.starts_with("...") {
+                creds_save_status.set(Some(Err("Invalid Account SID format".to_string())));
+                return;
+            }
+            
+            let token_val = (*auth_token).clone();
+            if token_val.len() != 32 || !token_val.chars().all(|c| c.is_ascii_hexdigit()) || token_val.starts_with("...") {
+                creds_save_status.set(Some(Err("Invalid Auth Token format".to_string())));
+                return;
+            }
+            
+            creds_save_status.set(None);
+            
+            spawn_local(async move {
+                if let Some(token) = window()
+                    .and_then(|w| w.local_storage().ok())
+                    .flatten()
+                    .and_then(|storage| storage.get_item("token").ok())
+                    .flatten()
+                {
+                    let result = Request::post(&format!("{}/api/profile/twilio-creds", config::get_backend_url()))
+                        .header("Authorization", &format!("Bearer {}", token))
+                        .json(&json!({
+                            "account_sid": *account_sid,
+                            "auth_token": *auth_token
+                        }))
+                        .unwrap()
+                        .send()
+                        .await;
+
+                    match result {
+                        Ok(response) => {
+                            if response.status() == 401 {
+                                // Token is invalid or expired
+                                if let Some(window) = window() {
+                                    if let Ok(Some(storage)) = window.local_storage() {
+                                        let _ = storage.remove_item("token");
+                                    }
+                                }
+                                creds_save_status.set(Some(Err("Session expired. Please log in again.".to_string())));
+                            } else if response.ok() {
+                                creds_save_status.set(Some(Ok(())));
+                            } else {
+                                creds_save_status.set(Some(Err("Failed to save Twilio credentials".to_string())));
+                            }
+                        }
+                        Err(_) => {
+                            creds_save_status.set(Some(Err("Network error occurred".to_string())));
+                        }
+                    }
+                } else {
+                    creds_save_status.set(Some(Err("Please log in to save Twilio credentials".to_string())));
+                }
+            });
+        })
+    };
 
     let close_modal = {
         let modal_visible = modal_visible.clone();
@@ -29,10 +227,35 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
             modal_visible.set(true);
         })
     };
+
+    let is_phone_valid = {
+        let val = &*phone_number;
+        !val.is_empty() && val.starts_with('+') && val.len() >= 10 && val[1..].chars().all(|c| c.is_ascii_digit()) && !val.starts_with("...")
+    };
+
+    let is_sid_valid = {
+        let val = &*account_sid;
+        val.len() == 34 && val.starts_with("AC") && val[2..].chars().all(|c| c.is_ascii_hexdigit()) && !val.starts_with("...")
+    };
+
+    let is_token_valid = {
+        let val = &*auth_token;
+        val.len() == 32 && val.chars().all(|c| c.is_ascii_hexdigit()) && !val.starts_with("...")
+    };
+
     html! {
         <div class="instructions-page">
             <div class="instructions-background"></div>
             <section class="instructions-section">
+                { if !props.message.is_empty() {
+                    html! {
+                        <div class="applicable-message">
+                            { props.message.clone() }
+                        </div>
+                    }
+                } else {
+                    html! {}
+                } }
                 <div class="instruction-block overview-block">
                     <div class="instruction-content">
                         <h2>{"What is Twilio and what does it do?"}</h2>
@@ -83,13 +306,35 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
                             <li>{"6. Click the 'Buy' button next to your chosen number and follow the steps"}</li>
                         </ul>
                         {
-                            if props.is_logged_in {
+                            if props.is_logged_in && props.sub_tier.as_deref() == Some("tier 2") {
                                 html! {
                                     <div class="input-field">
                                         <label for="phone-number">{"Your Twilio Phone Number:"}</label>
                                         <div class="input-with-button">
-                                            <input type="text" id="phone-number" placeholder="+1234567890" />
-                                            <button class="save-button">{"Save"}</button>
+                                            <input 
+                                                type="text" 
+                                                id="phone-number" 
+                                                placeholder="+1234567890" 
+                                                value={(*phone_number).clone()}
+                                                onchange={on_phone_change.clone()}
+                                            />
+                                            <button 
+                                                class={classes!("save-button", if !is_phone_valid { "invalid" } else { "" })}
+                                                onclick={on_save_phone.clone()}
+                                            >
+                                                {"Save"}
+                                            </button>
+                                            {
+                                                match &*phone_save_status {
+                                                    Some(Ok(_)) => html! {
+                                                        <span class="save-status success">{"✓ Saved"}</span>
+                                                    },
+                                                    Some(Err(err)) => html! {
+                                                        <span class="save-status error">{format!("Error: {}", err)}</span>
+                                                    },
+                                                    None => html! {}
+                                                }
+                                            }
                                         </div>
                                     </div>
                                 }
@@ -119,22 +364,50 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
                             <li>{"3. Reveal and copy your 'Auth Token' from the dashboard"}</li>
                         </ul>
                         {
-                            if props.is_logged_in {
+                            if props.is_logged_in && props.sub_tier.as_deref() == Some("tier 2") {
                                 html! {
                                     <>
                                         <div class="input-field">
                                             <label for="account-sid">{"Your Account SID:"}</label>
                                             <div class="input-with-button">
-                                                <input type="text" id="account-sid" placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" />
+                                                <input 
+                                                    type="text" 
+                                                    id="account-sid" 
+                                                    placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" 
+                                                    value={(*account_sid).clone()}
+                                                    onchange={on_sid_change.clone()}
+                                                />
                                             </div>
                                         </div>
                                         <div class="input-field">
                                             <label for="auth-token">{"Your Auth Token:"}</label>
                                             <div class="input-with-button">
-                                                <input type="password" id="auth-token" placeholder="your_auth_token_here" />
+                                                <input 
+                                                    type="text" 
+                                                    id="auth-token" 
+                                                    placeholder="your_auth_token_here" 
+                                                    value={(*auth_token).clone()}
+                                                    onchange={on_token_change.clone()}
+                                                />
                                             </div>
                                         </div>
-                                        <button class="save-button">{"Save"}</button>
+                                        <button 
+                                            class={classes!("save-button", if !(is_sid_valid && is_token_valid) { "invalid" } else { "" })}
+                                            onclick={on_save_creds.clone()}
+                                        >
+                                            {"Save"}
+                                        </button>
+                                        {
+                                            match &*creds_save_status {
+                                                Some(Ok(_)) => html! {
+                                                    <span class="save-status success">{"✓ Saved"}</span>
+                                                },
+                                                Some(Err(err)) => html! {
+                                                    <span class="save-status error">{format!("Error: {}", err)}</span>
+                                                },
+                                                None => html! {}
+                                            }
+                                        }
                                     </>
                                 }
                             } else {
@@ -400,6 +673,33 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
                     transform: translateY(1px);
                 }
 
+                .save-button.invalid {
+                    background: #cccccc;
+                    color: #666666;
+                    cursor: not-allowed;
+                }
+
+                .save-button.invalid:hover {
+                    background: #cccccc;
+                }
+
+                .save-status {
+                    margin-left: 1rem;
+                    padding: 0.5rem 1rem;
+                    border-radius: 4px;
+                    font-size: 0.9rem;
+                }
+
+                .save-status.success {
+                    color: #4CAF50;
+                    background: rgba(76, 175, 80, 0.1);
+                }
+
+                .save-status.error {
+                    color: #f44336;
+                    background: rgba(244, 67, 54, 0.1);
+                }
+
                 .modal-overlay {
                     position: fixed;
                     top: 0;
@@ -452,9 +752,19 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
                     background: rgba(0, 0, 0, 0.8);
                     border-color: white;
                 }
+
+                .applicable-message {
+                    color: #ffcc00;
+                    font-size: 1.2rem;
+                    margin-bottom: 2rem;
+                    text-align: center;
+                    padding: 1rem;
+                    background: rgba(255, 204, 0, 0.1);
+                    border: 1px solid rgba(255, 204, 0, 0.3);
+                    border-radius: 6px;
+                }
                 "#}
             </style>
         </div>
     }
 }
-

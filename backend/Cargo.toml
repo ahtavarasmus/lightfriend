@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+roxmltree = "0.20.0"
 quick-xml = "0.38.0"
 mime_guess = "2.0"
 image = "0.24"  # For image processing

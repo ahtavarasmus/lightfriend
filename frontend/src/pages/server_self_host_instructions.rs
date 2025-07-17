@@ -15,6 +15,8 @@ pub struct ServerSelfHostInstructionsProps {
     pub server_ip: Option<String>,
     #[prop_or_default]
     pub user_id: Option<String>,
+    #[prop_or_default]
+    pub message: String,
 }
 
 #[function_component(ServerSelfHostInstructions)]
@@ -100,10 +102,21 @@ pub fn server_self_host_instructions(props: &ServerSelfHostInstructionsProps) ->
         })
     };
 
+    let has_server_ip = props.server_ip.is_some();
+
     html! {
         <div class="instructions-page">
             <div class="instructions-background"></div>
             <section class="instructions-section">
+                { if !props.message.is_empty() {
+                    html! {
+                        <div class="applicable-message">
+                            { props.message.clone() }
+                        </div>
+                    }
+                } else {
+                    html! {}
+                } }
                 <div class="instruction-block overview-block">
                     <div class="instruction-content">
                         <h2>{"Setting Up Your Server on Hostinger"}</h2>
@@ -194,7 +207,7 @@ pub fn server_self_host_instructions(props: &ServerSelfHostInstructionsProps) ->
                                                 placeholder="Enter your server's IP address"
                                                 value={(*server_ip).clone()}
                                                 onchange={on_input_change.clone()}
-/>
+                                            />
                                             <button 
                                                 class="save-button"
                                                 onclick={on_save.clone()}
@@ -244,51 +257,53 @@ pub fn server_self_host_instructions(props: &ServerSelfHostInstructionsProps) ->
                     </div>
                 </div>
 
-                {
-                    if props.server_ip.is_some() {
-                        html! {
-                            <>
-                                <div class="instruction-block">
-                                    <div class="instruction-content">
-                                        <h2>{"Your Personal Lightfriend Domain"}</h2>
-                                        <p class="highlight-text">
-                                            {
-                                                if let Some(user_id) = &props.user_id {
-                                                    format!("{}.lightfriend.ai", user_id)
-                                                } else {
-                                                    "Loading...".to_string()
-                                                }
-                                            }
-                                        </p>
-                                        <p class="info-text">
-                                            {"Your domain is being set up. This process typically takes 5-30 minutes for DNS propagation. Once complete, your domain will automatically route to your server."}
-                                        </p>
-                                        <p class="note-text">
-                                            {"Note: During this time, you can proceed with the next step to set up your Cloudron account."}
-                                        </p>
-                                    </div>
-                                </div>
+                <div class={classes!("instruction-block", if !has_server_ip { "grayed-out" } else { "" })}>
+                    <div class="instruction-content">
+                        <h2>{"Your Personal Lightfriend Domain"}</h2>
+                        <p class="highlight-text">
+                            {
+                                if let Some(user_id) = &props.user_id {
+                                    format!("{}.lightfriend.ai", user_id)
+                                } else {
+                                    "Loading...".to_string()
+                                }
+                            }
+                        </p>
+                        <p class="info-text">
+                            {"Your domain is being set up. This process typically takes 5-30 minutes for DNS propagation. Once complete, your domain will automatically route to your server."}
+                        </p>
+                        <p class="note-text">
+                            {"Note: During this time, you can proceed with the next step to set up your Cloudron account."}
+                        </p>
+                    </div>
+                </div>
 
-                                <div class="instruction-block">
-                                    <div class="instruction-content">
-                                        <h2>{"Set Up Your Cloudron Account"}</h2>
-                                        <ul>
-                                            <li>{"1. Open your server's IP address in a browser: "}<a href={format!("http://{}", props.server_ip.as_ref().unwrap())} target="_blank" style="color: #1E90FF; text-decoration: underline;">{props.server_ip.as_ref().unwrap()}</a></li>
-                                            <li>{"2. You'll see the Cloudron setup page"}</li>
-                                            <li>{"3. Create your admin account"}</li>
-                                            <li>{"4. Follow the setup wizard to complete the installation"}</li>
-                                        </ul>
-                                        <p class="note-text">
-                                            {"Once your domain is propagated, you can access Cloudron through your personal domain instead of the IP address."}
-                                        </p>
-                                    </div>
-                                </div>
-                            </>
-                        }
-                    } else {
-                        html! {}
-                    }
-                }
+                <div class={classes!("instruction-block", if !has_server_ip { "grayed-out" } else { "" })}>
+                    <div class="instruction-content">
+                        <h2>{"Set Up Your Cloudron Account"}</h2>
+                        <ul>
+                            <li>{"1. Open your server's IP address in a browser: "}{
+                                if has_server_ip {
+                                    let ip = props.server_ip.as_ref().unwrap().clone();
+                                    html! {
+                                        <a href={format!("http://{}", ip)} target="_blank" style="color: #1E90FF; text-decoration: underline;">{ip}</a>
+                                    }
+                                } else {
+                                    html! {
+                                        <span style="color: #1E90FF; text-decoration: underline;">{"<your_server_ip>"}</span>
+                                    }
+                                }
+                            }</li>
+                            <li>{"2. You'll see the Cloudron setup page"}</li>
+                            <li>{"3. Create your admin account"}</li>
+                            <li>{"4. Follow the setup wizard to complete the installation"}</li>
+                        </ul>
+                        <p class="note-text">
+                            {"Once your domain is propagated, you can access Cloudron through your personal domain instead of the IP address."}
+                        </p>
+                    </div>
+                </div>
+
             </section>
 
             {
@@ -366,6 +381,11 @@ pub fn server_self_host_instructions(props: &ServerSelfHostInstructionsProps) ->
 
                 .instruction-block:hover {
                     border-color: rgba(30, 144, 255, 0.3);
+                }
+
+                .instruction-block.grayed-out {
+                    opacity: 0.5;
+                    pointer-events: none;
                 }
 
                 .instruction-content {
@@ -622,9 +642,19 @@ pub fn server_self_host_instructions(props: &ServerSelfHostInstructionsProps) ->
                         padding: 1rem;
                     }
                 }
+
+                .applicable-message {
+                    color: #ffcc00;
+                    font-size: 1.2rem;
+                    margin-bottom: 2rem;
+                    text-align: center;
+                    padding: 1rem;
+                    background: rgba(255, 204, 0, 0.1);
+                    border: 1px solid rgba(255, 204, 0, 0.3);
+                    border-radius: 6px;
+                }
                 "#}
             </style>
         </div>
     }
 }
-

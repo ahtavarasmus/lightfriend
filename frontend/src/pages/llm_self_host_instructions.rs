@@ -1,4 +1,3 @@
-
 use yew::prelude::*;
 use web_sys::MouseEvent;
 
@@ -8,6 +7,10 @@ pub struct AISelfHostInstructionsProps {
     pub is_logged_in: bool,
     #[prop_or_default]
     pub sub_tier: Option<String>,
+    #[prop_or_default]
+    pub api_key: Option<String>,
+    #[prop_or_default]
+    pub message: String,
 }
 
 #[function_component(AISelfHostInstructions)]
@@ -34,6 +37,15 @@ pub fn llm_self_host_instructions(props: &AISelfHostInstructionsProps) -> Html {
         <div class="instructions-page">
             <div class="instructions-background"></div>
             <section class="instructions-section">
+                { if !props.message.is_empty() {
+                    html! {
+                        <div class="applicable-message">
+                            { props.message.clone() }
+                        </div>
+                    }
+                } else {
+                    html! {}
+                } }
                 <div class="instruction-block overview-block">
                     <div class="instruction-content">
                         <h2>{"What is OpenRouter and what does it do?"}</h2>
@@ -406,6 +418,17 @@ pub fn llm_self_host_instructions(props: &AISelfHostInstructionsProps) -> Html {
                 .modal-close:hover {
                     background: rgba(0, 0, 0, 0.8);
                     border-color: white;
+                }
+
+                .applicable-message {
+                    color: #ffcc00;
+                    font-size: 1.2rem;
+                    margin-bottom: 2rem;
+                    text-align: center;
+                    padding: 1rem;
+                    background: rgba(255, 204, 0, 0.1);
+                    border: 1px solid rgba(255, 204, 0, 0.3);
+                    border-radius: 6px;
                 }
                 "#}
             </style>

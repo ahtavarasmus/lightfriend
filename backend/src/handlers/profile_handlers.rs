@@ -79,7 +79,9 @@ pub struct ProfileResponse {
     digests_reserved: i32,
     pairing_code: Option<String>,
     server_ip: Option<String>,
-
+    twilio_sid: Option<String>,
+    twilio_token: Option<String>,
+    openrouter_api_key: Option<String>,
 }
 
 use crate::handlers::auth_middleware::AuthUser;
@@ -95,7 +97,6 @@ pub async fn get_profile(
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": format!("Database error: {}", e)}))
     ))?;
-
 
     match user {
         Some(user) => {
@@ -139,6 +140,36 @@ pub async fn get_profile(
 
             let digests_reserved = current_count * days_until_billing.unwrap_or(30);
 
+            // Fetch Twilio credentials and mask them
+            let (twilio_sid, twilio_token) = match state.user_core.get_twilio_credentials(auth_user.user_id) {
+                Ok((sid, token)) => {
+                    let masked_sid = if sid.len() >= 4 {
+                        format!("...{}", &sid[sid.len() - 4..])
+                    } else {
+                        "...".to_string()
+                    };
+                    let masked_token = if token.len() >= 4 {
+                        format!("...{}", &token[token.len() - 4..])
+                    } else {
+                        "...".to_string()
+                    };
+                    (Some(masked_sid), Some(masked_token))
+                },
+                Err(_) => (None, None),
+            };
+
+            let openrouter_api_key = match state.user_core.get_openrouter_api_key(auth_user.user_id) {
+                Ok(key) => {
+                    let masked_key= if key.len() >= 4 {
+                        format!("...{}", &key[key.len() - 4..])
+                    } else {
+                        "...".to_string()
+                    };
+                    Some(masked_key)
+                },
+                Err(_) => None,
+            };
+
             Ok(Json(ProfileResponse {
                 id: user.id,
                 email: user.email,
@@ -167,7 +198,10 @@ pub async fn get_profile(
                 days_until_billing: days_until_billing,
                 digests_reserved: digests_reserved,
                 pairing_code: user_settings.server_instance_id,
-                server_ip: user_settings.server_ip
+                server_ip: user_settings.server_ip,
+                twilio_sid: twilio_sid,
+                twilio_token: twilio_token,
+                openrouter_api_key: openrouter_api_key,
             }))
         }
         None => Err((

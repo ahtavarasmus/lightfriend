@@ -11,7 +11,6 @@ use diesel::prelude::*;
 use diesel::r2d2::{self, ConnectionManager};
 use dashmap::DashMap;
 use governor::{RateLimiter, clock::DefaultClock, state::keyed::DefaultKeyedStateStore};
-use std::time::SystemTime;
 use oauth2::{
     basic::BasicClient,
     AuthUrl,
@@ -111,28 +110,14 @@ use repositories::user_core::UserCore;
 use repositories::user_repository::UserRepository;
 use repositories::user_conversations::UserConversations;
 
-use handlers::auth_handlers;
-use handlers::self_host_handlers;
-use handlers::profile_handlers;
-use handlers::billing_handlers;
-use handlers::admin_handlers;
-use handlers::stripe_handlers;
-//use handlers::composio_auth;
-//use handlers::unipile_auth;
-use handlers::google_calendar_auth;
-use handlers::google_calendar;
-use handlers::google_tasks_auth;
-use handlers::google_tasks;
-//use handlers::gmail_auth;
-//use handlers::gmail;
-use handlers::imap_auth;
-use handlers::imap_handlers;
-use handlers::{whatsapp_auth, whatsapp_handlers, telegram_auth, telegram_handlers};
-use handlers::filter_handlers;
-use api::twilio_sms;
-use api::elevenlabs;
-use api::elevenlabs_webhook;
-use api::shazam_call;
+use handlers::{
+    auth_handlers, self_host_handlers, profile_handlers, billing_handlers,
+    admin_handlers, stripe_handlers, google_calendar_auth, google_calendar,
+    google_tasks_auth, google_tasks, imap_auth, imap_handlers,
+    whatsapp_auth, whatsapp_handlers, telegram_auth, telegram_handlers,
+    filter_handlers,
+};
+use api::{twilio_sms, elevenlabs, elevenlabs_webhook, shazam_call};
 
 type DbPool = r2d2::Pool<ConnectionManager<SqliteConnection>>;
 
@@ -317,7 +302,6 @@ async fn main() {
 
     let auth_built_in_webhook_routes = Router::new()
         .route("/api/stripe/webhook", post(stripe_handlers::stripe_webhook))
-        //.route("/api/auth/google/gmail/callback", get(gmail_auth::gmail_callback))
         .route("/api/auth/google/calendar/callback", get(google_calendar_auth::google_callback))
         .route("/api/auth/google/tasks/callback", get(google_tasks_auth::google_tasks_callback));
 
@@ -357,6 +341,8 @@ async fn main() {
         .route("/api/profile/update", post(profile_handlers::update_profile))
         .route("/api/profile/generate-pairing-code", post(self_host_handlers::generate_pairing_code))
         .route("/api/profile/server-ip", post(self_host_handlers::update_server_ip))
+        .route("/api/profile/twilio-phone", post(self_host_handlers::update_twilio_phone))
+        .route("/api/profile/twilio-creds", post(self_host_handlers::update_twilio_creds))
         .route("/api/profile/timezone", post(profile_handlers::update_timezone))
         .route("/api/profile/preferred-number", post(profile_handlers::update_preferred_number))
         .route("/api/profile", get(profile_handlers::get_profile))
@@ -372,8 +358,6 @@ async fn main() {
 
         .route("/api/stripe/checkout-session/{user_id}", post(stripe_handlers::create_checkout_session))
         .route("/api/stripe/unified-subscription-checkout/{user_id}", post(stripe_handlers::create_unified_subscription_checkout))
-        // TODO can use this on the topping up credits if user already has bought some before
-        // .route("/api/stripe/automatic-charge/{user_id}", post(stripe_handlers::automatic_charge))
         .route("/api/stripe/customer-portal/{user_id}", get(stripe_handlers::create_customer_portal_session))
 
         .route("/api/auth/google/calendar/login", get(google_calendar_auth::google_login))
@@ -383,23 +367,12 @@ async fn main() {
         .route("/api/calendar/events", get(google_calendar::handle_calendar_fetching_route))
         .route("/api/calendar/create", post(google_calendar::create_calendar_event))
 
-        // Google Tasks routes
         .route("/api/auth/google/tasks/login", get(google_tasks_auth::google_tasks_login))
         .route("/api/auth/google/tasks/connection", delete(google_tasks_auth::delete_google_tasks_connection))
         .route("/api/auth/google/tasks/refresh", post(google_tasks_auth::refresh_google_tasks_token))
         .route("/api/auth/google/tasks/status", get(google_tasks::google_tasks_status))
         .route("/api/tasks", get(google_tasks::handle_tasks_fetching_route))
         .route("/api/tasks/create", post(google_tasks::handle_tasks_creation_route))
-
-        /*
-        .route("/api/auth/google/gmail/login", get(gmail_auth::gmail_login))
-        .route("/api/auth/google/gmail/delete_connection", delete(gmail_auth::delete_gmail_connection))
-        .route("/api/auth/google/gmail/refresh", post(gmail_auth::refresh_gmail_token))
-        .route("/api/auth/google/gmail/test_fetch", get(gmail::test_gmail_fetch))
-        .route("/api/auth/google/gmail/status", get(gmail::gmail_status))
-        .route("/api/gmail/previews", get(gmail::fetch_email_previews))
-        .route("/api/gmail/message/{id}", get(gmail::fetch_single_email))
-        */
 
         .route("/api/auth/imap/login", post(imap_auth::imap_login))
         .route("/api/auth/imap/status", get(imap_auth::imap_status))

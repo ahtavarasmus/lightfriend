@@ -48,6 +48,9 @@ pub struct UserProfile {
     pub digests_reserved: i32,
     pub pairing_code: Option<String>,
     pub server_ip: Option<String>,
+    pub twilio_sid: Option<String>,
+    pub twilio_token: Option<String>,
+    pub openrouter_api_key: Option<String>,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]

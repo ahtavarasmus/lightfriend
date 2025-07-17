@@ -777,6 +777,29 @@ impl UserCore {
         Ok(user_id)
     }
 
+    pub fn get_openrouter_api_key(&self, user_id: i32) -> Result<String, Box<dyn Error>> {
+        use crate::schema::user_settings;
+        use crate::utils::encryption::decrypt;
+        
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Get the user settings
+        let settings = user_settings::table
+            .filter(user_settings::user_id.eq(user_id))
+            .select(
+                user_settings::encrypted_openrouter_api_key,
+            )
+            .first::<Option<String>>(&mut conn)?;
+
+        match settings {
+            Some(encrypted_openrouter_api_key) => {
+                let openrouter_api_key= decrypt(&encrypted_openrouter_api_key)?;
+                Ok(openrouter_api_key)
+            },
+            _ => Err("Openrouter api key not found".into())
+        }
+    }
+
     pub fn get_twilio_credentials(&self, user_id: i32) -> Result<(String, String), Box<dyn Error>> {
         use crate::schema::user_settings;
         use crate::utils::encryption::decrypt;
@@ -801,6 +824,30 @@ impl UserCore {
             _ => Err("Twilio credentials not found".into())
         }
     }
+
+
+    pub fn update_twilio_credentials(&self, user_id: i32, account_sid: &str, auth_token: &str) -> Result<(), Box<dyn Error>> {
+        use crate::schema::user_settings;
+        use crate::utils::encryption::encrypt;
+        
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let encrypted_account_sid = encrypt(account_sid)?;
+        let encrypted_auth_token = encrypt(auth_token)?;
+
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set((
+                user_settings::encrypted_twilio_account_sid.eq(encrypted_account_sid.clone()),
+                user_settings::encrypted_twilio_auth_token.eq(encrypted_auth_token.clone()),
+            ))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
     pub fn set_server_instance_id(&self, user_id: i32, server_instance_id: &str) -> Result<(), DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
