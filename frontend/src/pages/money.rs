@@ -167,7 +167,9 @@ pub struct PricingCardProps {
 
 #[function_component(PricingCard)]
 pub fn pricing_card(props: &PricingCardProps) -> Html {
-    let price_text = if props.selected_country == "Other" {
+    let price_text = if props.price == 0.0 {
+        "Free".to_string()
+    } else if props.selected_country == "Other" {
         format!("from {}{:.2}", props.currency, props.price)
     } else {
         format!("{}{:.2}", props.currency, props.price)
@@ -179,7 +181,11 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         props.subscription_type.clone()
     };
 
-    let button = if props.coming_soon {
+    let button = if props.subscription_type == "diy" {
+        html! { 
+            <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer" class="iq-button signup-button"><b>{"Get Started on GitHub"}</b></a> 
+        }
+    } else if props.coming_soon {
         html! { <button class="iq-button coming-soon" disabled=true><b>{"Coming Soon"}</b></button> }
     } else if props.is_logged_in {
         if !props.verified {
@@ -228,9 +234,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                 if props.is_popular {
                     html! { <div class="popular-tag">{"Most Popular"}</div> }
                 } else if props.is_premium {
-                    html! { <div class="premium-tag">{if ["FI", "UK"].contains(&props.selected_country.as_str()) { "Secure EU-Hosted Monitoring with GDPR Compliance" } else { "Secure Hosted Monitoring with GDPR Compliance" }}</div> }
-                } else if props.is_self_hosting {
-                    html! { <div class="premium-tag">{"Maximum Privacy"}</div> }
+                    html! { <div class="premium-tag">{"Simplest"}</div> }
                 } else {
                     html! {}
                 }
@@ -240,7 +244,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                 <p class="best-for">{props.best_for.clone()}</p>
                 <div class="price">
                     <span class="amount">{price_text}</span>
-                    <span class="period">{"/month"}</span>
+                    { if props.price > 0.0 { html! { <span class="period">{"/month"}</span> } } else { html! {} } }
                 </div>
                 <div class="includes">
                     <ul class="quota-list">
@@ -452,9 +456,9 @@ pub fn feature_comparison(props: &FeatureComparisonProps) -> Html {
                         <td>{"✅"}</td>
                     </tr>
                     <tr>
-                        <td>{"Privacy Level"}</td>
-                        <td>{"High (Encrypted, No Sharing)"}</td>
-                        <td>{"Maximum (Zero Access)"}</td>
+                        <td>{"Privacy & Security"}</td>
+                        <td>{"Secure (GDPR Compliant, Encrypted)"}</td>
+                        <td>{"Self-Managed (Your Server)"}</td>
                     </tr>
                     <tr>
                         <td>{"Hosting Location"}</td>
@@ -613,36 +617,47 @@ pub fn pricing(props: &PricingProps) -> Html {
     };
     let self_hosting_total_price = self_hosting_base_price + self_hosting_topup_price;
 
-    let hosted_features = vec![
+    let diy_features = vec![
         Feature {
-            text: "All integrations & monitoring".to_string(),
+            text: "For tech-savvy users comfortable with server setup, security, and maintenance".to_string(),
             sub_items: vec![],
         },
         Feature {
-            text: "Hosted in secure EU servers".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: "GDPR compliant".to_string(),
+            text: "Manual updates and configuration".to_string(),
             sub_items: vec![],
         },
     ];
 
     let self_hosting_features = vec![
         Feature {
-            text: "Run on your private server".to_string(),
-            sub_items: vec!["Zero external access".to_string()],
-        },
-        Feature {
-            text: "Easy setup with Cloudron".to_string(),
-            sub_items: vec!["No coding required".to_string()],
-        },
-        Feature {
-            text: "Automatic updates & backups".to_string(),
+            text: "User-friendly setup with no coding required".to_string(),
             sub_items: vec![],
         },
         Feature {
-            text: "Includes all hosted features".to_string(),
+            text: "Automatic updates and built-in security".to_string(),
+            sub_items: vec![],
+        },
+        Feature {
+            text: "Available worldwide, even where hosted service isn't".to_string(),
+            sub_items: vec![],
+        },
+    ];
+
+    let hosted_features = vec![
+        Feature {
+            text: "Fully managed with no setup needed".to_string(),
+            sub_items: vec![],
+        },
+        Feature {
+            text: "Includes phone numbers, servers, and everything else".to_string(),
+            sub_items: vec![],
+        },
+        Feature {
+            text: "Automatic updates and security".to_string(),
+            sub_items: vec![],
+        },
+        Feature {
+            text: "Simply connect your apps to get started".to_string(),
             sub_items: vec![],
         },
     ];
@@ -701,6 +716,50 @@ pub fn pricing(props: &PricingProps) -> Html {
 
             <div class="pricing-grid">
                 <PricingCard
+                    plan_name="DIY Hosting"
+                    best_for="For tech-savvy users who enjoy hands-on server management and tinkering"
+                    price={0.0}
+                    currency={"$"}
+                    features={diy_features}
+                    subscription_type="diy"
+                    is_popular=false
+                    is_premium=false
+                    is_self_hosting=false
+                    user_id={props.user_id}
+                    user_email={props.user_email.clone()}
+                    is_logged_in={props.is_logged_in}
+                    verified={props.verified}
+                    sub_tier={props.sub_tier.clone()}
+                    selected_country={(*selected_country).clone()}
+                    show_topup_selector=false
+                    selected_topups=0
+                    on_topup_change={None::<Callback<i32>>}
+                    selected_digests=0
+                    coming_soon={false}
+                />
+                <PricingCard
+                    plan_name="Easy Self-Hosting Plan"
+                    best_for="Self-Hosted setup for non-technical users with automatic management."
+                    price={self_hosting_total_price}
+                    currency={if *selected_country == "US" { "$" } else { "€" }}
+                    features={self_hosting_features}
+                    subscription_type="self_hosting"
+                    is_popular=true
+                    is_premium=false
+                    is_self_hosting=true
+                    user_id={props.user_id}
+                    user_email={props.user_email.clone()}
+                    is_logged_in={props.is_logged_in}
+                    verified={props.verified}
+                    sub_tier={props.sub_tier.clone()}
+                    selected_country={(*selected_country).clone()}
+                    show_topup_selector={false}
+                    selected_topups=0
+                    on_topup_change={None::<Callback<i32>>}
+                    selected_digests=0
+                    coming_soon={true}
+                />
+                <PricingCard
                     plan_name="Hosted Plan"
                     best_for="Full-featured cloud service with 24/7 monitoring - hosted in EU."
                     price={hosted_total_price}
@@ -724,28 +783,6 @@ pub fn pricing(props: &PricingProps) -> Html {
                     })) } else { None }}
                     selected_digests={*hosted_selected_digests}
                     coming_soon={false}
-                />
-                <PricingCard
-                    plan_name="Easy Self-Hosting Plan"
-                    best_for="Simple installation, no coding required, complete privacy."
-                    price={self_hosting_total_price}
-                    currency={if *selected_country == "US" { "$" } else { "€" }}
-                    features={self_hosting_features}
-                    subscription_type="self_hosting"
-                    is_popular=true
-                    is_premium=false
-                    is_self_hosting=true
-                    user_id={props.user_id}
-                    user_email={props.user_email.clone()}
-                    is_logged_in={props.is_logged_in}
-                    verified={props.verified}
-                    sub_tier={props.sub_tier.clone()}
-                    selected_country={(*selected_country).clone()}
-                    show_topup_selector={false}
-                    selected_topups=0
-                    on_topup_change={None::<Callback<i32>>}
-                    selected_digests=0
-                    coming_soon={true}
                 />
             </div>
 
@@ -857,7 +894,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     </details>
                     <details>
                         <summary>{"How private is the Hosted Plan?"}</summary>
-                        <p>{"Very—we process data securely on EU servers, comply with GDPR, and never sell or share info. Features like WhatsApp require server handling, but we designed it with privacy in mind. If you want zero-access proof (no trust required), choose Easy Self-Hosting."}</p>
+                        <p>{"The Hosted Plan processes your data securely on EU servers with GDPR compliance. For those preferring to manage their own server, the Easy Self-Hosting Plan provides that option."}</p>
                     </details>
                     <details>
                         <summary>{"Why charge monthly for self-hosting?"}</summary>
@@ -910,7 +947,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                 }
                 .pricing-grid {
                     display: grid;
-                    grid-template-columns: repeat(2, 1fr);
+                    grid-template-columns: repeat(3, 1fr);
                     gap: 4rem;
                     max-width: 1200px;
                     margin: 4rem auto;
@@ -1024,6 +1061,9 @@ pub fn pricing(props: &PricingProps) -> Html {
                     position: relative;
                     transition: transform 0.3s ease, box-shadow 0.3s ease;
                     backdrop-filter: blur(10px);
+                    box-sizing: border-box;
+                    display: flex;
+                    flex-direction: column;
                 }
 
                 .pricing-card:hover {
@@ -1076,10 +1116,11 @@ pub fn pricing(props: &PricingProps) -> Html {
                     font-weight: 500;
                 }
 
-                .card-header h3 {
+                .card-header {
                     color: #7EB2FF;
                     font-size: 2rem;
                     margin-bottom: 1rem;
+                    flex-grow: 1;
                 }
 
                 .best-for {
@@ -1405,12 +1446,13 @@ pub fn pricing(props: &PricingProps) -> Html {
                     border: none;
                     padding: 1rem 2rem;
                     border-radius: 8px;
-                    font-size: 1.1rem;
+                    font-size: 1rem;
                     cursor: pointer;
                     transition: all 0.3s ease;
                     border: 1px solid rgba(255, 255, 255, 0.1);
                     width: 100%;
                     margin-top: 2rem;
+                    text-decoration: none;
                 }
 
                 .iq-button:hover {
