@@ -4,6 +4,7 @@ use crate::pages::twilio_self_host_instructions::TwilioSelfHostInstructions;
 use crate::pages::llm_self_host_instructions::AISelfHostInstructions;
 use crate::pages::voice_self_host_instructions::VoiceSelfHostInstructions;
 use crate::pages::server_self_host_instructions::ServerSelfHostInstructions;
+use crate::pages::setup_costs::SetupCosts;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum InstructionPage {
@@ -11,6 +12,7 @@ pub enum InstructionPage {
     AI,
     Voice,
     Server,
+    SetupCosts
 }
 
 #[derive(Properties, PartialEq)]
@@ -72,7 +74,7 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
                     _ => InstructionPage::Server,
                 }
             } else {
-                InstructionPage::Server
+                InstructionPage::SetupCosts
             };
             current_page_effect.set(new_initial);
             || ()
@@ -94,7 +96,8 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
         let current_page = current_page.clone();
         Callback::from(move |_: MouseEvent| {
             let next = match *current_page {
-                InstructionPage::Server => InstructionPage::Twilio,
+                InstructionPage::Server => InstructionPage::SetupCosts,
+                InstructionPage::SetupCosts => InstructionPage::Twilio,
                 InstructionPage::Twilio => InstructionPage::AI,
                 InstructionPage::AI => InstructionPage::Voice,
                 InstructionPage::Voice => InstructionPage::Server,
@@ -131,6 +134,17 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
         <div class="instructions-container">
             <h1 class="main-header">{"Self-Host Instructions"}</h1>
             <div class="instructions-tabs">
+                <button 
+                    class={classes!("tab-button", (*current_page == InstructionPage::SetupCosts).then(|| "active"))}
+                    onclick={let switch_page = switch_page.clone(); 
+                        Callback::from(move |_| switch_page.emit(InstructionPage::SetupCosts))}
+                    title={get_title(server_applicable, true)}
+                >
+                    /*<img src="/assets/" alt="" class="tab-logo" />
+                    */
+                    <i class="fa-solid fa-tag"></i>
+                    {"Setup Costs"}
+                </button>
                 <button 
                     class={classes!("tab-button", (*current_page == InstructionPage::Server).then(|| "active"), server_applicable.then(|| if is_server_filled { "completed" } else { "" }), (!server_applicable).then(|| "disabled"))}
                     onclick={let switch_page = switch_page.clone(); 
@@ -173,6 +187,9 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
                 {
                     match *current_page {
 
+                        InstructionPage::SetupCosts => html! {
+                            <SetupCosts />
+                        },
                         InstructionPage::Server => html! {
                             <ServerSelfHostInstructions 
                                 is_logged_in={props.is_logged_in}

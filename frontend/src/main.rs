@@ -28,6 +28,7 @@ mod pages {
     pub mod voice_self_host_instructions;
     pub mod server_self_host_instructions;
     pub mod self_host_instructions;
+    pub mod setup_costs;
 }
 
 mod proactive {
