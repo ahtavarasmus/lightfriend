@@ -2,8 +2,10 @@
 
 ## Running the Project
 
-- Start the backend: `cd backend && cargo run`
-- Start the frontend: `cd frontend && trunk serve`
+- Start the backend:
+```cd backend && cargo run```
+- Start the frontend:
+```cd frontend && trunk serve```
 
 Instructions for running the matrix server + bridges and other services will come also here at some point
 
