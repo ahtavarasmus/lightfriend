@@ -1,6 +1,15 @@
-[![Recent Posts on PacePeek.com](https://pacepeek.com/widget_svg/ahtavarasmus/3?fill_color=232626&stroke_color=0a8eb0&text_color=ffffff)](https://pacepeek.com/ahtavarasmus)
+# Lightfriend
 
-If there is interest to host this for yourself, email rasmus@ahtava.com
+## Running the Project
+
+- Start the backend: `cd backend && cargo run`
+- Start the frontend: `cd frontend && trunk serve`
+
+Instructions for running the matrix server + bridges and other services will come also here at some point
+
+## License
+
 
 This project is licensed under the GNU Affero General Public License v3. See the LICENSE file for details.
-"Lightfriend" is a brand owned by Rasmus Ähtävä. The code is licensed under AGPLv3, but the name "Lightfriend" and any associated branding are not included in this license.
+
+The name "Lightfriend" and any associated branding (including logos, icons, or visual elements) are owned by Rasmus Ähtävä. These elements are not included in the AGPLv3 license and may not be used without permission, especially for commercial purposes or in ways that imply endorsement or affiliation. Forks or derivatives should use a different name and branding to avoid confusion.
