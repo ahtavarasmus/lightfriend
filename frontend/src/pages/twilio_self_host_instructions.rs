@@ -22,8 +22,6 @@ pub struct TwilioSelfHostInstructionsProps {
     #[prop_or_default]
     pub textbee_device_id: Option<String>,
     #[prop_or_default]
-    pub textbee_phone_number: Option<String>,
-    #[prop_or_default]
     pub message: String,
 }
 
@@ -252,6 +250,7 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
         })
     };
 
+    /*
     let on_save_textbee = {
         let textbee_api_key = textbee_api_key.clone();
         let textbee_device_id = textbee_device_id.clone();
@@ -319,6 +318,17 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
         })
     };
 
+    let is_textbee_key_valid = {
+        let val = &*textbee_api_key;
+        !val.is_empty() && !val.starts_with("...")
+    };
+
+    let is_textbee_id_valid = {
+        let val = &*textbee_device_id;
+        !val.is_empty() && !val.starts_with("...")
+    };
+    */
+
     let close_modal = {
         let modal_visible = modal_visible.clone();
         Callback::from(move |_: MouseEvent| {
@@ -350,15 +360,6 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
         val.len() == 32 && val.chars().all(|c| c.is_ascii_hexdigit()) && !val.starts_with("...")
     };
 
-    let is_textbee_key_valid = {
-        let val = &*textbee_api_key;
-        !val.is_empty() && !val.starts_with("...")
-    };
-
-    let is_textbee_id_valid = {
-        let val = &*textbee_device_id;
-        !val.is_empty() && !val.starts_with("...")
-    };
 
     html! {
         <div class="instructions-page">

@@ -34,8 +34,6 @@ pub struct SelfHostInstructionsProps {
     #[prop_or_default]
     pub textbee_device_id: Option<String>,
     #[prop_or_default]
-    pub textbee_phone_number: Option<String>,
-    #[prop_or_default]
     pub openrouter_api_key: Option<String>,
 }
 
@@ -215,7 +213,6 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
                                 message={get_title(twilio_applicable, false)}
                                 textbee_api_key={props.textbee_api_key.clone()}
                                 textbee_device_id={props.textbee_device_id.clone()}
-                                textbee_phone_number={props.textbee_phone_number.clone()}
                             />
                         },
                         InstructionPage::AI => html! {
