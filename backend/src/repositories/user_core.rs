@@ -848,6 +848,53 @@ impl UserCore {
         Ok(())
     }
 
+    pub fn get_textbee_credentials(&self, user_id: i32) -> Result<(String, String), Box<dyn Error>> {
+        use crate::schema::user_settings;
+        use crate::utils::encryption::decrypt;
+        
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Get the user settings
+        let settings = user_settings::table
+            .filter(user_settings::user_id.eq(user_id))
+            .select((
+                user_settings::encrypted_textbee_device_id,
+                user_settings::encrypted_textbee_api_key,
+            ))
+            .first::<(Option<String>, Option<String>)>(&mut conn)?;
+
+        match settings {
+            (Some(encrypted_device_id), Some(encrypted_api_key)) => {
+                let device_id= decrypt(&encrypted_device_id)?;
+                let api_key= decrypt(&encrypted_api_key)?;
+                Ok((device_id, api_key))
+            },
+            _ => Err("Textbee credentials not found".into())
+        }
+    }
+
+    pub fn update_textbee_credentials(&self, user_id: i32, device_id: &str, api_key: &str) -> Result<(), Box<dyn Error>> {
+        use crate::schema::user_settings;
+        use crate::utils::encryption::encrypt;
+        
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        let encrypted_device_id = encrypt(device_id)?;
+        let encrypted_api_key= encrypt(api_key)?;
+
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set((
+                user_settings::encrypted_textbee_device_id.eq(encrypted_device_id.clone()),
+                user_settings::encrypted_textbee_api_key.eq(encrypted_api_key.clone()),
+            ))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
     pub fn set_server_instance_id(&self, user_id: i32, server_instance_id: &str) -> Result<(), DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");

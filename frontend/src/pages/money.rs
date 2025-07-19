@@ -1010,7 +1010,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                 .premium-tag {
                     position: absolute;
                     top: -12px;
-                    left: 24px;
+                    right: 24px;
                     background: linear-gradient(45deg, #FFD700, #FFA500);
                     color: white;
                     padding: 0.5rem 1rem;

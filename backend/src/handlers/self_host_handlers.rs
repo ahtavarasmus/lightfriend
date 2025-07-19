@@ -78,6 +78,12 @@ pub struct UpdateTwilioCredsRequest {
     auth_token: String,
 }
 
+#[derive(Deserialize)]
+pub struct UpdateTextBeeCredsRequest {
+    textbee_api_key: String,
+    textbee_device_id: String,
+}
+
 pub async fn update_twilio_phone(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -113,6 +119,27 @@ pub async fn update_twilio_creds(
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": "Failed to update Twilio credentials"}))
+            ))
+        }
+    }
+}
+
+pub async fn update_textbee_creds(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(req): Json<UpdateTextBeeCredsRequest>,
+) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
+    println!("here: {}", &req.textbee_device_id);
+    match state.user_core.update_textbee_credentials(auth_user.user_id, &req.textbee_device_id, &req.textbee_api_key) {
+        Ok(_) => {
+            println!("Successfully updated TextBee credentials for user: {}", auth_user.user_id);
+            Ok(StatusCode::OK)
+        },
+        Err(e) => {
+            tracing::error!("Failed to update TextBee credentials: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Failed to update TextBee credentials"}))
             ))
         }
     }

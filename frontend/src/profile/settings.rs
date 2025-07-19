@@ -202,6 +202,8 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     twilio_sid: (*user_profile).twilio_sid.clone(),
                                     twilio_token: (*user_profile).twilio_token.clone(),
                                     openrouter_api_key: (*user_profile).openrouter_api_key.clone(),
+                                    textbee_device_id: (*user_profile).textbee_device_id.clone(),
+                                    textbee_api_key: (*user_profile).textbee_api_key.clone(),
                                 };
 
                                 // Notify parent component

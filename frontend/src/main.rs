@@ -257,6 +257,9 @@ pub fn self_host_instructions_wrapper() -> Html {
                 twilio_phone={profile.preferred_number.clone()}
                 twilio_sid={profile.twilio_sid.clone()}
                 twilio_token={profile.twilio_token.clone()}
+                textbee_api_key={profile.textbee_api_key.clone()}
+                textbee_device_id={profile.textbee_device_id.clone()}
+                textbee_phone_number={profile.textbee_phone_number.clone()}
                 openrouter_api_key={profile.openrouter_api_key.clone()}
             />
         }
@@ -269,6 +272,9 @@ pub fn self_host_instructions_wrapper() -> Html {
                 twilio_phone={None::<String>}
                 twilio_sid={None::<String>}
                 twilio_token={None::<String>}
+                textbee_api_key={None::<String>}
+                textbee_device_id={None::<String>}
+                textbee_phone_number={None::<String>}
                 openrouter_api_key={None::<String>}
             />
         }

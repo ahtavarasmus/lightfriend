@@ -18,6 +18,12 @@ pub struct TwilioSelfHostInstructionsProps {
     #[prop_or_default]
     pub twilio_token: Option<String>,
     #[prop_or_default]
+    pub textbee_api_key: Option<String>,
+    #[prop_or_default]
+    pub textbee_device_id: Option<String>,
+    #[prop_or_default]
+    pub textbee_phone_number: Option<String>,
+    #[prop_or_default]
     pub message: String,
 }
 
@@ -29,15 +35,21 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
     let phone_number = use_state(|| props.twilio_phone.clone().unwrap_or_default());
     let account_sid = use_state(|| props.twilio_sid.clone().unwrap_or_default());
     let auth_token = use_state(|| props.twilio_token.clone().unwrap_or_default());
+    let textbee_api_key = use_state(|| props.textbee_api_key.clone().unwrap_or_default());
+    let textbee_device_id = use_state(|| props.textbee_device_id.clone().unwrap_or_default());
 
     let phone_save_status = use_state(|| None::<Result<(), String>>);
     let creds_save_status = use_state(|| None::<Result<(), String>>);
+    let textbee_save_status = use_state(|| None::<Result<(), String>>);
+
     {
         let phone_number = phone_number.clone();
         let account_sid = account_sid.clone();
         let auth_token = auth_token.clone();
+        let textbee_api_key = textbee_api_key.clone();
+        let textbee_device_id = textbee_device_id.clone();
         use_effect_with_deps(
-            move |(new_phone, new_sid, new_token)| {
+            move |(new_phone, new_sid, new_token, new_textbee_key, new_textbee_id)| {
                 if let Some(phone) = new_phone {
                     if phone != &*phone_number {
                         phone_number.set(phone.clone());
@@ -53,12 +65,24 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
                         auth_token.set(token.clone());
                     }
                 }
+                if let Some(key) = new_textbee_key {
+                    if key != &*textbee_api_key {
+                        textbee_api_key.set(key.clone());
+                    }
+                }
+                if let Some(id) = new_textbee_id {
+                    if id != &*textbee_device_id {
+                        textbee_device_id.set(id.clone());
+                    }
+                }
                 || {}
             },
             (
                 props.twilio_phone.clone(),
                 props.twilio_sid.clone(),
                 props.twilio_token.clone(),
+                props.textbee_api_key.clone(),
+                props.textbee_device_id.clone(),
             ),
         );
     }
@@ -84,6 +108,22 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
         Callback::from(move |e: Event| {
             let input: web_sys::HtmlInputElement = e.target_unchecked_into();
             auth_token.set(input.value());
+        })
+    };
+
+    let on_textbee_key_change = {
+        let textbee_api_key = textbee_api_key.clone();
+        Callback::from(move |e: Event| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            textbee_api_key.set(input.value());
+        })
+    };
+
+    let on_textbee_id_change = {
+        let textbee_device_id = textbee_device_id.clone();
+        Callback::from(move |e: Event| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            textbee_device_id.set(input.value());
         })
     };
 
@@ -212,6 +252,73 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
         })
     };
 
+    let on_save_textbee = {
+        let textbee_api_key = textbee_api_key.clone();
+        let textbee_device_id = textbee_device_id.clone();
+        let textbee_save_status = textbee_save_status.clone();
+        Callback::from(move |_| {
+            let textbee_api_key = textbee_api_key.clone();
+            let textbee_device_id = textbee_device_id.clone();
+            let textbee_save_status = textbee_save_status.clone();
+            
+            let key_val = (*textbee_api_key).clone();
+            if key_val.is_empty() || key_val.starts_with("...") {
+                textbee_save_status.set(Some(Err("Invalid API Key".to_string())));
+                return;
+            }
+            
+            let id_val = (*textbee_device_id).clone();
+            if id_val.is_empty() || id_val.starts_with("...") {
+                textbee_save_status.set(Some(Err("Invalid Device ID".to_string())));
+                return;
+            }
+            
+            textbee_save_status.set(None);
+            
+            spawn_local(async move {
+                if let Some(token) = window()
+                    .and_then(|w| w.local_storage().ok())
+                    .flatten()
+                    .and_then(|storage| storage.get_item("token").ok())
+                    .flatten()
+                {
+                    let result = Request::post(&format!("{}/api/profile/textbee-creds", config::get_backend_url()))
+                        .header("Authorization", &format!("Bearer {}", token))
+                        .json(&json!({
+                            "textbee_api_key": *textbee_api_key,
+                            "textbee_device_id": *textbee_device_id
+                        }))
+                        .unwrap()
+                        .send()
+                        .await;
+
+                    match result {
+                        Ok(response) => {
+                            if response.status() == 401 {
+                                // Token is invalid or expired
+                                if let Some(window) = window() {
+                                    if let Ok(Some(storage)) = window.local_storage() {
+                                        let _ = storage.remove_item("token");
+                                    }
+                                }
+                                textbee_save_status.set(Some(Err("Session expired. Please log in again.".to_string())));
+                            } else if response.ok() {
+                                textbee_save_status.set(Some(Ok(())));
+                            } else {
+                                textbee_save_status.set(Some(Err("Failed to save TextBee credentials".to_string())));
+                            }
+                        }
+                        Err(_) => {
+                            textbee_save_status.set(Some(Err("Network error occurred".to_string())));
+                        }
+                    }
+                } else {
+                    textbee_save_status.set(Some(Err("Please log in to save TextBee credentials".to_string())));
+                }
+            });
+        })
+    };
+
     let close_modal = {
         let modal_visible = modal_visible.clone();
         Callback::from(move |_: MouseEvent| {
@@ -243,6 +350,16 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
         val.len() == 32 && val.chars().all(|c| c.is_ascii_hexdigit()) && !val.starts_with("...")
     };
 
+    let is_textbee_key_valid = {
+        let val = &*textbee_api_key;
+        !val.is_empty() && !val.starts_with("...")
+    };
+
+    let is_textbee_id_valid = {
+        let val = &*textbee_device_id;
+        !val.is_empty() && !val.starts_with("...")
+    };
+
     html! {
         <div class="instructions-page">
             <div class="instructions-background"></div>
@@ -258,20 +375,98 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
                 } }
                 <div class="instruction-block overview-block">
                     <div class="instruction-content">
-                        <h2>{"What is Twilio and what does it do?"}</h2>
-                        <p>{"Twilio powers all SMS and voice communication in Lightfriend, enabling your AI assistant to send/receive messages and make calls through a dedicated phone number. Setting up your own Twilio account gives you full control over communications while ensuring privacy."}</p>
+                        <h2>{"SMS and Voice Communication Setup"}</h2>
+                        <p>{"Lightfriend uses Twilio for SMS messaging and voice calls, giving your AI assistant the ability to communicate via a dedicated phone number. For SMS only, you can alternatively use TextBee with your own Android phone for cost-effective messaging. Setting up your own accounts ensures privacy and control over communications."}</p>
                     </div>
                 </div>
 
+                /*
                 <div class="instruction-block">
                     <div class="instruction-content">
-                        <h2>{"Expected Costs"}</h2>
+                        <h2>{"Alternative: TextBee for SMS Messaging"}</h2>
+                        <p>{"If you have a spare Android phone (version 7.0+) with a secondary phone number lying around, connect it to Lightfriend via TextBee. This lets your AI send and receive texts using your existing phone plan, supporting up to 300 messages per month on the free tier at no extra cost beyond your carrier's standard SMS charges."}</p>
+                        <p>{"Note: TextBee is for texting only. If you need phone calls, set up Twilio in addition."}</p>
+                        <p>{"Note: TextBee does not support sending images or other media."}</p>
+                        <p>{"TextBee also offers a Pro plan ($6.99/month currently) for higher limits (up to 5,000 messages/month) and additional features like multi-device support."}</p>
+                        <h3>{"Setup Steps"}</h3>
+                        <ul>
+                            <li>{"Register for a free account at "}<a href="https://textbee.dev" target="_blank" style="color: #7EB2FF; text-decoration: underline;">{"textbee.dev"}</a>{" using email/password or Google."}</li>
+                            <li>{"Download and install the TextBee app on your Android phone from "}<a href="https://dl.textbee.dev" target="_blank" style="color: #7EB2FF; text-decoration: underline;">{"dl.textbee.dev"}</a>{"."}</li>
+                            <li>{"Grant SMS permissions in the app."}</li>
+                            <li>{"Link the device:"}
+                                <ul>
+                                    <li>{"Recommended: In the dashboard, click 'Register Device', scan the QR code with the app."}</li>
+                                    <li>{"Alternative: Generate an API key in the dashboard, enter it in the app."}</li>
+                                </ul>
+                            </li>
+                            <li>{"Once linked, note your Device ID from the devices list in the dashboard."}</li>
+                            <li>{"Generate or use your API Key from the dashboard."}</li>
+                        </ul>
+                        {
+                            if props.is_logged_in && props.sub_tier.as_deref() == Some("tier 2") {
+                                html! {
+                                    <>
+
+                                        <div class="input-field">
+                                            <label for="textbee-device-id">{"Your TextBee Device ID:"}</label>
+                                            <div class="input-with-button">
+                                                <input 
+                                                    type="text" 
+                                                    id="textbee-device-id" 
+                                                    placeholder="your_device_id_here" 
+                                                    value={(*textbee_device_id).clone()}
+                                                    onchange={on_textbee_id_change.clone()}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div class="input-field">
+                                            <label for="textbee-api-key">{"Your TextBee API Key:"}</label>
+                                            <div class="input-with-button">
+                                                <input 
+                                                    type="text" 
+                                                    id="textbee-api-key" 
+                                                    placeholder="your_api_key_here" 
+                                                    value={(*textbee_api_key).clone()}
+                                                    onchange={on_textbee_key_change.clone()}
+                                                />
+                                            </div>
+                                        </div>
+                                        <button 
+                                            class={classes!("save-button", if !(is_textbee_key_valid && is_textbee_id_valid) { "invalid" } else { "" })}
+                                            onclick={on_save_textbee.clone()}
+                                        >
+                                            {"Save TextBee Credentials"}
+                                        </button>
+                                        {
+                                            match &*textbee_save_status {
+                                                Some(Ok(_)) => html! {
+                                                    <span class="save-status success">{"✓ Saved"}</span>
+                                                },
+                                                Some(Err(err)) => html! {
+                                                    <span class="save-status error">{format!("Error: {}", err)}</span>
+                                                },
+                                                None => html! {}
+                                            }
+                                        }
+                                    </>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
+                    </div>
+                </div>
+                */
+
+                <div class="instruction-block">
+                    <div class="instruction-content">
+                        <h2>{"Twilio Expected Costs"}</h2>
                         <p>{"With typical usage (around 5 messages per day), expect to pay approximately $5+ per month. This includes a phone number (€1-15/month) and message costs. For details, visit "}<a href="https://www.twilio.com/en-us/sms/pricing/us" target="_blank" style="color: #7EB2FF; text-decoration: underline;">{"Twilio's pricing page"}</a>{"."}</p>
                     </div>
                 </div>
                 <div class="instruction-block">
                     <div class="instruction-content">
-                        <h2>{"Sign up and Add Funds"}</h2>
+                        <h2>{"Twilio Sign up and Add Funds"}</h2>
                         <ul>
                             <li>{"Go to Twilio's website (twilio.com) and click 'Sign up'"}</li>
                             <li>{"Complete the registration process with your email and other required information"}</li>
@@ -296,7 +491,7 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
 
                 <div class="instruction-block">
                     <div class="instruction-content">
-                        <h2>{"Buy a phone number"}</h2>
+                        <h2>{"Twilio Buy a phone number"}</h2>
                         <ul>
                             <li>{"1. On the Twilio Dashboard, click on the 'Phone Numbers' button in the left sidebar when 'Develop' is selected above."}</li>
                             <li>{"2. Click the 'Buy a number' button under the new sub menu"}</li>
@@ -357,7 +552,7 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
 
                 <div class="instruction-block">
                     <div class="instruction-content">
-                        <h2>{"Finding Credentials"}</h2>
+                        <h2>{"Twilio Finding Credentials"}</h2>
                         <ul>
                             <li>{"1. Click on the 'Account Dashboard' in the left sidebar"}</li>
                             <li>{"2. Find and copy your 'Account SID' from the dashboard"}</li>
@@ -501,7 +696,7 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
                 }
 
                 .instructions-hero p {
-                    font-size: 1.2rem;
+                    font-size: 1.5rem;
                     color: #999;
                     max-width: 600px;
                     margin: 0 auto;
@@ -568,6 +763,10 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
                     color: #1E90FF;
                 }
 
+                .instruction-content ul ul li::before {
+                    content: '◦';
+                }
+
                 .instruction-image {
                     flex: 1.2;  /* Increased from 1 to 1.2 to give more space for images */
                     display: flex;
@@ -576,7 +775,7 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
                 }
 
                 .instruction-image img {
-                    max-width: 110%;  /* Increased from 100% to 120% */
+                    max-width: 110%;  /* Increased from 100% to 110% */
                     height: auto;
                     border-radius: 12px;
                     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
@@ -738,7 +937,7 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
                     height: 40px;
                     border-radius: 50%;
                     background: rgba(0, 0, 0, 0.5);
-                    border: 2px solid rgba(255, 255, 255, 0.5);
+                    border: 2px solid rgba(255, 255,255, 0.5);
                     color: white;
                     font-size: 24px;
                     display: flex;

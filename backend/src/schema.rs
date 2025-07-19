@@ -199,6 +199,8 @@ diesel::table! {
         server_instance_id -> Nullable<Text>,
         server_instance_last_ping_timestamp -> Nullable<Integer>,
         server_ip -> Nullable<Text>,
+        encrypted_textbee_device_id -> Nullable<Text>,
+        encrypted_textbee_api_key -> Nullable<Text>,
     }
 }
 

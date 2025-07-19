@@ -82,6 +82,8 @@ pub struct ProfileResponse {
     twilio_sid: Option<String>,
     twilio_token: Option<String>,
     openrouter_api_key: Option<String>,
+    textbee_device_id: Option<String>,
+    textbee_api_key: Option<String>,
 }
 
 use crate::handlers::auth_middleware::AuthUser;
@@ -158,6 +160,19 @@ pub async fn get_profile(
                 Err(_) => (None, None),
             };
 
+            // Fetch Textbee credentials and mask them
+            let (textbee_device_id, textbee_api_key) = match state.user_core.get_textbee_credentials(auth_user.user_id) {
+                Ok((id, key)) => {
+                    let masked_key= if key.len() >= 4 {
+                        format!("...{}", &key[key.len() - 4..])
+                    } else {
+                        "...".to_string()
+                    };
+                    (Some(id), Some(masked_key))
+                },
+                Err(_) => (None, None),
+            };
+
             let openrouter_api_key = match state.user_core.get_openrouter_api_key(auth_user.user_id) {
                 Ok(key) => {
                     let masked_key= if key.len() >= 4 {
@@ -202,6 +217,8 @@ pub async fn get_profile(
                 twilio_sid: twilio_sid,
                 twilio_token: twilio_token,
                 openrouter_api_key: openrouter_api_key,
+                textbee_device_id: textbee_device_id,
+                textbee_api_key: textbee_api_key,
             }))
         }
         None => Err((

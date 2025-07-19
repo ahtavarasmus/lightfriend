@@ -30,6 +30,12 @@ pub struct SelfHostInstructionsProps {
     #[prop_or_default]
     pub twilio_token: Option<String>,
     #[prop_or_default]
+    pub textbee_api_key: Option<String>,
+    #[prop_or_default]
+    pub textbee_device_id: Option<String>,
+    #[prop_or_default]
+    pub textbee_phone_number: Option<String>,
+    #[prop_or_default]
     pub openrouter_api_key: Option<String>,
 }
 
@@ -108,6 +114,7 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
             }
         })
     };
+
 
     let get_title = |applicable: bool, is_server: bool| {
         if !is_logged_in {
@@ -206,6 +213,9 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
                                 twilio_sid={props.twilio_sid.clone()}
                                 twilio_token={props.twilio_token.clone()}
                                 message={get_title(twilio_applicable, false)}
+                                textbee_api_key={props.textbee_api_key.clone()}
+                                textbee_device_id={props.textbee_device_id.clone()}
+                                textbee_phone_number={props.textbee_phone_number.clone()}
                             />
                         },
                         InstructionPage::AI => html! {

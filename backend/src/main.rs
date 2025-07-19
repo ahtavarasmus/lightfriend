@@ -343,6 +343,7 @@ async fn main() {
         .route("/api/profile/server-ip", post(self_host_handlers::update_server_ip))
         .route("/api/profile/twilio-phone", post(self_host_handlers::update_twilio_phone))
         .route("/api/profile/twilio-creds", post(self_host_handlers::update_twilio_creds))
+        .route("/api/profile/textbee-creds", post(self_host_handlers::update_textbee_creds))
         .route("/api/profile/timezone", post(profile_handlers::update_timezone))
         .route("/api/profile/preferred-number", post(profile_handlers::update_preferred_number))
         .route("/api/profile", get(profile_handlers::get_profile))

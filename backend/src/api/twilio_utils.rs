@@ -764,11 +764,37 @@ pub async fn delete_twilio_message_media(
     Ok(())
 }
 
+use serde_json::json;
+use uuid::Uuid;
+use tokio::spawn;
 
+async fn send_textbee_sms(device_id: String, api_key: String, recipient: String, body: String) -> Result<(), Box<dyn Error>> {
+    let url = format!("https://api.textbee.dev/api/v1/gateway/devices/{}/send-sms", device_id);
+
+    let client = Client::new();
+
+    let data = json!({
+        "recipients": [recipient],
+        "message": body
+    });
+
+    client
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .header("x-api-key", api_key)
+        .json(&data)
+        .send()
+        .await?
+        .error_for_status()?;
+
+    tracing::debug!("Successfully sent conversation message via TextBee to: {}", recipient);
+
+    Ok(())
+}
 
 pub async fn send_conversation_message(
     state: &Arc<AppState>,
-    conversation_sid: &str, 
+    conversation_sid: &str, // for textbee this is recipient phone number
     twilio_number: &String,
     body: &str,
     redact: bool,
@@ -791,7 +817,31 @@ pub async fn send_conversation_message(
         tracing::error!("Failed to store WhatsApp confirmation message in history: {}", e);
     }
 
-    // Check if user has SMS discount tier and use their credentials if they do
+    let is_self_hosted = user.sub_tier == Some("self_hosted".to_string());
+
+    if is_self_hosted {
+        if let Ok((device_id, api_key)) = state.user_core.get_textbee_credentials(user.id) {
+            if media_sid.is_none() {
+                // Use TextBee for text-only messages
+                let recipient = conversation_sid.to_string();
+                let body_clone = body.to_string();
+                let device_id_clone = device_id.clone();
+                let api_key_clone = api_key.clone();
+
+                spawn(async move {
+                    if let Err(e) = send_textbee_sms(device_id_clone, api_key_clone, recipient, body_clone).await {
+                        tracing::error!("Failed to send TextBee SMS: {}", e);
+                    }
+                });
+
+                return Ok(conversation_sid.to_string());
+            }
+            // If media is present, fall back to Twilio
+        }
+        // If TextBee not set up or failed, fall back to Twilio
+    }
+
+    // Twilio send logic
     let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
         (
             env::var(format!("TWILIO_ACCOUNT_SID_{}", user.id))
@@ -799,12 +849,8 @@ pub async fn send_conversation_message(
             env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
                 .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
         )
-    } else if user.sub_tier == Some("tier 3".to_string()) {
-        let (account_sid, auth_token) = state.user_core.get_twilio_credentials(user.id)?;
-        (
-            account_sid,
-            auth_token,
-        )
+    } else if user.sub_tier == Some("tier 3".to_string()) || is_self_hosted {
+        state.user_core.get_twilio_credentials(user.id)?
     } else {
         (
             env::var("TWILIO_ACCOUNT_SID")?,
@@ -822,8 +868,8 @@ pub async fn send_conversation_message(
     ];
 
     // Add media_sid if provided
-    if let Some(media_sid) = media_sid {
-        form_data.push(("MediaSid", media_sid));
+    if let Some(media_id) = media_sid {
+        form_data.push(("MediaSid", media_id));
     }
 
     let response: MessageResponse = client
@@ -845,5 +891,3 @@ pub async fn send_conversation_message(
 
     Ok(response.sid)
 }
-
-

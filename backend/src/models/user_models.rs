@@ -423,6 +423,8 @@ pub struct UserSettings {
     pub server_instance_id: Option<String>, // for self hosted instance (field for pairing code and instance id)
     pub server_instance_last_ping_timestamp: Option<i32>, // for self hosted instance (used to allow only a single instance ping per day)
     pub server_ip: Option<String>, // for self hosted instance
+    pub encrypted_textbee_device_id: Option<String>,
+    pub encrypted_textbee_api_key: Option<String>,
 }
 
 #[derive(Insertable)]

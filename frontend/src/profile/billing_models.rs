@@ -51,6 +51,8 @@ pub struct UserProfile {
     pub twilio_sid: Option<String>,
     pub twilio_token: Option<String>,
     pub openrouter_api_key: Option<String>,
+    pub textbee_device_id: Option<String>,
+    pub textbee_api_key: Option<String>,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]
