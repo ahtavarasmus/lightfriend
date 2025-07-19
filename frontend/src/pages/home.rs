@@ -200,7 +200,7 @@ pub fn Home() -> Html {
                                                                         </div>
                                                                     </div>
                                                                 },
-                                                                "tier 2" => html! {
+                                                                "tier 3" => html! {
                                                                     <>
                                                                     <div class="credit-item" tabindex="0">
                                                                     {
