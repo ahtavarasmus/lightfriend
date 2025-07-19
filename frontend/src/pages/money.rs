@@ -346,137 +346,40 @@ pub fn topup_selector(props: &TopupSelectorProps) -> Html {
 }
 
 #[derive(Properties, PartialEq)]
-pub struct FeatureComparisonProps {
+pub struct FeatureListProps {
     pub selected_country: String,
 }
 
-#[function_component(FeatureComparison)]
-pub fn feature_comparison(props: &FeatureComparisonProps) -> Html {
+#[function_component(FeatureList)]
+pub fn feature_list(props: &FeatureListProps) -> Html {
     let base_messages_text = if props.selected_country == "US" {
-        "Base Messages (200 messages per month)"
+        "200 base messages per month (Hosted) or connect your own Twilio (Self-Hosting)"
     } else {
-        "Base Messages (40 messages per month)"
+        "40 base messages per month (Hosted) or connect your own Twilio (Self-Hosting)"
     };
 
     html! {
-        <div class="feature-comparison">
-            <h2>{"Included Features"}</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>{"Feature"}</th>
-                        <th>{"Hosted Plan"}</th>
-                        <th>{"Easy Self-Hosting Plan"}</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>{"Voice calling and SMS interface"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                    </tr>
-                    <tr>
-                        <td>{base_messages_text}</td>
-                        <td>{"✅"}</td>
-                        <td>{"Connect your own Twilio"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"Buy Additional Messages"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"Direct from Twilio"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"Perplexity AI Web Search"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"Weather Search and forecast of the next 6 hours"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"Photo Analysis & Translation (US & AUS only)"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"QR Code Scanning (US & AUS only)"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"WhatsApp Integration"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"Email Integration"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"Calendar Integration"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"Task Management"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"24/7 Critical Message Monitoring"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"Morning, Day and Evening Digests"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"Custom Waiting Checks"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"Priority Sender Notifications"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"Private VPS with Cloudron OS"}</td>
-                        <td>{"❌"}</td>
-                        <td>{"✅"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"Easy Lightfriend Setup via Cloudron"}</td>
-                        <td>{"❌"}</td>
-                        <td>{"✅"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"Privacy & Security"}</td>
-                        <td>{"Secure (GDPR Compliant, Encrypted)"}</td>
-                        <td>{"Self-Managed (Your Server)"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"Hosting Location"}</td>
-                        <td>{"EU Servers (GDPR Compliant)"}</td>
-                        <td>{"Your Private VPS"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"All Future Features Included"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                    </tr>
-                    <tr>
-                        <td>{"Priority Support"}</td>
-                        <td>{"✅"}</td>
-                        <td>{"✅"}</td>
-                    </tr>
-                </tbody>
-            </table>
+        <div class="feature-list">
+            <h2>{"Included in All Plans"}</h2>
+            <ul>
+                <li>{"Voice calling and SMS interface"}</li>
+                <li>{base_messages_text}</li>
+                <li>{"Buy Additional Messages (via Lightfriend or Twilio)"}</li>
+                <li>{"Perplexity AI Web Search"}</li>
+                <li>{"Weather Search and forecast of the next 6 hours"}</li>
+                <li>{"Photo Analysis & Translation (US & AUS only)"}</li>
+                <li>{"QR Code Scanning (US & AUS only)"}</li>
+                <li>{"WhatsApp Integration"}</li>
+                <li>{"Email Integration"}</li>
+                <li>{"Calendar Integration"}</li>
+                <li>{"Task Management"}</li>
+                <li>{"24/7 Critical Message Monitoring"}</li>
+                <li>{"Morning, Day and Evening Digests"}</li>
+                <li>{"Custom Waiting Checks"}</li>
+                <li>{"Priority Sender Notifications"}</li>
+                <li>{"All Future Features Included"}</li>
+                <li>{"Priority Support (for paid plans)"}</li>
+            </ul>
         </div>
     }
 }
@@ -852,7 +755,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                 }
             </div>
 
-            <FeatureComparison selected_country={(*selected_country).clone()} />
+            <FeatureList selected_country={(*selected_country).clone()} />
 
             <div class="phone-number-options">
                 <div class="phone-number-section">
@@ -1176,7 +1079,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     color: #7EB2FF;
                 }
 
-                .feature-comparison {
+                .feature-list {
                     max-width: 1000px;
                     margin: 4rem auto;
                     background: rgba(30, 30, 30, 0.8);
@@ -1184,38 +1087,32 @@ pub fn pricing(props: &PricingProps) -> Html {
                     border-radius: 24px;
                     padding: 2.5rem;
                     backdrop-filter: blur(10px);
-                    overflow-x: auto;
-                    -webkit-overflow-scrolling: touch;
                 }
 
-                .feature-comparison h2 {
+                .feature-list h2 {
                     color: #7EB2FF;
                     font-size: 2rem;
                     margin-bottom: 2rem;
                     text-align: center;
                 }
 
-                .feature-comparison table {
-                    width: 100%;
-                    border-collapse: collapse;
-                    margin-top: 2rem;
+                .feature-list ul {
+                    list-style-type: none;
+                    padding: 0;
                 }
 
-                .feature-comparison th,
-                .feature-comparison td {
-                    padding: 1rem;
-                    text-align: center;
-                    border: 1px solid rgba(30, 144, 255, 0.1);
-                }
-
-                .feature-comparison th {
-                    background: rgba(30, 144, 255, 0.1);
-                    color: #7EB2FF;
-                    font-weight: 600;
-                }
-
-                .feature-comparison td {
+                .feature-list li {
                     color: #e0e0e0;
+                    padding: 0.5rem 0;
+                    font-size: 1.1rem;
+                    position: relative;
+                    padding-left: 2rem;
+                }
+
+                .feature-list li::before {
+                    content: "✅";
+                    position: absolute;
+                    left: 0;
                 }
 
                 .topup-pricing {
@@ -1600,14 +1497,10 @@ pub fn pricing(props: &PricingProps) -> Html {
                         padding: 4rem 1rem;
                     }
 
-                    .feature-comparison {
+                    .feature-list {
                         padding: 1.5rem;
                         margin: 2rem 1rem;
                         max-width: calc(100vw - 2rem);
-                    }
-
-                    .feature-comparison table {
-                        min-width: 600px;
                     }
                 }
 
