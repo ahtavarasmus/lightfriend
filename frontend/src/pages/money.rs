@@ -255,21 +255,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                         }) }
                     </ul>
                 </div>
-                {
-                    if props.show_topup_selector {
-                        html! {
-                            <div class="sentinel-extras-integrated">
-                                <TopupSelector
-                                    id={format!("{}-topups", props.subscription_type)}
-                                    selected_topups={props.selected_topups}
-                                    on_topup_change={props.on_topup_change.as_ref().unwrap().clone()}
-                                />
-                            </div>
-                        }
-                    } else {
-                        html! {}
-                    }
-                }
             </div>
             {
                 if props.is_self_hosting {
@@ -469,10 +454,10 @@ pub fn pricing(props: &PricingProps) -> Html {
 
     let hosted_prices: HashMap<String, f64> = HashMap::from([
         ("US".to_string(), 29.00),
-        ("FI".to_string(), 29.00),
-        ("UK".to_string(), 29.00),
-        ("AU".to_string(), 29.00),
-        ("Other".to_string(), 29.00),
+        ("FI".to_string(), 79.00),
+        ("UK".to_string(), 79.00),
+        ("AU".to_string(), 79.00),
+        ("Other".to_string(), 79.00),
     ]);
 
     let self_hosting_prices: HashMap<String, f64> = HashMap::from([
@@ -780,24 +765,28 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <p>{"All plans are billed monthly and include a certain number of Messages per month. Additional Messages can be purchased using credits. Unused credits carry over indefinitely. You retain subscription benefits until the next normal billing period end even if you unsubscribed immediately. No hidden fees or commitments. Note that due to high cost of running the service, no free tiers or refunds can be offered (Lightfriend is a bootstrapped startup)."}</p>
                     </details>
                     <details>
+                        <summary>{"How many Messages does Hosted Plan include?"}</summary>
+                        <p>{"Hosted Plan includes 200 Messages per month"}</p>
+                    </details>
+                    <details>
                         <summary>{"What counts as a Message?"}</summary>
                         <p>{"Messages can be used for voice calls (1 minute = 1 Message) or text queries (1 query = 1 Message). They can also be used for receiving daily digests (1 digest = 1 Message) or notifications from priority senders (1 notification = 1/2 Message). Critical message monitoring and custom waiting checks don't count against your quota."}</p>
                     </details>
                     <details>
                         <summary>{"How do credits work?"}</summary>
-                        <p>{"Credits can be used for additional messages beyond your monthly limit. Enable auto-top-up to automatically purchase credits when you run low. Unused credits never expire."}</p>
+                        <p>{"For Hosted Plan, credits can be used for additional messages beyond your monthly limit. Enable auto-top-up to automatically purchase credits when you run low. Unused credits never expire."}</p>
                     </details>
                     <details>
                         <summary>{"How does automatic monitoring work?"}</summary>
                         <p>{"The AI continuously monitors your email, messages, and calendar, providing three daily digest summaries (morning, day, evening). Critical messages are flagged immediately and sent to you if enabled. You can set up to 5 custom waiting checks to monitor for specific types of messages or emails, and designate priority senders whose messages will always be notified about."}</p>
                     </details>
                     <details>
-                        <summary>{"What is the Easy Self-Hosting Plan?"}</summary>
-                        <p>{"The Easy Self-Hosting Plan provides a private VPS with Cloudron OS pre-installed, allowing you to run Lightfriend on your own server for maximum privacy and control. No technical background is required—just install Lightfriend from the Cloudron App Store. It includes all features, future updates, and ensures zero external access to your data."}</p>
+                        <summary>{"How private is the Hosted Plan?"}</summary>
+                        <p>{"The Hosted Plan processes your data securely on EU servers with GDPR compliance and data is only stored temporarily."}</p>
                     </details>
                     <details>
-                        <summary>{"How private is the Hosted Plan?"}</summary>
-                        <p>{"The Hosted Plan processes your data securely on EU servers with GDPR compliance. For those preferring to manage their own server, the Easy Self-Hosting Plan provides that option."}</p>
+                        <summary>{"Is the service available in my country?"}</summary>
+                        <p>{"Service availability and features vary by country. The Hosted Plan may be limited or unavailable in countries where we can't provide local phone numbers (including many parts of Asia, Africa, and some European countries). The Easy Self-Hosting Plan is available worldwide as it runs on your own server and you can connect your own Twilio account. Contact us to check availability for your specific location."}</p>
                     </details>
                     <details>
                         <summary>{"Why charge monthly for self-hosting?"}</summary>

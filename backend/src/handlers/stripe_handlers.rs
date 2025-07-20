@@ -992,14 +992,7 @@ pub async fn stripe_webhook(
                         } else if base_price == sentinel_us_id {
                             messages = 200.00 - (days_until_billing * amount_of_digests) as f32;
                         } else if is_sentinel_price_id {
-                            let new_balance = fit_digests_to_credits(
-                                &state,
-                                user.id,
-                                40.00,
-                                topups,
-                                days_until_billing,
-                            ).unwrap_or(40.00);
-                            messages = new_balance;
+                            messages = 200.00 - (days_until_billing * amount_of_digests) as f32;
                         } else if base_price == self_hosting_id {
                             // Self-hosting subscription - no messages
                             messages = 0.0;
