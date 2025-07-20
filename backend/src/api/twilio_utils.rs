@@ -924,7 +924,7 @@ pub async fn send_conversation_message(
 
     // Build form data with required fields
     let mut form_data = vec![
-        ("To", conversation_sid),
+        ("To", user.phone_number.as_str()),
         ("Body", body),
     ];
 
