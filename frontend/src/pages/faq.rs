@@ -429,6 +429,17 @@ pub fn faq() -> Html {
                     <p>{"Physical paper map, maps on your computer or get a phone that has maps like "}<a href="https://www.thelightphone.com/">{"the Light Phone."}</a>{" Honestly, maps is a hard one and you will get lost a ton, but they make great adventures:)."}</p>
                 </FaqItem>
 
+                <FaqItem 
+                    question="What tools can help me stay focused?"
+                    id="focus-tools"
+                >
+                    <ul>
+                        <li><a href="https://getcoldturkey.com/">{"Cold Turkey App Blocker"}</a>{" is great for website and computer app blocking. It is very strong so be careful though not to lock yourself out of your computer:D"}</li>
+                        <li>{"Amazon kindle has small simple text based browser, which can be used for reading website blogs."}</li>
+                        <li>{"If you want to watch some youtube videos on your computer, there's "}<a href="https://freetubeapp.io/">{"FreeTube"}</a>{" app that only has subscription feed(it has recommended videos also but they are not personalized)"}</li>
+                    </ul>
+                </FaqItem>
+
                 <h2>{"Privacy & Security"}</h2>
 
                 <FaqItem 
@@ -438,22 +449,9 @@ pub fn faq() -> Html {
                     <p>{"We keep your data minimal and secure:"}</p>
                     <ul>
                         <li><strong>{"Calls:"}</strong>{" No recordings. Just anonymous metrics to improve service."}</li>
-                        <li><strong>{"Messages:"}</strong>{" Sensitive info redacted, stored securely with Twilio, fetched only when needed."}</li>
-                    </ul>
-                    <p class="context-example">{"Example redaction:"}</p>
-                    <pre class="redaction-example">
-                        {"Original: \"Check if John Smith sent the $5000 invoice\"\nStored: \"Check if [NAME_REDACTED] sent the [CONTENT_REDACTED]\""}
-                    </pre>
-                </FaqItem>
-
-                <FaqItem 
-                    question="What tools can help me stay focused?"
-                    id="focus-tools"
-                >
-                    <ul>
-                        <li><a href="https://getcoldturkey.com/">{"Cold Turkey App Blocker"}</a>{" is great for website and computer app blocking. It is very strong so be careful though not to lock yourself out of your computer:D"}</li>
-                        <li>{"Amazon kindle has small simple text based browser, which can be used for reading website blogs."}</li>
-                        <li>{"If you want to watch some youtube videos on your computer, there's "}<a href="https://freetubeapp.io/">{"FreeTube"}</a>{" app that only has subscription feed(it has recommended videos also but they are not personalized)"}</li>
+                        <li><strong>{"Messages:"}</strong>{" Deleted immediately from Twilio after processing and sending, with no logs kept anywhere. Users can optionally store up to 10 recent message exchanges (encrypted at rest) for better context and follow-up questions; older messages are automatically deleted as new ones are added. Users can also choose zero stored history, though this means the assistant starts each interaction with cleared memory, limiting follow-up capabilities."}</li>
+                        <li><strong>{"Self-Hosted Plans (DIY and Easy Self-Hosting):"}</strong>{" You fully control your data on your own server. Messages and other data are managed according to your configuration, with no reliance on our servers, offering maximum privacy and control."}</li>
+                        <li><strong>{"Other data:"}</strong>{" All sensitive credentials and user data are encrypted, never shared or sold to anyone, stored only temporarily, and deleted upon user command."}</li>
                     </ul>
                 </FaqItem>
 
