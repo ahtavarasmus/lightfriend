@@ -192,7 +192,6 @@ pub async fn handle_send_telegram_message(
                     conversation_sid,
                     twilio_number,
                     &error_msg,
-                    true,
                     None,
                     user,
                 ).await {
@@ -230,7 +229,6 @@ pub async fn handle_send_telegram_message(
                     conversation_sid,
                     twilio_number,
                     "Failed to prepare Telegram message sending. (not charged, contact rasmus@ahtava.com)",
-                    true,
                     None,
                     user,
                 ).await {
@@ -267,7 +265,6 @@ pub async fn handle_send_telegram_message(
                 conversation_sid,
                 twilio_number,
                 &confirmation_msg,
-                true, // Don't redact since we need to extract info from this message later
                 None,
                 user,
             ).await {
@@ -304,7 +301,6 @@ pub async fn handle_send_telegram_message(
                 conversation_sid,
                 twilio_number,
                 error_msg,
-                true,
                 None,
                 user,
             ).await {

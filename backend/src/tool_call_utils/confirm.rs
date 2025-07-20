@@ -104,7 +104,6 @@ pub async fn handle_confirmation(
                             conversation_sid,
                             twilio_number,
                             confirmation_msg,
-                            true,
                             None,
                             user,
                         ).await {
@@ -126,7 +125,6 @@ pub async fn handle_confirmation(
                             conversation_sid,
                             twilio_number,
                             &error_msg,
-                            true,
                             None,
                             user,
                         ).await {
@@ -149,7 +147,6 @@ pub async fn handle_confirmation(
                     conversation_sid,
                     twilio_number,
                     cancel_msg,
-                    true,
                     None,
                     user,
                 ).await {
@@ -219,7 +216,6 @@ pub async fn handle_confirmation(
                             conversation_sid,
                             twilio_number,
                             &confirmation_msg,
-                            true,
                             None,
                             user,
                         ).await {
@@ -243,7 +239,6 @@ pub async fn handle_confirmation(
                             conversation_sid,
                             twilio_number,
                             &error_msg,
-                            true,
                             None,
                             user,
                         ).await {
@@ -267,7 +262,6 @@ pub async fn handle_confirmation(
                     conversation_sid,
                     twilio_number,
                     cancel_msg,
-                    true,
                     None,
                     user,
                 ).await {
@@ -344,7 +338,6 @@ pub async fn handle_confirmation(
                             conversation_sid,
                             twilio_number,
                             &confirmation_msg,
-                            true,
                             None,
                             user,
                         ).await {
@@ -366,7 +359,6 @@ pub async fn handle_confirmation(
                             conversation_sid,
                             twilio_number,
                             &error_msg,
-                            true,
                             None,
                             user,
                         ).await {
@@ -390,7 +382,6 @@ pub async fn handle_confirmation(
                     conversation_sid,
                     twilio_number,
                     cancel_msg,
-                    true,
                     None,
                     user,
                 ).await {

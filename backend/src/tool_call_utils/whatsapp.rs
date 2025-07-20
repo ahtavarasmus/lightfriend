@@ -187,7 +187,6 @@ pub async fn handle_send_whatsapp_message(
                 conversation_sid,
                 twilio_number,
                 error_msg,
-                true,
                 None,
                 user,
             ).await {
@@ -210,7 +209,6 @@ pub async fn handle_send_whatsapp_message(
             conversation_sid,
             twilio_number,
             &error_msg,
-            true,
             None,
             user,
         ).await {
@@ -246,7 +244,6 @@ pub async fn handle_send_whatsapp_message(
                     conversation_sid,
                     twilio_number,
                     &success_msg,
-                    true,
                     None,
                     user,
                 ).await {
@@ -267,7 +264,6 @@ pub async fn handle_send_whatsapp_message(
                     conversation_sid,
                     twilio_number,
                     &error_msg,
-                    true,
                     None,
                     user,
                 ).await {
@@ -303,7 +299,6 @@ pub async fn handle_send_whatsapp_message(
             conversation_sid,
             twilio_number,
             "Failed to prepare WhatsApp message sending. (not charged, contact rasmus@ahtava.com)",
-            true,
             None,
             user,
         ).await {
@@ -339,7 +334,6 @@ pub async fn handle_send_whatsapp_message(
         conversation_sid,
         twilio_number,
         &confirmation_msg,
-        true, 
         None,
         user,
     ).await {

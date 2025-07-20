@@ -271,7 +271,6 @@ pub async fn handle_create_calendar_event(
                     conversation_sid,
                     twilio_number,
                     &success_msg,
-                    true,
                     None,
                     user,
                 ).await {
@@ -292,7 +291,6 @@ pub async fn handle_create_calendar_event(
                     conversation_sid,
                     twilio_number,
                     &error_msg,
-                    true,
                     None,
                     user,
                 ).await {
@@ -340,7 +338,6 @@ pub async fn handle_create_calendar_event(
             conversation_sid,
             twilio_number,
             "Failed to prepare calendar event creation. (not charged, contact rasmus@ahtava.com)",
-            true,
             None,
             user,
         ).await {
@@ -361,7 +358,6 @@ pub async fn handle_create_calendar_event(
         conversation_sid,
         twilio_number,
         &confirmation_msg,
-        false, // Don't redact since we need to extract info from this message later
         None,
         user,
     ).await {

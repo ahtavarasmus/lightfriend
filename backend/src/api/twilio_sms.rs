@@ -67,6 +67,8 @@ pub struct TwilioWebhookPayload {
     pub media_url0: Option<String>,
     #[serde(rename = "MediaContentType0")]
     pub media_content_type0: Option<String>,
+    #[serde(rename = "MessageSid")]
+    pub message_sid: String,
 }
 
 #[derive(Serialize, Debug)]
@@ -1137,12 +1139,7 @@ pub async fn process_sms(
         }
         final_response_with_notice = format!("{} (free reply)", final_response);
     }
-
     tracing::debug!("is_clarifying message: {}", is_clarifying);
-    let mut redact_the_body = true;
-    if is_clarifying {
-        redact_the_body = false;
-    }
 
     let status = if should_charge {"charging".to_string()} else {"this was free reply".to_string()};
     tracing::debug!("STATUS: {}", status);
@@ -1236,8 +1233,16 @@ pub async fn process_sms(
         })
     }).collect::<Vec<String>>().join("\n");
 
-    // Take only the first media SID if there are multiple
     let media_sid = media_sids.first();
+    let state_clone = state.clone();
+    let msg_sid = payload.message_sid.clone();
+    let user_clone = user.clone();
+
+    tokio::spawn(async move {
+        if let Err(e) = crate::api::twilio_utils::delete_incoming_message(&state_clone, &msg_sid, &user_clone).await {
+            tracing::error!("Failed to delete incoming message {}: {}", msg_sid, e);
+        }
+    });
 
     // Send the actual message if not in test mode
     match crate::api::twilio_utils::send_conversation_message(
@@ -1245,7 +1250,6 @@ pub async fn process_sms(
         &conversation.conversation_sid,
         &conversation.twilio_number,
         &clean_response,
-        redact_the_body,
         media_sid,
         &user
     ).await {

@@ -228,7 +228,6 @@ pub async fn fetch_assistant(
                     &conversation.conversation_sid,
                     &conversation.twilio_number,
                     &error_message,
-                    true, 
                     None,
                     &user,
                 ).await {
@@ -661,7 +660,6 @@ pub async fn handle_send_sms_tool_call(
         &conversation.conversation_sid,
         &conversation.twilio_number,
         &payload.message,
-        true,
         None,
         &user,
     ).await {
@@ -1445,7 +1443,6 @@ pub async fn handle_whatsapp_confirm_send(
                     &conversation.conversation_sid,
                     &conversation.twilio_number,
                     &confirmation_message,
-                    true, 
                     None,
                     &user,
                 ).await {
@@ -1595,7 +1592,6 @@ pub async fn handle_telegram_confirm_send(
                 &conversation.conversation_sid,
                 &conversation.twilio_number,
                 &confirmation_message,
-                true,
                 None,
                 &user,
             ).await {
@@ -1794,7 +1790,6 @@ pub async fn handle_calendar_event_confirm(
             &conversation.conversation_sid,
             &conversation.twilio_number,
             &confirmation_message,
-            true, 
             None,
             &user,
         ).await {
@@ -2418,7 +2413,6 @@ pub async fn handle_email_response_tool_call(
                 &conversation.conversation_sid,
                 &conversation.twilio_number,
                 &confirmation_message,
-                true, 
                 None,
                 &user,
             ).await {
@@ -2725,7 +2719,6 @@ pub async fn make_notification_call(
         &conversation_sid,
         &twilio_number,
         &notification_sms,
-        true,
         None,
         &user,
     ).await {

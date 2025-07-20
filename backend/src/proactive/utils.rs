@@ -1307,7 +1307,6 @@ pub async fn send_notification(
                 &conversation.conversation_sid,
                 &conversation.twilio_number,
                 &notification,
-                true,
                 None,
                 &user,
             ).await {

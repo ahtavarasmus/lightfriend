@@ -107,7 +107,6 @@ pub async fn check_user_credits(
                         &conversation_sid,
                         &twilio_number,
                         "Your credits and monthly quota have been depleted. Please recharge your credits to continue using the service.",
-                        false,
                         None,
                         &user_clone,
                     ).await;

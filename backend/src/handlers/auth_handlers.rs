@@ -318,7 +318,6 @@ pub async fn request_password_reset(
         &conversation.conversation_sid,
         &conversation.twilio_number,
         &message,
-        false, // Don't redact OTP messages
         None,
         &user
     ).await {

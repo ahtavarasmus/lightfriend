@@ -295,7 +295,6 @@ async fn process_broadcast_messages(
                     &conversation.conversation_sid,
                     &sender_number,
                     &message_with_stop,
-                    false,
                     None,
                     &user,
                 )
@@ -460,55 +459,55 @@ pub async fn test_sms_with_image(
     }
 
     let mut message = String::new();
-                let mut image_data_url = None;
+    let mut image_data_url = None;
 
-                while let Some(field) = multipart.next_field().await.map_err(|e| (
+    while let Some(field) = multipart.next_field().await.map_err(|e| (
+        StatusCode::BAD_REQUEST,
+        Json(json!({"error": format!("Failed to process form data: {}", e)}))
+    ))? {
+        let name = field.name().unwrap_or("").to_string();
+
+        match name.as_str() {
+            "message" => {
+                println!("Processing message field");
+                message = field.text().await.map_err(|e| (
                     StatusCode::BAD_REQUEST,
-                    Json(json!({"error": format!("Failed to process form data: {}", e)}))
-                ))? {
-                    let name = field.name().unwrap_or("").to_string();
+                    Json(json!({"error": format!("Failed to read message: {}", e)}))
+                ))?;
+            }
+            "image" => {
+                let file_name = format!("{}.jpg", Uuid::new_v4());
+                println!("Processing image: {}", file_name);
+                let path = uploads_dir.join(&file_name);
+                
+                let data = field.bytes().await.map_err(|e| (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": format!("Failed to read image data: {}", e)}))
+                ))?;
 
-                    match name.as_str() {
-                        "message" => {
-                            println!("Processing message field");
-                            message = field.text().await.map_err(|e| (
-                                StatusCode::BAD_REQUEST,
-                                Json(json!({"error": format!("Failed to read message: {}", e)}))
-                            ))?;
-                        }
-                        "image" => {
-                            let file_name = format!("{}.jpg", Uuid::new_v4());
-                            println!("Processing image: {}", file_name);
-                            let path = uploads_dir.join(&file_name);
-                            
-                            let data = field.bytes().await.map_err(|e| (
-                                StatusCode::BAD_REQUEST,
-                                Json(json!({"error": format!("Failed to read image data: {}", e)}))
-                            ))?;
+                // Save the file
+                fs::write(&path, &data).await.map_err(|e| (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Failed to save image: {}", e)}))
+                ))?;
 
-                            // Save the file
-                            fs::write(&path, &data).await.map_err(|e| (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(json!({"error": format!("Failed to save image: {}", e)}))
-                            ))?;
+                // Convert to base64 data URL
+                let base64 = base64::encode(&data);
+                let mime_type = "image/jpeg"; // Assuming JPEG format
+                let data_url = format!("data:{};base64,{}", mime_type, base64);
+                
+                // Store both the data URL and save the file path
+                let absolute_path = path.canonicalize().map_err(|e| (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": format!("Failed to get absolute path: {}", e)}))
+                ))?.to_string_lossy().into_owned();
 
-                            // Convert to base64 data URL
-                            let base64 = base64::encode(&data);
-                            let mime_type = "image/jpeg"; // Assuming JPEG format
-                            let data_url = format!("data:{};base64,{}", mime_type, base64);
-                            
-                            // Store both the data URL and save the file path
-                            let absolute_path = path.canonicalize().map_err(|e| (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(json!({"error": format!("Failed to get absolute path: {}", e)}))
-                            ))?.to_string_lossy().into_owned();
-
-                            image_data_url = Some((data_url, absolute_path.clone()));
-                            println!("Image saved at: {}", absolute_path);
-                        }
-                        _ => continue,
-                    }
-                }
+                image_data_url = Some((data_url, absolute_path.clone()));
+                println!("Image saved at: {}", absolute_path);
+            }
+            _ => continue,
+        }
+    }
 
     // Create mock Twilio payload with image
     let mock_payload = crate::api::twilio_sms::TwilioWebhookPayload {
@@ -518,6 +517,7 @@ pub async fn test_sms_with_image(
         num_media: image_data_url.as_ref().map(|_| "1".to_string()),
         media_url0: Some(image_data_url.as_ref().map(|(data_url, _)| data_url.clone()).unwrap_or_default()),
         media_content_type0: Some("image/jpeg".to_string()),
+        message_sid: "".to_string(),
     };
     println!("mock_payload.num_media: {:#?}",mock_payload.num_media);
     // Process the SMS using the existing handler with test mode
@@ -566,6 +566,7 @@ pub async fn test_sms(
         num_media: None,
         media_url0: None,
         media_content_type0: None,
+        message_sid: "".to_string(),
     };
 
     // Process the SMS using the existing handler with test mode
