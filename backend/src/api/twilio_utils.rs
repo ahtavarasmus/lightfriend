@@ -795,7 +795,7 @@ async fn send_textbee_sms(device_id: String, api_key: String, recipient: String,
 use std::time::Duration;
 use tokio::time::sleep;
 
-pub async fn delete_incoming_message(
+pub async fn delete_twilio_message(
     state: &Arc<AppState>,
     message_sid: &str,
     user: &User,
@@ -849,61 +849,6 @@ pub async fn delete_incoming_message(
     }
 }
 
-pub async fn delete_conversation_message(
-    state: &Arc<AppState>,
-    conversation_sid: &str,
-    message_sid: &str,
-    user: &User,
-) -> Result<(), Box<dyn Error>> {
-    tracing::debug!("deleting conversation message");
-    let is_self_hosted = user.sub_tier == Some("self_hosted".to_string());
-
-    let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
-        (
-            env::var(format!("TWILIO_ACCOUNT_SID_{}", user.id))
-                .map_err(|_| format!("Missing TWILIO_ACCOUNT_SID_{}", user.id))?,
-            env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
-                .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
-        )
-    } else if user.sub_tier == Some("tier 3".to_string()) || is_self_hosted {
-        state.user_core.get_twilio_credentials(user.id)?
-    } else {
-        (
-            env::var("TWILIO_ACCOUNT_SID")?,
-            env::var("TWILIO_AUTH_TOKEN")?,
-        )
-    };
-
-    let client = Client::new();
-
-    // Wait 1 minute to avoid Error 20009
-    sleep(Duration::from_secs(60)).await;
-
-    let mut attempts = 0;
-    loop {
-        let response = client
-            .delete(format!(
-                "https://conversations.twilio.com/v1/Conversations/{}/Messages/{}",
-                conversation_sid, message_sid
-            ))
-            .basic_auth(&account_sid, Some(&auth_token))
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            tracing::debug!("Message deleted: {}", message_sid);
-            return Ok(());
-        } else if response.status().as_u16() == 403 && attempts < 3 {  // Assuming 403 for 20009; check actual code
-            // Retry for 'cannot delete before complete' - wait longer each time
-            attempts += 1;
-            let wait_secs = 60 * attempts as u64;
-            tracing::warn!("Error 20009 likely; retrying after {} seconds", wait_secs);
-            sleep(Duration::from_secs(wait_secs)).await;
-        } else {
-            return Err(format!("Failed to delete: {}", response.status()).into());
-        }
-    }
-}
 
 pub async fn send_conversation_message(
     state: &Arc<AppState>,
@@ -913,7 +858,6 @@ pub async fn send_conversation_message(
     media_sid: Option<&String>,
     user: &User,
 ) -> Result<String, Box<dyn Error>> {
-
     // Store assistant confirmation message
     let history_entry = crate::models::user_models::NewMessageHistory {
         user_id: user.id,
@@ -970,45 +914,62 @@ pub async fn send_conversation_message(
         )
     };
 
+    let messaging_service_sid = if user.discount_tier.as_deref() == Some("msg") {
+        env::var(format!("TWILIO_MESSAGING_SERVICE_SID_{}", user.id)).ok()
+    } else {
+        env::var("TWILIO_MESSAGING_SERVICE_SID").ok()
+    };
+
     let client = Client::new();
 
     // Build form data with required fields
     let mut form_data = vec![
-        ("Body", body), 
-        ("Author", "lightfriend"),
-        ("From", twilio_number),
+        ("To", conversation_sid),
+        ("Body", body),
     ];
 
-    // Add media_sid if provided
+    // Use MessagingServiceSid for US recipients if available
+    let use_messaging_service = conversation_sid.starts_with("+1") && messaging_service_sid.is_some();
+    if use_messaging_service {
+        form_data.push(("MessagingServiceSid", messaging_service_sid.as_ref().unwrap().as_str()));
+    } else {
+        form_data.push(("From", twilio_number.as_str()));
+    }
+
+    // Handle media_sid if provided
+    let media_url: String;
     if let Some(media_id) = media_sid {
-        form_data.push(("MediaSid", media_id));
+        // Construct the MediaUrl using the media_sid
+        media_url = format!(
+            "https://api.twilio.com/2010-04-01/Accounts/{}/Messages/{}/Media/{}.json",
+            account_sid, media_id, media_id
+        );
+        form_data.push(("MediaUrl", &media_url));
     }
 
     let response: MessageResponse = client
         .post(format!(
-            "https://conversations.twilio.com/v1/Conversations/{}/Messages",
-            conversation_sid
+            "https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json",
+            account_sid
         ))
         .basic_auth(&account_sid, Some(&auth_token))
-        .header("X-Twilio-Webhook-Enabled", "true")
         .form(&form_data)
         .send()
         .await?
         .json()
         .await?;
 
-    tracing::debug!("Successfully sent conversation message{} with SID: {}", 
+    tracing::debug!("Successfully sent message{} with SID: {}", 
         if media_sid.is_some() { " with media" } else { "" },
         response.sid);
 
     let state_clone = state.clone();
-    let conv_sid = conversation_sid.to_string();
     let msg_sid = response.sid.clone();
     let user_clone = user.clone();
 
-    tracing::debug!("going into deleting handler for the sent message");
+    tracing::info!("going into deleting handler for the sent message");
     spawn(async move {
-        if let Err(e) = delete_conversation_message(&state_clone, &conv_sid, &msg_sid, &user_clone).await {
+        if let Err(e) = delete_twilio_message(&state_clone, &msg_sid, &user_clone).await {
             tracing::error!("Failed to delete message {}: {}", msg_sid, e);
         }
     });
