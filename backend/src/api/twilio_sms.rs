@@ -1238,6 +1238,7 @@ pub async fn process_sms(
     let msg_sid = payload.message_sid.clone();
     let user_clone = user.clone();
 
+    tracing::debug!("going into deleting the incoming message handler");
     tokio::spawn(async move {
         if let Err(e) = crate::api::twilio_utils::delete_incoming_message(&state_clone, &msg_sid, &user_clone).await {
             tracing::error!("Failed to delete incoming message {}: {}", msg_sid, e);

@@ -800,6 +800,7 @@ pub async fn delete_incoming_message(
     message_sid: &str,
     user: &User,
 ) -> Result<(), Box<dyn Error>> {
+    tracing::debug!("deleting incoming message");
     let is_self_hosted = user.sub_tier == Some("self_hosted".to_string());
 
     let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
@@ -835,7 +836,7 @@ pub async fn delete_incoming_message(
             .await?;
 
         if response.status().is_success() {
-            tracing::debug!("Incoming message deleted: {}", message_sid);
+            tracing::info!("Incoming message deleted: {}", message_sid);
             return Ok(());
         } else if attempts < 3 {
             attempts += 1;
@@ -854,6 +855,7 @@ pub async fn delete_conversation_message(
     message_sid: &str,
     user: &User,
 ) -> Result<(), Box<dyn Error>> {
+    tracing::debug!("deleting conversation message");
     let is_self_hosted = user.sub_tier == Some("self_hosted".to_string());
 
     let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
@@ -1004,6 +1006,7 @@ pub async fn send_conversation_message(
     let msg_sid = response.sid.clone();
     let user_clone = user.clone();
 
+    tracing::debug!("going into deleting handler for the sent message");
     spawn(async move {
         if let Err(e) = delete_conversation_message(&state_clone, &conv_sid, &msg_sid, &user_clone).await {
             tracing::error!("Failed to delete message {}: {}", msg_sid, e);
