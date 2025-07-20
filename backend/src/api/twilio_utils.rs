@@ -858,7 +858,6 @@ pub async fn send_conversation_message(
     media_sid: Option<&String>,
     user: &User,
 ) -> Result<String, Box<dyn Error>> {
-    // Store assistant confirmation message
     let history_entry = crate::models::user_models::NewMessageHistory {
         user_id: user.id,
         role: "assistant".to_string(),

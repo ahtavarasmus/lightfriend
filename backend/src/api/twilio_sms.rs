@@ -1174,21 +1174,6 @@ pub async fn process_sms(
         .unwrap()
         .as_secs() as i32;
 
-    let assistant_message = crate::models::user_models::NewMessageHistory {
-        user_id: user.id,
-        role: "assistant".to_string(),
-        encrypted_content: final_response_with_notice.clone(),
-        tool_name: None,
-        tool_call_id: None,
-        created_at: current_time,
-        conversation_id: conversation.conversation_sid.clone(),
-    };
-
-    // Store messages in history
-    if let Err(e) = state.user_repository.create_message_history(&assistant_message) {
-        tracing::error!("Failed to store assistant message in history: {}", e);
-    }
-
     // If in test mode, skip sending the actual message and return the response directly
     if is_test {
 
