@@ -937,17 +937,18 @@ pub async fn send_conversation_message(
     }
 
     // Handle media_sid if provided
-    let media_url: String;
     if let Some(media_id) = media_sid {
-        // Construct the MediaUrl using the media_sid
-        media_url = format!(
-            "https://api.twilio.com/2010-04-01/Accounts/{}/Messages/{}/Media/{}.json",
-            account_sid, media_id, media_id
+        // Construct the MediaUrl using the media_sid (corrected to without .json and proper path)
+        // Note: This assumes media_sid is a valid Media SID hosted on Twilio. However, Twilio API URLs require authentication,
+        // so this may not work for sending MMS as the MediaUrl must be publicly accessible. Consider hosting media externally (e.g., S3) for reliability.
+        let media_url = format!(
+            "https://api.twilio.com/2010-04-01/Accounts/{}/Media/{}",
+            account_sid, media_id
         );
         form_data.push(("MediaUrl", &media_url));
     }
 
-    let response: MessageResponse = client
+    let resp = client
         .post(format!(
             "https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json",
             account_sid
@@ -955,9 +956,15 @@ pub async fn send_conversation_message(
         .basic_auth(&account_sid, Some(&auth_token))
         .form(&form_data)
         .send()
-        .await?
-        .json()
         .await?;
+
+    if !resp.status().is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        tracing::error!("Twilio send error: status {}, body: {}", resp.status(), text);
+        return Err(format!("Failed to send message: {}", text).into());
+    }
+
+    let response: MessageResponse = resp.json().await?;
 
     tracing::debug!("Successfully sent message{} with SID: {}", 
         if media_sid.is_some() { " with media" } else { "" },

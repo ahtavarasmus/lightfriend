@@ -337,11 +337,7 @@ pub struct FeatureListProps {
 
 #[function_component(FeatureList)]
 pub fn feature_list(props: &FeatureListProps) -> Html {
-    let base_messages_text = if props.selected_country == "US" {
-        "200 base messages per month (Hosted) or connect your own Twilio (Self-Hosting)"
-    } else {
-        "40 base messages per month (Hosted) or connect your own Twilio (Self-Hosting)"
-    };
+    let base_messages_text = "200 Messages per month (Hosted) or connect your own Twilio (Self-Hosting)";
 
     html! {
         <div class="feature-list">
@@ -765,10 +761,6 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <p>{"All plans are billed monthly and include a certain number of Messages per month. Additional Messages can be purchased using credits. Unused credits carry over indefinitely. You retain subscription benefits until the next normal billing period end even if you unsubscribed immediately. No hidden fees or commitments. Note that due to high cost of running the service, no free tiers or refunds can be offered (Lightfriend is a bootstrapped startup)."}</p>
                     </details>
                     <details>
-                        <summary>{"How many Messages does Hosted Plan include?"}</summary>
-                        <p>{"Hosted Plan includes 200 Messages per month"}</p>
-                    </details>
-                    <details>
                         <summary>{"What counts as a Message?"}</summary>
                         <p>{"Messages can be used for voice calls (1 minute = 1 Message) or text queries (1 query = 1 Message). They can also be used for receiving daily digests (1 digest = 1 Message) or notifications from priority senders (1 notification = 1/2 Message). Critical message monitoring and custom waiting checks don't count against your quota."}</p>
                     </details>
@@ -781,15 +773,23 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <p>{"The AI continuously monitors your email, messages, and calendar, providing three daily digest summaries (morning, day, evening). Critical messages are flagged immediately and sent to you if enabled. You can set up to 5 custom waiting checks to monitor for specific types of messages or emails, and designate priority senders whose messages will always be notified about."}</p>
                     </details>
                     <details>
-                        <summary>{"How private is the Hosted Plan?"}</summary>
-                        <p>{"The Hosted Plan processes your data securely on EU servers with GDPR compliance and data is only stored temporarily."}</p>
+                        <summary>{"What's the difference between the plans in terms of setup and ease of use?"}</summary>
+                        <p>{"The Hosted Plan is the easiest - no setup required, just connect your apps and start using. The Easy Self-Hosting Plan requires minimal effort: we provide a pre-configured VPS with one-click installation via Cloudron, automatic updates, and guided setup - no coding needed. The DIY Hosting is for advanced users: it's free but requires manual server setup, configuration, security management, and updates via GitHub."}</p>
                     </details>
                     <details>
-                        <summary>{"Is the service available in my country?"}</summary>
-                        <p>{"Service availability and features vary by country. The Hosted Plan may be limited or unavailable in countries where we can't provide local phone numbers (including many parts of Asia, Africa, and some European countries). The Easy Self-Hosting Plan is available worldwide as it runs on your own server and you can connect your own Twilio account. Contact us to check availability for your specific location."}</p>
+                        <summary>{"Who should choose the Hosted Plan?"}</summary>
+                        <p>{"If you want the simplest experience with zero technical setup, the Hosted Plan is ideal. Everything is managed for you, including phone numbers and servers - just subscribe and connect your accounts to get started immediately."}</p>
                     </details>
                     <details>
-                        <summary>{"Why charge monthly for self-hosting?"}</summary>
+                        <summary>{"Who is the Easy Self-Hosting Plan for?"}</summary>
+                        <p>{"This plan is perfect for non-technical users who want more control without the hassle. It offers user-friendly setup on your own server with automatic management, updates, and security - available worldwide and easy to maintain."}</p>
+                    </details>
+                    <details>
+                        <summary>{"Is DIY Hosting suitable for beginners?"}</summary>
+                        <p>{"DIY Hosting is best for tech-savvy users comfortable with server management, coding, and manual updates. If you're new to this, we recommend starting with the Hosted or Easy Self-Hosting Plans for a smoother experience."}</p>
+                    </details>
+                    <details>
+                        <summary>{"Why charge monthly for the Easy Self-Hosting Plan?"}</summary>
                         <p>{"The fee covers the simplified setup (no coding needed), managed Cloudron environment, automatic updates, subdomain, and ongoing support. You own your data and server, but we handle the heavy lifting to make it effortless."}</p>
                     </details>
                     <details>
