@@ -193,7 +193,7 @@ pub async fn setup_subdomain(
     let sld = "lightfriend";
     let tld = "ai";
     let subdomain_name = auth_user.user_id.to_string();
-    let subdomain = format!("{}.lightfriend.ai", subdomain_name);
+    let subdomain = format!("my.{}.lightfriend.ai", subdomain_name);
     let target_ip = req.ip_address.clone();
 
     tracing::info!("Constructed subdomain: {}", subdomain);

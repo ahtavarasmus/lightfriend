@@ -200,12 +200,12 @@ let group_states = use_state(|| {
 
                     // Apps 
                     <div class={classes!("service-group", 
-                        if props.sub_tier.as_deref() != Some("tier 2") && props.sub_tier.as_deref() != Some("tier 1.5") && !props.discount { "apps-disabled" } else { "" }
+                        if props.sub_tier.as_deref() != Some("tier 2") && props.sub_tier.as_deref() != Some("tier 1.5") && props.sub_tier.as_deref() != Some("self_hosted") && !props.discount { "apps-disabled" } else { "" }
                     )}>
                         <h3 class="service-group-title"
                             onclick={
                                 let group_states = group_states.clone();
-                                let can_expand = props.sub_tier.as_deref() == Some("tier 2") || props.discount;
+                                let can_expand = props.sub_tier.as_deref() == Some("tier 2") || props.sub_tier.as_deref() == Some("self_hosted") || props.discount;
                                 Callback::from(move |_| {
                                     if can_expand {
                                         let mut new_states = (*group_states).clone();
@@ -282,7 +282,7 @@ let group_states = use_state(|| {
 
                     // Proactive Services
                     <div class={classes!("service-group", 
-                        if props.sub_tier.as_deref() != Some("tier 2") { "monitoring-disabled" } else { "" }
+                        if props.sub_tier.as_deref() != Some("tier 2") || props.sub_tier.as_deref() != Some("self_hosted") { "monitoring-disabled" } else { "" }
                     )}>
                         <h3 class="service-group-title"
                             onclick={let group_states = group_states.clone();
@@ -439,7 +439,7 @@ let group_states = use_state(|| {
                             <div class="group-summary">
                                 <span class="service-count">
                                 {
-                                    if props.sub_tier.as_deref() != Some("tier 2") { {"5 tools ready!"} } else { "6 tools ready!" }
+                                    if props.sub_tier.as_deref() != Some("self_hosted") && props.sub_tier.as_deref() != Some("tier 2") { {"5 tools ready!"} } else { "6 tools ready!" }
                                 }
                                 </span>
                                 <i class={if group_states.get("tools").map(|s| s.expanded).unwrap_or(false) {
@@ -565,15 +565,15 @@ let group_states = use_state(|| {
 
                             // Waiting Checks
                             <div class={classes!("service-item",
-                                if props.sub_tier.as_deref() != Some("tier 2") && !props.discount { "disabled" } else { "" }
+                                if props.sub_tier.as_deref() != Some("tier 2") && props.sub_tier.as_deref() != Some("self_hosted") && !props.discount { "disabled" } else { "" }
                             )}>
                                 {
-                                    if props.sub_tier.as_deref() != Some("tier 2") && !props.discount {
+                                    if props.sub_tier.as_deref() != Some("tier 2") && props.sub_tier.as_deref() != Some("self_hosted") && !props.discount {
                                         html! {
                                             <div class="feature-overlay">
                                                 <div class="overlay-content" style="color: #999;">
                                                     <i class="fas fa-lock"></i>
-                                                    <p>{"Upgrade to Sentinel Plan to use Waiting Checks"}</p>
+                                                    <p>{"Upgrade Hosted Plan to use Waiting Checks here"}</p>
                                                 </div>
                                             </div>
                                         }
@@ -758,7 +758,7 @@ let group_states = use_state(|| {
 
 
 .service-group.apps-disabled::after {
-    content: "Upgrade to Oracle or Sentinel Plan to access Apps";
+    content: "Upgrade to Hosted Plan to access Apps here";
     position: absolute;
     top: 0;
     left: 0;
@@ -775,7 +775,7 @@ let group_states = use_state(|| {
 }
 
 .service-group.monitoring-disabled::after {
-    content: "Upgrade to Sentinel Plan to access Monitoring";
+    content: "Upgrade to Hosted Plan to access Monitoring here";
     position: absolute;
     top: 0;
     left: 0;

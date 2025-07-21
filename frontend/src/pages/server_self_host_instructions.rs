@@ -1,8 +1,10 @@
 use yew::prelude::*;
-use web_sys::{MouseEvent, window};
+use web_sys::window;
+use web_sys::{MouseEvent, Window, Navigator, Clipboard};
 use gloo_net::http::Request;
 use wasm_bindgen_futures::spawn_local;
 use serde_json::json;
+use gloo_timers::future::TimeoutFuture;
 use crate::config;
 
 #[derive(Properties, PartialEq)]
@@ -62,7 +64,6 @@ pub fn server_self_host_instructions(props: &ServerSelfHostInstructionsProps) ->
                     match result {
                         Ok(response) => {
                             if response.status() == 401 {
-                                // Token is invalid or expired
                                 if let Some(window) = window() {
                                     if let Ok(Some(storage)) = window.local_storage() {
                                         let _ = storage.remove_item("token");
@@ -103,6 +104,31 @@ pub fn server_self_host_instructions(props: &ServerSelfHostInstructionsProps) ->
     };
 
     let has_server_ip = props.server_ip.is_some();
+
+    let domain = if let Some(user_id) = &props.user_id {
+        format!("{}.lightfriend.ai", user_id)
+    } else {
+        "Loading...".to_string()
+    };
+
+    let copied = use_state(|| false);
+
+    let on_copy = {
+        let copied = copied.clone();
+        let domain = domain.clone();
+        Callback::from(move |_: MouseEvent| {
+            if let Some(window) = window() {
+                let clipboard= window.navigator().clipboard();
+                let _ = clipboard.write_text(&domain);
+                copied.set(true);
+                let copied = copied.clone();
+                spawn_local(async move {
+                    TimeoutFuture::new(2000).await;
+                    copied.set(false);
+                });
+            }
+        })
+    };
 
     html! {
         <div class="instructions-page">
@@ -271,32 +297,11 @@ pub fn server_self_host_instructions(props: &ServerSelfHostInstructionsProps) ->
                     </div>
                 </div>
 
-                <div class={classes!("instruction-block", if !has_server_ip { "grayed-out" } else { "" })}>
-                    <div class="instruction-content">
-                        <h2>{"Your Personal Lightfriend Domain"}</h2>
-                        <p class="highlight-text">
-                            {
-                                if let Some(user_id) = &props.user_id {
-                                    format!("{}.lightfriend.ai", user_id)
-                                } else {
-                                    "Loading...".to_string()
-                                }
-                            }
-                        </p>
-                        <p class="info-text">
-                            {"Your domain is being set up. This process typically takes 5-30 minutes for DNS propagation. Once complete, your domain will automatically route to your server."}
-                        </p>
-                        <p class="note-text">
-                            {"Note: During this time, you can proceed with the next step to set up your Cloudron account."}
-                        </p>
-                    </div>
-                </div>
-
-                <div class={classes!("instruction-block", if !has_server_ip { "grayed-out" } else { "" })}>
+                <div class="instruction-block">
                     <div class="instruction-content">
                         <h2>{"Set Up Your Cloudron Account"}</h2>
                         <ul>
-                            <li>{"1. Open your server's IP address in a browser: "}{
+                            <li>{"Open your server's IP address in a browser: "}{
                                 if has_server_ip {
                                     let ip = props.server_ip.as_ref().unwrap().clone();
                                     html! {
@@ -308,13 +313,79 @@ pub fn server_self_host_instructions(props: &ServerSelfHostInstructionsProps) ->
                                     }
                                 }
                             }</li>
-                            <li>{"2. You'll see the Cloudron setup page"}</li>
-                            <li>{"3. Create your admin account"}</li>
-                            <li>{"4. Follow the setup wizard to complete the installation"}</li>
+                            <li>{"1. In the field labeled 'example.com', paste your personal domain: "}
+                                <div class="domain-container">
+                                    <p class="highlight-text">{ domain.clone() }</p>
+                                    <button class="copy-button" onclick={on_copy.clone()}>{"Copy"}</button>
+                                    { if *copied { html! { <span class="copy-status">{"Copied!"}</span> } } else { html! {} } }
+                                </div>
+                            </li>
+                            <li>{"2. Select DNS provider as 'Manual (Not recommended)' since we've already configured the DNS for your subdomain to point to your server."}</li>
+                            <li>{"3. Click 'Advanced settings...' and choose 'disable' to the IPv6 option."}</li>
+                            <li>{"4. After clicking 'Next' you will see a loading screen. The initial setup should take max couple of minutes."}</li>
+                            <li>{"Proceed to create your admin account that you will use to login to your server in the future!"}</li>
                         </ul>
                         <p class="note-text">
                             {"Once your domain is propagated, you can access Cloudron through your personal domain instead of the IP address."}
                         </p>
+                    </div>
+                    <div class="instruction-images">
+                        <div class="instruction-image">
+                            <img 
+                                src="/assets/cloudron-setup-manual.png" 
+                                alt="Cloudron Setup Manual" 
+                                loading="lazy"
+                                onclick={let open_modal = open_modal.clone(); let src = "/assets/cloudron-setup-manual.png".to_string(); 
+                                    Callback::from(move |_| open_modal.emit(src.clone()))}
+                                style="cursor: pointer;"
+                            />
+                        </div>
+                        <div class="instruction-image">
+                            <img 
+                                src="/assets/cloudron-admin-setup.png" 
+                                alt="Cloudron Loading Screen" 
+                                loading="lazy"
+                                onclick={let open_modal = open_modal.clone(); let src = "/assets/cloudron-admin-setup.png".to_string(); 
+                                    Callback::from(move |_| open_modal.emit(src.clone()))}
+                                style="cursor: pointer;"
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                <div class="instruction-block">
+                    <div class="instruction-content">
+                        <h2>{"Install Lightfriend from the App Store"}</h2>
+                        <ul>
+                            <li>{"1. Click on 'App Store'"}</li>
+                            <li>{"2. Register to cloudron.io if not yet registered (this is different from the Cloudron admin account you just created; if you use a different password, ensure no overrides occur in your password manager since they share the same domain)."}</li>
+                            <li>{"3. Finally login!"}</li>
+                        </ul>
+                        <ul>
+                            <li>{"1. Search 'lightfriend' in the search bar."}</li>
+                        </ul>
+                    </div>
+                    <div class="instruction-images">
+                        <div class="instruction-image">
+                            <img 
+                                src="/assets/cloudron-io-login.png" 
+                                alt="Cloudron App Store Login" 
+                                loading="lazy"
+                                onclick={let open_modal = open_modal.clone(); let src = "/assets/cloudron-io-login.png".to_string(); 
+                                    Callback::from(move |_| open_modal.emit(src.clone()))}
+                                style="cursor: pointer;"
+                            />
+                        </div>
+                        <div class="instruction-image">
+                            <img 
+                                src="/assets/cloudron-search-lightfriend.png" 
+                                alt="Search Lightfriend in App Store" 
+                                loading="lazy"
+                                onclick={let open_modal = open_modal.clone(); let src = "/assets/cloudron-search-lightfriend.png".to_string(); 
+                                    Callback::from(move |_| open_modal.emit(src.clone()))}
+                                style="cursor: pointer;"
+                            />
+                        </div>
                     </div>
                 </div>
 
@@ -567,6 +638,13 @@ pub fn server_self_host_instructions(props: &ServerSelfHostInstructionsProps) ->
                     text-align: center;
                 }
 
+                .instruction-content .highlight-text {
+                    display: inline-block;
+                    padding: 0.5rem 1rem;
+                    font-size: 1.2rem;
+                    margin: 0;
+                }
+
                 .info-text {
                     color: #999;
                     margin: 1rem 0;
@@ -579,6 +657,39 @@ pub fn server_self_host_instructions(props: &ServerSelfHostInstructionsProps) ->
                     margin-top: 1rem;
                     padding-left: 1rem;
                     border-left: 3px solid rgba(126, 178, 255, 0.3);
+                }
+
+                .domain-container {
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 1rem;
+                }
+
+                .domain-container .highlight-text {
+                    margin: 0;
+                    flex: 1;
+                    text-align: left;
+                }
+
+                .copy-button {
+                    padding: 0.5rem 1rem;
+                    background: #1E90FF;
+                    color: white;
+                    border: none;
+                    border-radius: 6px;
+                    cursor: pointer;
+                    font-size: 1rem;
+                    transition: all 0.3s ease;
+                }
+
+                .copy-button:hover {
+                    background: #1976D2;
+                }
+
+                .copy-status {
+                    color: #4CAF50;
+                    font-size: 1rem;
                 }
 
                 .modal-overlay {

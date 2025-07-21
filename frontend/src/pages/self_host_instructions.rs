@@ -22,6 +22,8 @@ pub struct SelfHostInstructionsProps {
     #[prop_or_default]
     pub sub_tier: Option<String>,
     #[prop_or_default]
+    pub user_id: Option<String>,
+    #[prop_or_default]
     pub server_ip: Option<String>,
     #[prop_or_default]
     pub twilio_phone: Option<String>,
@@ -198,6 +200,7 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
                         InstructionPage::Server => html! {
                             <ServerSelfHostInstructions 
                                 is_logged_in={props.is_logged_in}
+                                user_id={props.user_id.clone()}
                                 sub_tier={props.sub_tier.clone()}
                                 server_ip={props.server_ip.clone()}
                                 message={get_title(server_applicable, true)}

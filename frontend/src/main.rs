@@ -253,6 +253,7 @@ pub fn self_host_instructions_wrapper() -> Html {
             <SelfHostInstructions
                 is_logged_in={true}
                 sub_tier={profile.sub_tier.clone()}
+                user_id={profile.id.clone().to_string()}
                 server_ip={profile.server_ip.clone()}
                 twilio_phone={profile.preferred_number.clone()}
                 twilio_sid={profile.twilio_sid.clone()}
@@ -267,6 +268,7 @@ pub fn self_host_instructions_wrapper() -> Html {
             <SelfHostInstructions
                 is_logged_in={false}
                 sub_tier={None::<String>}
+                user_id={None::<String>}
                 server_ip={None::<String>}
                 twilio_phone={None::<String>}
                 twilio_sid={None::<String>}
