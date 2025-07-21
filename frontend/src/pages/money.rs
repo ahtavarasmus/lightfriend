@@ -449,7 +449,7 @@ pub fn pricing(props: &PricingProps) -> Html {
     }
 
     let hosted_prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 29.00),
+        ("US".to_string(), 49.00),
         ("FI".to_string(), 79.00),
         ("UK".to_string(), 79.00),
         ("AU".to_string(), 79.00),
