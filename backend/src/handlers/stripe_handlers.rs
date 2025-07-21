@@ -990,7 +990,7 @@ pub async fn stripe_webhook(
                             // any other Oracle variant → 40 + 20×top-ups
                             messages = 40.0 + 20.0 * topups as f32;
                         } else if base_price == sentinel_us_id {
-                            messages = 200.00 - (days_until_billing * amount_of_digests) as f32;
+                            messages = 400.00 - (days_until_billing * amount_of_digests) as f32;
                         } else if is_sentinel_price_id {
                             messages = 200.00 - (days_until_billing * amount_of_digests) as f32;
                         } else if base_price == self_hosting_id {
