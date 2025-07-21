@@ -546,6 +546,8 @@ pub fn pricing(props: &PricingProps) -> Html {
         },
     ];
 
+    let currency_symbol = if *selected_country == "US" { "$" } else { "€" };
+
     html! {
         <div class="pricing-panel">
             <div class="pricing-header">
@@ -576,6 +578,13 @@ pub fn pricing(props: &PricingProps) -> Html {
                         html! {}
                     }
                 }
+            </div>
+
+            <div class="time-value-section">
+                <h2>{"Reclaim Your Time"}</h2>
+                <p>{"Lightfriend enables you to switch to a dumbphone, saving you 2-4 hours per day on unnecessary scrolling and distractions."}</p>
+                <p>{"If your time is worth "}{currency_symbol}{"20/hour, that's "}{currency_symbol}{"1,200 - "}{currency_symbol}{"2,400 per month in reclaimed value!"}</p>
+                <p class="footnote">{"For more comprehensive studies and calculations on smartphone usage time, see "}<a href="https://explodingtopics.com/blog/smartphone-usage-stats" target="_blank" rel="noopener noreferrer">{"Exploding Topics"}</a>{", "}<a href="https://datareportal.com/reports/digital-2024-deep-dive-the-time-we-spend-on-social-media" target="_blank" rel="noopener noreferrer">{"DataReportal"}</a>{", and "}<a href="https://www.demandsage.com/average-time-spent-on-social-media/" target="_blank" rel="noopener noreferrer">{"DemandSage"}</a>{"."}</p>
             </div>
 
             {
@@ -790,7 +799,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     </details>
                     <details>
                         <summary>{"Why charge monthly for the Easy Self-Hosting Plan?"}</summary>
-                        <p>{"The fee covers the simplified setup (no coding needed), managed Cloudron environment, automatic updates, subdomain, and ongoing support. You own your data and server, but we handle the heavy lifting to make it effortless."}</p>
+                        <p>{"The fee covers the simplified setup (no coding needed), managed Cloudron environment, automatic updates, subdomain, and ongoing support. You control your own server, but we handle the heavy lifting to make it effortless."}</p>
                     </details>
                     <details>
                         <summary>{"Can I self-host for free?"}</summary>
@@ -804,9 +813,8 @@ pub fn pricing(props: &PricingProps) -> Html {
             </div>
 
             <div class="footnotes">
-                <p class="footnote">{"* Gen Z spends 4-7 hours daily on phones, often regretting 60% of social media time. "}<a href="https://explodingtopics.com/blog/smartphone-usage-stats" target="_blank" rel="noopener noreferrer">{"Read the study"}</a></p>
+                <p class="footnote">{"* Gen Z spends 4-7 hours daily on phones, often regretting 60% of social media time. "}<a href="https://explodingtopics.com/blog/smartphone-usage-stats" target="_blank" rel="noopener noreferrer">{"Read the study"}</a><grok-card data-id="badfd9" data-type="citation_card"></grok-card></p>
                 <p class="footnote">{"The dumbphone is sold separately and is not included in any plan."}</p>
-                <p class="footnote">{"All data processed & stored in EU-based servers compliant with GDPR, except for the Easy Self-Hosting Plan, which is stored on your private server."}</p>
                 <p class="footnote">{"For developers: Check out the open-source repo on GitHub if you'd like to self-host from source (requires technical setup)."}</p>
                 <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer" class="github-link">{"View GitHub Repo"}</a>
             </div>
@@ -1475,6 +1483,29 @@ pub fn pricing(props: &PricingProps) -> Html {
                     color: #fff;
                     font-size: 1rem;
                     font-weight: 600;
+                }
+
+                .time-value-section {
+                    max-width: 800px;
+                    margin: 2rem auto;
+                    text-align: center;
+                    background: rgba(30, 30, 30, 0.8);
+                    border: 1px solid rgba(30, 144, 255, 0.15);
+                    border-radius: 24px;
+                    padding: 2rem;
+                    backdrop-filter: blur(10px);
+                }
+
+                .time-value-section h2 {
+                    color: #7EB2FF;
+                    font-size: 2rem;
+                    margin-bottom: 1rem;
+                }
+
+                .time-value-section p {
+                    color: #e0e0e0;
+                    font-size: 1.1rem;
+                    margin-bottom: 1rem;
                 }
 
                 @media (max-width: 968px) {
