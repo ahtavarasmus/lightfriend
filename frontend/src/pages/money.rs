@@ -353,10 +353,10 @@ pub fn feature_list(props: &FeatureListProps) -> Html {
                 <li>{"Weather Search and forecast of the next 6 hours"}</li>
                 <li>{"Photo Analysis & Translation (US & AUS only)"}</li>
                 <li>{"QR Code Scanning (US & AUS only)"}</li>
-                <li>{"WhatsApp Integration"}</li>
-                <li>{"Email Integration"}</li>
-                <li>{"Calendar Integration"}</li>
-                <li>{"Task Management"}</li>
+                <li>{"Send, Fetch and Monitor WhatsApp Messages"}</li>
+                <li>{"Fetch and Monitor Emails"}</li>
+                <li>{"Fetch, Create and Monitor Calendar events"}</li>
+                <li>{"Fetch and Create Tasks and Ideas"}</li>
                 <li>{"24/7 Critical Message Monitoring"}</li>
                 <li>{"Morning, Day and Evening Digests"}</li>
                 <li>{"Custom Waiting Checks"}</li>

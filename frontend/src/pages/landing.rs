@@ -162,7 +162,7 @@ pub fn landing() -> Html {
                 <div class="hero-content">
                     <div class="hero-header">
                         <p class="hero-subtitle">
-                            {"Let lightfriend monitor the situation. Smart notifications let you skip distractions or revive that dumbphone."}
+                            {"Break Phone Addiction Effortlessly: Zero Willpower Required"}
                         </p>
                     </div>
                     <div class="hero-cta-group">
