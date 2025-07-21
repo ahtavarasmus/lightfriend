@@ -226,7 +226,6 @@ pub async fn fetch_assistant(
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
                     &conversation.conversation_sid,
-                    &conversation.twilio_number,
                     &error_message,
                     None,
                     &user,
@@ -658,7 +657,6 @@ pub async fn handle_send_sms_tool_call(
     match crate::api::twilio_utils::send_conversation_message(
         &state,
         &conversation.conversation_sid,
-        &conversation.twilio_number,
         &payload.message,
         None,
         &user,
@@ -1441,7 +1439,6 @@ pub async fn handle_whatsapp_confirm_send(
                 match crate::api::twilio_utils::send_conversation_message(
                     &state,
                     &conversation.conversation_sid,
-                    &conversation.twilio_number,
                     &confirmation_message,
                     None,
                     &user,
@@ -1590,7 +1587,6 @@ pub async fn handle_telegram_confirm_send(
             match crate::api::twilio_utils::send_conversation_message(
                 &state,
                 &conversation.conversation_sid,
-                &conversation.twilio_number,
                 &confirmation_message,
                 None,
                 &user,
@@ -1788,7 +1784,6 @@ pub async fn handle_calendar_event_confirm(
         match crate::api::twilio_utils::send_conversation_message(
             &state,
             &conversation.conversation_sid,
-            &conversation.twilio_number,
             &confirmation_message,
             None,
             &user,
@@ -2411,7 +2406,6 @@ pub async fn handle_email_response_tool_call(
             match crate::api::twilio_utils::send_conversation_message(
                 &state,
                 &conversation.conversation_sid,
-                &conversation.twilio_number,
                 &confirmation_message,
                 None,
                 &user,
@@ -2717,7 +2711,6 @@ pub async fn make_notification_call(
     if let Err(e) = crate::api::twilio_utils::send_conversation_message(
         &state,
         &conversation_sid,
-        &twilio_number,
         &notification_sms,
         None,
         &user,

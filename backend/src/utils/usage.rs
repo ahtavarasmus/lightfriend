@@ -105,7 +105,6 @@ pub async fn check_user_credits(
                     let _ = crate::api::twilio_utils::send_conversation_message(
                         &state_clone,
                         &conversation_sid,
-                        &twilio_number,
                         "Your credits and monthly quota have been depleted. Please recharge your credits to continue using the service.",
                         None,
                         &user_clone,

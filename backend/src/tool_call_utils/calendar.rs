@@ -269,7 +269,6 @@ pub async fn handle_create_calendar_event(
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
                     conversation_sid,
-                    twilio_number,
                     &success_msg,
                     None,
                     user,
@@ -289,7 +288,6 @@ pub async fn handle_create_calendar_event(
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
                     conversation_sid,
-                    twilio_number,
                     &error_msg,
                     None,
                     user,
@@ -336,7 +334,6 @@ pub async fn handle_create_calendar_event(
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
             &state,
             conversation_sid,
-            twilio_number,
             "Failed to prepare calendar event creation. (not charged, contact rasmus@ahtava.com)",
             None,
             user,
@@ -356,7 +353,6 @@ pub async fn handle_create_calendar_event(
     match crate::api::twilio_utils::send_conversation_message(
         &state,
         conversation_sid,
-        twilio_number,
         &confirmation_msg,
         None,
         user,

@@ -102,7 +102,6 @@ pub async fn handle_confirmation(
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                             &state,
                             conversation_sid,
-                            twilio_number,
                             confirmation_msg,
                             None,
                             user,
@@ -123,7 +122,6 @@ pub async fn handle_confirmation(
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                             &state,
                             conversation_sid,
-                            twilio_number,
                             &error_msg,
                             None,
                             user,
@@ -145,7 +143,6 @@ pub async fn handle_confirmation(
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
                     conversation_sid,
-                    twilio_number,
                     cancel_msg,
                     None,
                     user,
@@ -214,7 +211,6 @@ pub async fn handle_confirmation(
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                             &state,
                             conversation_sid,
-                            twilio_number,
                             &confirmation_msg,
                             None,
                             user,
@@ -237,7 +233,6 @@ pub async fn handle_confirmation(
                         if let Err(send_err) = crate::api::twilio_utils::send_conversation_message(
                             &state,
                             conversation_sid,
-                            twilio_number,
                             &error_msg,
                             None,
                             user,
@@ -260,7 +255,6 @@ pub async fn handle_confirmation(
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
                     conversation_sid,
-                    twilio_number,
                     cancel_msg,
                     None,
                     user,
@@ -336,7 +330,6 @@ pub async fn handle_confirmation(
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                             &state,
                             conversation_sid,
-                            twilio_number,
                             &confirmation_msg,
                             None,
                             user,
@@ -357,7 +350,6 @@ pub async fn handle_confirmation(
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                             &state,
                             conversation_sid,
-                            twilio_number,
                             &error_msg,
                             None,
                             user,
@@ -380,7 +372,6 @@ pub async fn handle_confirmation(
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
                     conversation_sid,
-                    twilio_number,
                     cancel_msg,
                     None,
                     user,

@@ -446,8 +446,12 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                         } else if sub_tier == "tier 1.5" {
 
                                                             "Oracle Plan gives full integrations capability to your lightfriend and 70 monthly Message quota."
+                                                        } else if sub_tier == "tier 2" {
+                                                            "Hosted Plan gives full integrations and monitoring capability to your lightfriend and 120 monthly Message quota."
+                                                        } else if sub_tier == "tier 3" {
+                                                            "Easy Self-Hosting Plan gives you ability to host your own lightfriend on your own server with easy setup and automatic updates."
                                                         } else {
-                                                            "Sentinel Plan gives full integrations and monitoring capability to your lightfriend and 120 monthly Message quota."
+                                                            ""
                                                         }
                                                     }
                                                 </div>
@@ -457,8 +461,12 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                                 "Basic Plan"
                                                             } else if sub_tier == "tier 1.5" {
                                                                 "Oracle Plan"
+                                                            } else if sub_tier == "tier 2" {
+                                                                "Hosted Plan"
+                                                            } else if sub_tier == "tier 3" {
+                                                                "Easy Self-Hosting Plan"
                                                             } else {
-                                                                "Sentinel Plan"
+                                                                "Active"
                                                             }
                                                         }
                                                     </span>

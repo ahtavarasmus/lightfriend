@@ -185,7 +185,6 @@ pub async fn handle_send_whatsapp_message(
             if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                 &state,
                 conversation_sid,
-                twilio_number,
                 error_msg,
                 None,
                 user,
@@ -207,7 +206,6 @@ pub async fn handle_send_whatsapp_message(
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
             &state,
             conversation_sid,
-            twilio_number,
             &error_msg,
             None,
             user,
@@ -242,7 +240,6 @@ pub async fn handle_send_whatsapp_message(
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
                     conversation_sid,
-                    twilio_number,
                     &success_msg,
                     None,
                     user,
@@ -262,7 +259,6 @@ pub async fn handle_send_whatsapp_message(
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
                     conversation_sid,
-                    twilio_number,
                     &error_msg,
                     None,
                     user,
@@ -297,7 +293,6 @@ pub async fn handle_send_whatsapp_message(
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
             &state,
             conversation_sid,
-            twilio_number,
             "Failed to prepare WhatsApp message sending. (not charged, contact rasmus@ahtava.com)",
             None,
             user,
@@ -332,7 +327,6 @@ pub async fn handle_send_whatsapp_message(
     match crate::api::twilio_utils::send_conversation_message(
         &state,
         conversation_sid,
-        twilio_number,
         &confirmation_msg,
         None,
         user,

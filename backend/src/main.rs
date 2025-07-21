@@ -181,7 +181,7 @@ async fn main() {
     // Create filter that sets Matrix SDK logs to WARN and keeps our app at DEBUG
     let filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| {
-            EnvFilter::new("info,backend=debug")
+            EnvFilter::new("info,lightfriend=debug")
                 .add_directive("matrix_sdk=error".parse().unwrap())  // Changed from warn to error
                 .add_directive("tokio-runtime-worker=off".parse().unwrap())
                 .add_directive("ruma=warn".parse().unwrap())

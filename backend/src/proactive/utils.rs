@@ -1305,7 +1305,6 @@ pub async fn send_notification(
             match crate::api::twilio_utils::send_conversation_message(
                 &state,
                 &conversation.conversation_sid,
-                &conversation.twilio_number,
                 &notification,
                 None,
                 &user,

@@ -686,6 +686,7 @@ pub fn admin_dashboard() -> Html {
                                                                 "user-row",
                                                                 is_selected.then(|| "selected"),
                                                                 match user.sub_tier.as_deref() {
+                                                                    Some("tier 3") => "blue-user",
                                                                     Some("tier 2") => "gold-user",
                                                                     Some("tier 1.5") => "silver-user",
                                                                     Some("tier 1") => "bronze-user",
@@ -698,6 +699,9 @@ pub fn admin_dashboard() -> Html {
                                                                         {&user.email}
                                                                         {
                                                                             match user.sub_tier.as_deref() {
+                                                                                Some("tier 3") => html! {
+                                                                                    <span class="blue-badge">{"★"}</span>
+                                                                                },
                                                                                 Some("tier 2") => html! {
                                                                                     <span class="gold-badge">{"★"}</span>
                                                                                 },
@@ -733,6 +737,7 @@ pub fn admin_dashboard() -> Html {
                                                                     <span class={classes!(
                                                                         "tier-badge",
                                                                         match user.sub_tier.as_deref() {
+                                                                            Some("tier 3") => "blue",
                                                                             Some("tier 2") => "gold",
                                                                             Some("tier 1.5") => "silver",
                                                                             Some("tier 1") => "bronze",
@@ -1128,7 +1133,8 @@ pub fn admin_dashboard() -> Html {
                                                                                     let users = users.clone();
                                                                                     let error = error.clone();
                                                                                 let new_tier = match current_tier.as_deref() {
-                                                                                    None => "tier 2",
+                                                                                    None => "tier 3",
+                                                                                    Some("tier 3") => "tier 2",
                                                                                     Some("tier 2") => "tier 1.5",
                                                                                     Some("tier 1.5") => "tier 1",
                                                                                     Some("tier 1") => "tier 0",
@@ -1175,11 +1181,12 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                                                                             class="iq-button"
                                                                         >
                                                                             {match user.sub_tier.as_deref() {
-                                                                                None => "Set Tier 2",
+                                                                                None => "Set Tier 3",
+                                                                                Some("tier 3") => "Set Tier 2",
                                                                                 Some("tier 2") => "Set Tier 1.5",
                                                                                 Some("tier 1.5") => "Set Tier 1",
                                                                                 Some("tier 1") => "Remove Subscription",
-                                                                                _ => "Set Tier 2"
+                                                                                _ => "Set Tier 3"
                                                                             }}
                                                                         </button>
                                                                         
@@ -1771,8 +1778,11 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                     }
 
                     .gold-badge {
-
                         font-size: 1.2rem;
+                    }
+
+                    .blue-badge {
+                        color: #1E90FF;
                     }
 
                     .gold-badge {
@@ -1804,6 +1814,11 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                         color: #E91E63;
                     }
 
+                    .blue-user {
+                        background: linear-gradient(90deg, rgba(30, 144, 255, 0.05), transparent);
+                        border-left: 3px solid #1E90FF;
+                    }
+
                     .gold-user {
                         background: linear-gradient(90deg, rgba(255, 215, 0, 0.05), transparent);
                         border-left: 3px solid #FFD700;
@@ -1824,6 +1839,12 @@ match Request::post(&format!("{}/api/admin/subscription/{}/{}", config::get_back
                         border-radius: 4px;
                         font-size: 0.8rem;
                         font-weight: 500;
+                    }
+
+                    .tier-badge.blue {
+                        background: rgba(30, 144, 255, 0.1);
+                        color: #1E90FF;
+                        border: 1px solid rgba(30, 144, 255, 0.2);
                     }
 
                     .tier-badge.gold {

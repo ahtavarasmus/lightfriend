@@ -293,7 +293,6 @@ async fn process_broadcast_messages(
                 match crate::api::twilio_utils::send_conversation_message(
                     &state,
                     &conversation.conversation_sid,
-                    &sender_number,
                     &message_with_stop,
                     None,
                     &user,

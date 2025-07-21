@@ -604,60 +604,6 @@ pub async fn validate_twilio_signature(
     Ok(next.run(request).await)
 }
 
-
-// Function to update (redact) a message in Twilio
-pub async fn redact_message(
-    state: &Arc<AppState>,
-    conversation_sid: &str,
-    message_sid: &str,
-    redacted_body: &str,
-    user: &User,
-) -> Result<(), Box<dyn Error>> {
-    // Check if user has SMS discount tier and use their credentials if they do
-    let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
-        (
-            env::var(format!("TWILIO_ACCOUNT_SID_{}", user.id))
-                .map_err(|_| format!("Missing TWILIO_ACCOUNT_SID_{}", user.id))?,
-            env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
-                .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
-        )
-    } else if user.sub_tier == Some("tier 3".to_string()) {
-        let (account_sid, auth_token) = state.user_core.get_twilio_credentials(user.id)?;
-        (
-            account_sid,
-            auth_token,
-        )
-    } else {
-        (
-            env::var("TWILIO_ACCOUNT_SID")?,
-            env::var("TWILIO_AUTH_TOKEN")?,
-        )
-    };
-    let client = Client::new();
-
-    // 1. Update the conversation message body
-    let form_data = vec![("Body", redacted_body)];
-
-    let response = client
-        .post(format!(
-            "https://conversations.twilio.com/v1/Conversations/{}/Messages/{}",
-            conversation_sid, message_sid
-        ))
-        .basic_auth(&account_sid, Some(&auth_token))
-        .form(&form_data)
-        .send()
-        .await?;
-
-    if !response.status().is_success() {
-        tracing::error!("Failed to update conversation message {}: {}", message_sid, response.status());
-        return Err(format!("Failed to update conversation message: {}", response.status()).into());
-    }
-
-    tracing::debug!("Message {} fully redacted (both conversation and logs)", message_sid);
-    Ok(())
-}
-
-
 #[derive(Deserialize)]
 pub struct MediaResponse {
     pub sid: String,
@@ -853,7 +799,6 @@ pub async fn delete_twilio_message(
 pub async fn send_conversation_message(
     state: &Arc<AppState>,
     conversation_sid: &str, // for textbee this is recipient phone number
-    twilio_number: &String,
     body: &str,
     media_sid: Option<&String>,
     user: &User,
@@ -928,11 +873,13 @@ pub async fn send_conversation_message(
     ];
 
     // Use MessagingServiceSid for US recipients if available
-    let use_messaging_service = conversation_sid.starts_with("+1") && messaging_service_sid.is_some();
+    let user_preferred_number = user.preferred_number.clone().unwrap();
+    let use_messaging_service = user_preferred_number.starts_with("+1") && messaging_service_sid.is_some();
+    let sid = messaging_service_sid.clone().unwrap(); 
     if use_messaging_service {
-        form_data.push(("MessagingServiceSid", messaging_service_sid.as_ref().unwrap().as_str()));
+        form_data.push(("MessagingServiceSid", sid.as_str())); 
     } else {
-        form_data.push(("From", twilio_number.as_str()));
+        form_data.push(("From", user_preferred_number.as_str()));
     }
 
     // Handle media_sid if provided

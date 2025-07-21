@@ -196,7 +196,7 @@ pub fn server_self_host_instructions(props: &ServerSelfHostInstructionsProps) ->
                             <li>{"2. Then make sure 'Overview' is selected, scroll down and copy the IPV4 address"}</li>
                         </ul>
                         {
-                            if props.is_logged_in && props.sub_tier.as_deref() == Some("tier 2") {
+                            if props.is_logged_in {
                                 html! {
                                     <div class="input-field">
                                         <label for="server-ip">{"Your Server's IP Address:"}</label>
@@ -204,16 +204,23 @@ pub fn server_self_host_instructions(props: &ServerSelfHostInstructionsProps) ->
                                             <input 
                                                 type="text" 
                                                 id="server-ip" 
-                                                placeholder="Enter your server's IP address"
-                                                value={(*server_ip).clone()}
-                                                onchange={on_input_change.clone()}
+                                                placeholder={if props.sub_tier.as_deref() == Some("tier 3") { "Enter your server's IP address".to_string() } else { "Managed by lightfriend.ai".to_string() }}
+                                                value={if props.sub_tier.as_deref() == Some("tier 3") { (*server_ip).clone() } else { "Hosted on lightfriend.ai servers".to_string() }}
+                                                onchange={if props.sub_tier.as_deref() == Some("tier 3") { on_input_change.clone() } else { Callback::noop() }}
+                                                disabled={props.sub_tier.as_deref() != Some("tier 3")}
                                             />
-                                            <button 
-                                                class="save-button"
-                                                onclick={on_save.clone()}
-                                            >
-                                                {"Save"}
-                                            </button>
+                                            { if props.sub_tier.as_deref() == Some("tier 3") {
+                                                html! {
+                                                    <button 
+                                                        class="save-button"
+                                                        onclick={on_save.clone()}
+                                                    >
+                                                        {"Save"}
+                                                    </button>
+                                                }
+                                            } else {
+                                                html! {}
+                                            } }
                                             {
                                                 match &*save_status {
                                                     Some(Ok(_)) => html! {
@@ -226,6 +233,13 @@ pub fn server_self_host_instructions(props: &ServerSelfHostInstructionsProps) ->
                                                 }
                                             }
                                         </div>
+                                        { if props.sub_tier.as_deref() != Some("tier 3") {
+                                            html! {
+                                                <p class="note-text">{"These fields are filled in the hosted lightfriend.ai server."}</p>
+                                            }
+                                        } else {
+                                            html! {}
+                                        } }
                                     </div>
                                 }
                             } else {

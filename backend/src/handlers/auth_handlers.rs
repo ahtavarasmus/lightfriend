@@ -316,7 +316,6 @@ pub async fn request_password_reset(
     if let Err(_) = crate::api::twilio_utils::send_conversation_message(
         &state,
         &conversation.conversation_sid,
-        &conversation.twilio_number,
         &message,
         None,
         &user
