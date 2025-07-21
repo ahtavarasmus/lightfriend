@@ -521,6 +521,10 @@ pub fn pricing(props: &PricingProps) -> Html {
             sub_items: vec![],
         },
         Feature {
+            text: "Easy to follow instructions and direct founder support".to_string(),
+            sub_items: vec![],
+        },
+        Feature {
             text: "Automatic updates and built-in security".to_string(),
             sub_items: vec![],
         },
@@ -532,7 +536,7 @@ pub fn pricing(props: &PricingProps) -> Html {
 
     let hosted_features = vec![
         Feature {
-            text: "Fully managed with no setup needed".to_string(),
+            text: "Fully managed ready to go service hosted in EU".to_string(),
             sub_items: vec![],
         },
         Feature {
@@ -540,7 +544,7 @@ pub fn pricing(props: &PricingProps) -> Html {
             sub_items: vec![],
         },
         Feature {
-            text: "Automatic updates and security".to_string(),
+            text: "Automatic updates, security and priority founder support".to_string(),
             sub_items: vec![],
         },
         Feature {
@@ -657,7 +661,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                 />
                 <PricingCard
                     plan_name="Hosted Plan"
-                    best_for="Full-featured cloud service with 24/7 monitoring - hosted in EU."
+                    best_for="Full-featured cloud service ready to go."
                     price={hosted_total_price}
                     currency={if *selected_country == "US" { "$" } else { "€" }}
                     features={hosted_features}
