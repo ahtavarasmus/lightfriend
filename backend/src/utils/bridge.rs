@@ -14,18 +14,19 @@ use serde::{Deserialize, Serialize};
 use crate::AppState;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct WhatsAppRoom {
+pub struct BridgeRoom {
     pub room_id: String,
     pub display_name: String,
     pub last_activity: i64,
     pub last_activity_formatted: String,
 }
 
+
 use chrono::{DateTime, TimeZone};
 use chrono_tz::Tz;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct WhatsAppMessage {
+pub struct BridgeMessage {
     pub sender: String,
     pub sender_display_name: String,
     pub content: String,
@@ -59,14 +60,38 @@ fn format_timestamp(timestamp: i64, timezone: Option<String>) -> String {
     formatted
 }
 
-pub async fn fetch_whatsapp_messages(
+fn get_bridge_bot_username(service: &str) -> String {
+    let env_key = format!("{}_BRIDGE_BOT", service.to_uppercase());
+    std::env::var(env_key).unwrap_or_else(|_| format!("@{}bot:", service).to_string())
+}
+
+fn get_sender_prefix(service: &str) -> String {
+    format!("{}_", service)
+}
+
+fn get_room_suffix(service: &str) -> String {
+    match service {
+        "whatsapp" => "(WA)".to_string(),
+        "telegram" => "(TG)".to_string(),
+        _ => format!(" ({})", service.to_uppercase()),
+    }
+}
+
+fn infer_service(room_name: &str, sender_localpart: &str) -> Option<String> {
+    if room_name.contains("(WA)") || sender_localpart.starts_with("whatsapp_") { return Some("whatsapp".to_string()); }
+    if room_name.contains("(TG)") || sender_localpart.starts_with("telegram_") { return Some("telegram".to_string()); }
+    None
+}
+
+pub async fn fetch_bridge_messages(
+    service: &str,
     state: &Arc<AppState>,
     user_id: i32,
     start_time: i64,
     unread_only: bool,
-) -> Result<Vec<WhatsAppMessage>> {
+) -> Result<Vec<BridgeMessage>> {
 
-    tracing::info!("Fetching WhatsApp messages for user {}", user_id);
+    tracing::info!("Fetching {} messages for user {}", service, user_id);
     
     // Get user and user settings for timezone info
     let user = state.user_core.find_by_id(user_id)?
@@ -76,16 +101,27 @@ pub async fn fetch_whatsapp_messages(
     // Get Matrix client and check bridge status (use cached version for better performance)
     let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
 
-    let bridge = state.user_repository.get_whatsapp_bridge(user_id)?;
+    let bridge = state.user_repository.get_bridge(user_id, service)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
-        return Err(anyhow!("WhatsApp bridge is not connected. Please log in first."));
+        return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(&service)));
     }
 
-    let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
-        .unwrap_or_else(|_| "@whatsappbot:".to_string());
+    let bridge_bot_username = get_bridge_bot_username(service);
+
+    let room_suffix = get_room_suffix(service);
+
+    let sender_prefix = get_sender_prefix(service);
+
+    let service_cap = capitalize(&service);
+
+    let skip_terms = vec![
+        format!("{}bot", service),
+        format!("{}-bridge", service),
+        format!("{} Bridge", service_cap),
+        format!("{} bridge bot", service_cap),
+    ];
 
     // Structure to hold room info
-    #[derive(Debug)]
     struct RoomInfo {
         room: Room,
         last_activity: i64,
@@ -94,11 +130,13 @@ pub async fn fetch_whatsapp_messages(
 
     // Process rooms in parallel
     let joined_rooms = client.joined_rooms();
-    let mut room_infos = Vec::new();
     
     let mut futures = Vec::new();
     for room in joined_rooms {
         let bridge_bot_username = bridge_bot_username.clone();
+        let room_suffix = room_suffix.clone();
+        let skip_terms = skip_terms.clone();
+        let sender_prefix = sender_prefix.clone();
         futures.push(async move {
             let room_id = room.room_id();
             
@@ -108,16 +146,11 @@ pub async fn fetch_whatsapp_messages(
                 Err(_) => return None,
             };
 
-            // Skip non-WhatsApp and management rooms early
-            if !display_name.contains("(WA)") || 
-               display_name.contains("whatsappbot") ||
-               display_name.contains("whatsapp-bridge") ||
-               display_name == "WhatsApp Bridge" ||
-               display_name == "WhatsApp bridge bot" {
+            if !display_name.contains(&room_suffix) || 
+               skip_terms.iter().any(|t| display_name.contains(t)) {
                 return None;
             }
 
-            // ── Skip rooms that have nothing new ───────────────────────────
             if unread_only && room.unread_notification_counts().notification_count == 0 {
                 return None; 
             }
@@ -134,7 +167,7 @@ pub async fn fetch_whatsapp_messages(
 
             // Get last message timestamp
             let mut options = matrix_sdk::room::MessagesOptions::backward();
-            options.limit = matrix_sdk::ruma::UInt::new(10).unwrap(); // Look at more messages to find WhatsApp ones
+            options.limit = matrix_sdk::ruma::UInt::new(10).unwrap();
             
             let last_activity = match room.messages(options).await {
                 Ok(response) => {
@@ -145,23 +178,15 @@ pub async fn fetch_whatsapp_messages(
                                 if let AnySyncTimelineEvent::MessageLike(
                                     matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
                                 ) = any_event {
-                                    match msg {
-                                        SyncRoomMessageEvent::Original(e) => {
-                                            // Only count messages from WhatsApp users
-                                            if e.sender.localpart().starts_with("whatsapp_") {
-                                                Some(i64::from(e.origin_server_ts.0) / 1000)
-                                            } else {
-                                                None
-                                            }
+                                    if let SyncRoomMessageEvent::Original(e) = msg {
+                                        if e.sender.localpart().starts_with(&sender_prefix) {
+                                            Some(i64::from(e.origin_server_ts.0) / 1000)
+                                        } else {
+                                            None
                                         }
-                                        _ => None
-                                    }
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
+                                    } else { None }
+                                } else { None }
+                            } else { None }
                         })
                         .next() // Get the first (most recent) WhatsApp message timestamp
                         .unwrap_or(0)
@@ -179,97 +204,91 @@ pub async fn fetch_whatsapp_messages(
 
     // Collect results from parallel processing
     let results = join_all(futures).await;
-    room_infos.extend(results.into_iter().flatten());
+    let mut room_infos = results.into_iter().flatten().collect::<Vec<_>>();
     
-    // Sort and take top 10 most recent rooms
-    room_infos.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+    room_infos.sort_by_key(|r| std::cmp::Reverse(r.last_activity));
     let recent_rooms = room_infos.into_iter().take(10).collect::<Vec<_>>();
     
     // Fetch latest message from each room
-    let mut messages = Vec::new();
+    let user_timezone = user_settings.timezone.clone();
     
     // Process rooms in parallel
     let mut futures = Vec::new();
     for room_info in recent_rooms {
-        let room = room_info.room;
+        let room = room_info.room.clone();
+        let room_name = room_info.display_name.clone();
+        let user_timezone = user_timezone.clone();
+        let room_suffix = room_suffix.clone();
+        let sender_prefix = sender_prefix.clone();
 
-        let room_name = room_info.display_name;
-    let user_settings = state.user_core.get_user_settings(user_id)?;
-    let user_timezone = user_settings.timezone.clone();
-        
         futures.push(async move {
-    let mut options = matrix_sdk::room::MessagesOptions::backward();
-    options.limit = matrix_sdk::ruma::UInt::new(20).unwrap(); // Increase limit to find WhatsApp messages
-            
-    match room.messages(options).await {
-        Ok(response) => {
-            // Process all messages in the chunk to find WhatsApp messages
-            for event in response.chunk {
-                if let Ok(any_sync_event) = event.raw().deserialize() {
-                    if let AnySyncTimelineEvent::MessageLike(
-                        matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
-                    ) = any_sync_event {
-                        let (sender, timestamp, content) = match msg {
-                            SyncRoomMessageEvent::Original(e) => {
-                                let timestamp = i64::from(e.origin_server_ts.0) / 1000;
-                                (e.sender, timestamp, e.content)
+            let mut options = matrix_sdk::room::MessagesOptions::backward();
+            options.limit = matrix_sdk::ruma::UInt::new(20).unwrap();
+                    
+            match room.messages(options).await {
+                Ok(response) => {
+                    // Process all messages in the chunk to find WhatsApp messages
+                    for event in response.chunk.iter() {
+                        if let Ok(any_sync_event) = event.raw().deserialize() {
+                            if let AnySyncTimelineEvent::MessageLike(
+                                matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
+                            ) = any_sync_event {
+                                let (sender, timestamp, content) = match msg {
+                                    SyncRoomMessageEvent::Original(e) => {
+                                        let timestamp = i64::from(e.origin_server_ts.0) / 1000;
+                                        (e.sender, timestamp, e.content)
+                                    }
+                                    _ => continue,
+                                };
+
+                                // Skip messages outside time range
+                                if timestamp < start_time {
+                                    continue;
+                                }
+
+                                let (msgtype, body) = match content.msgtype {
+                                    MessageType::Text(t) => ("text", t.body),
+                                    MessageType::Notice(n) => ("notice", n.body),
+                                    MessageType::Image(_) => ("image", "📎 IMAGE".into()),
+                                    MessageType::Video(_) => ("video", "📎 VIDEO".into()),
+                                    MessageType::File(_) => ("file", "📎 FILE".into()),
+                                    MessageType::Audio(_) => ("audio", "📎 AUDIO".into()),
+                                    MessageType::Location(_) => ("location", "📍 LOCATION".into()),
+                                    MessageType::Emote(t) => ("emote", t.body),
+                                    _ => continue,
+                                };
+
+                                // Skip error messages
+                                if body.contains("Failed to bridge media") ||
+                                   body.contains("media no longer available") ||
+                                   body.contains("Decrypting message from WhatsApp failed") ||
+                                   body.starts_with("* Failed to") {
+                                    continue;
+                                }
+                                if sender.localpart().starts_with(&sender_prefix) && room_name.contains(&room_suffix) {
+                                    return Some(BridgeMessage {
+                                        sender: sender.to_string(),
+                                        sender_display_name: sender.localpart().to_string(),
+                                        content: body,
+                                        timestamp,
+                                        formatted_timestamp: format_timestamp(timestamp, user_timezone),
+                                        message_type: msgtype.to_string(),
+                                        room_name: room_name.clone(),
+                                    });
+                                }
                             }
-                            SyncRoomMessageEvent::Redacted(_) => continue,
-                        };
-
-                        // Skip messages outside time range
-                        if timestamp < start_time {
-                            continue;
-                        }
-
-                        let (msgtype, body) = match content.msgtype {
-                            MessageType::Text(t) => ("text", t.body),
-                            MessageType::Notice(n) => ("notice", n.body),
-                            MessageType::Image(_) => ("image", "📎 IMAGE".into()),
-                            MessageType::Video(_) => ("video", "📎 VIDEO".into()),
-                            MessageType::File(_) => ("file", "📎 FILE".into()),
-                            MessageType::Audio(_) => ("audio", "📎 AUDIO".into()),
-                            MessageType::Location(_) => ("location", "📍 LOCATION".into()),
-                            MessageType::Emote(t) => ("emote", t.body),
-                            _ => continue,
-                        };
-
-                        // Skip error messages
-                        if body.contains("Failed to bridge media") ||
-                           body.contains("media no longer available") ||
-                           body.contains("Decrypting message from WhatsApp failed") ||
-                           body.starts_with("* Failed to") {
-                            continue;
-                        }
-
-                        // Only include WhatsApp messages
-                        if sender.localpart().starts_with("whatsapp_") && room_name.contains("(WA)") {
-                            return Some(WhatsAppMessage {
-                                sender: sender.to_string(),
-                                sender_display_name: sender.localpart().to_string(),
-                                content: body,
-                                timestamp,
-                                formatted_timestamp: format_timestamp(timestamp, user_timezone),
-                                message_type: msgtype.to_string(),
-                                room_name: room_name.clone(),
-                            });
                         }
                     }
                 }
-
+                Err(e) => tracing::error!("Failed to fetch messages: {}", e),
             }
-        }
-        Err(e) => {
-            tracing::error!("Failed to fetch messages: {}", e);
-        }
-    }
-    None
+            None
         });
     }
 
     // Collect results from parallel processing
     let results = join_all(futures).await;
-    messages.extend(results.into_iter().flatten());
+    let mut messages = results.into_iter().flatten().collect::<Vec<_>>();
 
     // Sort by timestamp (most recent first)
     messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
@@ -285,52 +304,39 @@ use tokio::sync::Mutex;
 use std::collections::HashMap;
 
 
-pub async fn send_whatsapp_message(
+pub async fn send_bridge_message(
+    service: &str,
     state: &Arc<AppState>,
     user_id: i32,
     chat_name: &str,
     message: &str,
     media_url: Option<String>,
-) -> Result<WhatsAppMessage> {
+) -> Result<BridgeMessage> {
     // Get user for timezone info
     let user = state.user_core.find_by_id(user_id)?
         .ok_or_else(|| anyhow!("User not found"))?;
-    // Get bridge bot username from environment variable or use default pattern
-    let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
-        .unwrap_or_else(|_| "@whatsappbot:".to_string());
-    tracing::info!("Sending WhatsApp message for user {}", user_id);
-
-    // Normalize phone number format
+    let bridge_bot_username = get_bridge_bot_username(service);
+    tracing::info!("Sending {} message for user {}", service, user_id);
     
-    tracing::debug!("Attempting to get Matrix client for user {}", user_id);
-    let client = match crate::utils::matrix_auth::get_cached_client(user_id, &state).await {
-        Ok(client) => {
-            tracing::debug!("Successfully obtained cached Matrix client");
-            client
-        },
-        Err(e) => {
-            tracing::error!("Failed to get Matrix client: {}", e);
-            return Err(e);
-        }
-    };
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
 
-    tracing::debug!("Checking WhatsApp bridge connection status");
-    let bridge = state.user_repository.get_whatsapp_bridge(user_id)?;
+    let bridge = state.user_repository.get_bridge(user_id, service)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
-        return Err(anyhow!("WhatsApp bridge is not connected. Please log in first."));
+        return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(&service)));
     }
 
     // Get all joined rooms
     let joined_rooms = client.joined_rooms();
-    
-    // Find WhatsApp room with exact match (case insensitive)
-    let mut target_room = None;
+    let room_suffix = get_room_suffix(service);
     let search_term_lower = chat_name.trim().to_lowercase();
     let mut found_rooms = Vec::new();
+    let mut target_room = None;
     
     for room in joined_rooms {
-        let room_name = room.display_name().await?.to_string();
-        
+        let display_name = match room.display_name().await {
+            Ok(n) => n.to_string(),
+            Err(_) => continue,
+        };
 
         // Get room members
         let members = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
@@ -338,24 +344,17 @@ pub async fn send_whatsapp_message(
             Err(_) => continue,
         };
 
-        // Check if bridge bot is a member of the room
-        let has_bridge_bot = members.iter().any(|member| 
-            member.user_id().to_string().contains(&bridge_bot_username)
-        );
-        if !has_bridge_bot {
+        if !members.iter().any(|member| member.user_id().to_string().contains(&bridge_bot_username)) {
             continue;
         }
 
-        // Only process WhatsApp rooms
-        if !room_name.contains("(WA)") {
+        if !display_name.contains(&room_suffix) {
             continue;
         }
-
-        // Extract chat name from room name
-        let chat_name_part = room_name
-            .split(" (WA)")
+        let chat_name_part = display_name
+            .split(&room_suffix)
             .next()
-            .unwrap_or(&room_name)
+            .unwrap_or(&display_name)
             .trim()
             .to_string();
 
@@ -368,8 +367,8 @@ pub async fn send_whatsapp_message(
         }
     }
 
-    let room = if let Some(room) = target_room {
-        room
+    let room = if let Some(r) = target_room {
+        r
     } else {
         // Provide a helpful error message listing similar rooms
         let similar_rooms: Vec<String> = found_rooms
@@ -379,10 +378,11 @@ pub async fn send_whatsapp_message(
             .collect();
 
         let error_msg = if similar_rooms.is_empty() {
-            format!("Could not find exact matching WhatsApp room for '{}'", chat_name)
+            format!("Could not find exact matching {} room for '{}'", capitalize(&service), chat_name)
         } else {
             format!(
-                "Could not find exact matching WhatsApp room for '{}'. Did you mean one of these?\n{}",
+                "Could not find exact matching {} room for '{}'. Did you mean one of these?\n{}",
+                capitalize(&service),
                 chat_name,
                 similar_rooms.join("\n")
             )
@@ -391,7 +391,6 @@ pub async fn send_whatsapp_message(
     };
 
     use matrix_sdk::{
-        attachment::AttachmentConfig,   // optional, for metadata
         ruma::events::room::message::{
             RoomMessageEventContent, MessageType, ImageMessageEventContent,
         },
@@ -400,13 +399,9 @@ pub async fn send_whatsapp_message(
     // Create message content
     let content = RoomMessageEventContent::text_plain(message);
 
-
-
     if let Some(url) = media_url {
-
         // ── 1. Download the image and get MIME type ────────────────────────────────
         let resp = reqwest::get(&url).await?;
-        
         // Get MIME type from headers before consuming the response
         let mime: mime_guess::mime::Mime = resp
             .headers()
@@ -420,18 +415,16 @@ pub async fn send_whatsapp_message(
         let size = bytes.len();
 
         // ── 2. Filename (best-effort) ────────────────────────────────────────────
-
         let filename = std::path::Path::new(&url)
             .file_name()
             .and_then(|p| p.to_str())
             .unwrap_or("file");
 
         // ── 3. Upload to the homeserver ──────────────────────────────────────────
-        // This gives you an `mxc://…` URI without posting anything to the room.
         let upload_resp = client
             .media()
             .upload(&mime, bytes.to_vec(), None)
-            .await?;                                     // :contentReference[oaicite:0]{index=0}
+            .await?;
 
         let mxc: matrix_sdk::ruma::OwnedMxcUri = upload_resp.content_uri;
 
@@ -444,16 +437,13 @@ pub async fn send_whatsapp_message(
         // Optional but nice: add basic metadata so bridges & clients know the size
         let mut imageinfo = matrix_sdk::ruma::events::room::ImageInfo::new();
         imageinfo.size = Some(matrix_sdk::ruma::UInt::new(size as u64).unwrap_or_default());
-        img.info = Some(Box::new(
-            imageinfo
-        ));
+        img.info = Some(Box::new(imageinfo));
 
         // Wrap it as a generic “m.room.message”
         let content = RoomMessageEventContent::new(MessageType::Image(img));
 
         // ── 5. Send it ───────────────────────────────────────────────────────────
         room.send(content).await?;
-
     } else {
         // plain text
         room.send(RoomMessageEventContent::text_plain(message)).await?;
@@ -461,12 +451,12 @@ pub async fn send_whatsapp_message(
     // Send the message with transaction ID
     let txn_id = matrix_sdk::ruma::TransactionId::new();
     room.send(content.clone()).with_transaction_id(txn_id).await?;
-    println!("Message sent!");
+    tracing::debug!("Message sent!");
 
     let user_settings = state.user_core.get_user_settings(user_id)?;
-    // Return the sent message details
     let current_timestamp = chrono::Utc::now().timestamp();
-    Ok(WhatsAppMessage {
+    // Return the sent message details
+    Ok(BridgeMessage {
         sender: "You".to_string(),
         sender_display_name: "You".to_string(),
         content: message.to_string(),
@@ -483,53 +473,56 @@ use strsim;
 use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
 
 #[derive(Debug)]
-struct WhatsAppSearchRoom {
+struct BridgeSearchRoom {
     room: matrix_sdk::room::Room,
     chat_name: String,
     last_activity: i64,
 }
 
-pub async fn fetch_whatsapp_room_messages(
+
+pub async fn fetch_bridge_room_messages(
+    service: &str,
     state: &Arc<AppState>,
     user_id: i32,
     chat_name: &str,
     limit: Option<u64>,
-) -> Result<(Vec<WhatsAppMessage>, String)> {
+) -> Result<(Vec<BridgeMessage>, String)> {
     
-    tracing::info!(
-        "Starting WhatsApp message fetch - User: {}, Message Limit: {}", 
+    tracing::debug!(
+        "Starting {} message fetch - User: {}, chat: {}, limit: {}", 
+        capitalize(&service),
         user_id, 
+        chat_name,
         limit.unwrap_or(20)
     );
 
-    // Early validation of bridge status
-    if let Some(bridge) = state.user_repository.get_whatsapp_bridge(user_id)? {
+    if let Some(bridge) = state.user_repository.get_bridge(user_id, service)? {
         if bridge.status != "connected" {
-            return Err(anyhow!("WhatsApp bridge is not connected. Please log in first."));
+            return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(&service)));
         }
     } else {
-        return Err(anyhow!("WhatsApp bridge not found"));
+        return Err(anyhow!("{} bridge not found", capitalize(&service)));
     }
 
     let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
 
-    let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
-        .unwrap_or_else(|_| "@whatsappbot:".to_string());
+    let bridge_bot_username = get_bridge_bot_username(service);
+    let room_suffix = get_room_suffix(service);
+    let sender_prefix = get_sender_prefix(service);
     let joined_rooms = client.joined_rooms();
     let search_term_lower = chat_name.trim().to_lowercase();
 
-    // Process rooms in parallel
-    let mut room_futures = Vec::new();
+    let mut futures = Vec::new();
     for room in joined_rooms {
         let bridge_bot_username = bridge_bot_username.clone();
-        room_futures.push(async move {
+        let room_suffix = room_suffix.clone();
+        futures.push(async move {
             let display_name = match room.display_name().await {
                 Ok(name) => name.to_string(),
                 Err(_) => return None,
             };
 
-            // Quick filter for non-WhatsApp rooms
-            if !display_name.contains("(WA)") {
+            if !display_name.contains(&room_suffix) {
                 return None;
             }
 
@@ -544,7 +537,7 @@ pub async fn fetch_whatsapp_room_messages(
             }
 
             let chat_name_part = display_name
-                .split(" (WA)")
+                .split(&room_suffix)
                 .next()
                 .unwrap_or(&display_name)
                 .trim()
@@ -561,7 +554,7 @@ pub async fn fetch_whatsapp_room_messages(
                 Err(_) => 0,
             };
 
-            Some(WhatsAppSearchRoom {
+            Some(BridgeSearchRoom {
                 room,
                 chat_name: chat_name_part,
                 last_activity,
@@ -570,7 +563,7 @@ pub async fn fetch_whatsapp_room_messages(
     }
 
     // Collect parallel results
-    let whatsapp_rooms: Vec<WhatsAppSearchRoom> = join_all(room_futures)
+    let bridge_rooms: Vec<BridgeSearchRoom> = join_all(futures)
         .await
         .into_iter()
         .flatten()
@@ -580,12 +573,12 @@ pub async fn fetch_whatsapp_room_messages(
     // Find matching room with optimized search
     let matching_room = {
         // Try exact match first (fastest)
-        if let Some(room) = whatsapp_rooms.iter().find(|r| r.chat_name.to_lowercase() == search_term_lower) {
+        if let Some(room) = bridge_rooms.iter().find(|r| r.chat_name.to_lowercase() == search_term_lower) {
             tracing::info!("Found exact match for room");
             Some(room)
         }
         // Then try substring match
-        else if let Some(room) = whatsapp_rooms.iter()
+        else if let Some(room) = bridge_rooms.iter()
             .filter(|r| r.chat_name.to_lowercase().contains(&search_term_lower))
             .max_by_key(|r| r.last_activity) {
             tracing::info!("Found substring match for room");
@@ -593,7 +586,7 @@ pub async fn fetch_whatsapp_room_messages(
         }
         // Finally try similarity match
         else {
-            let best_match = whatsapp_rooms.iter()
+            let best_match = bridge_rooms.iter()
                 .map(|r| (strsim::jaro_winkler(&search_term_lower, &r.chat_name.to_lowercase()), r))
                 .filter(|(score, _)| *score >= 0.7)
                 .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
@@ -607,47 +600,43 @@ pub async fn fetch_whatsapp_room_messages(
         }
     };
 
+    let user_settings = state.user_core.get_user_settings(user_id)?;
     match matching_room {
-        Some(room) => {
-            let user_settings = state.user_core.get_user_settings(user_id)?;
-            fetch_messages_from_room(room.room.clone(), chat_name, limit, user_settings.timezone).await
-        },
+        Some(room) => fetch_messages_from_room(service, room.room.clone(), limit, user_settings.timezone).await,
         None => Err(anyhow!("No matching WhatsApp room found for '{}'", chat_name))
     }
 }
 
 async fn fetch_messages_from_room(
+    service: &str,
     room: matrix_sdk::room::Room,
-    chat_name: &str,
     limit: Option<u64>,
     timezone: Option<String>,
-) -> Result<(Vec<WhatsAppMessage>, String)> {
+) -> Result<(Vec<BridgeMessage>, String)> {
     let room_name = room.display_name().await?.to_string();
+    let sender_prefix = get_sender_prefix(service);
     let mut options = MessagesOptions::backward();
     options.limit = matrix_sdk::ruma::UInt::new(limit.unwrap_or(20)).unwrap();
 
-
     let response = room.messages(options).await?;
     
-    // Process messages in parallel
-    let mut message_futures = Vec::with_capacity(response.chunk.len());
+    let mut futures = Vec::with_capacity(response.chunk.len());
     let room_name_clone = room_name.clone();
     
     for event in response.chunk {
         let timezone = timezone.clone();
         let room_name = room_name_clone.clone();
-        
-        message_futures.push(async move {
+        let sender_prefix = sender_prefix.clone();
+        futures.push(async move {
             if let Ok(AnySyncTimelineEvent::MessageLike(
                 matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
             )) = event.raw().deserialize() {
                 let (sender, timestamp, content) = match msg {
                     SyncRoomMessageEvent::Original(e) => (e.sender, i64::from(e.origin_server_ts.0) / 1000, e.content),
-                    SyncRoomMessageEvent::Redacted(_) => return None,
+                    _ => return None,
                 };
 
-                // Skip non-WhatsApp messages early
-                if !sender.localpart().starts_with("whatsapp_") {
+                if !sender.localpart().starts_with(&sender_prefix) {
                     return None;
                 }
 
@@ -663,7 +652,7 @@ async fn fetch_messages_from_room(
                     _ => return None,
                 };
 
-                Some(WhatsAppMessage {
+                Some(BridgeMessage {
                     sender: sender.to_string(),
                     sender_display_name: sender.localpart().to_string(),
                     content: body,
@@ -679,8 +668,7 @@ async fn fetch_messages_from_room(
     }
 
     // Collect results from parallel processing
-    let mut messages: Vec<WhatsAppMessage> = join_all(message_futures)
-        .await
+    let mut messages: Vec<BridgeMessage> = join_all(futures).await
         .into_iter()
         .flatten()
         .collect();
@@ -692,13 +680,13 @@ async fn fetch_messages_from_room(
 }
 
 
-pub async fn handle_whatsapp_message(
+pub async fn handle_bridge_message(
     event: OriginalSyncRoomMessageEvent,
     room: Room,
     client: MatrixClient,
     state: Arc<AppState>,
 ) {
-    tracing::info!("Entering WhatsApp message handler");
+    tracing::debug!("Entering bridge message handler");
 
     // Get room name
     let room_name = match room.display_name().await {
@@ -709,17 +697,26 @@ pub async fn handle_whatsapp_message(
         }
     };
 
-    // Only process WhatsApp rooms
-    if !room_name.contains("(WA)") {
-        tracing::info!("Skipping non-WhatsApp room");
+    let sender_localpart = event.sender.localpart().to_string();
+
+    let service = match infer_service(&room_name, &sender_localpart) {
+        Some(s) => s,
+        None => {
+            tracing::error!("Could not infer service, skipping");
+            return;
+        }
+    };
+
+    let room_suffix = get_room_suffix(&service);
+    let sender_prefix = get_sender_prefix(&service);
+
+    if !room_name.contains(&room_suffix) {
+        tracing::debug!("Skipping non-{} room", service);
         return;
     }
 
-    // Only process messages from WhatsApp users
-    if !event.sender.localpart().starts_with("whatsapp_") {
-        tracing::debug!(
-            "Skipping non-WhatsApp sender",
-        );
+    if !sender_localpart.starts_with(&sender_prefix) {
+        tracing::debug!("Skipping non-{} sender", service);
         return;
     }
 
@@ -733,43 +730,20 @@ pub async fn handle_whatsapp_message(
         .map(|s| s.trim_start_matches('@')) // Remove leading '@'
         .unwrap_or(&client_user_id); // Fallback to original if parsing fails
 
-    // Get user for additional info
     let user = match state.user_repository.get_user_by_matrix_user_id(local_user_id) {
         Ok(Some(user)) => user,
-        Ok(None) => {
-            tracing::error!("User {} not found", local_user_id);
-            return;
-        },
-        Err(e) => {
-            tracing::error!("Failed to get user {}: {}", local_user_id, e);
-            return;
-        }
+        _ => return,
     };
 
     let user_id = user.id;
 
     // Check if user has valid subscription
-    match state.user_repository.has_valid_subscription_tier(user_id, "tier 2") {
-        Ok(true) => {
-            tracing::info!(
-                "User {} has valid subscription for WhatsApp monitoring",
-                user_id
-            );
-        },
-        Ok(false) => {
-            tracing::info!(
-                "User {} does not have valid subscription for WhatsApp monitoring",
-                user_id
-            );
-            return;
-        },
-        Err(e) => {
-            tracing::error!("Failed to check subscription status for user {}: {}", user_id, e);
-            return;
-        }
+    let has_valid_sub = state.user_repository.has_valid_subscription_tier(user_id, "tier 2").unwrap_or(false) || 
+        state.user_repository.has_valid_subscription_tier(user_id, "self_hosted").unwrap_or(false);
+    if !has_valid_sub {
+        tracing::debug!("User {} does not have valid subscription for WhatsApp monitoring", user_id);
+        return;
     }
-
-
 
     // Extract message content
     let content = match event.content.msgtype {
@@ -789,43 +763,28 @@ pub async fn handle_whatsapp_message(
        content.contains("media no longer available") ||
        content.contains("Decrypting message from WhatsApp failed") ||
        content.starts_with("* Failed to") {
-        tracing::info!("Skipping error message because content contained error messages");
+        tracing::debug!("Skipping error message because content contained error messages");
         return;
     }
 
-    // Extract clean chat name from room name
     let chat_name = room_name
-        .split(" (WA)")
+        .split(&room_suffix)
         .next()
         .unwrap_or(&room_name)
         .trim()
         .to_string();
-
-    // Extract sender name from Matrix user ID
-    let sender_name = event.sender.localpart()
-        .strip_prefix("whatsapp_")
-        .unwrap_or(event.sender.localpart())
+    
+    let sender_name = sender_localpart
+        .strip_prefix(&sender_prefix)
+        .unwrap_or(&sender_localpart)
         .to_string();
 
+    let waiting_checks = state.user_repository.get_waiting_checks(user_id, "messaging").unwrap_or(Vec::new());
 
-    let waiting_checks = match state.user_repository.get_waiting_checks(user_id, "messaging") {
-        Ok(checks) => checks,
-        Err(e) => {
-            tracing::error!("Failed to get waiting checks for user {}: {}", user_id, e);
-            Vec::new()
-        }
-    };
+    let priority_senders = state.user_repository.get_priority_senders(user_id, &service).unwrap_or(Vec::new());
 
-    let priority_senders = match state.user_repository.get_priority_senders(user_id, "whatsapp") {
-        Ok(senders) => senders,
-        Err(e) => {
-            tracing::error!("Failed to get priority senders for user {}: {}", user_id, e);
-            Vec::new()
-        }
-    };
-
-    fn trim_for_sms(sender: &str, content: &str) -> String {
-        let prefix = "WhatsApp from ";
+    fn trim_for_sms(service: &str, sender: &str, content: &str) -> String {
+        let prefix = format!("{} from ", capitalize(&service));
         let separator = ": ";
         let max_len = 157;
 
@@ -847,12 +806,13 @@ pub async fn handle_whatsapp_message(
         format!("{}{}{}{}", prefix, sender_trimmed, separator, content_trimmed)
     }
 
+    let service_cap = capitalize(&service);
+
     // FAST CHECKS SECOND - Check priority senders if active
     for priority_sender in &priority_senders {
 
-        // Clean up priority sender name by removing (WA) suffix
         let clean_priority_sender = priority_sender.sender
-            .split(" (WA)")
+            .split(&room_suffix)
             .next()
             .unwrap_or(&priority_sender.sender)
             .trim()
@@ -867,8 +827,9 @@ pub async fn handle_whatsapp_message(
                     // User has enough credits, proceed with notification
                     let state_clone = state.clone();
                     let content_clone = content.clone();
-                    let message = trim_for_sms(&priority_sender.sender, &content_clone);
-                    let first_message = format!("Hello, you have an important WhatsApp message from {}.", priority_sender.sender);
+                    let message = trim_for_sms(&service, &priority_sender.sender, &content_clone);
+                    let first_message = format!("Hello, you have an important {} message from {}.", service_cap, priority_sender.sender);
+                    let notification_type = format!("{}_priority", service);
                     
                     // Spawn a new task for sending notification
                     tokio::spawn(async move {
@@ -877,7 +838,7 @@ pub async fn handle_whatsapp_message(
                             &state_clone,
                             user_id,
                             &message,
-                            "whatsapp_priority".to_string(),
+                            notification_type,
                             Some(first_message),
                         ).await;
                         
@@ -899,12 +860,12 @@ pub async fn handle_whatsapp_message(
         // Check if any waiting checks match the message
         if let Ok((check_id_option, message, first_message)) = crate::proactive::utils::check_waiting_check_match(
             &state,
-            &format!("WhatsApp from {}: {}", chat_name, content),
+            &format!("{} from {}: {}", service_cap, chat_name, content),
             &waiting_checks,
         ).await {
             if let Some(check_id) = check_id_option {
-                let message = message.unwrap_or("Waiting check matched in WhatsApp, but failed to get content".to_string());
-                let first_message = first_message.unwrap_or("Hey, I found a match for one of your waiting checks in WhatsApp.".to_string());
+                let message = message.unwrap_or(format!("Waiting check matched in {}, but failed to get content", service).to_string());
+                let first_message = first_message.unwrap_or(format!("Hey, I found a match for one of your waiting checks in {}.", service_cap));
                 
                 // Delete the matched waiting check
                 if let Err(e) = state.user_repository.delete_waiting_check_by_id(user_id, check_id) {
@@ -913,12 +874,13 @@ pub async fn handle_whatsapp_message(
                 
                 // Send notification
                 let state_clone = state.clone();
+                let notification_type = format!("{}_waiting_check", service);
                 tokio::spawn(async move {
                     crate::proactive::utils::send_notification(
                         &state_clone,
                         user_id,
                         &message,
-                        "whatsapp_waiting_check".to_string(),
+                        notification_type,
                         Some(first_message),
                     ).await;
                 });
@@ -941,53 +903,52 @@ pub async fn handle_whatsapp_message(
         return;
     }
 
-    match crate::proactive::utils::check_message_importance(&state, &format!("WhatsApp from {}: {}", chat_name, content)).await {
-        Ok((is_critical, message, first_message)) => {
-            if is_critical {
-                let message = message.unwrap_or("Critical WhatsApp message found, check WhatsApp to see it (failed to fetch actual content, pls report)".to_string());
-                let first_message = first_message.unwrap_or("Hey, I found some critical WhatsApp message you should know.".to_string());
-                
-                // Spawn a new task for sending critical message notification
-                let state_clone = state.clone();
-                tokio::spawn(async move {
-                    crate::proactive::utils::send_notification(
-                        &state_clone,
-                        user_id,
-                        &message,
-                        "whatsapp_critical".to_string(),
-                        Some(first_message),
-                    ).await;
-                });
-            }
-        }
-        Err(e) => {
-            tracing::error!("Failed to check message importance: {}", e);
+    if let Ok((is_critical, message, first_message)) = crate::proactive::utils::check_message_importance(&state, &format!("{} from {}: {}", service_cap, chat_name, content)).await {
+        if is_critical {
+            let message = message.unwrap_or(format!("Critical {} message found, failed to get content, but you can check your {} to see it.", service_cap, service));
+            let first_message = first_message.unwrap_or(format!("Hey, I found some critical {} message.", service_cap));
+            
+            // Spawn a new task for sending critical message notification
+            let state_clone = state.clone();
+            let notification_type = format!("{}_critical", service);
+            tokio::spawn(async move {
+                crate::proactive::utils::send_notification(
+                    &state_clone,
+                    user_id,
+                    &message,
+                    notification_type,
+                    Some(first_message),
+                ).await;
+            });
         }
     }
 }
 
 
-pub async fn search_whatsapp_rooms(
+pub async fn search_bridge_rooms(
+    service: &str,
     state: &Arc<AppState>,
     user_id: i32,
     search_term: &str,
-) -> Result<Vec<WhatsAppRoom>> {
-    let bridge_bot_username = std::env::var("WHATSAPP_BRIDGE_BOT")
-        .unwrap_or_else(|_| "@whatsappbot:".to_string());
+) -> Result<Vec<BridgeRoom>> {
+    let bridge_bot_username = get_bridge_bot_username(service);
 
     // Validate bridge connection first
-    let bridge = state.user_repository.get_whatsapp_bridge(user_id)?;
+    let bridge = state.user_repository.get_bridge(user_id, service)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
-        return Err(anyhow!("WhatsApp bridge is not connected. Please log in first."));
+        return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(&service)));
     }
 
     let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
     let joined_rooms = client.joined_rooms();
     let search_term_lower = search_term.trim().to_lowercase();
 
+    let room_suffix = get_room_suffix(service);
+
     // Process rooms in parallel
     let room_futures = joined_rooms.into_iter().map(|room| {
         let bridge_bot_username = bridge_bot_username.clone();
+        let room_suffix = room_suffix.clone();
         async move {
             // Quick check for room name
             let room_name = match room.display_name().await {
@@ -995,26 +956,21 @@ pub async fn search_whatsapp_rooms(
                 Err(_) => return None,
             };
 
-            // Early filter for WhatsApp rooms
-            if !room_name.contains("(WA)") {
+            if !room_name.contains(&room_suffix) {
                 return None;
             }
 
-            // Check bridge bot membership
-            let has_bridge_bot = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
-                Ok(members) => members.iter().any(|member| 
-                    member.user_id().to_string().contains(&bridge_bot_username)
-                ),
+            let members = match room.members(RoomMemberships::JOIN).await {
+                Ok(m) => m,
                 Err(_) => return None,
             };
 
-            if !has_bridge_bot {
+            if !members.iter().any(|member| member.user_id().to_string().contains(&bridge_bot_username)) {
                 return None;
             }
 
-            // Get clean name and last activity
             let clean_name = room_name
-                .split(" (WA)")
+                .split(&room_suffix)
                 .next()
                 .unwrap_or(&room_name)
                 .trim()
@@ -1032,7 +988,7 @@ pub async fn search_whatsapp_rooms(
                 Err(_) => 0,
             };
 
-            Some((clean_name, WhatsAppRoom {
+            Some((clean_name, BridgeRoom {
                 room_id: room.room_id().to_string(),
                 display_name: room_name,
                 last_activity,
@@ -1042,14 +998,14 @@ pub async fn search_whatsapp_rooms(
     });
 
     // Collect results from parallel processing
-    let all_whatsapp_rooms: Vec<(String, WhatsAppRoom)> = join_all(room_futures)
+    let all_rooms: Vec<(String, BridgeRoom)> = join_all(room_futures)
         .await
         .into_iter()
         .flatten()
         .collect();
 
     // Single-pass matching with prioritized results
-    let mut matching_rooms: Vec<(f64, WhatsAppRoom)> = all_whatsapp_rooms
+    let mut matching_rooms: Vec<(f64, BridgeRoom)> = all_rooms
         .into_iter()
         .filter_map(|(name, room)| {
             let name_lower = name.to_lowercase();
@@ -1078,7 +1034,16 @@ pub async fn search_whatsapp_rooms(
             .then(b.1.last_activity.cmp(&a.1.last_activity))
     });
 
-    tracing::info!("Found {} matching WhatsApp rooms", matching_rooms.len());
+    tracing::info!("Found {} matching {} rooms", matching_rooms.len(), capitalize(&service));
     
     Ok(matching_rooms.into_iter().map(|(_, room)| room).collect())
+}
+
+
+pub fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+    }
 }

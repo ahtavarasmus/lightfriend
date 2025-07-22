@@ -173,7 +173,8 @@ pub async fn handle_send_whatsapp_message(
     tracing::info!("IN HANDLE_SEND_WHATSAPP_MESSAGE");
 
     // First search for the chat room
-    let rooms = match crate::utils::whatsapp_utils::search_whatsapp_rooms(
+    let rooms = match crate::utils::bridge::search_bridge_rooms(
+        "whatsapp", 
         &state,
         user_id,
         &args.chat_name,
@@ -228,7 +229,8 @@ pub async fn handle_send_whatsapp_message(
     // If confirmation is not required, send the message directly
     if !user_settings.require_confirmation {
         let message = args.message;
-        match crate::utils::whatsapp_utils::send_whatsapp_message(
+        match crate::utils::bridge::send_bridge_message(
+            "whatsapp",
             &state,
             user_id,
             &exact_name,
@@ -370,7 +372,8 @@ pub async fn handle_search_whatsapp_rooms(
         }
     };
 
-    match crate::utils::whatsapp_utils::search_whatsapp_rooms(
+    match crate::utils::bridge::search_bridge_rooms(
+        "whatsapp", 
         &state,
         user_id,
         &args.search_term,
@@ -423,7 +426,8 @@ pub async fn handle_fetch_whatsapp_room_messages(
         }
     };
 
-    match crate::utils::whatsapp_utils::fetch_whatsapp_room_messages(
+    match crate::utils::bridge::fetch_bridge_room_messages(
+        "whatsapp", 
         &state,
         user_id,
         &args.chat_name,
@@ -495,7 +499,8 @@ pub async fn handle_fetch_whatsapp_messages(
         }
     };
 
-    match crate::utils::whatsapp_utils::fetch_whatsapp_messages(
+    match crate::utils::bridge::fetch_bridge_messages(
+        "whatsapp", 
         &state,
         user_id,
         start_time,

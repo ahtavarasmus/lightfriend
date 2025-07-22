@@ -496,13 +496,12 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             );
 
             // Fetch WhatsApp messages
-            if let Some(bridge) = state.user_repository.get_whatsapp_bridge(user_id)? {
-                match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, true).await {
+            if let Some(bridge) = state.user_repository.get_bridge(user_id, "whatsapp")? {
+                match crate::utils::bridge::fetch_bridge_messages("whatsapp", state, user_id, start_timestamp, true).await {
                     Ok(whatsapp_messages) => {
                         // Convert WhatsAppMessage to MessageInfo and add to messages
                         let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
                             .map(|msg| MessageInfo {
-                                // Remove the (WA) suffix if it exists
                                 sender: msg.room_name,
                                 content: msg.content,
                                 timestamp_rfc: msg.formatted_timestamp,
@@ -699,13 +698,12 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             );
 
             // Fetch WhatsApp messages
-            if let Some(bridge) = state.user_repository.get_whatsapp_bridge(user_id)? {
-                match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, true).await {
+            if let Some(bridge) = state.user_repository.get_bridge(user_id, "whatsapp")? {
+                match crate::utils::bridge::fetch_bridge_messages("whatsapp", state, user_id, start_timestamp, true).await {
                     Ok(whatsapp_messages) => {
                         // Convert WhatsAppMessage to MessageInfo and add to messages
                         let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()
                             .map(|msg| MessageInfo {
-                                // Remove the (WA) suffix if it exists
                                 sender: msg.room_name,
                                 content: msg.content,
                                 timestamp_rfc: msg.formatted_timestamp,
@@ -917,8 +915,8 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             );
 
             // Fetch WhatsApp messages
-            if let Some(bridge) = state.user_repository.get_whatsapp_bridge(user_id)? {
-                match crate::utils::whatsapp_utils::fetch_whatsapp_messages(state, user_id, start_timestamp, true).await {
+            if let Some(bridge) = state.user_repository.get_bridge(user_id, "whatsapp")? {
+                match crate::utils::bridge::fetch_bridge_messages("whatsapp", state, user_id, start_timestamp, true).await {
                     Ok(whatsapp_messages) => {
                         // Convert WhatsAppMessage to MessageInfo and add to messages
                         let whatsapp_infos: Vec<MessageInfo> = whatsapp_messages.into_iter()

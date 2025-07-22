@@ -388,7 +388,7 @@ pub async fn get_whatsapp_status(
     auth_user: AuthUser,
 ) -> Result<AxumJson<serde_json::Value>, (StatusCode, AxumJson<serde_json::Value>)> {
     tracing::debug!("📊 Checking WhatsApp status for user {}", auth_user.user_id);
-    let bridge = state.user_repository.get_whatsapp_bridge(auth_user.user_id)
+    let bridge = state.user_repository.get_bridge(auth_user.user_id, "whatsapp")
         .map_err(|e| {
             tracing::error!("Failed to get WhatsApp bridge status: {}", e);
             (
@@ -478,7 +478,7 @@ async fn monitor_whatsapp_connection(
                                     created_at: Some(current_time),
                                 };
 
-                                state.user_repository.delete_whatsapp_bridge(user_id)?;
+                                state.user_repository.delete_bridge(user_id, "whatsapp")?;
                                 state.user_repository.create_bridge(new_bridge)?;
 
                                 // Add client to app state and start sync
@@ -494,7 +494,7 @@ async fn monitor_whatsapp_connection(
                                     let state = Arc::clone(&state_for_handler);
                                     async move {
                                         tracing::debug!("📨 Received message in room {}: {:?}", room.room_id(), ev);
-                                        crate::utils::whatsapp_utils::handle_whatsapp_message(ev, room, client, state).await;
+                                        crate::utils::bridge::handle_bridge_message(ev, room, client, state).await;
                                     }
                                 });
 
@@ -558,7 +558,7 @@ async fn monitor_whatsapp_connection(
 
                             if error_patterns.iter().any(|&pattern| content.to_lowercase().contains(pattern)) {
                                 tracing::error!("❌ WhatsApp connection failed for user {}: {}", user_id, content);
-                                state.user_repository.delete_whatsapp_bridge(user_id)?;
+                                state.user_repository.delete_bridge(user_id, "whatsapp")?;
                                 return Err(anyhow!("WhatsApp connection failed: {}", content));
                             }
                         }
@@ -572,7 +572,7 @@ async fn monitor_whatsapp_connection(
     }
 
     // If we reach here, connection timed out
-    state.user_repository.delete_whatsapp_bridge(user_id)?;
+    state.user_repository.delete_bridge(user_id, "whatsapp")?;
     Err(anyhow!("WhatsApp connection timed out after 3 minutes"))
 }
 
@@ -584,7 +584,7 @@ pub async fn resync_whatsapp(
     println!("🔄 Starting WhatsApp resync process for user {}", auth_user.user_id);
 
     // Get the bridge information first
-    let bridge = state.user_repository.get_whatsapp_bridge(auth_user.user_id)
+    let bridge = state.user_repository.get_bridge(auth_user.user_id, "whatsapp")
         .map_err(|e| {
             tracing::error!("Failed to get WhatsApp bridge: {}", e);
             (
@@ -708,7 +708,7 @@ pub async fn disconnect_whatsapp(
     tracing::debug!("🔌 Starting WhatsApp disconnection process for user {}", auth_user.user_id);
 
     // Get the bridge information first
-    let bridge = state.user_repository.get_whatsapp_bridge(auth_user.user_id)
+    let bridge = state.user_repository.get_bridge(auth_user.user_id, "whatsapp")
         .map_err(|e| {
             tracing::error!("Failed to get WhatsApp bridge: {}", e);
             (
@@ -786,7 +786,7 @@ pub async fn disconnect_whatsapp(
     }
 
     // Delete the bridge record
-    state.user_repository.delete_whatsapp_bridge(auth_user.user_id)
+    state.user_repository.delete_bridge(auth_user.user_id, "whatsapp")
         .map_err(|e| {
             tracing::error!("Failed to delete WhatsApp bridge: {}", e);
             (

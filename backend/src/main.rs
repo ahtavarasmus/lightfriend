@@ -55,7 +55,7 @@ mod utils {
     pub mod tool_exec;
     pub mod usage;
     pub mod matrix_auth;
-    pub mod whatsapp_utils;
+    pub mod bridge;
     pub mod telegram_utils;
     pub mod elevenlabs_prompts;
     pub mod imap_utils;

@@ -197,7 +197,8 @@ pub async fn handle_confirmation(
         match user_response.as_str() {
             "yes" => {
                 // Send the WhatsApp message
-                match crate::utils::whatsapp_utils::send_whatsapp_message(
+                match crate::utils::bridge::send_bridge_message(
+                    "whatsapp",
                     state,
                     user.id,
                     &recipient,

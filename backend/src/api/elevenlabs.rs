@@ -1326,7 +1326,8 @@ pub async fn handle_whatsapp_confirm_send(
     // If confirmation is not required, send the message directly
     if !user_settings.require_confirmation {
         // First find the room
-        match crate::utils::whatsapp_utils::fetch_whatsapp_room_messages(
+        match crate::utils::bridge::fetch_bridge_room_messages(
+            "whatsapp", 
             &state,
             user_id,
             &payload.chat_name,
@@ -1336,7 +1337,8 @@ pub async fn handle_whatsapp_confirm_send(
                 let clean_room_name = room_name.trim_end_matches(" (WA)").to_string();
                 
                 // Send the message directly
-                match crate::utils::whatsapp_utils::send_whatsapp_message(
+                match crate::utils::bridge::send_bridge_message(
+                    "whatsapp",
                     &state,
                     user_id,
                     &clean_room_name,
@@ -1377,8 +1379,8 @@ pub async fn handle_whatsapp_confirm_send(
         }
     } else {
         // If confirmation is required, continue with the existing flow
-        // First, try to find the exact room using fetch_whatsapp_room_messages
-        match crate::utils::whatsapp_utils::fetch_whatsapp_room_messages(
+        match crate::utils::bridge::fetch_bridge_room_messages(
+            "whatsapp", 
             &state,
             user_id,
             &payload.chat_name,
@@ -1836,7 +1838,7 @@ pub async fn handle_whatsapp_search_tool_call(
     };
 
     // Search for rooms using the existing utility function
-    match crate::utils::whatsapp_utils::search_whatsapp_rooms(&state, user_id, &payload.search_term).await {
+    match crate::utils::bridge::search_bridge_rooms("whatsapp", &state, user_id, &payload.search_term).await {
         Ok(rooms) => {
             if rooms.is_empty() {
                 return Ok(Json(json!({
@@ -1990,7 +1992,7 @@ pub async fn handle_whatsapp_fetch_specific_room_tool_call(
     };
 
     // Fetch messages using the existing utility function
-    match crate::utils::whatsapp_utils::fetch_whatsapp_room_messages(&state, user_id, chat_room, Some(20)).await {
+    match crate::utils::bridge::fetch_bridge_room_messages("whatsapp", &state, user_id, chat_room, Some(20)).await {
         Ok((messages, room_name)) => {
             if messages.is_empty() {
                 return Ok(Json(json!({
@@ -2137,7 +2139,7 @@ pub async fn handle_whatsapp_fetch_tool_call(
     let start_timestamp = (chrono::Utc::now() - chrono::Duration::days(2)).timestamp();
 
     // Fetch messages using the existing utility function
-    match crate::utils::whatsapp_utils::fetch_whatsapp_messages(&state, user_id, start_timestamp, false).await {
+    match crate::utils::bridge::fetch_bridge_messages("whatsapp", &state, user_id, start_timestamp, false).await {
         Ok(messages) => {
             if messages.is_empty() {
                 return Ok(Json(json!({

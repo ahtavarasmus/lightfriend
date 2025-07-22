@@ -941,13 +941,13 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn delete_whatsapp_bridge(&self, user_id: i32) -> Result<(), DieselError> {
+    pub fn delete_bridge(&self, user_id: i32, service: &str) -> Result<(), DieselError> {
         use crate::schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         diesel::delete(bridges::table)
             .filter(bridges::user_id.eq(user_id))
-            .filter(bridges::bridge_type.eq("whatsapp"))
+            .filter(bridges::bridge_type.eq(service))
             .execute(&mut conn)?;
 
         Ok(())
@@ -965,13 +965,13 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn get_whatsapp_bridge(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
+    pub fn get_bridge(&self, user_id: i32, service: &str) -> Result<Option<Bridge>, DieselError> {
         use crate::schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
 
         let bridge = bridges::table
             .filter(bridges::user_id.eq(user_id))
-            .filter(bridges::bridge_type.eq("whatsapp"))
+            .filter(bridges::bridge_type.eq(service))
             .first::<Bridge>(&mut conn)
             .optional()?;
 

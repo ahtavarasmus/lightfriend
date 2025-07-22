@@ -42,7 +42,7 @@ async fn initialize_matrix_clients(state: Arc<AppState>) {
                             let state = Arc::clone(&state_for_handler);
                             async move {
                                 tracing::debug!("📨 Received message in room {}: {:?}", room.room_id(), ev);
-                                crate::utils::whatsapp_utils::handle_whatsapp_message(ev, room, client, state).await;
+                                crate::utils::bridge::handle_bridge_message(ev, room, client, state).await;
                             }
                         });
 
