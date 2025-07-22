@@ -521,7 +521,7 @@ pub fn pricing(props: &PricingProps) -> Html {
             sub_items: vec![],
         },
         Feature {
-            text: "Easy to follow instructions and direct founder support".to_string(),
+            text: "Easy to follow instructions and our support".to_string(),
             sub_items: vec![],
         },
         Feature {
@@ -544,7 +544,7 @@ pub fn pricing(props: &PricingProps) -> Html {
             sub_items: vec![],
         },
         Feature {
-            text: "Automatic updates, security and priority founder support".to_string(),
+            text: "Automatic updates, security and priority support".to_string(),
             sub_items: vec![],
         },
         Feature {
@@ -585,13 +585,6 @@ pub fn pricing(props: &PricingProps) -> Html {
                         html! {}
                     }
                 }
-            </div>
-
-            <div class="time-value-section">
-                <h2>{"Reclaim Your Time"}</h2>
-                <p>{"Lightfriend enables you to switch to a dumbphone, saving you 2-4 hours per day on unnecessary scrolling and distractions."}</p>
-                <p>{"If your time is worth "}{currency_symbol}{"20/hour, that's "}{currency_symbol}{"1,200 - "}{currency_symbol}{"2,400 per month in reclaimed value!"}</p>
-                <p class="footnote">{"For more comprehensive studies and calculations on smartphone usage time, see "}<a href="https://explodingtopics.com/blog/smartphone-usage-stats" target="_blank" rel="noopener noreferrer">{"Exploding Topics"}</a>{", "}<a href="https://datareportal.com/reports/digital-2024-deep-dive-the-time-we-spend-on-social-media" target="_blank" rel="noopener noreferrer">{"DataReportal"}</a>{", and "}<a href="https://www.demandsage.com/average-time-spent-on-social-media/" target="_blank" rel="noopener noreferrer">{"DemandSage"}</a>{"."}</p>
             </div>
 
             {
