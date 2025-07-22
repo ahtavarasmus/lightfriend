@@ -841,6 +841,10 @@ pub async fn send_conversation_message(
         // If TextBee not set up or failed, fall back to Twilio
     }
 
+    if user.id == 1 {
+        println!("user sub: {:#?}", user.sub_tier);
+    }
+
     // Twilio send logic
     let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
         (
