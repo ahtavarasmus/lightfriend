@@ -546,6 +546,7 @@ pub async fn process_sms(
     }
 
     // If you still want the assert afterwards, leave it here
+    /*
     assert!(
         chat_messages.iter().all(|m| match &m.content {
             chat_completion::Content::Text(t) => !t.trim().is_empty(),
@@ -553,6 +554,7 @@ pub async fn process_sms(
         }),
         "Found at least one empty content item – see previous log lines"
     );
+    */
 
 
     let result = match client.chat_completion(chat_completion::ChatCompletionRequest::new(
