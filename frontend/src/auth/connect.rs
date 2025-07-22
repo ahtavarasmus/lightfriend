@@ -282,7 +282,7 @@ let group_states = use_state(|| {
 
                     // Proactive Services
                     <div class={classes!("service-group", 
-                        if props.sub_tier.as_deref() != Some("tier 2") || props.sub_tier.as_deref() != Some("self_hosted") { "monitoring-disabled" } else { "" }
+                        if props.sub_tier.as_deref() != Some("tier 2") && props.sub_tier.as_deref() != Some("self_hosted") { "monitoring-disabled" } else { "" }
                     )}>
                         <h3 class="service-group-title"
                             onclick={let group_states = group_states.clone();
