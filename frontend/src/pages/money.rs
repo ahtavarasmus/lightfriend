@@ -409,11 +409,11 @@ pub fn pricing(props: &PricingProps) -> Html {
     ]);
 
     let digital_detox_prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 9.99),
-        ("FI".to_string(), 14.99),
-        ("UK".to_string(), 14.99),
-        ("AU".to_string(), 14.99),
-        ("Other".to_string(), 14.99),
+        ("US".to_string(), 19.00),
+        ("FI".to_string(), 19.00),
+        ("UK".to_string(), 19.00),
+        ("AU".to_string(), 19.00),
+        ("Other".to_string(), 19.00),
     ]);
 
     let self_hosting_prices: HashMap<String, f64> = HashMap::from([
