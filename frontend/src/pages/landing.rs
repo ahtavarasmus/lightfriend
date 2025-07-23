@@ -486,6 +486,11 @@ pub fn landing() -> Html {
     .example-image.visible {
         opacity: 1;
         z-index: 6;
+        pointer-events: auto; /* Enable pointer events only when visible */
+    }
+
+    .intro-section.visible .sticky-image {
+        pointer-events: auto; /* Enable pointer events only when the section is visible */
     }
 
     .sticky-image {
@@ -495,6 +500,7 @@ pub fn landing() -> Html {
         height: 600px;
         margin: 0 !important;
         z-index: 10;
+        pointer-events: none; /* Disable pointer events on the container by default */
     }
 
     @media (max-width: 768px) {
@@ -511,6 +517,10 @@ pub fn landing() -> Html {
             overflow: visible;
             backface-visibility: hidden;
             -webkit-backface-visibility: hidden;
+            pointer-events: none; /* Disable on mobile by default */
+        }
+        .intro-section.visible .sticky-image {
+            pointer-events: auto; /* Enable only when visible */
         }
     }
 
