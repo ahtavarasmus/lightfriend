@@ -48,10 +48,6 @@ pub struct CheckoutButtonProps {
     pub user_email: String,
     pub subscription_type: String,
     pub selected_country: String,
-    #[prop_or(0)]
-    pub selected_topups: i32,
-    #[prop_or(0)]
-    pub selected_digests: i32,
 }
 
 #[function_component(CheckoutButton)]
@@ -60,21 +56,16 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
     let user_email = props.user_email.clone();
     let subscription_type = props.subscription_type.clone();
     let selected_country = props.selected_country.clone();
-    let selected_topups = props.selected_topups;
-    let selected_digests = props.selected_digests;
 
     let onclick = {
         let user_id = user_id.clone();
         let subscription_type = subscription_type.clone();
         let selected_country = selected_country.clone();
-        let selected_topups = selected_topups.clone();
-        let selected_digests = selected_digests.clone();
         
         Callback::from(move |e: MouseEvent| {
             e.prevent_default();
             let user_id = user_id.clone();
             let subscription_type = subscription_type.clone();
-            let selected_topups = selected_topups.clone();
             
             if subscription_type != "basic" && subscription_type != "oracle" && selected_country == "Other" {
                 if let Some(window) = web_sys::window() {
@@ -100,11 +91,10 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
                     let request_body = json!({
                         "subscription_type": match subscription_type.as_str() {
                             "hosted" => "Hosted",
+                            "digital_detox" => "DigitalDetox",
                             "self_hosting" => "SelfHosting",
                             _ => "Hosted"  // Default to Hosted if unknown
                         },
-                        "selected_topups": selected_topups,
-                        "selected_digests": selected_digests
                     });
 
                     let response = Request::post(&endpoint)
@@ -144,10 +134,12 @@ pub struct PricingCardProps {
     pub best_for: String,
     pub price: f64,
     pub currency: String,
+    pub period: String,
     pub features: Vec<Feature>,
     pub subscription_type: String,
     pub is_popular: bool,
     pub is_premium: bool,
+    pub is_trial: bool,
     pub is_self_hosting: bool,
     pub user_id: i32,
     pub user_email: String,
@@ -155,37 +147,25 @@ pub struct PricingCardProps {
     pub verified: bool,
     pub sub_tier: Option<String>,
     pub selected_country: String,
-    pub show_topup_selector: bool,
-    #[prop_or(0)]
-    pub selected_topups: i32,
-    pub on_topup_change: Option<Callback<i32>>,
-    #[prop_or(0)]
-    pub selected_digests: i32,
     #[prop_or(false)]
     pub coming_soon: bool,
+    pub hosted_prices: HashMap<String, f64>,
 }
 
 #[function_component(PricingCard)]
 pub fn pricing_card(props: &PricingCardProps) -> Html {
-    let price_text = if props.price == 0.0 {
-        "Free".to_string()
-    } else if props.selected_country == "Other" {
-        format!("from {}{:.2}", props.currency, props.price)
-    } else {
-        format!("{}{:.2}", props.currency, props.price)
-    };
+    let mut price_text = format!("{}{:.2}", props.currency, props.price);
+    if props.subscription_type == "hosted" {
+        price_text = format!("{}{:.2}", props.currency, props.price / 30.00);
+    }
 
-    let effective_tier = if props.subscription_type == "hosted" {
+    let effective_tier = if props.subscription_type == "hosted" || props.subscription_type == "digital_detox" {
         "tier 2".to_string()
     } else {
         props.subscription_type.clone()
     };
 
-    let button = if props.subscription_type == "diy" {
-        html! { 
-            <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer" class="iq-button signup-button"><b>{"Get Started on GitHub"}</b></a> 
-        }
-    } else if props.coming_soon {
+    let button = if props.coming_soon {
         html! { <button class="iq-button coming-soon" disabled=true><b>{"Coming Soon"}</b></button> }
     } else if props.is_logged_in {
         if !props.verified {
@@ -205,8 +185,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     user_email={props.user_email.clone()} 
                     subscription_type={props.subscription_type.clone()}
                     selected_country={props.selected_country.clone()}
-                    selected_topups={props.selected_topups}
-                    selected_digests={props.selected_digests}
                 />
             }
         }
@@ -226,22 +204,24 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
     };
 
     let image_url = match props.subscription_type.as_str() {
-        "diy" => "/assets/diy-tier-image.png",
         "self_hosting" => "/assets/easy-self-host-image.png",
         "hosted" => "/assets/hosted-tier-image.png",
+        "digital_detox" => "/assets/digital-detox-image.png",
         _ => "",
     };
 
     html! {
         <div class={classes!("pricing-card", "subscription",
-            if props.is_popular { "popular" } else { "" },
-            if props.is_premium { "premium" } else { "" },
+            if props.is_popular || props.is_popular { "popular" } else { "" },
+            if props.is_premium  { "premium" } else { "" },
             if props.is_self_hosting { "self-hosting" } else { "" })}>
             {
                 if props.is_popular {
                     html! { <div class="popular-tag">{"Most Popular"}</div> }
                 } else if props.is_premium {
-                    html! { <div class="premium-tag">{"Simplest"}</div> }
+                    html! { <div class="popular-tag">{"Simplest"}</div> }
+                } else if props.is_trial {
+                    html! { <div class="premium-tag">{"Take a Challenge!"}</div> }
                 } else {
                     html! {}
                 }
@@ -253,7 +233,14 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                 <p class="best-for">{props.best_for.clone()}</p>
                 <div class="price">
                     <span class="amount">{price_text}</span>
-                    { if props.price > 0.0 { html! { <span class="period">{"/month"}</span> } } else { html! {} } }
+                    <span class="period">{props.period.clone()}</span>
+                    { if props.subscription_type == "hosted" { 
+                        html! { <p class="billing-note">{"Billed monthly at "}{format!("{}{:.2}", props.currency, props.price)}</p> }
+                    } else if props.subscription_type == "digital_detox" {
+                        html! { <p class="billing-note">{"Billed monthly at "}{format!("{}{:.2}", props.currency, props.hosted_prices.get(&props.selected_country).unwrap_or(&0.0))}{" after trial"}</p> }
+                    } else { 
+                        html! {} 
+                    }}
                 </div>
                 <div class="includes">
                     <ul class="quota-list">
@@ -276,64 +263,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     }
                 }
                 {button}
-            </div>
-        </div>
-    }
-}
-
-#[derive(Properties, PartialEq)]
-pub struct TopupSelectorProps {
-    pub id: String,
-    pub selected_topups: i32,
-    pub on_topup_change: Callback<i32>,
-}
-
-#[function_component(TopupSelector)]
-pub fn topup_selector(props: &TopupSelectorProps) -> Html {
-    let on_change = {
-        let on_topup_change = props.on_topup_change.clone();
-        Callback::from(move |e: Event| {
-            if let Some(target) = e.target_dyn_into::<HtmlSelectElement>() {
-                if let Ok(value) = target.value().parse::<i32>() {
-                    on_topup_change.emit(value);
-                }
-            }
-        })
-    };
-
-    html! {
-        <div class="extras-section">
-            <h4>{"Add Message Packs"}</h4>
-            <p class="extras-description">{"Each pack adds 20 Messages for €5/month"}</p>
-            <div class="extras-selector-inline">
-                <div class="quantity-selector-inline">
-                    <label for={props.id.clone()}>{"Message Packs:"}</label>
-                    <select id={props.id.clone()} onchange={on_change}>
-                        { for (0..=10).map(|i| html! {
-                            <option value={i.to_string()} selected={props.selected_topups == i}>
-                                {if i == 0 { "None".to_string() } else { format!("{} pack{}", i, if i == 1 { "" } else { "s" }) }}
-                            </option>
-                        }) }
-                    </select>
-                </div>
-                {
-                    if props.selected_topups > 0 {
-                        html! {
-                            <div class="extras-summary-inline">
-                                <div class="summary-item">
-                                    <span class="summary-label">{"Extra Messages:"}</span>
-                                    <span class="summary-value">{format!("{}", props.selected_topups * 20)}</span>
-                                </div>
-                                <div class="summary-item">
-                                    <span class="summary-label">{"Extra Cost:"}</span>
-                                    <span class="summary-value">{format!("€{}/month", props.selected_topups * 5)}</span>
-                                </div>
-                            </div>
-                        }
-                    } else {
-                        html! {}
-                    }
-                }
             </div>
         </div>
     }
@@ -468,6 +397,14 @@ pub fn pricing(props: &PricingProps) -> Html {
         ("Other".to_string(), 79.00),
     ]);
 
+    let digital_detox_prices: HashMap<String, f64> = HashMap::from([
+        ("US".to_string(), 9.99),
+        ("FI".to_string(), 14.99),
+        ("UK".to_string(), 14.99),
+        ("AU".to_string(), 14.99),
+        ("Other".to_string(), 14.99),
+    ]);
+
     let self_hosting_prices: HashMap<String, f64> = HashMap::from([
         ("US".to_string(), 15.00),
         ("FI".to_string(), 15.00),
@@ -493,36 +430,11 @@ pub fn pricing(props: &PricingProps) -> Html {
         })
     };
 
-    let hosted_selected_topups = use_state(|| 0);
-    let hosted_selected_digests = use_state(|| 0);
-    let hosted_base_price = hosted_prices.get(&*selected_country).unwrap_or(&0.0);
-    let hosted_topup_price = if *selected_country == "US" {
-        0.0
-    } else {
-        *hosted_selected_topups as f64 * 5.0
-    };
-    let hosted_total_price = hosted_base_price + hosted_topup_price;
+    let hosted_total_price = hosted_prices.get(&*selected_country).unwrap_or(&0.0);
 
-    let self_hosting_selected_topups = use_state(|| 0);
-    let self_hosting_selected_digests = use_state(|| 0);
-    let self_hosting_base_price = self_hosting_prices.get(&*selected_country).unwrap_or(&0.0);
-    let self_hosting_topup_price = if *selected_country == "US" {
-        0.0
-    } else {
-        *self_hosting_selected_topups as f64 * 5.0
-    };
-    let self_hosting_total_price = self_hosting_base_price + self_hosting_topup_price;
+    let digital_detox_total_price = digital_detox_prices.get(&*selected_country).unwrap_or(&0.0);
 
-    let diy_features = vec![
-        Feature {
-            text: "For tech-savvy users comfortable with server setup, security, and maintenance".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: "Manual updates and configuration".to_string(),
-            sub_items: vec![],
-        },
-    ];
+    let self_hosting_total_price = self_hosting_prices.get(&*selected_country).unwrap_or(&0.0);
 
     let self_hosting_features = vec![
         Feature {
@@ -562,13 +474,20 @@ pub fn pricing(props: &PricingProps) -> Html {
         },
     ];
 
+    let digital_detox_features = vec![
+        Feature {
+            text: "Experience the full Hosted Plan features for a one-week trial period".to_string(),
+            sub_items: vec![],
+        },
+    ];
+
     let currency_symbol = if *selected_country == "US" { "$" } else { "€" };
 
     html! {
         <div class="pricing-panel">
             <div class="pricing-header">
                 <h1>{"Invest in Your Peace of Mind"}</h1>
-                <p>{"Reduce anxiety, sleep better, and live with clarity without the constant pull of your smartphone."}</p>
+                <p>{"Lightfriend makes it possible to seriously switch to a dumbphone, saving you 2-4 hours per day of mindless scrolling.*"}</p>
                 {
                     if *selected_country == "Other" {
                         html! {
@@ -616,76 +535,79 @@ pub fn pricing(props: &PricingProps) -> Html {
                 }
             }
 
-            <div class="pricing-grid">
-                <PricingCard
-                    plan_name="DIY Hosting"
-                    best_for="For tech-savvy users who enjoy hands-on server management and tinkering"
-                    price={0.0}
-                    currency={"$"}
-                    features={diy_features}
-                    subscription_type="diy"
-                    is_popular=false
-                    is_premium=false
-                    is_self_hosting=false
-                    user_id={props.user_id}
-                    user_email={props.user_email.clone()}
-                    is_logged_in={props.is_logged_in}
-                    verified={props.verified}
-                    sub_tier={props.sub_tier.clone()}
-                    selected_country={(*selected_country).clone()}
-                    show_topup_selector=false
-                    selected_topups=0
-                    on_topup_change={None::<Callback<i32>>}
-                    selected_digests=0
-                    coming_soon={false}
-                />
-                <PricingCard
-                    plan_name="Easy Self-Hosting Plan"
-                    best_for="Self-Hosted setup for non-technical users with automatic management."
-                    price={self_hosting_total_price}
-                    currency={if *selected_country == "US" { "$" } else { "€" }}
-                    features={self_hosting_features}
-                    subscription_type="self_hosting"
-                    is_popular=true
-                    is_premium=false
-                    is_self_hosting=true
-                    user_id={props.user_id}
-                    user_email={props.user_email.clone()}
-                    is_logged_in={props.is_logged_in}
-                    verified={props.verified}
-                    sub_tier={props.sub_tier.clone()}
-                    selected_country={(*selected_country).clone()}
-                    show_topup_selector={false}
-                    selected_topups=0
-                    on_topup_change={None::<Callback<i32>>}
-                    selected_digests=0
-                    coming_soon={true}
-                />
-                <PricingCard
-                    plan_name="Hosted Plan"
-                    best_for="Full-featured cloud service ready to go."
-                    price={hosted_total_price}
-                    currency={if *selected_country == "US" { "$" } else { "€" }}
-                    features={hosted_features}
-                    subscription_type="hosted"
-                    is_popular=false
-                    is_premium=true
-                    is_self_hosting=false
-                    user_id={props.user_id}
-                    user_email={props.user_email.clone()}
-                    is_logged_in={props.is_logged_in}
-                    verified={props.verified}
-                    sub_tier={props.sub_tier.clone()}
-                    selected_country={(*selected_country).clone()}
-                    show_topup_selector={*selected_country != "US"}
-                    selected_topups={*hosted_selected_topups}
-                    on_topup_change={if *selected_country != "US" { Some(Callback::from({
-                        let hosted_selected_topups = hosted_selected_topups.clone();
-                        move |value: i32| hosted_selected_topups.set(value)
-                    })) } else { None }}
-                    selected_digests={*hosted_selected_digests}
-                    coming_soon={false}
-                />
+            <div class="hosted-plans-section">
+                <h2 class="section-title">{"Hosted Plans"}</h2>
+                <div class="pricing-grid">
+                    <PricingCard
+                        plan_name="Digital Detox Trial"
+                        best_for="Try our full-featured cloud service for a week."
+                        price={digital_detox_total_price}
+                        currency={if *selected_country == "US" { "$" } else { "€" }}
+                        period="/week"
+                        features={digital_detox_features.clone()}
+                        subscription_type="digital_detox"
+                        is_popular=false
+                        is_premium=false
+                        is_trial=true
+                        is_self_hosting=false
+                        user_id={props.user_id}
+                        user_email={props.user_email.clone()}
+                        is_logged_in={props.is_logged_in}
+                        verified={props.verified}
+                        sub_tier={props.sub_tier.clone()}
+                        selected_country={(*selected_country).clone()}
+                        coming_soon={false}
+                        hosted_prices={hosted_prices.clone()} 
+                    />
+                    <PricingCard
+                        plan_name="Hosted Plan"
+                        best_for="Full-featured cloud service ready to go."
+                        price={hosted_total_price}
+                        currency={if *selected_country == "US" { "$" } else { "€" }}
+                        period="/day"
+                        features={hosted_features}
+                        subscription_type="hosted"
+                        is_popular=false
+                        is_premium=true
+                        is_trial=false
+                        is_self_hosting=false
+                        user_id={props.user_id}
+                        user_email={props.user_email.clone()}
+                        is_logged_in={props.is_logged_in}
+                        verified={props.verified}
+                        sub_tier={props.sub_tier.clone()}
+                        selected_country={(*selected_country).clone()}
+                        coming_soon={false}
+                        hosted_prices={hosted_prices.clone()} 
+                    />
+                </div>
+            </div>
+
+            <div class="self-hosted-plans-section">
+                <h2 class="section-title">{"Self-Hosted Plan"}</h2>
+                <div class="pricing-grid self-hosted-grid">
+                    <PricingCard
+                        plan_name="Easy Self-Hosting Plan"
+                        best_for="Self-Hosted setup for non-technical users with automatic management."
+                        price={self_hosting_total_price}
+                        currency={if *selected_country == "US" { "$" } else { "€" }}
+                        period="/month"
+                        features={self_hosting_features.clone()}
+                        subscription_type="self_hosting"
+                        is_popular=true
+                        is_premium=false
+                        is_trial=false
+                        is_self_hosting=true
+                        user_id={props.user_id}
+                        user_email={props.user_email.clone()}
+                        is_logged_in={props.is_logged_in}
+                        verified={props.verified}
+                        sub_tier={props.sub_tier.clone()}
+                        selected_country={(*selected_country).clone()}
+                        coming_soon={true}
+                        hosted_prices={hosted_prices.clone()} 
+                    />
+                </div>
             </div>
 
             <div class="topup-pricing">
@@ -776,7 +698,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <div class="faq-grid">
                     <details>
                         <summary>{"How does billing work?"}</summary>
-                        <p>{"All plans are billed monthly and include a certain number of Messages per month. Additional Messages can be purchased using credits. Unused credits carry over indefinitely. You retain subscription benefits until the next normal billing period end even if you unsubscribed immediately. No hidden fees or commitments. Note that due to high cost of running the service, no free tiers or refunds can be offered (Lightfriend is a bootstrapped startup)."}</p>
+                        <p>{"All plans are billed monthly and include a certain number of Messages per month. The Digital Detox Trial is billed weekly for the first week, then transitions to the standard Hosted Plan monthly billing. Additional Messages can be purchased using credits. Unused credits carry over indefinitely. You retain subscription benefits until the next normal billing period end even if you unsubscribed immediately. No hidden fees or commitments. Note that due to high cost of running the service, no refunds can be offered (Lightfriend is a bootstrapped startup)."}</p>
                     </details>
                     <details>
                         <summary>{"What counts as a Message?"}</summary>
@@ -784,7 +706,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     </details>
                     <details>
                         <summary>{"How do credits work?"}</summary>
-                        <p>{"For Hosted Plan, credits can be used for additional messages beyond your monthly limit. Enable auto-top-up to automatically purchase credits when you run low. Unused credits never expire."}</p>
+                        <p>{"For Hosted Plan and Digital Detox Trial, credits can be used for additional messages beyond your monthly limit. Enable auto-top-up to automatically purchase credits when you run low. Unused credits never expire."}</p>
                     </details>
                     <details>
                         <summary>{"How does automatic monitoring work?"}</summary>
@@ -792,19 +714,15 @@ pub fn pricing(props: &PricingProps) -> Html {
                     </details>
                     <details>
                         <summary>{"What's the difference between the plans in terms of setup and ease of use?"}</summary>
-                        <p>{"The Hosted Plan is the easiest - no setup required, just connect your apps and start using. The Easy Self-Hosting Plan requires minimal effort: we provide a pre-configured VPS with one-click installation via Cloudron, automatic updates, and guided setup - no coding needed. The DIY Hosting is for advanced users: it's free but requires manual server setup, configuration, security management, and updates via GitHub."}</p>
+                        <p>{"The Hosted Plan and Digital Detox Trial are the easiest - no setup required, just connect your apps and start using. The Easy Self-Hosting Plan requires minimal effort: we provide a pre-configured VPS with one-click installation via Cloudron, automatic updates, and guided setup - no coding needed."}</p>
                     </details>
                     <details>
                         <summary>{"Who should choose the Hosted Plan?"}</summary>
-                        <p>{"If you want the simplest experience with zero technical setup, the Hosted Plan is ideal. Everything is managed for you, including phone numbers and servers - just subscribe and connect your accounts to get started immediately."}</p>
+                        <p>{"If you want the simplest experience with zero technical setup, the Hosted Plan or Digital Detox Trial is ideal. Everything is managed for you, including phone numbers and servers - just subscribe and connect your accounts to get started immediately."}</p>
                     </details>
                     <details>
                         <summary>{"Who is the Easy Self-Hosting Plan for?"}</summary>
                         <p>{"This plan is perfect for non-technical users who want more control without the hassle. It offers user-friendly setup on your own server with automatic management, updates, and security - available worldwide and easy to maintain."}</p>
-                    </details>
-                    <details>
-                        <summary>{"Is DIY Hosting suitable for beginners?"}</summary>
-                        <p>{"DIY Hosting is best for tech-savvy users comfortable with server management, coding, and manual updates. If you're new to this, we recommend starting with the Hosted or Easy Self-Hosting Plans for a smoother experience."}</p>
                     </details>
                     <details>
                         <summary>{"Why charge monthly for the Easy Self-Hosting Plan?"}</summary>
@@ -855,11 +773,28 @@ pub fn pricing(props: &PricingProps) -> Html {
                     text-decoration: underline;
                 }
                 .pricing-grid {
-                    display: grid;
-                    grid-template-columns: 1fr;
-                    gap: 4rem;
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 2rem;
+                    justify-content: center;
                     max-width: 1200px;
+                    margin: 2rem auto;
+                }
+
+                .self-hosted-grid {
+                    justify-content: center;
+                }
+
+                .hosted-plans-section, .self-hosted-plans-section {
                     margin: 4rem auto;
+                    max-width: 1200px;
+                }
+
+                .section-title {
+                    text-align: center;
+                    color: #7EB2FF;
+                    font-size: 2.5rem;
+                    margin-bottom: 2rem;
                 }
 
                 .pricing-panel {
@@ -957,6 +892,9 @@ pub fn pricing(props: &PricingProps) -> Html {
                 }
 
                 .pricing-card {
+                    flex: 1;
+                    min-width: 250px;
+                    max-width: 350px;
                     background: rgba(30, 30, 30, 0.8);
                     border: 1px solid rgba(30, 144, 255, 0.15);
                     border-radius: 24px;
@@ -967,13 +905,21 @@ pub fn pricing(props: &PricingProps) -> Html {
                     display: flex;
                     flex-direction: column;
                     padding: 0;
-                    overflow: hidden;
                 }
-
                 .pricing-card:hover {
                     transform: translateY(-5px);
-                    box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
-                    border-color: rgba(30, 144, 255, 0.3);
+                    box-shadow: 0 8px 32px rgba(30, 144, 255, 0.2);
+                    border-color: rgba(30, 144, 255, 0.4);
+                }
+
+                .pricing-card.popular {
+                    background: linear-gradient(180deg, rgba(30, 144, 255, 0.1), rgba(30, 30, 30, 0.9));
+                    border: 2px solid #1E90FF;
+                    box-shadow: 0 4px 16px rgba(30, 144, 255, 0.3);
+                }
+
+                .pricing-card.popular:hover {
+                    box-shadow: 0 8px 32px rgba(30, 144, 255, 0.4);
                 }
 
                 .pricing-card.premium {
@@ -982,42 +928,43 @@ pub fn pricing(props: &PricingProps) -> Html {
                 }
 
                 .pricing-card.premium:hover {
-                    box-shadow: 0 8px 32px rgba(255, 215, 0, 0.2);
-                    border-color: rgba(255, 215, 0, 0.5);
+                    box-shadow: 0 8px 32px rgba(255, 215, 0, 0.3);
                 }
 
                 .pricing-card.self-hosting {
-                    background: rgba(40, 40, 40, 0.85);
-                    border: 2px solid rgba(0, 255, 255, 0.3);
+                    background: linear-gradient(180deg, rgba(0, 255, 255, 0.1), rgba(30, 30, 30, 0.9));
+                    border: 2px solid #00FFFF;
+                    box-shadow: 0 4px 16px rgba(0, 255, 255, 0.3);
                 }
 
                 .pricing-card.self-hosting:hover {
-                    box-shadow: 0 8px 32px rgba(0, 255, 255, 0.2);
-                    border-color: rgba(0, 255, 255, 0.5);
+                    box-shadow: 0 8px 32px rgba(0, 255, 255, 0.4);
                 }
 
                 .popular-tag {
                     position: absolute;
-                    top: -12px;
-                    right: 24px;
+                    top: -15px;
+                    right: 20px;
                     background: linear-gradient(45deg, #1E90FF, #4169E1);
                     color: white;
                     padding: 0.5rem 1rem;
                     border-radius: 20px;
                     font-size: 0.9rem;
                     font-weight: 500;
+                    z-index: 4;
                 }
 
                 .premium-tag {
                     position: absolute;
-                    top: -12px;
-                    right: 24px;
+                    top: -15px;
+                    right: 20px;
                     background: linear-gradient(45deg, #FFD700, #FFA500);
                     color: white;
                     padding: 0.5rem 1rem;
                     border-radius: 20px;
                     font-size: 0.9rem;
                     font-weight: 500;
+                    z-index: 4;
                 }
 
                 .header-background {
@@ -1027,6 +974,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     background-position: center;
                     display: flex;
                     align-items: center;
+                    text-align: center;
                     justify-content: center;
                     border-top-left-radius: 24px;
                     border-top-right-radius: 24px;
@@ -1065,22 +1013,39 @@ pub fn pricing(props: &PricingProps) -> Html {
                     margin-top: 0.5rem;
                     margin-bottom: 1.5rem;
                     font-style: italic;
+                    text-align: center;
                 }
 
                 .price {
                     margin: 1.5rem 0;
                     text-align: center;
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 0.5rem;
                 }
 
                 .price .amount {
-                    font-size: 3rem;
+                    font-size: 3.5rem;
                     color: #fff;
-                    font-weight: 700;
+                    font-weight: 800;
+                    background: linear-gradient(45deg, #1E90FF, #7EB2FF);
+                    -webkit-background-clip: text;
+                    -webkit-text-fill-color: transparent;
+                    line-height: 1;
                 }
 
                 .price .period {
                     color: #999;
-                    font-size: 1.1rem;
+                    font-size: 1.2rem;
+                    margin-left: 0.5rem;
+                }
+
+                .billing-note {
+                    color: #b0b0b0;
+                    font-size: 0.95rem;
+                    margin-top: 0.5rem;
+                    text-align: center;
                 }
 
                 .includes {
@@ -1107,6 +1072,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                 }
 
                 .quota-list li.sub-item::before {
+                    content: "→";
                     position: absolute;
                     left: 1rem;
                     color: #7EB2FF;
@@ -1165,15 +1131,12 @@ pub fn pricing(props: &PricingProps) -> Html {
                     margin-bottom: 2rem;
                 }
 
-                .topup-packages {
-                    max-width: 600px;
-                    margin: 2rem auto;
-                }
 
                 .pricing-card.main {
                     background: rgba(30, 30, 30, 0.8);
                     border: 1px solid rgba(30, 144, 255, 0.15);
                     padding: 2rem;
+                    min-width: 400px;
                 }
 
                 .package-row {
@@ -1195,6 +1158,14 @@ pub fn pricing(props: &PricingProps) -> Html {
 
                 .package-row .price {
                     margin: 0;
+                }
+
+                .topup-packages {
+                    max-width: 600px;
+                    margin: 2rem auto;
+                    align-items: center;
+                    display: flex;
+                    justify-content: center;
                 }
 
                 .package-row .price .amount {
@@ -1265,18 +1236,27 @@ pub fn pricing(props: &PricingProps) -> Html {
                 }
 
                 @media (max-width: 968px) {
+                    .pricing-grid {
+                        flex-direction: column;
+                        align-items: center;
+                    }
+
+                    .pricing-card {
+                        max-width: 400px;
+                        width: 100%;
+                    }
                     .options-grid {
                         grid-template-columns: 1fr;
-                    }
-                    
-                    .topup-packages {
-                        padding: 0 1rem;
-                    }
-                    
+                    } 
                     .package-row {
                         flex-direction: column;
                         text-align: center;
                         gap: 0.5rem;
+                    }
+                }
+                @media (min-width: 969px) {
+                    .pricing-card {
+                        flex: 0 1 33%;
                     }
                 }
 
@@ -1425,6 +1405,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     box-shadow: none;
                 }
 
+
                 .sentinel-extras-integrated {
                     margin: 2rem auto;
                     padding: 2rem;
@@ -1467,7 +1448,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     justify-content: space-between;
                     align-items: center;
                     padding: 1rem;
-                    background: rgba(30, 144, 255, 0.1);
+                    background tundra: rgba(30, 144, 255, 0.1);
                     border-radius: 8px;
                     margin-top: 0.5rem;
                 }
@@ -1557,29 +1538,6 @@ pub fn pricing(props: &PricingProps) -> Html {
                         padding: 1.5rem;
                         margin: 2rem 1rem;
                         max-width: calc(100vw - 2rem);
-                    }
-                }
-
-                @media (max-width: 768px) {
-                    .topup-controls {
-                        grid-template-columns: 1fr;
-                        gap: 1rem;
-                    }
-                    
-                    .quantity-selector-inline {
-                        flex-direction: column;
-                        align-items: center;
-                        gap: 0.5rem;
-                    }
-
-                    .quantity-selector-inline label {
-                        min-width: auto;
-                        text-align: center;
-                    }
-
-                    .extras-summary-inline {
-                        flex-direction: column;
-                        gap: 1rem;
                     }
                 }
                 "#}

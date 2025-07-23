@@ -78,6 +78,7 @@ fn get_room_suffix(service: &str) -> String {
 }
 
 fn infer_service(room_name: &str, sender_localpart: &str) -> Option<String> {
+    println!("room_name: {}, sender_localpart: {}", room_name, sender_localpart);
     if room_name.contains("(WA)") || sender_localpart.starts_with("whatsapp_") { return Some("whatsapp".to_string()); }
     if room_name.contains("(TG)") || sender_localpart.starts_with("telegram_") { return Some("telegram".to_string()); }
     None

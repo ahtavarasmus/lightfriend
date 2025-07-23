@@ -17,6 +17,7 @@ use stripe::{
 pub enum SubscriptionType {
     Hosted,
     SelfHosting,
+    DigitalDetox,
 }
 
 use serde::{Deserialize, Serialize};
@@ -42,7 +43,6 @@ pub struct BuyCreditsRequest {
 #[derive(Deserialize)]
 pub struct SubscriptionCheckoutBody {
     pub subscription_type: SubscriptionType,
-    pub selected_topups: Option<u64>,   // defaults to 0 if omitted
 }
 
 pub async fn create_unified_subscription_checkout(
@@ -52,24 +52,6 @@ pub async fn create_unified_subscription_checkout(
     Json(body): Json<SubscriptionCheckoutBody>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     println!("Starting create_subscription_checkout for user_id: {}", user_id);
-
-    let selected_topups = body.selected_topups.unwrap_or(0);
-    
-    // Validate user_id
-    if user_id <= 0 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({"error": "Invalid user ID"})),
-        ));
-    }
-
-    // Check if user is accessing their own data or is an admin
-    if auth_user.user_id != user_id && !auth_user.is_admin {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({"error": "Access denied"})),
-        ));
-    }
 
     // Verify user exists in database
     let user = state
@@ -144,9 +126,10 @@ pub async fn create_unified_subscription_checkout(
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
 
     // Select price ID based on subscription type and user's phone number
-    let base_price_id = match body.subscription_type {
+    // Select price ID based on subscription type and user's phone number
+    let (base_price_id, trial_days, one_time_fee_id) = match body.subscription_type {
         SubscriptionType::Hosted => {
-            if user.phone_number.starts_with("+1") {
+            let price_id = if user.phone_number.starts_with("+1") {
                 std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_US")
             } else if user.phone_number.starts_with("+358") {
                 std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_FI")
@@ -156,12 +139,35 @@ pub async fn create_unified_subscription_checkout(
                 std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_AU")
             } else {
                 std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER")
-            }
+            }.expect("Stripe price ID not found for region");
+            (price_id, None, None)
         },
         SubscriptionType::SelfHosting => {
-            std::env::var("STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID")
+            let price_id = std::env::var("STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID")
+                .expect("Stripe price ID not found for region");
+            (price_id, None, None)
+        },
+        SubscriptionType::DigitalDetox => {
+            let price_id = if user.phone_number.starts_with("+1") {
+                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_US")
+            } else if user.phone_number.starts_with("+358") {
+                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_FI")
+            } else if user.phone_number.starts_with("+44") {
+                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_UK")
+            } else if user.phone_number.starts_with("+61") {
+                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_AU")
+            } else {
+                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER")
+            }.expect("Stripe price ID not found for region");
+            let one_time_fee_id = if user.phone_number.starts_with("+1") {
+                std::env::var("STRIPE_DIGITALDETOX_ONETIME_FEE_ID_US")
+            } else {
+                std::env::var("STRIPE_DIGITALDETOX_ONETIME_FEE_ID_OTHER")
+            }
+                .expect("Stripe one-time fee ID not found");
+            (price_id, Some(7), Some(one_time_fee_id))
         }
-    }.expect("Stripe price ID not found for region");
+    };
 
     let mut line_items = vec![
         stripe::CreateCheckoutSessionLineItems {
@@ -171,14 +177,11 @@ pub async fn create_unified_subscription_checkout(
         }
     ];
 
-    // Add top-ups if selected and not Basic plan
-    if selected_topups > 0 && body.subscription_type != SubscriptionType::SelfHosting {
-        let topup_price_id = std::env::var("STRIPE_TOPUP_PRICE_ID")
-            .expect("STRIPE_TOPUP_PRICE_ID not found");
-        
+    // Add one-time fee for DigitalDetox
+    if let Some(fee_id) = one_time_fee_id {
         line_items.push(stripe::CreateCheckoutSessionLineItems {
-            price: Some(topup_price_id),
-            quantity: Some(selected_topups as u64),
+            price: Some(fee_id),
+            quantity: Some(1),
             ..Default::default()
         });
     }
@@ -208,6 +211,14 @@ pub async fn create_unified_subscription_checkout(
         ..Default::default()
     };
 
+    // Add trial period for DigitalDetox
+    if let Some(trial_days) = trial_days {
+        create_params.subscription_data = Some(stripe::CreateCheckoutSessionSubscriptionData {
+            trial_period_days: Some(trial_days),
+            ..Default::default()
+        });
+    }
+
     let success_url1 = format!("{}/billing?subscription=changed", domain_url);
     if let Some(current_subscription) = existing_subscription.data.first() {
         println!("Found existing subscription: {}", current_subscription.id);
@@ -220,6 +231,7 @@ pub async fn create_unified_subscription_checkout(
         
         create_params.subscription_data = Some(stripe::CreateCheckoutSessionSubscriptionData {
             metadata: Some(metadata),
+            trial_period_days: trial_days, // Preserve trial_days from earlier
             ..Default::default()
         });
 
@@ -583,15 +595,6 @@ struct SubscriptionInfo {
     tier: &'static str,
 }
 
-/// Quantity of top-ups in this subscription (0 if none)
-fn topup_quantity(items: &[stripe::SubscriptionItem]) -> i64 {
-    let topup_id = std::env::var("STRIPE_TOPUP_PRICE_ID").unwrap_or_default();
-    items.iter()
-         .find(|it| it.price.as_ref().map(|p| p.id.as_str()) == Some(topup_id.as_str()))
-         .and_then(|it| it.quantity)
-         .map(|q| q as i64)                  // cast each u64 → i64
-         .unwrap_or(0)
-}
 
 fn base_price_id(items: &[stripe::SubscriptionItem]) -> Option<String> {
     let topup_id = std::env::var("STRIPE_TOPUP_PRICE_ID").unwrap_or_default();
@@ -601,6 +604,16 @@ fn base_price_id(items: &[stripe::SubscriptionItem]) -> Option<String> {
          .map(|p| p.id.to_string())
 }
 
+// Helper function to check if DigitalDetox one-time fee is present
+fn is_digital_detox_subscription(items: &[stripe::SubscriptionItem]) -> bool {
+    let digital_detox_fee_id_us = std::env::var("STRIPE_DIGITALDETOX_ONETIME_FEE_ID_US").unwrap_or_default();
+    let digital_detox_fee_id_other = std::env::var("STRIPE_DIGITALDETOX_ONETIME_FEE_ID_OTHER").unwrap_or_default();
+    items.iter().any(|item| {
+        item.price.as_ref().map(|p| {
+            p.id.as_str() == digital_detox_fee_id_us || p.id.as_str() == digital_detox_fee_id_other
+        }).unwrap_or(false)
+    })
+}
 
 
 // Helper function to extract subscription info from price ID
@@ -647,16 +660,6 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
         );
     }
 
-    // Tier 1.5 Plans (Oracle Plan)
-    for country in ["US", "FI", "UK", "AU", "OTHER"] {
-        // Check Hard Mode price IDs (older subscriptions)
-        check_price_id!(
-            country,
-            format!("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_{}", country),
-            "tier 1.5"
-        );
-    }
-
     for country in ["US", "FI", "UK", "AU", "OTHER"] {
         // Check World price IDs (older subscriptions)
         check_price_id!(
@@ -691,16 +694,6 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
     info
 }
 
-fn is_oracle_price_id(price_id: &str) -> bool {
-    const COUNTRIES: [&str; 5] = ["US", "FI", "UK", "AU", "OTHER"];
-
-    COUNTRIES.iter().any(|cty| {
-        let var_name = format!("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_{}", cty);
-        // If the env-var is missing, simply skip that entry.
-        std::env::var(var_name).map_or(false, |v| v == price_id)
-    })
-}
-
 fn is_sentinel_price_id(price_id: &str) -> bool {
     const COUNTRIES: [&str; 5] = ["US", "FI", "UK", "AU", "OTHER"];
 
@@ -710,77 +703,6 @@ fn is_sentinel_price_id(price_id: &str) -> bool {
         std::env::var(var_name).map_or(false, |v| v == price_id)
     })
 }
-
-/// Make sure the user keeps only as many digests as their credits allow.
-///
-/// Rules
-/// -----
-/// 1. Try to keep morning + evening + day if possible.
-/// 2. If credits turn negative, drop **day** first.
-/// 3. Still negative?  Drop **evening**.
-/// 4. **Morning is never removed**; if it would still be negative we just keep
-///    morning and leave credits at 0.
-///
-/// Returns the updated credit balance _after_ any digest removals.
-///
-/// Call from the Sentinel section of your webhook **before** you
-/// write `sub_credits` to the user table.
-fn fit_digests_to_credits(
-    state:   &AppState,
-    user_id: i32,
-    base_credits: f32,         // 40.0
-    topups: i64,               // number of top-ups
-    days_until_billing: i64,   // e.g. 30
-) -> Option<f32> {
-    // Helper to convert Option<String> triple into (owned) mutable vars
-    let (mut morning, mut day, mut evening) = {
-        // (morning, day, evening) Options returned from DB
-        state.user_core.get_digests(user_id)
-             .unwrap_or((None, None, None))
-    };
-
-    // How many (active) digests at any given time?
-    let count_digests = |m:&Option<String>, d:&Option<String>, e:&Option<String>| -> i64 {
-        let mut c = 0;
-        if m.is_some() { c += 1; }
-        if d.is_some() { c += 1; }
-        if e.is_some() { c += 1; }
-        c
-    };
-
-    // Reusable closure for “credits left after deductions”
-    let calc_balance = |digest_cnt: i64| -> f32 {
-        base_credits + 20.0 * topups as f32 - (days_until_billing * digest_cnt) as f32
-    };
-
-    // Current balance
-    let mut balance = calc_balance(count_digests(&morning,&day,&evening));
-
-    // If negative, start dropping digests in required order
-    if balance < 0.0 && day.is_some() {
-        day = None;
-        balance = calc_balance(count_digests(&morning,&day,&evening));
-    }
-    if balance < 0.0 && evening.is_some() {
-        evening = None;
-        balance = calc_balance(count_digests(&morning,&day,&evening));
-    }
-    // Morning never removed; if still negative, clamp at 0
-    if balance < 0.0 {
-        balance = 0.0;
-    }
-
-    // Persist the possibly-changed digest configuration
-    state.user_core.update_digests(
-        user_id,
-        morning.as_deref(),
-        day.as_deref(),
-        evening.as_deref(),
-    ).ok()?;
-
-    Some(balance)
-}
-
 
 pub async fn stripe_webhook(
     State(state): State<Arc<AppState>>,
@@ -917,7 +839,6 @@ pub async fn stripe_webhook(
 
                 if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
                     let items        = &subscription.items.data;
-                    let topups       = topup_quantity(items);
                     let base_price   = match base_price_id(items) {
                         Some(id) => id,
                         None => {
@@ -935,7 +856,7 @@ pub async fn stripe_webhook(
                         // Extract subscription info (both country and tier)
                         let sub_info = extract_subscription_info(&price_id);
                         let is_sentinel_price_id = is_sentinel_price_id(&price_id);
-                        let is_oracle_price_id = is_oracle_price_id(&price_id);
+                        let is_digital_detox = is_digital_detox_subscription(&subscription.items.data);
                         
                         // Update subscription country
                         if let Err(e) = state.user_core.update_sub_country(user.id, sub_info.country) {
@@ -950,9 +871,6 @@ pub async fn stripe_webhook(
                         let messages: f32;
 
                         println!("sub_tier: {}", sub_info.tier);
-
-                        let oracle_us_id = std::env::var("STRIPE_SUBSCRIPTION_ORACLE_PRICE_ID_US")
-                                .unwrap_or_default();
 
                         let sentinel_us_id = std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_US")
                                 .unwrap_or_default();
@@ -984,11 +902,8 @@ pub async fn stripe_webhook(
                             }
                         };
                         
-                        if base_price == oracle_us_id {
-                            messages = 120.0;
-                        } else if is_oracle_price_id {
-                            // any other Oracle variant → 40 + 20×top-ups
-                            messages = 40.0 + 20.0 * topups as f32;
+                        if is_digital_detox {
+                            messages = 50.0;
                         } else if base_price == sentinel_us_id {
                             messages = 400.00 - (days_until_billing * amount_of_digests) as f32;
                         } else if is_sentinel_price_id {
