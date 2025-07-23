@@ -242,6 +242,17 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                         html! {} 
                     }}
                 </div>
+                {
+                    if props.subscription_type == "hosted" && props.selected_country == "US" {
+                        html! {
+                            <div class="us-deal-section">
+                                <p class="us-deal-text">{"US Special Offer: Get a free dumbphone with your subscription! ($40 Amazon gift card)"}</p>
+                            </div>
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
                 <div class="includes">
                     <ul class="quota-list">
                         { for props.features.iter().flat_map(|feature| {
@@ -741,7 +752,7 @@ pub fn pricing(props: &PricingProps) -> Html {
 
             <div class="footnotes">
                 <p class="footnote">{"* Gen Z spends 4-7 hours daily on phones, often regretting 60% of social media time. "}<a href="https://explodingtopics.com/blog/smartphone-usage-stats" target="_blank" rel="noopener noreferrer">{"Read the study"}</a><grok-card data-id="badfd9" data-type="citation_card"></grok-card></p>
-                <p class="footnote">{"The dumbphone is sold separately and is not included in any plan."}</p>
+                <p class="footnote">{"The dumbphone is sold separately and is not included in any plan, except for US Hosted Plan subscribers who receive a free dumbphone and a $40 Amazon gift card."}</p>
                 <p class="footnote">{"For developers: Check out the open-source repo on GitHub if you'd like to self-host from source (requires technical setup)."}</p>
                 <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer" class="github-link">{"View GitHub Repo"}</a>
             </div>
@@ -1048,6 +1059,20 @@ pub fn pricing(props: &PricingProps) -> Html {
                     text-align: center;
                 }
 
+                .us-deal-section {
+                    margin: 1rem 0;
+                    text-align: center;
+                    background: rgba(30, 144, 255, 0.1);
+                    border-radius: 8px;
+                    padding: 0.5rem;
+                }
+
+                .us-deal-text {
+                    color: #FFD700;
+                    font-size: 0.95rem;
+                    font-weight: 500;
+                }
+
                 .includes {
                     margin-top: 2rem;
                 }
@@ -1277,7 +1302,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     gap: 1rem;
                 }
 
-                details {
+                .details {
                     background: rgba(30, 30, 30, 0.8);
                     border: 1px solid rgba(30, 144, 255, 0.15);
                     border-radius: 12px;
@@ -1285,7 +1310,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     transition: all 0.3s ease;
                 }
 
-                details:hover {
+                .details:hover {
                     border-color: rgba(30, 144, 255, 0.3);
                 }
 
@@ -1296,7 +1321,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     padding: 0.5rem 0;
                 }
 
-                details p {
+                .details p {
                     color: #e0e0e0;
                     margin-top: 1rem;
                     line-height: 1.6;
