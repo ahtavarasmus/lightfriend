@@ -621,71 +621,79 @@ pub fn pricing(props: &PricingProps) -> Html {
                 </div>
             </div>
 
-            <div class="topup-pricing">
-                <h2>{format!("Overage Rates for {}", *selected_country)}</h2>
-                <p>{"When you exceed your quota on the Hosted Plan, these rates apply. Enable auto-top-up to automatically add credits when you run low. Unused credits carry over indefinitely. These are can used to answer user initiated questions, send notifications from priority senders and daily digests. On the Easy Self-Hosting Plan credits are bought directly from twilio."}</p>
-                <div class="topup-packages">
-                    <div class="pricing-card main">
-                        <div class="card-header">
-                            <div class="package-row">
-                                <h3>{"Additional Messages:"}</h3>
-                                <div class="price">
-                                    {
-                                        if *selected_country == "US" {
-                                            html! {
-                                                <span class="amount">{format!("${:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0))}</span>
-                                            }
-                                        } else {
-                                            html! {
-                                                <span class="amount">{format!("€{:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0))}</span>
-                                            }
-                                        }
-                                    }
+            {
+                if *selected_country != "US" {
+                    html! {
+                        <div class="topup-pricing">
+                            <h2>{format!("Overage Rates for {}", *selected_country)}</h2>
+                            <p>{"When you exceed your quota on the Hosted Plan, these rates apply. Enable auto-top-up to automatically add credits when you run low. Unused credits carry over indefinitely. These are can used to answer user initiated questions, send notifications from priority senders and daily digests. On the Easy Self-Hosting Plan credits are bought directly from twilio."}</p>
+                            <div class="topup-packages">
+                                <div class="pricing-card main">
+                                    <div class="card-header">
+                                        <div class="package-row">
+                                            <h3>{"Additional Messages:"}</h3>
+                                            <div class="price">
+                                                {
+                                                    if *selected_country == "US" {
+                                                        html! {
+                                                            <span class="amount">{format!("${:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                                        }
+                                                    } else {
+                                                        html! {
+                                                            <span class="amount">{format!("€{:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0))}</span>
+                                                        }
+                                                    }
+                                                }
+                                            </div>
+                                        </div>
+                                        <div class="package-row">
+                                            <h3>{"Additional Priority Sender Notifications:"}</h3>
+                                            <div class="price">
+                                                {
+                                                    if *selected_country == "US" {
+                                                        html! {
+                                                            <>
+                                                                <span class="amount">{format!("${:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0)/3.0)}</span>
+                                                                <span class="period">{" per notification"}</span>
+                                                            </>
+                                                        }
+                                                    } else {
+                                                        html! {
+                                                            <>
+                                                                <span class="amount">{format!("€{:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0)/2.0)}</span>
+                                                                <span class="period">{" per notification"}</span>
+                                                            </>
+                                                        }
+                                                    }
+                                                }
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="package-row">
-                                <h3>{"Additional Priority Sender Notifications:"}</h3>
-                                <div class="price">
-                                    {
-                                        if *selected_country == "US" {
-                                            html! {
-                                                <>
-                                                    <span class="amount">{format!("${:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0)/3.0)}</span>
-                                                    <span class="period">{" per notification"}</span>
-                                                </>
-                                            }
-                                        } else {
-                                            html! {
-                                                <>
-                                                    <span class="amount">{format!("€{:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0)/2.0)}</span>
-                                                    <span class="period">{" per notification"}</span>
-                                                </>
-                                            }
-                                        }
+                            {
+                                if props.is_logged_in {
+                                    html! {
+                                        <div class="topup-toggle">
+                                            <p>{"Choose your auto-top-up package size in your account billing."}</p>
+                                            <button class="iq-button signup-button" onclick={Callback::from(move |e: MouseEvent| {
+                                                e.prevent_default();
+                                                if let Some(window) = web_sys::window() {
+                                                    let _ = window.location().set_href("/billing");
+                                                }
+                                            })}><b>{"Go to Billing"}</b></button>
+                                        </div>
                                     }
-                                </div>
-                            </div>
+                                } else {
+                                    html! {}
+                                }
+                            }
                         </div>
-                    </div>
-                </div>
-                {
-                    if props.is_logged_in {
-                        html! {
-                            <div class="topup-toggle">
-                                <p>{"Choose your auto-top-up package size in your account billing."}</p>
-                                <button class="iq-button signup-button" onclick={Callback::from(move |e: MouseEvent| {
-                                    e.prevent_default();
-                                    if let Some(window) = web_sys::window() {
-                                        let _ = window.location().set_href("/billing");
-                                    }
-                                })}><b>{"Go to Billing"}</b></button>
-                            </div>
-                        }
-                    } else {
-                        html! {}
                     }
+                } else {
+                    html! {}
                 }
-            </div>
+            }
 
             <FeatureList selected_country={(*selected_country).clone()} />
 
