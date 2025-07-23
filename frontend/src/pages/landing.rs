@@ -1,4 +1,3 @@
-
 use yew::prelude::*;
 use crate::auth::connect::Connect;
 use wasm_bindgen::prelude::*;
@@ -47,7 +46,7 @@ pub fn landing() -> Html {
                 let scroll_pos = window_clone.scroll_y().unwrap();
                 let window_height = window_clone.inner_height().unwrap().as_f64().unwrap();
                 
-                let sticky_scroll = scroll_pos - (window_height*2.3 * 1.2);  // Increased to 0.5 to delay appearance
+                let sticky_scroll = scroll_pos - (window_height*2.3 * 1.7);  // Increased to 0.5 to delay appearance
                 let sticky_duration = window_height*2.3 * 4.0;  // Keep this the same
                 
                 // Calculate intro section opacity based on scroll position
@@ -66,14 +65,14 @@ pub fn landing() -> Html {
                 let current_classes = intro_section.class_name();
                 let base_classes = "intro-section";
                 
-                if scroll_pos > window_height*2.3 * 0.8 {  // Increased to 0.6 to start transition later
+                if scroll_pos > window_height*2.3 * 1.1 {  // Increased to 0.6 to start transition later
                     if !current_classes.contains("visible") {
 
                         intro_section.set_class_name(&format!("{} visible", base_classes));
                     }
                     
                     // Calculate relative scroll position within the sticky section
-                    let sticky_scroll = scroll_pos - (window_height*2.3 * 0.8);  // Increased to match the above change
+                    let sticky_scroll = scroll_pos - (window_height*2.3 * 1.1);  // Increased to match the above change
                     let sticky_duration = window_height * 1.5; // Reduced to 1.5 for shorter duration
                     
                     // Handle image transitions based on sticky scroll position
@@ -162,7 +161,7 @@ pub fn landing() -> Html {
                 <div class="hero-content">
                     <div class="hero-header">
                         <p class="hero-subtitle">
-                            {"Break Phone Addiction Effortlessly: Zero Willpower Required"}
+                            {"Your Personal Robot: Monitors Apps, Filters Noise, Lets You Live Free"}
                         </p>
                     </div>
                     <div class="hero-cta-group">
@@ -176,11 +175,28 @@ pub fn landing() -> Html {
                 </div>
         </header>        
 
+        <section class="story-section">
+            <div class="story-grid">
+                <div class="story-item">
+                    <img src="/assets/lightfriend-robot-scene-1.png" alt="Tired of constant distractions" loading="lazy" />
+                    <p>{"Stuck to your phone?"}</p>
+                </div>
+                <div class="story-item">
+                    <img src="/assets/lightfriend-robot-scene-2.png" alt="Let robot handle monitoring" loading="lazy" />
+                    <p>{"Let your lightfriend monitor apps."}</p>
+                </div>
+                <div class="story-item">
+                    <img src="/assets/lightfriend-robot-scene-3.png" alt="Live life freely" loading="lazy" />
+                    <p>{"Live free, call when needed."}</p>
+                </div>
+            </div>
+        </section>
+
             <div class="filter-concept">
                 <div class="filter-content">
                     <div class="filter-text">
-                        <h2>{"Your Digital Filter"}</h2>
-                        <p>{"Lightfriend acts as your intelligent filter between all your digital services and your phone. Whether you use a dumbphone or want to silence your smartphone, Lightfriend ensures you never miss what's truly important."}</p>
+                        <h2>{"Your Robot Filter"}</h2>
+                        <p>{"Lightfriend, your personal robot, filters digital services to your phone so you only get what's important."}</p>
                     </div>
                     <div class="filter-image">
                         <img src="/assets/lightfriend-filter.png" alt="Lightfriend filtering concept" loading="lazy" />
@@ -191,12 +207,12 @@ pub fn landing() -> Html {
             <div class="feature-block">
                 <div class="feature-content">
                     <h2>{"Filter the Noise"}</h2>
-                    <p>{"Lightfriend sends instant SMS/call alerts ONLY for critical messages, emails or events."}</p>
+                    <p>{"Get alerts only for what matters."}</p>
                     <ul class="feature-list">
-                        <li>{"🔔 Instant SMS/Call Alerts for Critical WhatsApp Messages or Emails"}</li>
-                        <li>{"⏰ Scheduled SMS Summaries of received messages and upcoming events"}</li>
-                        <li>{"⭐ Priority Sender Notifications"}</li>
-                        <li>{"🔍 Set Waiting Checks for Specific Content"}</li>
+                        <li>{"🔔 Instant Alerts for Critical Messages"}</li>
+                        <li>{"⏰ Scheduled Summaries"}</li>
+                        <li>{"⭐ Priority Notifications"}</li>
+                        <li>{"🔍 Content Checks"}</li>
                     </ul>
                 </div>
                 <div class="cta-image-container">
@@ -217,12 +233,12 @@ pub fn landing() -> Html {
             <section class="intro-section">
                 <div class="intro-content">
                     <div class="intro-text">
-                        <h2>{"Ask Anything, Anytime"}</h2>
-                        <p>{"Voice call or text from any phone (even dumbphone) to ask about your stuff, search the web with Perplexity or analyze photos."}</p>
+                        <h2>{"Ask Your Lightfriend Anytime"}</h2>
+                        <p>{"Call or text your personal lightfriend for info, web search, or photo analysis."}</p>
                         <ul class="feature-list">
-                            <li><img src="/assets/perplexitylogo.png" loading="lazy" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI Web Search & ☀️ Weather"}</li>
-                            <li>{"📧 Check or Create Messages, Emails, Events & Tasks"}</li>
-                            <li>{"📸 Photo Analysis, Translation & 📱 QR Code Reader (US & AUS only)"}</li>
+                            <li><img src="/assets/perplexitylogo.png" loading="lazy" alt="Perplexity" class="perplexity-logo" /> {"Web Search & Weather"}</li>
+                            <li>{"📧 Check/Create Messages & Events"}</li>
+                            <li>{"📸 Photo Analysis & QR Reader (US/AUS)"}</li>
                         </ul>
                     </div>
 
@@ -241,12 +257,12 @@ pub fn landing() -> Html {
             // Add mobile-only intro content first
             <div class="intro-mobile">
                     <div class="feature-content">
-                        <h2>{"Ask Anything, Anytime"}</h2>
-                        <p>{"Voice call or text from any phone (even dumbphone) to ask about your stuff, search the web with Perplexity or analyze photos."}</p>
+                        <h2>{"Ask Your Robot Anytime"}</h2>
+                        <p>{"Call or text your personal robot for info, web search, or photo analysis."}</p>
                         <ul class="feature-list">
-                            <li><img src="/assets/perplexitylogo.png" loading="lazy" alt="Perplexity" class="perplexity-logo" /> {"Perplexity AI Web Search & ☀️ Weather"}</li>
-                            <li>{"📧 Check or Create Messages, Emails, Events & Tasks"}</li>
-                            <li>{"📸 Photo Analysis, Translation & 📱 QR Code Reader (US & AUS only)"}</li>
+                            <li><img src="/assets/perplexitylogo.png" loading="lazy" alt="Perplexity" class="perplexity-logo" /> {"Web Search & Weather"}</li>
+                            <li>{"📧 Check/Create Messages & Events"}</li>
+                            <li>{"📸 Photo Analysis & QR Reader (US/AUS)"}</li>
                         </ul>
                     </div>
 
@@ -266,20 +282,20 @@ pub fn landing() -> Html {
         </section>
 
         <section class="how-it-works">
-            <h2>{"Off Load Monitoring"}</h2>
-            <p>{"Whether you use a smartphone or dumbphone, Lightfriend lets you stay focused while catching what matters."}</p>
+            <h2>{"Offload to Your Lightfriend"}</h2>
+            <p>{"Stay focused while your robot handles monitoring."}</p>
             <div class="steps-grid">
                 <div class="step">
-                    <h3>{"Connect Your Apps"}</h3>
-                    <p>{"Link your messaging apps, email, and calendar through our secure portal and let Lightfriend monitor them."}</p>
+                    <h3>{"Connect Apps"}</h3>
+                    <p>{"Link your services securely."}</p>
                 </div>
                 <div class="step">
-                    <h3>{"Set Your Priorities"}</h3>
-                    <p>{"Choose what's important - schedule summaries, set waiting checks or priority senders."}</p>
+                    <h3>{"Set Priorities"}</h3>
+                    <p>{"Choose what matters."}</p>
                 </div>
                 <div class="step">
-                    <h3>{"Stay Present"}</h3>
-                    <p>{"Focus on life knowing LightFriend will alert you about important messages. Perfect for both smartphone and dumbphone users."}</p>
+                    <h3>{"Live Present"}</h3>
+                    <p>{"Focus on life, get alerts for important stuff."}</p>
                 </div>
             </div>
         </section>
@@ -287,11 +303,11 @@ pub fn landing() -> Html {
         <footer class="footer-cta">
             <div class="footer-content">
                 <h2>{"Ready for Digital Peace?"}</h2>
-                <p class="subtitle">{"Stop checking your phone constantly. Let LightFriend monitor your messages and notify you only about what matters."}</p>
+                <p class="subtitle">{"Let your personal robot monitor messages and notify only what matters."}</p>
                 <Link<Route> to={Route::Pricing} classes="forward-link">
-                    <button class="hero-cta">{"Start Monitoring Today"}</button>
+                    <button class="hero-cta">{"Start Today"}</button>
                 </Link<Route>>
-                <p class="disclaimer">{"Works with both smartphones and basic phones - even on Nokia 3310. Customize notifications to your needs."}</p>
+                <p class="disclaimer">{"Works with smartphones and basic phones. Customize to your needs."}</p>
                 <div class="development-links">
                     <p>{"Source code on "}
                         <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">{"GitHub"}</a>
@@ -1260,6 +1276,11 @@ pub fn landing() -> Html {
             margin-top: 2rem;
         }
 
+        .section-intro {
+            padding: 1.5rem;
+            margin-top: 2rem;
+        }
+
         .section-header h2 {
             font-size: 2rem;
         }
@@ -1304,6 +1325,64 @@ pub fn landing() -> Html {
     .development-links a:hover::after {
         transform: scaleX(1);
         transform-origin: bottom left;
+    }
+
+    .story-section {
+        padding: 4rem 2rem;
+        max-width: 1200px;
+        margin: 0 auto;
+        text-align: center;
+        position: relative;
+        z-index: 2;
+    }
+
+    .story-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 2rem;
+    }
+
+    .story-item {
+        background: rgba(30, 30, 30, 0.8);
+        border: 1px solid rgba(30, 144, 255, 0.15);
+        border-radius: 24px;
+        padding: 1.5rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .story-item:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
+    }
+
+    .story-item img {
+        max-width: 100%;
+        height: auto;
+        border-radius: 12px;
+        margin-bottom: 1rem;
+    }
+
+    .story-item p {
+        color: #999;
+        font-size: 1.1rem;
+        margin: 0;
+    }
+
+    @media (max-width: 768px) {
+        .story-section {
+            padding: 2rem 1rem;
+        }
+
+        .story-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .story-item p {
+            font-size: 1rem;
+        }
     }
                    
                 "#}

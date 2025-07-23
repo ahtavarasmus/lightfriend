@@ -225,6 +225,13 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         html! { <button onclick={onclick} class="iq-button signup-button"><b>{"Get Started"}</b></button> }
     };
 
+    let image_url = match props.subscription_type.as_str() {
+        "diy" => "/assets/diy-tier-image.png",
+        "self_hosting" => "/assets/easy-self-host-image.png",
+        "hosted" => "/assets/hosted-tier-image.png",
+        _ => "",
+    };
+
     html! {
         <div class={classes!("pricing-card", "subscription",
             if props.is_popular { "popular" } else { "" },
@@ -239,8 +246,10 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     html! {}
                 }
             }
-            <div class="card-header">
+            <div class="header-background" style={format!("background-image: url({});", image_url)}>
                 <h3>{props.plan_name.clone()}</h3>
+            </div>
+            <div class="card-content">
                 <p class="best-for">{props.best_for.clone()}</p>
                 <div class="price">
                     <span class="amount">{price_text}</span>
@@ -255,19 +264,19 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                         }) }
                     </ul>
                 </div>
-            </div>
-            {
-                if props.is_self_hosting {
-                    html! {
-                        <div class="learn-more-section">
-                            <a href="/host-instructions" class="learn-more-link">{"Learn how self-hosting works"}</a>
-                        </div>
+                {
+                    if props.is_self_hosting {
+                        html! {
+                            <div class="learn-more-section">
+                                <a href="/host-instructions" class="learn-more-link">{"Learn how self-hosting works"}</a>
+                            </div>
+                        }
+                    } else {
+                        html! {}
                     }
-                } else {
-                    html! {}
                 }
-            }
-            {button}
+                {button}
+            </div>
         </div>
     }
 }
@@ -847,16 +856,10 @@ pub fn pricing(props: &PricingProps) -> Html {
                 }
                 .pricing-grid {
                     display: grid;
-                    grid-template-columns: repeat(3, 1fr);
+                    grid-template-columns: 1fr;
                     gap: 4rem;
                     max-width: 1200px;
                     margin: 4rem auto;
-                }
-
-                @media (max-width: 968px) {
-                    .pricing-grid {
-                        grid-template-columns: 1fr;
-                    }
                 }
 
                 .pricing-panel {
@@ -957,13 +960,14 @@ pub fn pricing(props: &PricingProps) -> Html {
                     background: rgba(30, 30, 30, 0.8);
                     border: 1px solid rgba(30, 144, 255, 0.15);
                     border-radius: 24px;
-                    padding: 2.5rem;
                     position: relative;
                     transition: transform 0.3s ease, box-shadow 0.3s ease;
                     backdrop-filter: blur(10px);
                     box-sizing: border-box;
                     display: flex;
                     flex-direction: column;
+                    padding: 0;
+                    overflow: hidden;
                 }
 
                 .pricing-card:hover {
@@ -1016,11 +1020,43 @@ pub fn pricing(props: &PricingProps) -> Html {
                     font-weight: 500;
                 }
 
-                .card-header {
-                    color: #7EB2FF;
+                .header-background {
+                    position: relative;
+                    height: 200px;
+                    background-size: cover;
+                    background-position: center;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    border-top-left-radius: 24px;
+                    border-top-right-radius: 24px;
+                }
+
+                .header-background::before {
+                    content: '';
+                    position: absolute;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0, 0, 0, 0.3);
+                    border-top-left-radius: 24px;
+                    border-top-right-radius: 24px;
+                }
+
+                .header-background h3 {
+                    color: #ffffff;
                     font-size: 2rem;
-                    margin-bottom: 1rem;
+                    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
+                    z-index: 1;
+                    margin: 0;
+                }
+
+                .card-content {
+                    padding: 1.5rem 2.5rem 2.5rem;
                     flex-grow: 1;
+                    display: flex;
+                    flex-direction: column;
                 }
 
                 .best-for {
