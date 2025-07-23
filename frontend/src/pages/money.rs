@@ -243,10 +243,10 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     }}
                 </div>
                 {
-                    if props.subscription_type == "hosted" && props.selected_country == "US" {
+                    if props.subscription_type == "hosted" {
                         html! {
                             <div class="us-deal-section">
-                                <p class="us-deal-text">{"US Special Offer: Get a free dumbphone with your subscription! ($40 Amazon gift card)"}</p>
+                                <p class="us-deal-text">{"Special Offer: Get a free dumbphone with your subscription! ($40 Amazon gift card)"}</p>
                             </div>
                         }
                     } else {
