@@ -70,9 +70,9 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
             if subscription_type != "basic" && subscription_type != "oracle" && selected_country == "Other" {
                 if let Some(window) = web_sys::window() {
                     if !window.confirm_with_message(
-                        "Have you contacted us to get a coupon code for your country? The base price shown is just a placeholder and the actual price will be set using a coupon code based on your country's pricing. Click OK if you have a coupon code, or Cancel to contact us first."
+                        "Have you contacted us to make sure the service is available in your country?"
                     ).unwrap_or(false) {
-                        let email_url = "mailto:rasmus@ahtava.com?subject=Monitoring%20Plan%20Pricing%20Inquiry&body=Hey,%0A%0AI'm%20interested%20in%20the%20Monitoring%20Plan.%20Could%20you%20please%20provide%20me%20with%20the%20correct%20pricing%20and%20coupon%20code%20for%20my%20country?%0A%0AThanks!";
+                        let email_url = "mailto:rasmus@ahtava.com";
                         let _ = window.location().set_href(email_url);
                         return;
                     }
@@ -401,11 +401,11 @@ pub fn pricing(props: &PricingProps) -> Html {
     }
 
     let hosted_prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 49.00),
-        ("FI".to_string(), 79.00),
-        ("UK".to_string(), 79.00),
-        ("AU".to_string(), 79.00),
-        ("Other".to_string(), 79.00),
+        ("US".to_string(), 99.00),
+        ("FI".to_string(), 99.00),
+        ("UK".to_string(), 99.00),
+        ("AU".to_string(), 99.00),
+        ("Other".to_string(), 99.00),
     ]);
 
     let digital_detox_prices: HashMap<String, f64> = HashMap::from([
@@ -417,11 +417,11 @@ pub fn pricing(props: &PricingProps) -> Html {
     ]);
 
     let self_hosting_prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 15.00),
-        ("FI".to_string(), 15.00),
-        ("UK".to_string(), 15.00),
-        ("AU".to_string(), 15.00),
-        ("Other".to_string(), 15.00),
+        ("US".to_string(), 29.00),
+        ("FI".to_string(), 29.00),
+        ("UK".to_string(), 29.00),
+        ("AU".to_string(), 29.00),
+        ("Other".to_string(), 29.00),
     ]);
 
     let credit_rates: HashMap<String, f64> = HashMap::from([
@@ -516,7 +516,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                         {"rasmus@ahtava.com"}
                                     </a>
                                 </span>
-                                {". Contact to ask for availability and you get a coupon code to use for the subscription to set the correct price."}
+                                {". Contact to ask for availability"}
                             </p>
                             </>
                         }
