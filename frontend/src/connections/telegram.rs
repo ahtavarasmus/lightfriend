@@ -16,7 +16,7 @@ struct TelegramStatus {
 
 #[derive(Deserialize)]
 struct TelegramConnectionResponse {
-    login_link: String,
+    login_url: String,
 }
 
 #[derive(Properties, PartialEq)]
@@ -112,7 +112,7 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         Ok(response) => {
                             match response.json::<TelegramConnectionResponse>().await {
                                 Ok(connection_response) => {
-                                    login_link.set(Some(connection_response.login_link));
+                                    login_link.set(Some(connection_response.login_url));
                                     error.set(None);
 
                                     // Start polling for status

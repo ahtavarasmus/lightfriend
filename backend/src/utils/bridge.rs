@@ -78,9 +78,19 @@ fn get_room_suffix(service: &str) -> String {
 }
 
 fn infer_service(room_name: &str, sender_localpart: &str) -> Option<String> {
-    println!("room_name: {}, sender_localpart: {}", room_name, sender_localpart);
-    if room_name.contains("(WA)") || sender_localpart.starts_with("whatsapp_") { return Some("whatsapp".to_string()); }
-    if room_name.contains("(TG)") || sender_localpart.starts_with("telegram_") { return Some("telegram".to_string()); }
+    println!("room_name: {:?}, sender_localpart: {:?}", room_name, sender_localpart);
+    let sender_localpart = sender_localpart.trim().to_lowercase();
+    let room_name = room_name.to_lowercase();
+
+    if room_name.contains("(wa)") || sender_localpart.starts_with("whatsapp_") || sender_localpart.starts_with("whatsapp") {
+        println!("Detected WhatsApp");
+        return Some("whatsapp".to_string());
+    }
+    if room_name.contains("(tg)") || sender_localpart.starts_with("telegram_") || sender_localpart.starts_with("telegram") {
+        println!("Detected Telegram");
+        return Some("telegram".to_string());
+    }
+    println!("No service detected");
     None
 }
 
@@ -687,6 +697,10 @@ pub async fn handle_bridge_message(
     client: MatrixClient,
     state: Arc<AppState>,
 ) {
+    let running_environment = std::env::var("ENVIRONMENT").unwrap();
+    if running_environment == "development".to_string() {
+        return;
+    }
     tracing::debug!("Entering bridge message handler");
 
     // Get room name
@@ -707,6 +721,7 @@ pub async fn handle_bridge_message(
             return;
         }
     };
+
 
     let room_suffix = get_room_suffix(&service);
     let sender_prefix = get_sender_prefix(&service);

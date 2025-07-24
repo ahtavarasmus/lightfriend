@@ -817,6 +817,12 @@ pub async fn send_conversation_message(
         tracing::error!("Failed to store WhatsApp confirmation message in history: {}", e);
     }
 
+    let running_environment= env::var("ENVIRONMENT")
+            .map_err(|_| "ENVIRONMENT not set")?;
+    if running_environment == "development".to_string() {
+        println!("NOT SENDING MESSAGE SINCE ENVIRONMENT IS DEVELOPMENT");
+        return Ok("dev not sending anything".to_string());
+    }
     let is_self_hosted = user.sub_tier == Some("self_hosted".to_string());
 
     if is_self_hosted {

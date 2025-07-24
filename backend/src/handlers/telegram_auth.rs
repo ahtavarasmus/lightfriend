@@ -158,12 +158,12 @@ async fn connect_telegram(
         return Err(anyhow!("Bot {} failed to join room", bot_user_id));
     }
     // Send cancel command to get rid of the previous login
-    let cancel_command = format!("cancel");
+    let cancel_command = format!("!tg cancel");
     room.send(RoomMessageEventContent::text_plain(&cancel_command)).await?;
 
 
     // Send login command
-    let login_command = format!("login");
+    let login_command = format!("!tg login");
     tracing::debug!("📤 Sending Telegram login command: {}", login_command);
     room.send(RoomMessageEventContent::text_plain(&login_command)).await?;
 
@@ -213,6 +213,8 @@ async fn connect_telegram(
                                     continue;
                                 },
                             };
+
+                            println!("message_body: {}", message_body);
 
                             
                             // More efficient login url extraction
