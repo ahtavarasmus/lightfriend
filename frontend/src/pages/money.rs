@@ -260,6 +260,9 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                             let sub_items = feature.sub_items.iter().map(|sub| html! { <li class="sub-item">{sub}</li> }).collect::<Vec<_>>();
                             vec![main_item].into_iter().chain(sub_items.into_iter())
                         }) }
+                        { if props.subscription_type == "hosted" && props.selected_country != "US" {
+                            html! { <li>{"SMS costs vary ~€0.04-0.40/message, depending on region (normal usage <100 messages per month)"}</li> }
+                        } else { html! {} }}
                     </ul>
                 </div>
                 {
@@ -508,6 +511,7 @@ pub fn pricing(props: &PricingProps) -> Html {
             <div class="pricing-header">
                 <h1>{"Invest in Your Peace of Mind"}</h1>
                 <p>{"Lightfriend makes it possible to seriously switch to a dumbphone, saving you 2-4 hours per day of mindless scrolling.*"}</p>
+                <p>{"Save 120 hours/month at €29!"}</p>
                 {
                     if *selected_country == "Other" {
                         html! {
@@ -630,96 +634,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                 </div>
             </div>
 
-            {
-                if *selected_country != "US" {
-                    html! {
-                        <div class="topup-pricing">
-                            <h2>{format!("Overage Rates for {}", *selected_country)}</h2>
-                            <p>{"When you exceed your quota on the Hosted Plan, these rates apply via your Twilio account (you control SMS costs, e.g., ~€0.05-0.30/message depending on country). Enable auto-top-up to automatically add credits when you run low. Unused credits carry over indefinitely. These are used to answer user-initiated questions, send notifications from priority senders, and daily digests. On the Easy Self-Hosting Plan, credits are bought directly from Twilio."}</p>
-                            <div class="topup-packages">
-                                <div class="pricing-card main">
-                                    <div class="card-header">
-                                        <div class="package-row">
-                                            <h3>{"Additional Messages:"}</h3>
-                                            <div class="price">
-                                                {
-                                                    if *selected_country == "US" {
-                                                        html! {
-                                                            <span class="amount">{format!("${:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0))}</span>
-                                                        }
-                                                    } else {
-                                                        html! {
-                                                            <span class="amount">{format!("€{:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0))}</span>
-                                                        }
-                                                    }
-                                                }
-                                            </div>
-                                        </div>
-                                        <div class="package-row">
-                                            <h3>{"Additional Priority Sender Notifications:"}</h3>
-                                            <div class="price">
-                                                {
-                                                    if *selected_country == "US" {
-                                                        html! {
-                                                            <>
-                                                                <span class="amount">{format!("${:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0)/3.0)}</span>
-                                                                <span class="period">{" per notification"}</span>
-                                                            </>
-                                                        }
-                                                    } else {
-                                                        html! {
-                                                            <>
-                                                                <span class="amount">{format!("€{:.2}", credit_rates.get(&*selected_country).unwrap_or(&0.0)/2.0)}</span>
-                                                                <span class="period">{" per notification"}</span>
-                                                            </>
-                                                        }
-                                                    }
-                                                }
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            {
-                                if props.is_logged_in {
-                                    html! {
-                                        <div class="topup-toggle">
-                                            <p>{"Choose your auto-top-up package size in your account billing."}</p>
-                                            <button class="iq-button signup-button" onclick={Callback::from(move |e: MouseEvent| {
-                                                e.prevent_default();
-                                                if let Some(window) = web_sys::window() {
-                                                    let _ = window.location().set_href("/billing");
-                                                }
-                                            })}><b>{"Go to Billing"}</b></button>
-                                        </div>
-                                    }
-                                } else {
-                                    html! {}
-                                }
-                            }
-                        </div>
-                    }
-                } else {
-                    html! {}
-                }
-            }
-
             <FeatureList selected_country={(*selected_country).clone()} />
-
-            <div class="phone-number-options">
-                <div class="phone-number-section">
-                    <h2>{"Phone Number Options"}</h2>
-                    <div class="options-grid">
-                        <div class="option-card">
-                            <h3>{"Request New Number"}</h3>
-                            <p>{"US Hosted Plan includes Twilio phone numbers. Outside the US, Hosted Plan requires your own Twilio account for numbers and SMS (we provide setup guides). Self-Hosted Plan also uses your own Twilio account for maximum control. Need help with Twilio setup? Get VIP Setup Support for a one-time $49 fee. Due to regulatory restrictions, we cannot provide numbers in many countries including Germany, India, most African countries, and parts of Asia. Contact us to check availability or use your own Twilio account for global access."}</p>
-                            <a href={format!("mailto:rasmus@ahtava.com?subject=Country%20Availability%20Inquiry%20for%20{}&body=Hey,%0A%0AIs%20the%20service%20available%20in%20{}%3F%0A%0AThanks,%0A",(*country_name).clone(), (*country_name).clone())}>
-                                <button class="iq-button signup-button">{"Check Number Availability"}</button>
-                            </a>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
             <div class="pricing-faq">
                 <h2>{"Common Questions"}</h2>
