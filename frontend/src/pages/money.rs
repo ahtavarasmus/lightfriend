@@ -287,9 +287,9 @@ pub struct FeatureListProps {
 #[function_component(FeatureList)]
 pub fn feature_list(props: &FeatureListProps) -> Html {
     let base_messages_text: String = if props.selected_country == "US" {
-        "Unlimited Messages per month (Hosted) or connect your own Twilio (Self-Hosting)".to_string()
+        "500 Messages per month (Hosted) or connect your own Twilio (Self-Hosting)".to_string()
     } else {
-        "Connect your own Twilio for Messages (Hosted/Self-Hosting)".to_string()
+        "Bring your own twilio for messages".to_string()
     };
 
     html! {
