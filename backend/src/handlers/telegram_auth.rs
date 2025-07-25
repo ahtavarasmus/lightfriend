@@ -157,6 +157,31 @@ async fn connect_telegram(
         println!("❌ Bot failed to join room after all attempts");
         return Err(anyhow!("Bot {} failed to join room", bot_user_id));
     }
+
+    if let Some(room) = client.get_room(&room_id) {
+        let mut options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
+        options.limit = matrix_sdk::ruma::UInt::new(100).unwrap(); // Increase limit to fetch more messages
+        let messages = room.messages(options).await?;
+        println!("Full chat history for room {}:", room_id);
+        for msg in messages.chunk.iter() {
+            if let Ok(event) = msg.raw().deserialize() {
+                if let AnySyncTimelineEvent::MessageLike(
+                    matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event),
+                ) = event {
+                    let event_content = match sync_event {
+                        SyncRoomMessageEvent::Original(original_event) => original_event.content,
+                        SyncRoomMessageEvent::Redacted(_) => continue,
+                    };
+                    let message_body = match event_content.msgtype {
+                        MessageType::Notice(text_content) => text_content.body,
+                        MessageType::Text(text_content) => text_content.body,
+                        _ => continue,
+                    };
+                    println!("Message: {}", message_body);
+                }
+            }
+        }
+    }
     // Send cancel command to get rid of the previous login
     let cancel_command = format!("!tg cancel");
     room.send(RoomMessageEventContent::text_plain(&cancel_command)).await?;
@@ -214,9 +239,6 @@ async fn connect_telegram(
                                 },
                             };
 
-                            println!("message_body: {}", message_body);
-
-                            
                             // More efficient login url extraction
                             if let Some(url) = extract_login_url(&message_body) {
                                 login_url = Some(url);
@@ -243,14 +265,14 @@ async fn connect_telegram(
 
 // Helper function to extract login url more efficiently
 fn extract_login_url(message: &str) -> Option<String> {
-    // Remove backticks and other formatting
+    // Remove backticks and other formatting that might interfere
     let clean_message = message.replace('`', "").replace("*", "");
     
-    // Look for https?:// followed by non-space characters
-    let re = regex::Regex::new(r"(https?://[^\s]+)").ok()?;
+    // Regex to match the full URL within Markdown [text](url) format
+    let re = regex::Regex::new(r"\((https?://[^\)]+)\)").ok()?;
     
     if let Some(captures) = re.captures(&clean_message) {
-        return Some(captures[1].to_string());
+        return Some(captures[1].to_string()); // Capture the URL inside the parentheses
     }
     
     None
@@ -382,7 +404,7 @@ pub async fn get_telegram_status(
         }))),
     }
 }
-                       
+
 
 async fn monitor_telegram_connection(
     client: &MatrixClient,
@@ -391,34 +413,36 @@ async fn monitor_telegram_connection(
     user_id: i32,
     state: Arc<AppState>,
 ) -> Result<(), anyhow::Error> {
-    tracing::debug!("👀 Starting optimized Telegram connection monitoring for user {} in room {}", user_id, room_id);
+    tracing::info!("👀 Starting optimized Telegram connection monitoring for user {} in room {}", user_id, room_id);
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
 
-    // Shorter sync timeout for faster response
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(10));
 
-    // Reduced monitoring duration but more frequent checks
-    for attempt in 1..60 { // Try for about 5 minutes (60 * 5 seconds)
-        tracing::debug!("🔄 Monitoring attempt #{} for user {}", attempt, user_id);
+
+    for attempt in 1..=120 { // Increase to 10 minutes (120 * 5 seconds)
+        tracing::info!("🔄 Monitoring attempt #{} for user {}", attempt, user_id);
+
+        // Send login command to trigger a response
+        if let Some(room) = client.get_room(room_id) {
+            tracing::debug!("📤 Sending login command to verify connection");
+            room.send(RoomMessageEventContent::text_plain("login")).await?;
+        }
 
         let _ = client.sync_once(sync_settings.clone()).await?;
-        
 
         if let Some(room) = client.get_room(room_id) {
-            // Get only recent messages to reduce processing time
             let mut options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
-            options.limit = matrix_sdk::ruma::UInt::new(5).unwrap(); // Reduced from default to 5
+            options.limit = matrix_sdk::ruma::UInt::new(20).unwrap(); // Increase to 20 messages
             let messages = room.messages(options).await?;
-            
+
             for msg in messages.chunk {
                 let raw_event = msg.raw();
                 if let Ok(event) = raw_event.deserialize() {
                     if event.sender() == bot_user_id {
                         if let AnySyncTimelineEvent::MessageLike(
-                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event)
+                            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event),
                         ) = event {
-
-                            let event_content: RoomMessageEventContent = match sync_event {
+                            let event_content = match sync_event {
                                 SyncRoomMessageEvent::Original(original_event) => original_event.content,
                                 SyncRoomMessageEvent::Redacted(_) => continue,
                             };
@@ -429,18 +453,15 @@ async fn monitor_telegram_connection(
                                 _ => continue,
                             };
 
+                            println!("CONTENT: {}", content);
 
-
-                            // Check for successful login message first
-                            if content.contains("Logged in") {
+                            // Check for successful login or already logged in
+                            if content.contains("Logged in") || content.contains("You are already logged in") {
                                 tracing::debug!("🎉 Telegram successfully connected for user {}", user_id);
-                                
-                                // Update bridge status to connected
                                 let current_time = std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .unwrap()
                                     .as_secs() as i32;
-
                                 let new_bridge = NewBridge {
                                     user_id,
                                     bridge_type: "telegram".to_string(),
@@ -449,7 +470,6 @@ async fn monitor_telegram_connection(
                                     data: None,
                                     created_at: Some(current_time),
                                 };
-
                                 state.user_repository.delete_bridge(user_id, "telegram")?;
                                 state.user_repository.create_bridge(new_bridge)?;
 
@@ -457,12 +477,8 @@ async fn monitor_telegram_connection(
                                 let mut matrix_clients = state.matrix_clients.lock().await;
                                 let mut sync_tasks = state.matrix_sync_tasks.lock().await;
 
-                                // Add event handlers before storing/cloning the client
-                                use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
-                                use matrix_sdk::room::Room;
-                                
                                 let state_for_handler = Arc::clone(&state);
-                                client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room, client| {
+                                client.add_event_handler(move |ev: matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent, room: matrix_sdk::room::Room, client| {
                                     let state = Arc::clone(&state_for_handler);
                                     async move {
                                         tracing::debug!("📨 Received message in room {}: {:?}", room.room_id(), ev);
@@ -470,11 +486,9 @@ async fn monitor_telegram_connection(
                                     }
                                 });
 
-                                // Store the client
                                 let client_arc = Arc::new(client.clone());
                                 matrix_clients.insert(user_id, client_arc.clone());
 
-                                // Create sync task
                                 let sync_settings = MatrixSyncSettings::default()
                                     .timeout(Duration::from_secs(30))
                                     .full_state(true);
@@ -484,11 +498,11 @@ async fn monitor_telegram_connection(
                                         match client_arc.sync(sync_settings.clone()).await {
                                             Ok(_) => {
                                                 tracing::debug!("Sync completed normally for user {}", user_id);
-                                                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                                            },
+                                                tokio::time::sleep(Duration::from_secs(1)).await;
+                                            }
                                             Err(e) => {
                                                 tracing::error!("Matrix sync error for user {}: {}", user_id, e);
-                                                tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+                                                tokio::time::sleep(Duration::from_secs(30)).await;
                                             }
                                         }
                                     }
@@ -496,38 +510,23 @@ async fn monitor_telegram_connection(
 
                                 sync_tasks.insert(user_id, handle);
 
-                                // Send sync commands with reduced delays
                                 if let Some(room) = client.get_room(&room_id) {
-                                    // Send both commands quickly without long waits
                                     room.send(RoomMessageEventContent::text_plain("sync contacts")).await?;
                                     tracing::debug!("Sent contacts sync command for user {}", user_id);
-                                    
-                                    // Shorter wait time
                                     sleep(Duration::from_millis(500)).await;
-                                    
                                     room.send(RoomMessageEventContent::text_plain("sync chats")).await?;
                                     tracing::debug!("Sent chats sync command for user {}", user_id);
                                 } else {
                                     tracing::error!("Telegram room not found for sync commands");
                                 }
 
-
                                 return Ok(());
                             }
 
-
-                            // Check for error messages with more specific patterns
                             let error_patterns = [
-                                "error",
-                                "failed",
-                                "timeout",
-                                "disconnected",
-                                "invalid code",
-                                "connection lost",
-                                "authentication failed",
-                                "login failed"
+                                "error", "failed", "timeout", "disconnected", "invalid code",
+                                "connection lost", "authentication failed", "login failed",
                             ];
-
                             if error_patterns.iter().any(|&pattern| content.to_lowercase().contains(pattern)) {
                                 tracing::error!("❌ Telegram connection failed for user {}: {}", user_id, content);
                                 state.user_repository.delete_bridge(user_id, "telegram")?;
@@ -539,15 +538,12 @@ async fn monitor_telegram_connection(
             }
         }
 
-        // Shorter sleep between checks for faster response
-        sleep(Duration::from_secs(3)).await; // Reduced from 5 to 3 seconds
+        sleep(Duration::from_secs(5)).await; // Increase to 5 seconds for stability
     }
 
-    // If we reach here, connection timed out
     state.user_repository.delete_bridge(user_id, "telegram")?;
-    Err(anyhow!("Telegram connection timed out after 3 minutes"))
+    Err(anyhow!("Telegram connection timed out after 10 minutes"))
 }
-
 
 pub async fn resync_telegram(
     State(state): State<Arc<AppState>>,

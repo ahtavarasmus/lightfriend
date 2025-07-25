@@ -868,11 +868,6 @@ pub async fn send_conversation_message(
         )
     };
 
-    let messaging_service_sid = if user.discount_tier.as_deref() == Some("msg") {
-        env::var(format!("TWILIO_MESSAGING_SERVICE_SID_{}", user.id)).ok()
-    } else {
-        env::var("TWILIO_MESSAGING_SERVICE_SID").ok()
-    };
 
     let client = Client::new();
 
@@ -884,9 +879,10 @@ pub async fn send_conversation_message(
 
     // Use MessagingServiceSid for US recipients if available
     let user_preferred_number = user.preferred_number.clone().unwrap();
-    let use_messaging_service = user_preferred_number.starts_with("+1") && messaging_service_sid.is_some();
-    let sid = messaging_service_sid.clone().unwrap(); 
+    let use_messaging_service = user_preferred_number.starts_with("+1");
+    let mut sid: String;
     if use_messaging_service {
+        sid = env::var("TWILIO_MESSAGING_SERVICE_SID")?;
         form_data.push(("MessagingServiceSid", sid.as_str())); 
     } else {
         form_data.push(("From", user_preferred_number.as_str()));
