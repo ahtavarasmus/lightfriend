@@ -491,10 +491,6 @@ pub fn pricing(props: &PricingProps) -> Html {
             text: "Use your own Twilio account for SMS and numbers".to_string(),
             sub_items: vec![],
         },
-        Feature {
-            text: "Premium privacy at a fair price".to_string(),
-            sub_items: vec![],
-        },
     ];
 
     let hosted_features = vec![
@@ -546,7 +542,7 @@ pub fn pricing(props: &PricingProps) -> Html {
             <div class="pricing-header">
                 <h1>{"Invest in Your Peace of Mind"}</h1>
                 <p>{"Lightfriend makes it possible to seriously switch to a dumbphone, saving you 2-4 hours per day of mindless scrolling.*"}</p>
-                <p>{"Save 120 hours/month at €29!"}</p>
+                <p>{"Save 120 hours/month starting at €19!"}</p>
                 {
                     if *selected_country == "Other" {
                         html! {
@@ -660,7 +656,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <div class="faq-grid">
                     <details>
                         <summary>{"How does billing work?"}</summary>
-                        <p>{"Hosted and Self-Hosted Plans bill monthly ($29 or $49). Digital Detox Trial is $9/week, then $29/month Hosted. Extra messages cost via Lightfriend (US Hosted) or your Twilio (Intl Hosted/Self-Hosted). Credits carry over. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                        <p>{"Hosted and Self-Hosted Plans bill monthly. Digital Detox Trial is billed for the first week, then transitioned to Hosted unless canceled. Extra messages cost via Lightfriend (US Hosted) or your Twilio (Intl Hosted/Self-Hosted). Credits carry over. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
                     </details>
                     <details>
                         <summary>{"What counts as a Message?"}</summary>
@@ -668,7 +664,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     </details>
                     <details>
                         <summary>{"Hosted vs. Self-Hosted: What's the difference?"}</summary>
-                        <p>{"Hosted ($29/month) is the easiest start - no setup in the US (Twilio included) or minimal for intl (bring your own Twilio, guided) - but requires some trust since I bridge messaging apps. I don’t log anything, and the code’s open-source. Self-hosted ($49/month) takes 30-60 mins to set up (guided) and gives you 100% zero-access privacy with global access using your Twilio. Your data is locked down and secure either way."}</p>
+                        <p>{"Hosted is the easiest start - no setup in the US (Twilio included) or minimal for intl (bring your own Twilio, guided) - but requires some trust since I bridge messaging apps. I don’t log anything, and the code’s open-source. Self-hosted takes 30-60 mins to set up (guided) and gives you 100% zero-access privacy with global access using your Twilio. Your data is locked down and secure either way."}</p>
                     </details>
                     <details>
                         <summary>{"Is it available in my country?"}</summary>
