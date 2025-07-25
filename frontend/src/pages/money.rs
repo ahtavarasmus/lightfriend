@@ -156,10 +156,13 @@ pub struct PricingCardProps {
 
 #[function_component(PricingCard)]
 pub fn pricing_card(props: &PricingCardProps) -> Html {
-    let mut price_text = format!("{}{:.2}", props.currency, props.price);
-    if props.subscription_type == "hosted" || props.subscription_type == "self_hosting" {
-        price_text = format!("{}{:.2}", props.currency, props.price / 30.00);
-    }
+    let price_text = if props.subscription_type == "self_hosting" {
+        format!("{}0.00", props.currency) // Show $0.00 or €0.00 for self-hosted plan
+    } else if props.subscription_type == "hosted" || props.subscription_type == "self_hosting" {
+        format!("{}{:.2}", props.currency, props.price / 30.00) // Normal pricing for other plans
+    } else {
+        format!("{}{:.2}", props.currency, props.price)
+    };
 
     let effective_tier = if props.subscription_type == "hosted" || props.subscription_type == "digital_detox" {
         "tier 2".to_string()
@@ -212,8 +215,8 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
 
     html! {
         <div class={classes!("pricing-card", "subscription",
-            if props.is_popular || props.is_popular { "popular" } else { "" },
-            if props.is_premium  { "premium" } else { "" },
+            if props.is_popular { "popular" } else { "" },
+            if props.is_premium { "premium" } else { "" },
             if props.is_self_hosting { "self-hosting" } else { "" })}>
             {
                 if props.is_popular {
@@ -222,6 +225,8 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     html! { <div class="popular-tag">{"Simplest"}</div> }
                 } else if props.is_trial {
                     html! { <div class="premium-tag">{"Take a Challenge!"}</div> }
+                } else if props.is_self_hosting {
+                    html! { <div class="promo-tag">{"First 10 Customers Free"}</div> }
                 } else {
                     html! {}
                 }
@@ -236,7 +241,15 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     <span class="amount">{price_text}</span>
                     <span class="period">{props.period.clone()}</span>
                     { if props.subscription_type == "hosted" || props.subscription_type == "self_hosting" { 
-                        html! { <p class="billing-note">{"Billed monthly at "}{format!("{}{:.2}", props.currency, props.price)}</p> }
+                        html! { 
+                            <p class="billing-note">
+                                {if props.subscription_type == "self_hosting" {
+                                    "Free for first 10 customers on launch, sign up now for free to know about the launch!".to_string()
+                                } else {
+                                    format!("Billed monthly at {}{:.2}", props.currency, props.price)
+                                }}
+                            </p> 
+                        }
                     } else if props.subscription_type == "digital_detox" {
                         html! { <p class="billing-note">{"Billed monthly at "}{format!("{}{:.2}", props.currency, props.hosted_prices.get(&props.selected_country).unwrap_or(&0.0))}{" after trial"}</p> }
                     } else { 
@@ -244,11 +257,20 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     }}
                 </div>
                 {
-                    if props.subscription_type == "self_hosting" {
+                    /*if props.subscription_type == "self_hosting" {
+                    */
+                    if false {
                         html! {
-                            <div class="us-deal-section">
-                                <p class="us-deal-text">{"Special Offer: Get a free dumbphone with your subscription! ($40 Amazon gift card)"}</p>
-                            </div>
+                            <>
+                                <div class="us-deal-section">
+                                    <p class="us-deal-text">{"Special Offer: Get a free dumbphone with your subscription! ($40 Amazon gift card)"}</p>
+                                </div>
+                                <div class="signup-notification-section">
+                                    <a href="/register?notify=self-hosted" class="signup-notification-link">
+                                        {"Sign up now for free to be informed when Self-Hosted launches"}
+                                    </a>
+                                </div>
+                            </>
                         }
                     } else {
                         html! {}
@@ -406,11 +428,11 @@ pub fn pricing(props: &PricingProps) -> Html {
     }
 
     let hosted_prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 29.00),
-        ("FI".to_string(), 29.00),
-        ("UK".to_string(), 29.00),
-        ("AU".to_string(), 29.00),
-        ("Other".to_string(), 29.00),
+        ("US".to_string(), 19.00),
+        ("FI".to_string(), 19.00),
+        ("UK".to_string(), 19.00),
+        ("AU".to_string(), 19.00),
+        ("Other".to_string(), 19.00),
     ]);
 
     let digital_detox_prices: HashMap<String, f64> = HashMap::from([
@@ -422,11 +444,11 @@ pub fn pricing(props: &PricingProps) -> Html {
     ]);
 
     let self_hosting_prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 49.00),
-        ("FI".to_string(), 49.00),
-        ("UK".to_string(), 49.00),
-        ("AU".to_string(), 49.00),
-        ("Other".to_string(), 49.00),
+        ("US".to_string(), 29.00),
+        ("FI".to_string(), 29.00),
+        ("UK".to_string(), 29.00),
+        ("AU".to_string(), 29.00),
+        ("Other".to_string(), 29.00),
     ]);
 
     let credit_rates: HashMap<String, f64> = HashMap::from([
@@ -615,10 +637,10 @@ pub fn pricing(props: &PricingProps) -> Html {
                         period="/day"
                         features={self_hosting_features.clone()}
                         subscription_type="self_hosting"
-                        is_popular=true
+                        is_popular=false
                         is_premium=false
                         is_trial=false
-                        is_self_hosting=true
+                        is_self_hosting={true}
                         user_id={props.user_id}
                         user_email={props.user_email.clone()}
                         is_logged_in={props.is_logged_in}
@@ -685,6 +707,37 @@ pub fn pricing(props: &PricingProps) -> Html {
                 }
 
                 .learn-more-link:hover {
+                    color: #7EB2FF;
+                    text-decoration: underline;
+                }
+
+                .promo-tag {
+                    position: absolute;
+                    top: -15px;
+                    right: 20px;
+                    background: linear-gradient(45deg, #00FFFF, #00CED1);
+                    color: white;
+                    padding: 0.5rem 1rem;
+                    border-radius: 20px;
+                    font-size: 0.9rem;
+                    font-weight: 500;
+                    z-index: 4;
+                }
+
+                .signup-notification-section {
+                    text-align: center;
+                    margin: 1rem 0;
+                }
+
+                .signup-notification-link {
+                    color: #00FFFF;
+                    text-decoration: none;
+                    font-size: 1rem;
+                    font-weight: 500;
+                    transition: color 0.3s ease;
+                }
+
+                .signup-notification-link:hover {
                     color: #7EB2FF;
                     text-decoration: underline;
                 }
