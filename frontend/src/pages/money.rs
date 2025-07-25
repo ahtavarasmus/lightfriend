@@ -648,12 +648,8 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <p>{"Voice calls (1 min = 1 Message), text queries (1 query = 1 Message), daily digests (1 digest = 1 Message), priority sender notifications (1 notification = 1/2 Message). Critical monitoring and custom checks are free."}</p>
                     </details>
                     <details>
-                        <summary>{"Is my data private and secure?"}</summary>
-                        <p>{"Your data is locked down and secure. Since I’m a solo dev, the hosted version - where I bridge messaging apps for you - needs a bit of trust in me. I don’t log anything, the code’s open-source, and it’s the easiest way to get started. Want full control? The self-hosted option is 100% zero-access private, but it requires a bit of setting up first."}</p>
-                    </details>
-                    <details>
                         <summary>{"Hosted vs. Self-Hosted: What's the difference?"}</summary>
-                        <p>{"Hosted ($29/month): Requires trusting me, but it's the simplest to start — no setup in US (Twilio included), minimal for intl (bring your own Twilio, guided). Self-Hosted ($49/month): Requires setup (30-60 mins, guided), but delivers full zero-access privacy and global access with your Twilio."}</p>
+                        <p>{"Hosted ($29/month) is the easiest start - no setup in the US (Twilio included) or minimal for intl (bring your own Twilio, guided) - but requires some trust since I bridge messaging apps. I don’t log anything, and the code’s open-source. Self-hosted ($49/month) takes 30-60 mins to set up (guided) and gives you 100% zero-access privacy with global access using your Twilio. Your data is locked down and secure either way."}</p>
                     </details>
                     <details>
                         <summary>{"Is it available in my country?"}</summary>
