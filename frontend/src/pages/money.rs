@@ -150,6 +150,8 @@ pub struct PricingCardProps {
     #[prop_or(false)]
     pub coming_soon: bool,
     pub hosted_prices: HashMap<String, f64>,
+    #[prop_or_default]
+    pub children: Children,
 }
 
 #[function_component(PricingCard)]
@@ -204,10 +206,8 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
     };
 
     let image_url = match props.subscription_type.as_str() {
-        "self_hosting" => "/assets/easy-self-host-image.png",
-        "hosted" => "/assets/hosted-tier-image.png",
-        "digital_detox" => "/assets/digital-detox-image.png",
-        _ => "",
+        "self_hosting" => "/assets/self-host-image.png",
+        _ => "/assets/hosted-image.png",
     };
 
     html! {
@@ -230,6 +230,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                 <h3>{props.plan_name.clone()}</h3>
             </div>
             <div class="card-content">
+                { for props.children.iter() }
                 <p class="best-for">{props.best_for.clone()}</p>
                 <div class="price">
                     <span class="amount">{price_text}</span>
@@ -260,7 +261,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                             let sub_items = feature.sub_items.iter().map(|sub| html! { <li class="sub-item">{sub}</li> }).collect::<Vec<_>>();
                             vec![main_item].into_iter().chain(sub_items.into_iter())
                         }) }
-                        { if props.subscription_type == "hosted" && props.selected_country != "US" {
+                        { if (props.subscription_type == "hosted" || props.subscription_type == "digital_detox") && props.selected_country != "US" {
                             html! { <li>{"SMS costs vary ~€0.04-0.40/message, depending on region (normal usage <100 messages per month)"}</li> }
                         } else { html! {} }}
                     </ul>
@@ -506,6 +507,18 @@ pub fn pricing(props: &PricingProps) -> Html {
 
     let currency_symbol = if *selected_country == "US" { "$" } else { "€" };
 
+    let hosted_mode = use_state(|| "hosted".to_string());
+
+    let onclick_trial = {
+        let hosted_mode = hosted_mode.clone();
+        Callback::from(move |_| hosted_mode.set("trial".to_string()))
+    };
+
+    let onclick_hosted = {
+        let hosted_mode = hosted_mode.clone();
+        Callback::from(move |_| hosted_mode.set("hosted".to_string()))
+    };
+
     html! {
         <div class="pricing-panel">
             <div class="pricing-header">
@@ -563,17 +576,17 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <h2 class="section-title">{"Hosted Plans"}</h2>
                 <div class="pricing-grid">
                     <PricingCard
-                        plan_name="Digital Detox Trial"
-                        best_for="Try our full-featured cloud service for a week."
-                        price={digital_detox_total_price}
+                        plan_name={if *hosted_mode == "trial" {"Digital Detox Trial"} else {"Hosted Plan"}}
+                        best_for={if *hosted_mode == "trial" {"Try our full-featured cloud service for a week."} else {"Full-featured cloud service ready to go."}}
+                        price={if *hosted_mode == "trial" {*digital_detox_total_price} else {*hosted_total_price}}
                         currency={if *selected_country == "US" { "$" } else { "€" }}
-                        period="/week"
-                        features={digital_detox_features.clone()}
-                        subscription_type="digital_detox"
-                        is_popular=false
-                        is_premium=false
-                        is_trial=true
-                        is_self_hosting=false
+                        period={if *hosted_mode == "trial" {"/week"} else {"/day"}}
+                        features={if *hosted_mode == "trial" {digital_detox_features.clone()} else {hosted_features.clone()}}
+                        subscription_type={if *hosted_mode == "trial" {"digital_detox"} else {"hosted"}}
+                        is_popular={false}
+                        is_premium={*hosted_mode == "hosted"}
+                        is_trial={*hosted_mode == "trial"}
+                        is_self_hosting={false}
                         user_id={props.user_id}
                         user_email={props.user_email.clone()}
                         is_logged_in={props.is_logged_in}
@@ -582,28 +595,12 @@ pub fn pricing(props: &PricingProps) -> Html {
                         selected_country={(*selected_country).clone()}
                         coming_soon={false}
                         hosted_prices={hosted_prices.clone()} 
-                    />
-                    <PricingCard
-                        plan_name="Hosted Plan"
-                        best_for="Full-featured cloud service ready to go."
-                        price={hosted_total_price}
-                        currency={if *selected_country == "US" { "$" } else { "€" }}
-                        period="/day"
-                        features={hosted_features.clone()}
-                        subscription_type="hosted"
-                        is_popular=false
-                        is_premium=true
-                        is_trial=false
-                        is_self_hosting=false
-                        user_id={props.user_id}
-                        user_email={props.user_email.clone()}
-                        is_logged_in={props.is_logged_in}
-                        verified={props.verified}
-                        sub_tier={props.sub_tier.clone()}
-                        selected_country={(*selected_country).clone()}
-                        coming_soon={false}
-                        hosted_prices={hosted_prices.clone()} 
-                    />
+                    >
+                        <div class="toggle-container">
+                            <button class={classes!("toggle-button", if *hosted_mode == "trial" {"active"} else {""})} onclick={onclick_trial}>{"Week Trial"}</button>
+                            <button class={classes!("toggle-button", if *hosted_mode == "hosted" {"active"} else {""})} onclick={onclick_hosted}>{"Month Hosted"}</button>
+                        </div>
+                    </PricingCard>
                 </div>
             </div>
 
@@ -812,8 +809,8 @@ pub fn pricing(props: &PricingProps) -> Html {
 
                 .pricing-card {
                     flex: 1;
-                    min-width: 250px;
-                    max-width: 350px;
+                    min-width: 0;
+                    max-width: 100%;
                     background: rgba(30, 30, 30, 0.8);
                     border: 1px solid rgba(30, 144, 255, 0.15);
                     border-radius: 24px;
@@ -824,6 +821,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     display: flex;
                     flex-direction: column;
                     padding: 0;
+                    width: 100%;
                 }
                 .pricing-card:hover {
                     transform: translateY(-5px);
@@ -888,7 +886,7 @@ pub fn pricing(props: &PricingProps) -> Html {
 
                 .header-background {
                     position: relative;
-                    height: 200px;
+                    height: 750px;
                     background-size: cover;
                     background-position: center;
                     display: flex;
@@ -1168,27 +1166,46 @@ pub fn pricing(props: &PricingProps) -> Html {
                 }
 
                 @media (max-width: 968px) {
-                    .pricing-grid {
-                        flex-direction: column;
-                        align-items: center;
+                    .pricing-header h1 {
+                        font-size: 2.5rem;
                     }
 
-                    .pricing-card {
-                        max-width: 400px;
-                        width: 100%;
+                    .pricing-panel {
+                        padding: 4rem 1rem;
                     }
-                    .options-grid {
-                        grid-template-columns: 1fr;
-                    } 
-                    .package-row {
-                        flex-direction: column;
-                        text-align: center;
-                        gap: 0.5rem;
+
+                    .feature-list {
+                        padding: 1.5rem;
+                        margin: 2rem 1rem;
+                        max-width: calc(100vw - 2rem);
+                    }
+                    .pricing-card {
+                        min-width: 0;
+                        width: 100%;
+                        padding: 1rem;
+                    }
+                    .toggle-container {
+                        top: 5px;
+                        max-width: 250px;
+                        padding: 2px;
+                    }
+                    .toggle-button {
+                        padding: 0.5rem 1rem;
+                        font-size: 0.9rem;
+                    }
+                    .header-background {
+                        height: 150px;
+                    }
+                    .card-content {
+                        padding: 1rem;
+                    }
+                    .price .amount {
+                        font-size: 2.5rem;
                     }
                 }
                 @media (min-width: 969px) {
                     .pricing-card {
-                        flex: 0 1 33%;
+                        flex: 0 1 100%;
                     }
                 }
 
@@ -1456,6 +1473,43 @@ pub fn pricing(props: &PricingProps) -> Html {
                     margin-bottom: 1rem;
                 }
 
+                .toggle-container {
+                    display: flex;
+                    justify-content: center;
+                    margin-bottom: 1rem;
+                    background: rgba(30, 30, 30, 0.9);
+                    border-radius: 50px;
+                    padding: 4px;
+                    border: 1px solid rgba(30, 144, 255, 0.3);
+                    max-width: 300px;
+                    margin: 1rem auto;
+                    position: absolute;
+                    top: 10px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                }
+
+                .toggle-button {
+                    padding: 0.8rem 1.5rem;
+                    background: transparent;
+                    border: none;
+                    color: #fff;
+                    font-size: 1rem;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                    border-radius: 50px;
+                    flex: 1;
+                }
+
+                .toggle-button.active {
+                    background: linear-gradient(45deg, #1E90FF, #4169E1);
+                    box-shadow: 0 2px 10px rgba(30, 144, 255, 0.3);
+                }
+
+                .toggle-button:hover {
+                    background: rgba(30, 144, 255, 0.2);
+                }
+
                 @media (max-width: 968px) {
                     .pricing-header h1 {
                         font-size: 2.5rem;
@@ -1469,6 +1523,35 @@ pub fn pricing(props: &PricingProps) -> Html {
                         padding: 1.5rem;
                         margin: 2rem 1rem;
                         max-width: calc(100vw - 2rem);
+                    }
+                    .pricing-card {
+                        min-width: 0;
+                        width: 100%;
+                        padding: 1rem;
+                    }
+                    .toggle-container {
+                        top: 5px;
+                        max-width: 250px;
+                        padding: 2px;
+                        width: 90%;
+                    }
+                    .toggle-button {
+                        padding: 0.5rem 1rem;
+                        font-size: 0.9rem;
+                    }
+                    .header-background {
+                        height: 250px;
+                    }
+                    .card-content {
+                        padding: 1rem;
+                    }
+                    .price .amount {
+                        font-size: 2.5rem;
+                    }
+                }
+                @media (min-width: 969px) {
+                    .pricing-card {
+                        flex: 0 1 100%;
                     }
                 }
                 "#}
