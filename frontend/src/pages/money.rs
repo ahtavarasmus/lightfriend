@@ -649,7 +649,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     </details>
                     <details>
                         <summary>{"Is my data private and secure?"}</summary>
-                        <p>{"Hosted requires trusting me (no logging, open-source code), but it's the simplest to start. Self-Hosted is fully zero-access private, but requires setup."}</p>
+                        <p>{"Your data is locked down and secure. Since I’m a solo dev, the hosted version - where I bridge messaging apps for you - needs a bit of trust in me. I don’t log anything, the code’s open-source, and it’s the easiest way to get started. Want full control? The self-hosted option is 100% zero-access private, but it requires a bit of setting up first."}</p>
                     </details>
                     <details>
                         <summary>{"Hosted vs. Self-Hosted: What's the difference?"}</summary>
