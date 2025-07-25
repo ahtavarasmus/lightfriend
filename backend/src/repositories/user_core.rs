@@ -428,71 +428,24 @@ impl UserCore {
     }
 
 
-    pub fn get_whatsapp_temp_variable(&self, user_id: i32) -> Result<Option<(Option<String>, Option<String>, Option<String>)>, DieselError> {
+    pub fn get_temp_variable(&self, user_id: i32, service_type: &str) -> Result<Option<(Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>)>, DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         let temp_var = temp_variables::table
             .filter(temp_variables::user_id.eq(user_id))
-            .filter(temp_variables::confirm_send_event_type.eq("whatsapp"))
-            .first::<TempVariable>(&mut conn)
-            .optional()?;
-            
-        match temp_var {
-            Some(var) => Ok(Some((var.confirm_send_event_recipient, var.confirm_send_event_content, var.confirm_send_event_image_url))),
-            None => Ok(None)
-        }
-    }
-
-    pub fn get_telegram_temp_variable(&self, user_id: i32) -> Result<Option<(Option<String>, Option<String>, Option<String>)>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        let temp_var = temp_variables::table
-            .filter(temp_variables::user_id.eq(user_id))
-            .filter(temp_variables::confirm_send_event_type.eq("telegram"))
-            .first::<TempVariable>(&mut conn)
-            .optional()?;
-            
-        match temp_var {
-            Some(var) => Ok(Some((var.confirm_send_event_recipient, var.confirm_send_event_content, var.confirm_send_event_image_url))),
-            None => Ok(None)
-        }
-    }
-
-    pub fn get_calendar_temp_variable(&self, user_id: i32) -> Result<Option<(Option<String>, Option<String>, Option<String>, Option<String>)>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        let temp_var = temp_variables::table
-            .filter(temp_variables::user_id.eq(user_id))
-            .filter(temp_variables::confirm_send_event_type.eq("calendar"))
+            .filter(temp_variables::confirm_send_event_type.eq(service_type))
             .first::<TempVariable>(&mut conn)
             .optional()?;
             
         match temp_var {
             Some(var) => Ok(Some((
-                var.confirm_send_event_subject,
-                var.confirm_send_event_start_time,
-                var.confirm_send_event_duration,
-                var.confirm_send_event_content,
-            ))),
-            None => Ok(None)
-        }
-    }
-
-    pub fn get_email_temp_variable(&self, user_id: i32) -> Result<Option<(Option<String>, Option<String>, Option<String>, Option<String>)>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        let temp_var = temp_variables::table
-            .filter(temp_variables::user_id.eq(user_id))
-            .filter(temp_variables::confirm_send_event_type.eq("email"))
-            .first::<TempVariable>(&mut conn)
-            .optional()?;
-            
-        match temp_var {
-            Some(var) => Ok(Some((
-                var.confirm_send_event_recipient,
-                var.confirm_send_event_subject,
-                var.confirm_send_event_content,
-                var.confirm_send_event_id
+                var.confirm_send_event_recipient, 
+                var.confirm_send_event_subject, 
+                var.confirm_send_event_content, 
+                var.confirm_send_event_start_time, 
+                var.confirm_send_event_duration, 
+                var.confirm_send_event_id, 
+                var.confirm_send_event_image_url
             ))),
             None => Ok(None)
         }

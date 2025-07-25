@@ -157,31 +157,6 @@ async fn connect_telegram(
         println!("❌ Bot failed to join room after all attempts");
         return Err(anyhow!("Bot {} failed to join room", bot_user_id));
     }
-
-    if let Some(room) = client.get_room(&room_id) {
-        let mut options = matrix_sdk::room::MessagesOptions::new(matrix_sdk::ruma::api::Direction::Backward);
-        options.limit = matrix_sdk::ruma::UInt::new(100).unwrap(); // Increase limit to fetch more messages
-        let messages = room.messages(options).await?;
-        println!("Full chat history for room {}:", room_id);
-        for msg in messages.chunk.iter() {
-            if let Ok(event) = msg.raw().deserialize() {
-                if let AnySyncTimelineEvent::MessageLike(
-                    matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(sync_event),
-                ) = event {
-                    let event_content = match sync_event {
-                        SyncRoomMessageEvent::Original(original_event) => original_event.content,
-                        SyncRoomMessageEvent::Redacted(_) => continue,
-                    };
-                    let message_body = match event_content.msgtype {
-                        MessageType::Notice(text_content) => text_content.body,
-                        MessageType::Text(text_content) => text_content.body,
-                        _ => continue,
-                    };
-                    println!("Message: {}", message_body);
-                }
-            }
-        }
-    }
     // Send cancel command to get rid of the previous login
     let cancel_command = format!("!tg cancel");
     room.send(RoomMessageEventContent::text_plain(&cancel_command)).await?;
@@ -413,7 +388,7 @@ async fn monitor_telegram_connection(
     user_id: i32,
     state: Arc<AppState>,
 ) -> Result<(), anyhow::Error> {
-    tracing::info!("👀 Starting optimized Telegram connection monitoring for user {} in room {}", user_id, room_id);
+    tracing::info!("👀 Starting Telegram connection monitoring for user {} in room {}", user_id, room_id);
     let bot_user_id = OwnedUserId::try_from(bridge_bot)?;
 
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_secs(10));
@@ -642,20 +617,6 @@ pub async fn resync_telegram(
             ));
         }
         tracing::debug!("✅ Sent chats sync command");
-
-        /*
-        // Start accepting invitations for new rooms
-        let client_clone = client.clone();
-        tokio::spawn(async move {
-            // Wait a bit for initial invitations to arrive
-            sleep(Duration::from_secs(5)).await;
-            
-            // Run the invitation acceptance loop for 15 minutes
-            if let Err(e) = accept_room_invitations(client_clone, Duration::from_secs(900)).await {
-                tracing::error!("Error in accept_room_invitations: {}", e);
-            }
-        });
-        */
 
         tracing::debug!("✅ Telegram resync process completed for user {}", auth_user.user_id);
         Ok(AxumJson(json!({

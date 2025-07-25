@@ -956,6 +956,7 @@ pub async fn search_bridge_rooms(
     }
 
     let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
+
     let joined_rooms = client.joined_rooms();
     let search_term_lower = search_term.trim().to_lowercase();
 

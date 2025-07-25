@@ -2,14 +2,14 @@ use axum::{
     extract::{State, Json},
 };
 use serde::Deserialize;
-use crate::{AppState, utils::telegram_utils::{fetch_telegram_messages, TelegramMessage}};
+use crate::{AppState, utils::bridge::{fetch_bridge_messages, BridgeMessage, BridgeRoom}};
 use serde::Serialize;
 use chrono::Utc;
 use crate::handlers::auth_middleware::AuthUser;
 
 #[derive(Serialize)]
 pub struct TelegramMessagesResponse {
-    messages: Vec<crate::utils::telegram_utils::TelegramMessage>,
+    messages: Vec<BridgeMessage>,
 }
 
 #[derive(Deserialize)]
@@ -19,7 +19,7 @@ pub struct SearchTelegramRoomsRequest {
 
 #[derive(Serialize)]
 pub struct SearchTelegramRoomsResponse {
-    rooms: Vec<crate::utils::telegram_utils::TelegramRoom>,
+    rooms: Vec<BridgeRoom>,
 }
 
 #[derive(Deserialize)]
@@ -31,7 +31,7 @@ pub struct SendTelegramMessageRequest {
 
 #[derive(Serialize)]
 pub struct SendTelegramMessageResponse {
-    message: TelegramMessage,
+    message: BridgeMessage,
 }
 
 pub async fn send_message(
@@ -40,7 +40,7 @@ pub async fn send_message(
     Json(request): Json<SendTelegramMessageRequest>,
 ) -> Result<Json<SendTelegramMessageResponse>, String> {
     // Get bridge info first to verify Telegram is connected
-    let bridge = state.user_repository.get_telegram_bridge(auth_user.user_id)
+    let bridge = state.user_repository.get_bridge(auth_user.user_id, "telegram")
         .map_err(|e| format!("Failed to get bridge info: {}", e))?
         .ok_or_else(|| "Telegram bridge not found".to_string())?;
 
@@ -50,8 +50,8 @@ pub async fn send_message(
         return Err("Telegram is not connected".to_string());
     }
 
-    // Send the message using the telegram_utils function
-    match crate::utils::telegram_utils::send_telegram_message(
+    match crate::utils::bridge::send_bridge_message(
+        "telegram", 
         &state,
         auth_user.user_id,
         &request.chat_name,
@@ -75,7 +75,7 @@ pub async fn test_fetch_messages(
 ) -> Result<Json<TelegramMessagesResponse>, String> {
 
     // Get bridge info first
-    let bridge = state.user_repository.get_telegram_bridge(auth_user.user_id)
+    let bridge = state.user_repository.get_bridge(auth_user.user_id, "telegram")
         .map_err(|e| format!("Failed to get bridge info: {}", e))?
         .ok_or_else(|| "Telegram bridge not found".to_string())?;
 
@@ -92,7 +92,7 @@ pub async fn test_fetch_messages(
 
     tracing::info!("Fetching messages from {} to {}", start_time, end_time);
 
-    match crate::utils::telegram_utils::fetch_telegram_messages(&state, auth_user.user_id, start_time, end_time).await {
+    match crate::utils::bridge::fetch_bridge_messages("telegram", &state, auth_user.user_id, start_time, false).await {
         Ok(messages) => {
             tracing::info!("Found {} messages", messages.len());
             
@@ -147,8 +147,7 @@ pub async fn test_fetch_messages(
             tracing::error!("Error fetching messages: {}", e);
             
             // Try to fall back to the older fetch_telegram_messages method
-            tracing::info!("Attempting fallback to fetch_telegram_messages method");
-            match fetch_telegram_messages(&state, auth_user.user_id, start_time, end_time).await {
+            match fetch_bridge_messages("telegram", &state, auth_user.user_id, start_time, false).await {
                 Ok(fallback_messages) => {
                     tracing::info!("Fallback successful, found {} messages", fallback_messages.len());
                     Ok(Json(TelegramMessagesResponse { messages: fallback_messages }))
@@ -171,7 +170,7 @@ pub async fn search_telegram_rooms_handler(
     Json(request): Json<SearchTelegramRoomsRequest>,
 ) -> Result<Json<SearchTelegramRoomsResponse>, String> {
     // Get bridge info first to verify Telegram is connected
-    let bridge = state.user_repository.get_telegram_bridge(auth_user.user_id)
+    let bridge = state.user_repository.get_bridge(auth_user.user_id, "telegram")
         .map_err(|e| format!("Failed to get bridge info: {}", e))?
         .ok_or_else(|| "Telegram bridge not found".to_string())?;
 
@@ -179,7 +178,8 @@ pub async fn search_telegram_rooms_handler(
         return Err("Telegram is not connected".to_string());
     }
 
-    match crate::utils::telegram_utils::search_telegram_rooms(
+    match crate::utils::bridge::search_bridge_rooms(
+        "telegram", 
         &state,
         auth_user.user_id,
         &request.search_term,
@@ -214,11 +214,6 @@ pub async fn search_telegram_rooms_handler(
 use axum::{
     extract::Query,
     http::StatusCode,
-    Extension,
-};
-use crate::{
-    models::user_models::User,
-    utils::telegram_utils::{search_telegram_rooms, TelegramRoom},
 };
 
 #[derive(Deserialize)]
@@ -230,8 +225,8 @@ pub async fn search_rooms_handler(
     State(state): State<std::sync::Arc<AppState>>,
     auth_user: AuthUser,
     Query(params): Query<SearchQuery>,
-) -> Result<Json<Vec<TelegramRoom>>, StatusCode> {
-    match search_telegram_rooms(&state, auth_user.user_id, &params.search).await {
+) -> Result<Json<Vec<BridgeRoom>>, StatusCode> {
+    match crate::utils::bridge::search_bridge_rooms("telegram", &state, auth_user.user_id, &params.search).await {
         Ok(rooms) => Ok(Json(rooms)),
         Err(e) => {
             tracing::error!("Failed to search Telegram rooms for user {}: {}", auth_user.user_id, e);

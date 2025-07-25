@@ -29,8 +29,8 @@ pub async fn handle_confirmation(
     if event_type == &"calendar".to_string() {
         // Handle calendar event confirmation
         // Get the calendar event details from temp variables
-        let (summary, start_time, duration, description) = match state.user_core.get_calendar_temp_variable(user.id) {
-            Ok(Some((summary, start_time, duration_str, description))) => (
+        let (summary, start_time, duration, description) = match state.user_core.get_temp_variable(user.id, "calendar") {
+            Ok(Some((_, summary, description, start_time, duration_str, _, _))) => (
                 summary.unwrap_or_default(),
                 start_time.unwrap_or_default(),
                 duration_str.unwrap_or_default().parse::<i32>().unwrap_or(30),
@@ -164,8 +164,8 @@ pub async fn handle_confirmation(
         }
     } else if event_type == &"whatsapp".to_string() {
         // Get the WhatsApp message details from temp variables
-        let whatsapp_details = match state.user_core.get_whatsapp_temp_variable(user.id) {
-            Ok(Some((recipient, message_content, image_url))) => {
+        let whatsapp_details = match state.user_core.get_temp_variable(user.id, "whatsapp") {
+            Ok(Some((recipient, _, message_content, _, _, _, image_url))) => {
                 (recipient.unwrap_or_default(), message_content.unwrap_or_default(), image_url.unwrap_or("".to_string()))
             },
             _ => {
@@ -275,10 +275,124 @@ pub async fn handle_confirmation(
                 should_continue = true;
             }
         }
+
+    } else if event_type == &"telegram".to_string() {
+        // Get the Telegram message details from temp variables
+        let details = match state.user_core.get_temp_variable(user.id, "telegram") {
+            Ok(Some((recipient, _, message_content, _, _, _, image_url))) => {
+                (recipient.unwrap_or_default(), message_content.unwrap_or_default(), image_url.unwrap_or("".to_string()))
+            },
+            _ => {
+                response = Some((
+                    StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    Json(TwilioResponse {
+                        message: "Failed to send WhatsApp message due to internal error.".to_string(),
+                    })
+                ));
+                // Clear the confirmation state
+                if let Err(e) = state.user_core.clear_confirm_send_event(user.id) {
+                    tracing::error!("Failed to clear confirmation state: {}", e);
+                }
+                return ConfirmationResult {
+                    should_continue,
+                    response,
+                };
+            }
+        };
+
+        let (recipient, message_content, image_url) = details;
+        let image_url_option = if !image_url.is_empty() {
+            Some(image_url)
+        } else {
+            None
+        };
+
+        match user_response.as_str() {
+            "yes" => {
+                // Send the WhatsApp message
+                match crate::utils::bridge::send_bridge_message(
+                    "whatsapp",
+                    state,
+                    user.id,
+                    &recipient,
+                    &message_content,
+                    image_url_option,
+                ).await {
+                    Ok(_) => {
+                        // Send confirmation via Twilio
+                        tracing::info!("SENDING messages since user said yes");
+                        let confirmation_msg = format!("Message sent successfully to {}", recipient);
+                        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                            &state,
+                            conversation_sid,
+                            &confirmation_msg,
+                            None,
+                            user,
+                        ).await {
+                            tracing::error!("Failed to send confirmation message: {}", e);
+                        }
+
+                        response = Some((
+                            StatusCode::OK,
+                            [(axum::http::header::CONTENT_TYPE, "application/json")],
+                            Json(TwilioResponse {
+                                message: confirmation_msg,
+                            })
+                        ));
+                    }
+                    Err(e) => {
+                        // Send error message via Twilio
+                        tracing::debug!("sending failed to send the message to whatsapp sms");
+                        let error_msg = format!("Failed to send message: {} (not charged)", e);
+                        if let Err(send_err) = crate::api::twilio_utils::send_conversation_message(
+                            &state,
+                            conversation_sid,
+                            &error_msg,
+                            None,
+                            user,
+                        ).await {
+                            tracing::error!("Failed to send error message: {}", send_err);
+                        }
+
+                        response = Some((
+                            StatusCode::OK,
+                            [(axum::http::header::CONTENT_TYPE, "application/json")],
+                            Json(TwilioResponse {
+                                message: error_msg,
+                            })
+                        ));
+                    }
+                }
+            }
+            "no" => {
+                let cancel_msg = "WhatsApp message cancelled.";
+                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    &state,
+                    conversation_sid,
+                    cancel_msg,
+                    None,
+                    user,
+                ).await {
+                    tracing::error!("Failed to send cancellation confirmation: {}", e);
+                }
+
+                response = Some((
+                    StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    Json(TwilioResponse {
+                        message: cancel_msg.to_string(),
+                    })
+                ));
+            }
+            _ => {
+                should_continue = true;
+            }
+        }
     } else if event_type == &"email".to_string() {
         // Get the email response details from temp variables
-        let email_details = match state.user_core.get_email_temp_variable(user.id) {
-            Ok(Some((recipient, subject, response_text, email_id))) => {
+        let email_details = match state.user_core.get_temp_variable(user.id, "email") {
+            Ok(Some((recipient, subject, response_text, _, _, email_id, _))) => {
                 (
                     recipient.unwrap_or_default(),
                     subject.unwrap_or_default(),

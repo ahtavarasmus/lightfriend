@@ -1528,7 +1528,8 @@ pub async fn handle_telegram_confirm_send(
     };
 
     // First, try to find the exact room using fetch_telegram_room_messages
-    match crate::utils::telegram_utils::fetch_telegram_room_messages(
+    match crate::utils::bridge::fetch_bridge_room_messages(
+        "telegram", 
         &state,
         user_id,
         &payload.chat_name,
@@ -1909,7 +1910,7 @@ pub async fn handle_telegram_search_tool_call(
     };
 
     // Search for rooms using the existing utility function
-    match crate::utils::telegram_utils::search_telegram_rooms(&state, user_id, &payload.search_term).await {
+    match crate::utils::bridge::search_bridge_rooms("telegram", &state, user_id, &payload.search_term).await {
         Ok(rooms) => {
             if rooms.is_empty() {
                 return Ok(Json(json!({
@@ -2070,7 +2071,7 @@ pub async fn handle_telegram_fetch_specific_room_tool_call(
     };
 
     // Fetch messages using the existing utility function
-    match crate::utils::telegram_utils::fetch_telegram_room_messages(&state, user_id, chat_room, Some(20)).await {
+    match crate::utils::bridge::fetch_bridge_room_messages("telegram", &state, user_id, chat_room, Some(20)).await {
         Ok((messages, room_name)) => {
             if messages.is_empty() {
                 return Ok(Json(json!({
@@ -2239,7 +2240,7 @@ pub async fn handle_telegram_fetch_tool_call(
     };
 
     // Fetch messages using the existing utility function
-    match crate::utils::telegram_utils::fetch_telegram_messages(&state, user_id, start_timestamp, end_timestamp).await {
+    match crate::utils::bridge::fetch_bridge_messages("telegram", &state, user_id, start_timestamp, false).await {
         Ok(messages) => {
             if messages.is_empty() {
                 return Ok(Json(json!({

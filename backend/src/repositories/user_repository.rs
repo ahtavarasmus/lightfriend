@@ -633,7 +633,6 @@ impl UserRepository {
             .optional()?;
 
         if let Some(connection) = connection {
-            tracing::info!("Found active Google Calendar connection for user {}", user_id);
             
             // Decrypt access token
             let access_token = match decrypt(&connection.encrypted_access_token) {
@@ -659,8 +658,6 @@ impl UserRepository {
                 }
             };
             
-
-            tracing::info!("Successfully retrieved and decrypted calendar tokens for user {}", user_id);
             Ok(Some((access_token, refresh_token)))
         } else {
             tracing::info!("No active calendar connection found for user {}", user_id);
@@ -894,42 +891,6 @@ impl UserRepository {
         Ok(())
     }
 
-
-    pub fn get_matrix_credentials(&self, user_id: i32) -> Result<Option<(String, String, String, String)>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let user = users::table
-            .find(user_id)
-            .first::<User>(&mut conn)?;
-
-        match (user.matrix_username, user.encrypted_matrix_access_token, user.matrix_device_id, user.encrypted_matrix_password) {
-            (Some(username), Some(encrypted_token), Some(device_id), Some(encrypted_password)) => {
-                let token = crate::utils::encryption::decrypt(&encrypted_token)
-                    .map_err(|_| DieselError::RollbackTransaction)?;
-                let password= crate::utils::encryption::decrypt(&encrypted_password)
-                    .map_err(|_| DieselError::RollbackTransaction)?;
-                Ok(Some((username, token, device_id, password)))
-            },
-            _ => Ok(None),
-        }
-    }
-
-
-
-    pub fn delete_matrix_credentials(&self, user_id: i32) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        diesel::update(users::table.find(user_id))
-            .set((
-                users::matrix_username.eq::<Option<String>>(None),
-                users::encrypted_matrix_access_token.eq::<Option<String>>(None),
-                users::matrix_device_id.eq::<Option<String>>(None),
-            ))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
-
     pub fn create_bridge(&self, new_bridge: NewBridge) -> Result<(), DieselError> {
         use crate::schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -953,17 +914,6 @@ impl UserRepository {
         Ok(())
     }
 
-    pub fn delete_telegram_bridge(&self, user_id: i32) -> Result<(), DieselError> {
-        use crate::schema::bridges;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        diesel::delete(bridges::table)
-            .filter(bridges::user_id.eq(user_id))
-            .filter(bridges::bridge_type.eq("telegram"))
-            .execute(&mut conn)?;
-
-        Ok(())
-    }
 
     pub fn get_bridge(&self, user_id: i32, service: &str) -> Result<Option<Bridge>, DieselError> {
         use crate::schema::bridges;
@@ -978,18 +928,6 @@ impl UserRepository {
         Ok(bridge)
     }
 
-    pub fn get_telegram_bridge(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
-        use crate::schema::bridges;
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        let bridge = bridges::table
-            .filter(bridges::user_id.eq(user_id))
-            .filter(bridges::bridge_type.eq("telegram"))
-            .first::<Bridge>(&mut conn)
-            .optional()?;
-
-        Ok(bridge)
-    }
 
     pub fn get_active_whatsapp_connection(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
         use crate::schema::bridges;

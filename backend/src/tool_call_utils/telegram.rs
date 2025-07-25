@@ -179,7 +179,8 @@ pub async fn handle_send_telegram_message(
     tracing::info!("IN HANDLE_SEND_TELEGRAM_MESSAGE");
 
     // First search for the chat room
-    match crate::utils::telegram_utils::search_telegram_rooms(
+    match crate::utils::bridge::search_bridge_rooms(
+        "telegram",
         &state,
         user_id,
         &args.chat_name,
@@ -326,7 +327,8 @@ pub async fn handle_search_telegram_rooms(
         }
     };
 
-    match crate::utils::telegram_utils::search_telegram_rooms(
+    match crate::utils::bridge::search_bridge_rooms(
+        "telegram",
         &state,
         user_id,
         &args.search_term,
@@ -379,7 +381,8 @@ pub async fn handle_fetch_telegram_room_messages(
         }
     };
 
-    match crate::utils::telegram_utils::fetch_telegram_room_messages(
+    match crate::utils::bridge::fetch_bridge_room_messages(
+        "telegram", 
         &state,
         user_id,
         &args.chat_name,
@@ -451,19 +454,12 @@ pub async fn handle_fetch_telegram_messages(
         }
     };
 
-    let end_time = match chrono::DateTime::parse_from_rfc3339(&time_frame.end) {
-        Ok(dt) => dt.timestamp(),
-        Err(e) => {
-            eprintln!("Failed to parse end time: {}", e);
-            return "Invalid end time format. Please use RFC3339 format.".to_string();
-        }
-    };
-
-    match crate::utils::telegram_utils::fetch_telegram_messages(
+    match crate::utils::bridge::fetch_bridge_messages(
+        "telegram",
         &state,
         user_id,
         start_time,
-        end_time,
+        false,
     ).await {
         Ok(messages) => {
             if messages.is_empty() {

@@ -56,7 +56,6 @@ mod utils {
     pub mod usage;
     pub mod matrix_auth;
     pub mod bridge;
-    pub mod telegram_utils;
     pub mod elevenlabs_prompts;
     pub mod imap_utils;
     pub mod qr_utils;
@@ -386,6 +385,7 @@ async fn main() {
         .route("/api/auth/telegram/status", get(telegram_auth::get_telegram_status))
         .route("/api/auth/telegram/connect", get(telegram_auth::start_telegram_connection))
         .route("/api/auth/telegram/disconnect", delete(telegram_auth::disconnect_telegram))
+        .route("/api/auth/telegram/resync", post(telegram_auth::resync_telegram))
         .route("/api/telegram/test-messages", get(telegram_handlers::test_fetch_messages))
         .route("/api/telegram/send", post(telegram_handlers::send_message))
         .route("/api/telegram/search-rooms", post(telegram_handlers::search_telegram_rooms_handler))
