@@ -905,7 +905,7 @@ pub async fn stripe_webhook(
                         if is_digital_detox {
                             messages = 60.0;
                         } else if base_price == sentinel_us_id {
-                            messages = 5000.00 - (days_until_billing * amount_of_digests) as f32;
+                            messages = 400.00 - (days_until_billing * amount_of_digests) as f32;
                         } else if is_sentinel_price_id {
                             messages = 200.00 - (days_until_billing * amount_of_digests) as f32;
                         } else if base_price == self_hosting_id {

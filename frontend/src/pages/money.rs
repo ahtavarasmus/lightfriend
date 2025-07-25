@@ -155,7 +155,7 @@ pub struct PricingCardProps {
 #[function_component(PricingCard)]
 pub fn pricing_card(props: &PricingCardProps) -> Html {
     let mut price_text = format!("{}{:.2}", props.currency, props.price);
-    if props.subscription_type == "hosted" {
+    if props.subscription_type == "hosted" || props.subscription_type == "self_hosting" {
         price_text = format!("{}{:.2}", props.currency, props.price / 30.00);
     }
 
@@ -234,7 +234,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                 <div class="price">
                     <span class="amount">{price_text}</span>
                     <span class="period">{props.period.clone()}</span>
-                    { if props.subscription_type == "hosted" { 
+                    { if props.subscription_type == "hosted" || props.subscription_type == "self_hosting" { 
                         html! { <p class="billing-note">{"Billed monthly at "}{format!("{}{:.2}", props.currency, props.price)}</p> }
                     } else if props.subscription_type == "digital_detox" {
                         html! { <p class="billing-note">{"Billed monthly at "}{format!("{}{:.2}", props.currency, props.hosted_prices.get(&props.selected_country).unwrap_or(&0.0))}{" after trial"}</p> }
@@ -243,7 +243,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     }}
                 </div>
                 {
-                    if props.subscription_type == "hosted" {
+                    if props.subscription_type == "self_hosting" {
                         html! {
                             <div class="us-deal-section">
                                 <p class="us-deal-text">{"Special Offer: Get a free dumbphone with your subscription! ($40 Amazon gift card)"}</p>
@@ -286,10 +286,11 @@ pub struct FeatureListProps {
 
 #[function_component(FeatureList)]
 pub fn feature_list(props: &FeatureListProps) -> Html {
-    let mut base_messages_text: String = "Unlimited Messages per month (Hosted) or connect your own Twilio (Self-Hosting)".to_string();
-    if props.selected_country != "US".to_string() {
-        base_messages_text = "200 Messages per month (Hosted) or connect your own Twilio (Self-Hosting)".to_string();
-    }
+    let base_messages_text: String = if props.selected_country == "US" {
+        "Unlimited Messages per month (Hosted) or connect your own Twilio (Self-Hosting)".to_string()
+    } else {
+        "Connect your own Twilio for Messages (Hosted/Self-Hosting)".to_string()
+    };
 
     html! {
         <div class="feature-list">
@@ -401,27 +402,27 @@ pub fn pricing(props: &PricingProps) -> Html {
     }
 
     let hosted_prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 99.00),
-        ("FI".to_string(), 99.00),
-        ("UK".to_string(), 99.00),
-        ("AU".to_string(), 99.00),
-        ("Other".to_string(), 99.00),
-    ]);
-
-    let digital_detox_prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 19.00),
-        ("FI".to_string(), 19.00),
-        ("UK".to_string(), 19.00),
-        ("AU".to_string(), 19.00),
-        ("Other".to_string(), 19.00),
-    ]);
-
-    let self_hosting_prices: HashMap<String, f64> = HashMap::from([
         ("US".to_string(), 29.00),
         ("FI".to_string(), 29.00),
         ("UK".to_string(), 29.00),
         ("AU".to_string(), 29.00),
         ("Other".to_string(), 29.00),
+    ]);
+
+    let digital_detox_prices: HashMap<String, f64> = HashMap::from([
+        ("US".to_string(), 9.00),
+        ("FI".to_string(), 9.00),
+        ("UK".to_string(), 9.00),
+        ("AU".to_string(), 9.00),
+        ("Other".to_string(), 9.00),
+    ]);
+
+    let self_hosting_prices: HashMap<String, f64> = HashMap::from([
+        ("US".to_string(), 49.00),
+        ("FI".to_string(), 49.00),
+        ("UK".to_string(), 49.00),
+        ("AU".to_string(), 49.00),
+        ("Other".to_string(), 49.00),
     ]);
 
     let credit_rates: HashMap<String, f64> = HashMap::from([
@@ -435,7 +436,7 @@ pub fn pricing(props: &PricingProps) -> Html {
     let on_country_change = {
         let selected_country = selected_country.clone();
         Callback::from(move |e: Event| {
-            if let Some(target) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
+            if let Some(target) = e.target_dyn_into::<HtmlSelectElement>() {
                 selected_country.set(target.value());
             }
         })
@@ -453,41 +454,49 @@ pub fn pricing(props: &PricingProps) -> Html {
             sub_items: vec![],
         },
         Feature {
-            text: "Easy to follow instructions and our support".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
             text: "Automatic updates and built-in security".to_string(),
             sub_items: vec![],
         },
         Feature {
-            text: "Available worldwide, even where hosted service isn't".to_string(),
+            text: "Zero-access privacy: full control, no trust required".to_string(),
+            sub_items: vec![],
+        },
+        Feature {
+            text: "Use your own Twilio account for SMS and numbers".to_string(),
+            sub_items: vec![],
+        },
+        Feature {
+            text: "Premium privacy at a fair price".to_string(),
             sub_items: vec![],
         },
     ];
 
     let hosted_features = vec![
         Feature {
-            text: "Fully managed ready to go service hosted in EU".to_string(),
+            text: "Fully managed service hosted in EU".to_string(),
             sub_items: vec![],
         },
         Feature {
-            text: "Includes phone numbers, servers, and everything else".to_string(),
+            text: "US: Twilio numbers included. Intl: Bring your own Twilio (guided setup)".to_string(),
             sub_items: vec![],
         },
         Feature {
-            text: "Automatic updates, security and priority support".to_string(),
+            text: "Automatic updates, security, and priority support".to_string(),
             sub_items: vec![],
         },
         Feature {
-            text: "Simply connect your apps to get started".to_string(),
+            text: "No setup, connect apps and go".to_string(),
+            sub_items: vec![],
+        },
+        Feature {
+            text: "Secure no-logging policy (requires trust, no zero-access)".to_string(),
             sub_items: vec![],
         },
     ];
 
     let digital_detox_features = vec![
         Feature {
-            text: "Experience the full Hosted Plan features for a one-week trial period".to_string(),
+            text: "Full Hosted Plan features for a one-week trial".to_string(),
             sub_items: vec![],
         },
     ];
@@ -576,7 +585,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                         price={hosted_total_price}
                         currency={if *selected_country == "US" { "$" } else { "€" }}
                         period="/day"
-                        features={hosted_features}
+                        features={hosted_features.clone()}
                         subscription_type="hosted"
                         is_popular=false
                         is_premium=true
@@ -602,7 +611,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                         best_for="Self-Hosted setup for non-technical users with automatic management."
                         price={self_hosting_total_price}
                         currency={if *selected_country == "US" { "$" } else { "€" }}
-                        period="/month"
+                        period="/day"
                         features={self_hosting_features.clone()}
                         subscription_type="self_hosting"
                         is_popular=true
@@ -626,7 +635,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     html! {
                         <div class="topup-pricing">
                             <h2>{format!("Overage Rates for {}", *selected_country)}</h2>
-                            <p>{"When you exceed your quota on the Hosted Plan, these rates apply. Enable auto-top-up to automatically add credits when you run low. Unused credits carry over indefinitely. These are can used to answer user initiated questions, send notifications from priority senders and daily digests. On the Easy Self-Hosting Plan credits are bought directly from twilio."}</p>
+                            <p>{"When you exceed your quota on the Hosted Plan, these rates apply via your Twilio account (you control SMS costs, e.g., ~€0.05-0.30/message depending on country). Enable auto-top-up to automatically add credits when you run low. Unused credits carry over indefinitely. These are used to answer user-initiated questions, send notifications from priority senders, and daily digests. On the Easy Self-Hosting Plan, credits are bought directly from Twilio."}</p>
                             <div class="topup-packages">
                                 <div class="pricing-card main">
                                     <div class="card-header">
@@ -703,7 +712,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     <div class="options-grid">
                         <div class="option-card">
                             <h3>{"Request New Number"}</h3>
-                            <p>{"Need a phone number? We can provide numbers in select countries like US, Finland, UK, and Australia. Due to regulatory restrictions, we cannot provide numbers in many countries including Germany, India, most African countries, and parts of Asia. If your country isn't listed in the pricing above, contact us to check availability or consider the Easy Self-Hosting Plan where you can connect your own Twilio account."}</p>
+                            <p>{"US Hosted Plan includes Twilio phone numbers. Outside the US, Hosted Plan requires your own Twilio account for numbers and SMS (we provide setup guides). Self-Hosted Plan also uses your own Twilio account for maximum control. Need help with Twilio setup? Get VIP Setup Support for a one-time $49 fee. Due to regulatory restrictions, we cannot provide numbers in many countries including Germany, India, most African countries, and parts of Asia. Contact us to check availability or use your own Twilio account for global access."}</p>
                             <a href={format!("mailto:rasmus@ahtava.com?subject=Country%20Availability%20Inquiry%20for%20{}&body=Hey,%0A%0AIs%20the%20service%20available%20in%20{}%3F%0A%0AThanks,%0A",(*country_name).clone(), (*country_name).clone())}>
                                 <button class="iq-button signup-button">{"Check Number Availability"}</button>
                             </a>
@@ -717,50 +726,30 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <div class="faq-grid">
                     <details>
                         <summary>{"How does billing work?"}</summary>
-                        <p>{"All plans are billed monthly and include a certain number of Messages per month. The Digital Detox Trial is billed weekly for the first week, then transitions to the standard Hosted Plan monthly billing. Additional Messages can be purchased using credits. Unused credits carry over indefinitely. You retain subscription benefits until the next normal billing period end even if you unsubscribed immediately. No hidden fees or commitments. Note that due to high cost of running the service, no refunds can be offered (Lightfriend is a bootstrapped startup)."}</p>
+                        <p>{"Hosted and Self-Hosted Plans bill monthly ($29 or $49). Digital Detox Trial is $9/week, then $29/month Hosted. Extra messages cost via Lightfriend (US Hosted) or your Twilio (Intl Hosted/Self-Hosted). Credits carry over. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
                     </details>
                     <details>
                         <summary>{"What counts as a Message?"}</summary>
-                        <p>{"Messages can be used for voice calls (1 minute = 1 Message) or text queries (1 query = 1 Message). They can also be used for receiving daily digests (1 digest = 1 Message) or notifications from priority senders (1 notification = 1/2 Message). Critical message monitoring and custom waiting checks don't count against your quota."}</p>
+                        <p>{"Voice calls (1 min = 1 Message), text queries (1 query = 1 Message), daily digests (1 digest = 1 Message), priority sender notifications (1 notification = 1/2 Message). Critical monitoring and custom checks are free."}</p>
                     </details>
                     <details>
-                        <summary>{"How do credits work?"}</summary>
-                        <p>{"For Hosted Plan and Digital Detox Trial, credits can be used for additional messages beyond your monthly limit. Enable auto-top-up to automatically purchase credits when you run low. Unused credits never expire."}</p>
+                        <summary>{"Is my data private and secure?"}</summary>
+                        <p>{"Hosted requires trusting me (no logging, open-source code), but it's the simplest to start. Self-Hosted is fully zero-access private, but requires setup."}</p>
                     </details>
                     <details>
-                        <summary>{"How does automatic monitoring work?"}</summary>
-                        <p>{"The AI continuously monitors your email, messages, and calendar, providing three daily digest summaries (morning, day, evening). Critical messages are flagged immediately and sent to you if enabled. You can set up to 5 custom waiting checks to monitor for specific types of messages or emails, and designate priority senders whose messages will always be notified about."}</p>
+                        <summary>{"Hosted vs. Self-Hosted: What's the difference?"}</summary>
+                        <p>{"Hosted ($29/month): Requires trusting me, but it's the simplest to start — no setup in US (Twilio included), minimal for intl (bring your own Twilio, guided). Self-Hosted ($49/month): Requires setup (30-60 mins, guided), but delivers full zero-access privacy and global access with your Twilio."}</p>
                     </details>
                     <details>
-                        <summary>{"What's the difference between the plans in terms of setup and ease of use?"}</summary>
-                        <p>{"The Hosted Plan and Digital Detox Trial are the easiest - no setup required, just connect your apps and start using. The Easy Self-Hosting Plan requires minimal effort: we provide a pre-configured VPS with one-click installation via Cloudron, automatic updates, and guided setup - no coding needed."}</p>
-                    </details>
-                    <details>
-                        <summary>{"Who should choose the Hosted Plan?"}</summary>
-                        <p>{"If you want the simplest experience with zero technical setup, the Hosted Plan or Digital Detox Trial is ideal. Everything is managed for you, including phone numbers and servers - just subscribe and connect your accounts to get started immediately."}</p>
-                    </details>
-                    <details>
-                        <summary>{"Who is the Easy Self-Hosting Plan for?"}</summary>
-                        <p>{"This plan is perfect for non-technical users who want more control without the hassle. It offers user-friendly setup on your own server with automatic management, updates, and security - available worldwide and easy to maintain."}</p>
-                    </details>
-                    <details>
-                        <summary>{"Why charge monthly for the Easy Self-Hosting Plan?"}</summary>
-                        <p>{"The fee covers the simplified setup (no coding needed), managed Cloudron environment, automatic updates, subdomain, and ongoing support. You control your own server, but we handle the heavy lifting to make it effortless."}</p>
-                    </details>
-                    <details>
-                        <summary>{"Can I self-host for free?"}</summary>
-                        <p>{"Yes, the core code is open-source on GitHub for developers comfortable with manual setup. For non-technical users, we recommend the Easy Self-Hosting Plan, which includes a pre-configured VPS, one-click Cloudron install, automatic updates, and priority support."}</p>
-                    </details>
-                    <details>
-                        <summary>{"Is the service available in my country?"}</summary>
-                        <p>{"Service availability and features vary by country. The Hosted Plan may be limited or unavailable in countries where we can't provide local phone numbers (including many parts of Asia, Africa, and some European countries). The Easy Self-Hosting Plan is available worldwide as it runs on your own server and you can connect your own Twilio account. Contact us to check availability for your specific location."}</p>
+                        <summary>{"Is it available in my country?"}</summary>
+                        <p>{"Hosted: Available globally; US includes Twilio, elsewhere bring your own (guided setup, SMS costs vary ~€0.05-0.30/message). Self-Hosted: Available worldwide with your Twilio. Contact rasmus@ahtava.com for details."}</p>
                     </details>
                 </div>
             </div>
 
             <div class="footnotes">
                 <p class="footnote">{"* Gen Z spends 4-7 hours daily on phones, often regretting 60% of social media time. "}<a href="https://explodingtopics.com/blog/smartphone-usage-stats" target="_blank" rel="noopener noreferrer">{"Read the study"}</a><grok-card data-id="badfd9" data-type="citation_card"></grok-card></p>
-                <p class="footnote">{"The dumbphone is sold separately and is not included in any plan, except for US Hosted Plan subscribers who receive a free dumbphone (buy any kind you want with $40 Amazon gift card)."}</p>
+                <p class="footnote">{"The dumbphone is sold separately and is not included in any plan, except for Self-Hosted Plan subscribers who receive a free dumbphone (buy any kind you want with $40 Amazon gift card)."}</p>
                 <p class="footnote">{"For developers: Check out the open-source repo on GitHub if you'd like to self-host from source (requires technical setup)."}</p>
                 <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer" class="github-link">{"View GitHub Repo"}</a>
             </div>
@@ -1164,7 +1153,6 @@ pub fn pricing(props: &PricingProps) -> Html {
                     margin-bottom: 2rem;
                 }
 
-
                 .pricing-card.main {
                     background: rgba(30, 30, 30, 0.8);
                     border: 1px solid rgba(30, 144, 255, 0.15);
@@ -1310,7 +1298,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     gap: 1rem;
                 }
 
-                .details {
+                details {
                     background: rgba(30, 30, 30, 0.8);
                     border: 1px solid rgba(30, 144, 255, 0.15);
                     border-radius: 12px;
@@ -1318,7 +1306,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     transition: all 0.3s ease;
                 }
 
-                .details:hover {
+                details:hover {
                     border-color: rgba(30, 144, 255, 0.3);
                 }
 
@@ -1329,7 +1317,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     padding: 0.5rem 0;
                 }
 
-                .details p {
+                details p {
                     color: #e0e0e0;
                     margin-top: 1rem;
                     line-height: 1.6;
@@ -1438,7 +1426,6 @@ pub fn pricing(props: &PricingProps) -> Html {
                     box-shadow: none;
                 }
 
-
                 .sentinel-extras-integrated {
                     margin: 2rem auto;
                     padding: 2rem;
@@ -1481,7 +1468,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     justify-content: space-between;
                     align-items: center;
                     padding: 1rem;
-                    background tundra: rgba(30, 144, 255, 0.1);
+                    background: rgba(30, 144, 255, 0.1);
                     border-radius: 8px;
                     margin-top: 0.5rem;
                 }
