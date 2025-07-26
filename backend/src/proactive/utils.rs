@@ -1187,15 +1187,6 @@ pub async fn send_notification(
         }
     };
 
-    // Get the conversation for the user
-    let conversation = match state.user_conversations.get_conversation(&state, &user, sender_number).await {
-        Ok(conv) => conv,
-        Err(e) => {
-            tracing::error!("Failed to ensure conversation exists: {}", e);
-            return;
-        }
-    };
-
     // Check user's notification preference from settings
     let notification_type = if content_type.contains("critical") {
         user_settings.critical_enabled.as_deref().unwrap_or("sms")
@@ -1239,7 +1230,7 @@ pub async fn send_notification(
                         tool_name: None,
                         tool_call_id: None,
                         created_at: current_time,
-                        conversation_id: conversation.conversation_sid.clone(),
+                        conversation_id: "".to_string(),
                     };
                     
                     let assistant_notification = crate::models::user_models::NewMessageHistory {
@@ -1249,7 +1240,7 @@ pub async fn send_notification(
                         tool_name: None,
                         tool_call_id: None,
                         created_at: current_time,
-                        conversation_id: conversation.conversation_sid.clone(),
+                        conversation_id: "".to_string(),
                     };
 
                     // Store messages in history
@@ -1302,7 +1293,6 @@ pub async fn send_notification(
             // Default to SMS notification
             match crate::api::twilio_utils::send_conversation_message(
                 &state,
-                &conversation.conversation_sid,
                 &notification,
                 None,
                 &user,
@@ -1319,7 +1309,7 @@ pub async fn send_notification(
                         tool_name: None,
                         tool_call_id: None,
                         created_at: current_time,
-                        conversation_id: conversation.conversation_sid.clone(),
+                        conversation_id: "".to_string(),
                     };
 
                     // Store message in history

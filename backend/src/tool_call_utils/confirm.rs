@@ -15,8 +15,6 @@ pub struct ConfirmationResult {
 pub async fn handle_confirmation(
     state: &Arc<AppState>,
     user: &User,
-    conversation_sid: &str,
-    twilio_number: &String,
     event_type: &String,
     user_message: &str,
 ) -> ConfirmationResult {
@@ -101,7 +99,6 @@ pub async fn handle_confirmation(
                         let confirmation_msg = "Calendar event created successfully!";
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                             &state,
-                            conversation_sid,
                             confirmation_msg,
                             None,
                             user,
@@ -121,7 +118,6 @@ pub async fn handle_confirmation(
                         let error_msg = format!("Failed to create calendar event: {} (not charged)", error["error"].as_str().unwrap_or("Unknown error"));
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                             &state,
-                            conversation_sid,
                             &error_msg,
                             None,
                             user,
@@ -142,7 +138,6 @@ pub async fn handle_confirmation(
                 let cancel_msg = "Calendar event creation cancelled.";
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
-                    conversation_sid,
                     cancel_msg,
                     None,
                     user,
@@ -211,7 +206,6 @@ pub async fn handle_confirmation(
                         let confirmation_msg = format!("Message sent successfully to {}", recipient);
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                             &state,
-                            conversation_sid,
                             &confirmation_msg,
                             None,
                             user,
@@ -233,7 +227,6 @@ pub async fn handle_confirmation(
                         let error_msg = format!("Failed to send message: {} (not charged)", e);
                         if let Err(send_err) = crate::api::twilio_utils::send_conversation_message(
                             &state,
-                            conversation_sid,
                             &error_msg,
                             None,
                             user,
@@ -255,7 +248,6 @@ pub async fn handle_confirmation(
                 let cancel_msg = "WhatsApp message cancelled.";
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
-                    conversation_sid,
                     cancel_msg,
                     None,
                     user,
@@ -325,7 +317,6 @@ pub async fn handle_confirmation(
                         let confirmation_msg = format!("Message sent successfully to {}", recipient);
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                             &state,
-                            conversation_sid,
                             &confirmation_msg,
                             None,
                             user,
@@ -347,7 +338,6 @@ pub async fn handle_confirmation(
                         let error_msg = format!("Failed to send message: {} (not charged)", e);
                         if let Err(send_err) = crate::api::twilio_utils::send_conversation_message(
                             &state,
-                            conversation_sid,
                             &error_msg,
                             None,
                             user,
@@ -369,7 +359,6 @@ pub async fn handle_confirmation(
                 let cancel_msg = "WhatsApp message cancelled.";
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
-                    conversation_sid,
                     cancel_msg,
                     None,
                     user,
@@ -444,7 +433,6 @@ pub async fn handle_confirmation(
                         let confirmation_msg = format!("Email response sent successfully to {} regarding '{}'", recipient, subject);
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                             &state,
-                            conversation_sid,
                             &confirmation_msg,
                             None,
                             user,
@@ -464,7 +452,6 @@ pub async fn handle_confirmation(
                         let error_msg = format!("Failed to send email response: {} (not charged)", error["error"].as_str().unwrap_or("Unknown error"));
                         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                             &state,
-                            conversation_sid,
                             &error_msg,
                             None,
                             user,
@@ -486,7 +473,6 @@ pub async fn handle_confirmation(
                 let cancel_msg = "Email response cancelled.";
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
-                    conversation_sid,
                     cancel_msg,
                     None,
                     user,

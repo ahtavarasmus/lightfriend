@@ -226,8 +226,6 @@ pub async fn handle_fetch_calendar_events(
 pub async fn handle_create_calendar_event(
     state: &Arc<AppState>,
     user_id: i32,
-    conversation_sid: &str,
-    twilio_number: &String,
     args: &str,
     user: &crate::models::user_models::User,
 ) -> Result<(axum::http::StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<crate::api::twilio_sms::TwilioResponse>), Box<dyn std::error::Error>> {
@@ -268,7 +266,6 @@ pub async fn handle_create_calendar_event(
                 let success_msg = format!("Calendar event '{}' created for {}", args.summary, formatted_time);
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
-                    conversation_sid,
                     &success_msg,
                     None,
                     user,
@@ -287,7 +284,6 @@ pub async fn handle_create_calendar_event(
                 let error_msg = format!("Failed to create calendar event: {}", error_json.0.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error"));
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
-                    conversation_sid,
                     &error_msg,
                     None,
                     user,
@@ -333,7 +329,6 @@ pub async fn handle_create_calendar_event(
         tracing::error!("Failed to set temporary variable: {}", e);
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
             &state,
-            conversation_sid,
             "Failed to prepare calendar event creation. (not charged, contact rasmus@ahtava.com)",
             None,
             user,
@@ -352,7 +347,6 @@ pub async fn handle_create_calendar_event(
     // Send the confirmation message
     match crate::api::twilio_utils::send_conversation_message(
         &state,
-        conversation_sid,
         &confirmation_msg,
         None,
         user,

@@ -240,20 +240,6 @@ pub async fn process_sms(
         }
     }
 
-    let conversation = match state.user_conversations.get_conversation(&state, &user, payload.to).await {
-        Ok(conv) => conv,
-        Err(e) => {
-            tracing::error!("Failed to ensure conversation exists: {}", e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                axum::Json(TwilioResponse {
-                    message: "Failed to create conversation".to_string(),
-                })
-            );
-        }
-    };
-
     let current_time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -267,7 +253,7 @@ pub async fn process_sms(
         tool_name: None,
         tool_call_id: None,
         created_at: current_time,
-        conversation_id: conversation.conversation_sid.clone(),
+        conversation_id: "".to_string(),
     };
 
     if let Err(e) = state.user_repository.create_message_history(&user_message) {
@@ -279,8 +265,6 @@ pub async fn process_sms(
         let confirmation_result = crate::tool_call_utils::confirm::handle_confirmation(
             &state,
             &user.clone(),
-            &conversation.conversation_sid,
-            &conversation.twilio_number,
             &user.clone().confirm_send_event.unwrap(),
             &payload.body,
         ).await;
@@ -645,7 +629,7 @@ pub async fn process_sms(
                         .unwrap_or_else(|| "_tool_call".to_string())),
                     tool_call_id: Some(tool_call.id.clone()),
                     created_at: tool_call_time,
-                    conversation_id: conversation.conversation_sid.clone(),
+                    conversation_id: "".to_string(),
                 };
 
                 if let Err(e) = state.user_repository.create_message_history(&history_entry) {
@@ -750,6 +734,7 @@ pub async fn process_sms(
                             let email = &email["email"];
                             
                             // Upload attachments to Twilio if present
+                            /*
                             let mut uploaded_attachments: Vec<(String, String)> = Vec::new(); // (filename, media_sid)
                             if let Some(attachments) = email["attachments"].as_array() {
                                 for attachment_url in attachments {
@@ -791,6 +776,16 @@ pub async fn process_sms(
                                     }
                                 }
                             }
+
+                            // Add attachment information with just filenames
+                            if !uploaded_attachments.is_empty() {
+                                response.push_str("\n\nAttachments:\n");
+                                for (filename, _) in &uploaded_attachments {
+                                    response.push_str(&format!("- {}\n", filename));
+                                }
+                            }
+                            */
+
                             // Format the response with all email details and just filenames for attachments
                             let mut response = format!(
                                 "From: {}\nSubject: {}\nDate: {}\n\n{}",
@@ -799,13 +794,6 @@ pub async fn process_sms(
                                 email["date_formatted"],
                                 email["body"]
                             );
-                            // Add attachment information with just filenames
-                            if !uploaded_attachments.is_empty() {
-                                response.push_str("\n\nAttachments:\n");
-                                for (filename, _) in &uploaded_attachments {
-                                    response.push_str(&format!("- {}\n", filename));
-                                }
-                            }
                             tool_answers.insert(tool_call_id, response);
                         },
                         Err(e) => {
@@ -828,8 +816,6 @@ pub async fn process_sms(
                     match crate::tool_call_utils::calendar::handle_create_calendar_event(
                         &state,
                         user.id,
-                        &conversation.conversation_sid,
-                        &conversation.twilio_number,
                         arguments,
                         &user,
                     ).await {
@@ -841,7 +827,7 @@ pub async fn process_sms(
                                 tool_name: Some("create_calendar_event".to_string()),
                                 tool_call_id: Some(tool_call.id.clone()),
                                 created_at: chrono::Utc::now().timestamp() as i32,
-                                conversation_id: conversation.conversation_sid.clone(),
+                                conversation_id: "".to_string(),
                             };
 
                             if let Err(e) = state.user_repository.create_message_history(&history_entry) {
@@ -874,8 +860,6 @@ pub async fn process_sms(
                     match crate::tool_call_utils::whatsapp::handle_send_whatsapp_message(
                         &state,
                         user.id,
-                        &conversation.conversation_sid,
-                        &conversation.twilio_number,
                         arguments,
                         &user,
                         image_url.as_deref(),
@@ -889,7 +873,7 @@ pub async fn process_sms(
                                 tool_name: Some("send_whatsapp_message".to_string()),
                                 tool_call_id: Some(tool_call.id.clone()),
                                 created_at: chrono::Utc::now().timestamp() as i32,
-                                conversation_id: conversation.conversation_sid.clone(),
+                                conversation_id: "".to_string(),
                             };
                             if let Err(e) = state.user_repository.create_message_history(&history_entry) {
                                 tracing::error!("Failed to store WhatsApp tool message in history: {}", e);
@@ -906,8 +890,6 @@ pub async fn process_sms(
                     match crate::tool_call_utils::telegram::handle_send_telegram_message(
                         &state,
                         user.id,
-                        &conversation.conversation_sid,
-                        &conversation.twilio_number,
                         arguments,
                         &user,
                         image_url.as_deref(),
@@ -920,7 +902,7 @@ pub async fn process_sms(
                                 tool_name: Some("send_telegram_message".to_string()),
                                 tool_call_id: Some(tool_call.id.clone()),
                                 created_at: chrono::Utc::now().timestamp() as i32,
-                                conversation_id: conversation.conversation_sid.clone(),
+                                conversation_id: "".to_string(),
                             };
                             if let Err(e) = state.user_repository.create_message_history(&history_entry) {
                                 tracing::error!("Failed to store send telegram message tool message in history: {}", e);
@@ -1062,7 +1044,7 @@ pub async fn process_sms(
                     tool_name: None, // We could store this if needed
                     tool_call_id: Some(tool_call_id.clone()),
                     created_at: current_time,
-                    conversation_id: conversation.conversation_sid.clone(),
+                    conversation_id: "".to_string(),
                 };
 
                 if let Err(e) = state.user_repository.create_message_history(&tool_message) {
@@ -1165,7 +1147,6 @@ pub async fn process_sms(
     let save_context = user_settings.save_context.unwrap_or(0);
     if let Err(e) = state.user_repository.delete_old_message_history(
         user.id,
-        Some(&conversation.conversation_sid),
         save_context as i64
     ) {
         tracing::error!("Failed to clean up old message history: {}", e);
@@ -1183,7 +1164,7 @@ pub async fn process_sms(
         tool_name: None,
         tool_call_id: None,
         created_at: current_time,
-        conversation_id: conversation.conversation_sid.clone(),
+        conversation_id: "".to_string(),
     };
 
     // Store messages in history
@@ -1250,7 +1231,6 @@ pub async fn process_sms(
     // Send the actual message if not in test mode
     match crate::api::twilio_utils::send_conversation_message(
         &state,
-        &conversation.conversation_sid,
         &clean_response,
         media_sid,
         &user

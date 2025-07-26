@@ -124,6 +124,14 @@ pub async fn delete_bot_conversations(
             account_sid,
             auth_token,
         )
+    } else if !user.phone_number.starts_with("+1") {
+        match state.user_core.get_twilio_credentials(user.id) {
+            Ok(credentials) => credentials,
+            Err(_) => (
+                env::var("TWILIO_ACCOUNT_SID")?,
+                env::var("TWILIO_AUTH_TOKEN")?,
+            ),
+        }
     } else {
         (
             env::var("TWILIO_ACCOUNT_SID")?,
@@ -207,6 +215,14 @@ pub async fn delete_twilio_conversation(
             account_sid,
             auth_token,
         )
+    } else if !user.phone_number.starts_with("+1") {
+        match state.user_core.get_twilio_credentials(user.id) {
+            Ok(credentials) => credentials,
+            Err(_) => (
+                env::var("TWILIO_ACCOUNT_SID")?,
+                env::var("TWILIO_AUTH_TOKEN")?,
+            ),
+        }
     } else {
         (
             env::var("TWILIO_ACCOUNT_SID")?,
@@ -500,47 +516,6 @@ pub async fn validate_twilio_signature(
         }
     };
 
-    let is_self_hosted= std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
-    let auth_token: String;
-    let url: String;
-    if is_self_hosted {
-        (auth_token, url) = match state.user_core.get_settings_for_tier3() {
-            Ok((_, Some(token), _, Some(server_url), _, _)) => {
-                tracing::info!("✅ Successfully retrieved self hosted Twilio Auth Token");
-                (token, server_url)
-            },
-            Err(e) => {
-                tracing::error!("❌ Failed to get self hosted Twilio Auth Token: {}", e);
-                return Err(StatusCode::INTERNAL_SERVER_ERROR);
-            },
-            _ => {
-                tracing::error!("❌ Failed to get self hosted Twilio Auth Token");
-                return Err(StatusCode::INTERNAL_SERVER_ERROR);
-            }
-        };
-    } else {
-        auth_token = match std::env::var("TWILIO_AUTH_TOKEN") {
-            Ok(token) => {
-                tracing::info!("✅ Successfully retrieved TWILIO_AUTH_TOKEN");
-                token
-            },
-            Err(e) => {
-                tracing::error!("❌ Failed to get TWILIO_AUTH_TOKEN: {}", e);
-                return Err(StatusCode::INTERNAL_SERVER_ERROR);
-            }
-        };
-
-        url = match std::env::var("SERVER_URL") {
-            Ok(url) => {
-                tracing::info!("✅ Successfully retrieved SERVER_URL");
-                url + "/api/sms/server"
-            },
-            Err(e) => {
-                tracing::error!("❌ Failed to get SERVER_URL: {}", e);
-                return Err(StatusCode::INTERNAL_SERVER_ERROR);
-            }
-        };
-    }
 
     // Get request body for validation
     let (parts, body) = request.into_parts();
@@ -568,6 +543,74 @@ pub async fn validate_twilio_signature(
     let params: BTreeMap<String, String> = form_urlencoded::parse(params_str.as_bytes())
         .into_owned()
         .collect();
+
+    let from_phone = match params.get("From") {
+        Some(phone) => {
+            tracing::info!("✅ Found From phone number: {}", phone);
+            phone
+        },
+        None => {
+            tracing::error!("❌ No From phone number found in payload");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+    let user = match state.user_core.find_by_phone_number(from_phone) {
+        Ok(Some(user)) => {
+            tracing::info!("✅ Found user {} for phone {}", user.id, from_phone);
+            user
+        },
+        Ok(None) => {
+            tracing::error!("❌ No user found for phone {}", from_phone);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        },
+        Err(e) => {
+            tracing::error!("❌ Failed to query user by phone {}: {}", from_phone, e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    };
+
+    let is_self_hosted= std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
+    let auth_token: String;
+    let url: String;
+    if is_self_hosted {
+        (auth_token, url) = match state.user_core.get_settings_for_tier3() {
+            Ok((_, Some(token), _, Some(server_url), _, _)) => {
+                tracing::info!("✅ Successfully retrieved self hosted Twilio Auth Token");
+                (token, server_url)
+            },
+            Err(e) => {
+                tracing::error!("❌ Failed to get self hosted Twilio Auth Token: {}", e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            },
+            _ => {
+                tracing::error!("❌ Failed to get self hosted Twilio Auth Token");
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        };
+    } else {
+
+        auth_token = if !user.phone_number.starts_with("+1") {
+            match state.user_core.get_twilio_credentials(user.id) {
+                Ok((_, token)) => token,
+                Err(_) => env::var("TWILIO_AUTH_TOKEN")
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            }
+        } else {
+            std::env::var("TWILIO_AUTH_TOKEN")
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        };
+
+        url = match std::env::var("SERVER_URL") {
+            Ok(url) => {
+                tracing::info!("✅ Successfully retrieved SERVER_URL");
+                url + "/api/sms/server"
+            },
+            Err(e) => {
+                tracing::error!("❌ Failed to get SERVER_URL: {}", e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        };
+    }
 
     // Build the string to sign
     let mut string_to_sign = url;
@@ -632,6 +675,14 @@ pub async fn upload_media_to_twilio(
             account_sid,
             auth_token,
         )
+    } else if !user.phone_number.starts_with("+1") {
+        match state.user_core.get_twilio_credentials(user.id) {
+            Ok(credentials) => credentials,
+            Err(_) => (
+                env::var("TWILIO_ACCOUNT_SID")?,
+                env::var("TWILIO_AUTH_TOKEN")?,
+            ),
+        }
     } else {
         (
             env::var("TWILIO_ACCOUNT_SID")?,
@@ -684,6 +735,14 @@ pub async fn delete_twilio_message_media(
             account_sid,
             auth_token,
         )
+    } else if !user.phone_number.starts_with("+1") {
+        match state.user_core.get_twilio_credentials(user.id) {
+            Ok(credentials) => credentials,
+            Err(_) => (
+                env::var("TWILIO_ACCOUNT_SID")?,
+                env::var("TWILIO_AUTH_TOKEN")?,
+            ),
+        }
     } else {
         (
             env::var("TWILIO_ACCOUNT_SID")?,
@@ -758,6 +817,14 @@ pub async fn delete_twilio_message(
         )
     } else if user.sub_tier == Some("tier 3".to_string()) || is_self_hosted {
         state.user_core.get_twilio_credentials(user.id)?
+    } else if !user.phone_number.starts_with("+1") {
+        match state.user_core.get_twilio_credentials(user.id) {
+            Ok(credentials) => credentials,
+            Err(_) => (
+                env::var("TWILIO_ACCOUNT_SID")?,
+                env::var("TWILIO_AUTH_TOKEN")?,
+            ),
+        }
     } else {
         (
             env::var("TWILIO_ACCOUNT_SID")?,
@@ -798,7 +865,6 @@ pub async fn delete_twilio_message(
 
 pub async fn send_conversation_message(
     state: &Arc<AppState>,
-    conversation_sid: &str, // for textbee this is recipient phone number
     body: &str,
     media_sid: Option<&String>,
     user: &User,
@@ -810,7 +876,7 @@ pub async fn send_conversation_message(
         tool_name: None,
         tool_call_id: None,
         created_at: chrono::Utc::now().timestamp() as i32,
-        conversation_id: conversation_sid.clone().to_string(),
+        conversation_id: "".to_string(),
     };
 
     if let Err(e) = state.user_repository.create_message_history(&history_entry) {
@@ -829,7 +895,7 @@ pub async fn send_conversation_message(
         if let Ok((device_id, api_key)) = state.user_core.get_textbee_credentials(user.id) {
             if media_sid.is_none() {
                 // Use TextBee for text-only messages
-                let recipient = conversation_sid.to_string();
+                let recipient = "".to_string(); // TODO change this then to fetch the number
                 let body_clone = body.to_string();
                 let device_id_clone = device_id.clone();
                 let api_key_clone = api_key.clone();
@@ -840,7 +906,7 @@ pub async fn send_conversation_message(
                     }
                 });
 
-                return Ok(conversation_sid.to_string());
+                return Ok("".to_string());
             }
             // If media is present, fall back to Twilio
         }
@@ -861,6 +927,14 @@ pub async fn send_conversation_message(
         )
     } else if user.sub_tier == Some("tier 3".to_string()) || is_self_hosted {
         state.user_core.get_twilio_credentials(user.id)?
+    } else if !user.phone_number.starts_with("+1") {
+        match state.user_core.get_twilio_credentials(user.id) {
+            Ok(credentials) => credentials,
+            Err(_) => (
+                env::var("TWILIO_ACCOUNT_SID")?,
+                env::var("TWILIO_AUTH_TOKEN")?,
+            ),
+        }
     } else {
         (
             env::var("TWILIO_ACCOUNT_SID")?,

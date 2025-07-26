@@ -34,6 +34,7 @@ pub struct BridgeMessage {
     pub formatted_timestamp: String,
     pub message_type: String,
     pub room_name: String,
+    pub media_url: Option<String>,
 }
 
 
@@ -285,6 +286,7 @@ pub async fn fetch_bridge_messages(
                                         formatted_timestamp: format_timestamp(timestamp, user_timezone),
                                         message_type: msgtype.to_string(),
                                         room_name: room_name.clone(),
+                                        media_url: None,
                                     });
                                 }
                             }
@@ -475,6 +477,7 @@ pub async fn send_bridge_message(
         formatted_timestamp: format_timestamp(current_timestamp, user_settings.timezone),
         message_type: "text".to_string(),
         room_name: room.display_name().await?.to_string(),
+        media_url: None,
     })
 }
 
@@ -654,11 +657,11 @@ async fn fetch_messages_from_room(
                 let (msgtype, body) = match content.msgtype {
                     MessageType::Text(t) => ("text", t.body),
                     MessageType::Notice(n) => ("notice", n.body),
-                    MessageType::Image(_) => ("image", "📎 IMAGE".into()),
-                    MessageType::Video(_) => ("video", "📎 VIDEO".into()),
-                    MessageType::File(_) => ("file", "📎 FILE".into()),
-                    MessageType::Audio(_) => ("audio", "📎 AUDIO".into()),
-                    MessageType::Location(_) => ("location", "📍 LOCATION".into()),
+                    MessageType::Image(i) => ("image", if i.body.is_empty() { "📎 IMAGE".into() } else { i.body }),
+                    MessageType::Video(v) => ("video", if v.body.is_empty() { "📎 VIDEO".into() } else { v.body }),
+                    MessageType::File(f) => ("file", if f.body.is_empty() { "📎 FILE".into() } else { f.body }),
+                    MessageType::Audio(a) => ("audio", if a.body.is_empty() { "📎 AUDIO".into() } else { a.body }),
+                    MessageType::Location(l) => ("location", "📍 LOCATION".into()), // Location has no body field
                     MessageType::Emote(t) => ("emote", t.body),
                     _ => return None,
                 };
@@ -671,6 +674,7 @@ async fn fetch_messages_from_room(
                     formatted_timestamp: format_timestamp(timestamp, timezone),
                     message_type: msgtype.to_string(),
                     room_name: room_name.clone(),
+                    media_url: None,
                 })
             } else {
                 None

@@ -224,12 +224,9 @@ pub async fn broadcast_message(
         Json(json!({"error": format!("Database error: {}", e)}))
     ))?;
 
-    tokio::spawn(async move {
-        process_broadcast_messages(state.clone(), users, request.message.clone()).await;
-    });
     // Immediately return a success response
     Ok(Json(json!({
-        "message": "Broadcast request received, processing in progress",
+        "message": "Broadcast is currently disabled(create it for programmable messaging)",
         "status": "ok"
     })))
 
@@ -280,52 +277,7 @@ async fn process_broadcast_messages(
             }
         };
 
-
-        let conversation_result = state
-            .user_conversations
-            .get_conversation(&state, &user, sender_number.to_string())
-            .await
-            .map_err(|e| BroadcastError::ConversationError(e.to_string()));
-
-        match conversation_result {
-            Ok(conversation) => {
-                let message_with_stop = format!("{}\n\nTo stop receiving updates about new features, reply \"STOP\".", message);
-                match crate::api::twilio_utils::send_conversation_message(
-                    &state,
-                    &conversation.conversation_sid,
-                    &message_with_stop,
-                    None,
-                    &user,
-                )
-                .await
-                .map_err(|e| BroadcastError::MessageSendError(e.to_string()))
-                {
-                    Ok(_) => {
-                        success_count += 1;
-                        println!("Successfully sent message to {}", user.phone_number);
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to send message to {}: {}", user.phone_number, e);
-                        failed_count += 1;
-                    }
-                }
-            }
-            Err(e) => {
-
-                eprintln!(
-                    "Failed to get/create conversation for {}: {}",
-                    user.phone_number,
-                    e
-                );
-                failed_count += 1;
-            }
-        }
     }
-
-    println!(
-        "Broadcast completed: {} successful, {} failed",
-        success_count, failed_count
-    );
 }
 
 

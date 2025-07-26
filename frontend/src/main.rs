@@ -29,6 +29,7 @@ mod pages {
     pub mod server_self_host_instructions;
     pub mod self_host_instructions;
     pub mod setup_costs;
+    pub mod bring_own_number;
 }
 
 mod proactive {
@@ -49,12 +50,6 @@ mod connections {
     pub mod tasks;
 }
 
-/*
-mod components {
-    pub mod idea_widget;
-}
-*/
-
 mod auth {
     pub mod connect;
     pub mod verify;
@@ -74,6 +69,7 @@ use pages::{
     termsprivacy::{TermsAndConditions, PrivacyPolicy},
     money::{Pricing},
     self_host_instructions::SelfHostInstructions,
+    bring_own_number::TwilioHostedInstructions, 
 };
 
 use auth::{
@@ -85,11 +81,9 @@ use auth::{
 
 use profile::profile::Billing;
 use admin::dashboard::AdminDashboard;
-/*
-use crate::components::idea_widget::IdeaWidget;
-*/
 
-
+use crate::profile::billing_models::UserProfile;
+use gloo_net::http::Request;
 
 #[derive(Clone, PartialEq)]
 pub enum SelfHostingStatus {
@@ -110,6 +104,8 @@ pub enum Route {
     SelfHostInstructions,
     #[at("/supported-countries")]
     SupportedCountries,
+    #[at("/bring-own-number")]
+    TwilioHostedInstructions,
     #[at("/")]
     Home,
     #[at("/login")]
@@ -130,13 +126,7 @@ pub enum Route {
     Pricing,
 }
 
-
-use crate::profile::billing_models::UserProfile;
-use gloo_net::http::Request;
-
 fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: bool) -> Html {
-
-    // If in self-hosted mode, redirect to self-hosted page
     if matches!(self_hosting_status, SelfHostingStatus::SelfHostedSignup | SelfHostingStatus::SelfHostedLogin) {
         return match routes {
             Route::SelfHosted => {
@@ -166,13 +156,17 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
             info!("Rendering FAQ page");
             html! { <Faq /> }
         },
-        Route::SelfHostInstructions=> {
+        Route::SelfHostInstructions => {
             info!("Rendering Self Host Instructions page");
             html! { <SelfHostInstructionsWrapper /> }
         },
         Route::SupportedCountries => {
             info!("Rendering SupportedCountries page");
             html! { <SupportedCountries/> }
+        },
+        Route::TwilioHostedInstructions => {
+            info!("Rendering TwilioHostedInstructions page");
+            html! { <TwilioHostedInstructionsWrapper /> }
         },
         Route::Home => {
             info!("Rendering Home page");
@@ -213,6 +207,64 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
     }
 }
 
+#[function_component(TwilioHostedInstructionsWrapper)]
+pub fn twilio_hosted_instructions_wrapper() -> Html {
+    let profile_data = use_state(|| None::<UserProfile>);
+    
+    {
+        let profile_data = profile_data.clone();
+        
+        use_effect_with_deps(move |_| {
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Some(token) = window()
+                    .and_then(|w| w.local_storage().ok())
+                    .flatten()
+                    .and_then(|storage| storage.get_item("token").ok())
+                    .flatten()
+                {
+                    match Request::get(&format!("{}/api/profile", config::get_backend_url()))
+                        .header("Authorization", &format!("Bearer {}", token))
+                        .send()
+                        .await
+                    {
+                        Ok(response) => {
+                            if let Ok(profile) = response.json::<UserProfile>().await {
+                                profile_data.set(Some(profile));
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                }
+            });
+            
+            || ()
+        }, ());
+    }
+
+    if let Some(profile) = (*profile_data).as_ref() {
+        html! {
+            <TwilioHostedInstructions
+                is_logged_in={true}
+                sub_tier={profile.sub_tier.clone()}
+                twilio_phone={profile.preferred_number.clone()}
+                twilio_sid={profile.twilio_sid.clone()}
+                twilio_token={profile.twilio_token.clone()}
+                country={profile.sub_country.clone()}
+            />
+        }
+    } else {
+        html! {
+            <TwilioHostedInstructions
+                is_logged_in={false}
+                sub_tier={None::<String>}
+                twilio_phone={None::<String>}
+                twilio_sid={None::<String>}
+                twilio_token={None::<String>}
+                country={None::<String>}
+            />
+        }
+    }
+}
 
 #[function_component(SelfHostInstructionsWrapper)]
 pub fn self_host_instructions_wrapper() -> Html {
@@ -361,7 +413,7 @@ pub fn nav(props: &NavProps) -> Html {
             
             let scroll_callback = Closure::wrap(Box::new(move || {
                 let scroll_top = document.document_element().unwrap().scroll_top();
-                is_scrolled.set(scroll_top > 2500); // Increased threshold to match hero image height
+                is_scrolled.set(scroll_top > 2500);
             }) as Box<dyn FnMut()>);
             
             window.add_event_listener_with_callback("scroll", scroll_callback.as_ref().unchecked_ref())
@@ -381,20 +433,20 @@ pub fn nav(props: &NavProps) -> Html {
         })
     };
 
-let toggle_menu = {
-    let menu_open = menu_open.clone();
-    Callback::from(move |e: MouseEvent| {
-        e.prevent_default();
-        menu_open.set(!*menu_open);
-    })
-};
+    let toggle_menu = {
+        let menu_open = menu_open.clone();
+        Callback::from(move |e: MouseEvent| {
+            e.prevent_default();
+            menu_open.set(!*menu_open);
+        })
+    };
 
-let close_menu = {
-    let menu_open = menu_open.clone();
-    Callback::from(move |_: MouseEvent| {
-        menu_open.set(false);
-    })
-};
+    let close_menu = {
+        let menu_open = menu_open.clone();
+        Callback::from(move |_: MouseEvent| {
+            menu_open.set(false);
+        })
+    };
 
     let menu_class = if *menu_open {
         "nav-right mobile-menu-open"
@@ -488,7 +540,7 @@ let close_menu = {
 
 #[function_component]
 fn App() -> Html {
-    let logged_in = use_state(|| is_logged_in());  // Import is_logged_in from home module
+    let logged_in = use_state(|| is_logged_in());
     let self_hosting_status = use_state(|| SelfHostingStatus::Normal);
 
     {
@@ -537,14 +589,11 @@ fn App() -> Html {
             if let Some(window) = window() {
                 if let Ok(Some(storage)) = window.local_storage() {
                     let _ = storage.remove_item("token");
-                    // Reload the page to reflect the logged out state
                     let _ = window.location().reload();
                 }
             }
         })
     };
-
-
 
     html! {
         <>
@@ -556,16 +605,9 @@ fn App() -> Html {
     }
 }
 
-
 fn main() {
-    // Initialize console error panic hook for better error messages
     console_error_panic_hook::set_once();
-    
-    // Initialize logging
     console_log::init_with_level(Level::Info).expect("error initializing log");
-    
     info!("Starting application");
     yew::Renderer::<App>::new().render();
 }
-
-        

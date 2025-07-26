@@ -13,7 +13,6 @@ use reqwest::Client as HttpClient;
 use base64::{Engine as _, engine::general_purpose};
 use serde_json::{Value, from_str};
 use crate::repositories::user_repository::UserRepository;
-use crate::repositories::user_conversations::UserConversations;
 use crate::repositories::user_core::UserCore;
 use hound::{WavWriter, WavSpec};
 use std::io::Cursor;
@@ -27,17 +26,15 @@ pub struct ShazamState {
     pub user_calls: UserCallMap,
     pub user_core: Arc<UserCore>,
     pub user_repository: Arc<UserRepository>,
-    pub user_conversations: Arc<UserConversations>,
 }
 
 impl ShazamState {
-    pub fn new(user_core: Arc<UserCore>, user_repository: Arc<UserRepository>, user_conversations: Arc<UserConversations>) -> Self {
+    pub fn new(user_core: Arc<UserCore>, user_repository: Arc<UserRepository>) -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             user_calls: Arc::new(Mutex::new(HashMap::new())),
             user_core,
             user_repository,
-            user_conversations,
         }
     }
 }

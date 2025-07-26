@@ -298,24 +298,9 @@ pub async fn request_password_reset(
 
     println!("Stored OTP {} for email {} with expiration {}", otp, reset_req.email, expiration);
 
-    // Get or create a conversation for sending the OTP
-    let conversation = match state.user_conversations.get_conversation(&state, &user, user.preferred_number.clone().unwrap_or_else(|| {
-        std::env::var("FIN_PHONE").expect("FIN_PHONE must be set")
-    })).await {
-        Ok(conv) => conv,
-        Err(_) => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Failed to create conversation for OTP"}))
-            ));
-        }
-    };
-
-    // Send OTP via conversation message
     let message = format!("Your Lightfriend password reset code is: {}. Valid for 5 minutes.", otp);
     if let Err(_) = crate::api::twilio_utils::send_conversation_message(
         &state,
-        &conversation.conversation_sid,
         &message,
         None,
         &user

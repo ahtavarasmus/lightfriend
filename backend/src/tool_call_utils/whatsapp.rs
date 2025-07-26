@@ -159,8 +159,6 @@ pub struct WhatsAppTimeFrame {
 pub async fn handle_send_whatsapp_message(
     state: &Arc<AppState>,
     user_id: i32,
-    conversation_sid: &str,
-    twilio_number: &String,
     args: &str,
     user: &crate::models::user_models::User,
     image_url: Option<&str>
@@ -185,7 +183,6 @@ pub async fn handle_send_whatsapp_message(
             let error_msg = "Failed to find WhatsApp contact. Please make sure you're connected to WhatsApp bridge.";
             if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                 &state,
-                conversation_sid,
                 error_msg,
                 None,
                 user,
@@ -206,7 +203,6 @@ pub async fn handle_send_whatsapp_message(
         let error_msg = format!("No WhatsApp contacts found matching '{}'.", args.chat_name);
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
             &state,
-            conversation_sid,
             &error_msg,
             None,
             user,
@@ -241,7 +237,6 @@ pub async fn handle_send_whatsapp_message(
                 let success_msg = format!("WhatsApp message: '{}' sent to '{}'", message ,exact_name);
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
-                    conversation_sid,
                     &success_msg,
                     None,
                     user,
@@ -260,7 +255,6 @@ pub async fn handle_send_whatsapp_message(
                 let error_msg = format!("Failed to send WhatsApp message: {}", e);
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
-                    conversation_sid,
                     &error_msg,
                     None,
                     user,
@@ -294,7 +288,6 @@ pub async fn handle_send_whatsapp_message(
         tracing::error!("Failed to set temporary variable: {}", e);
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
             &state,
-            conversation_sid,
             "Failed to prepare WhatsApp message sending. (not charged, contact rasmus@ahtava.com)",
             None,
             user,
@@ -328,7 +321,6 @@ pub async fn handle_send_whatsapp_message(
     // Send the confirmation message
     match crate::api::twilio_utils::send_conversation_message(
         &state,
-        conversation_sid,
         &confirmation_msg,
         None,
         user,

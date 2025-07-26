@@ -202,30 +202,11 @@ pub async fn fetch_assistant(
                     }
                 }
             } else if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "voice", None).await {
-                // Get conversation for the user
-                let conversation = match state.user_conversations.get_conversation(
-                    &state,
-                    &user, 
-                    user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
-                ).await {
-                    Ok(conv) => conv,
-                    Err(e) => {
-                        error!("Failed to get conversation: {}", e);
-                        return Err((
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({
-                                "error": "Failed to get conversation",
-                                "message": "Internal server error"
-                            }))
-                        ));
-                    }
-                };
 
                 // Send insufficient credits message
                 let error_message = "Insufficient credits to make a voice call".to_string();
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
-                    &conversation.conversation_sid,
                     &error_message,
                     None,
                     &user,
@@ -614,31 +595,14 @@ pub async fn handle_send_sms_tool_call(
         }
     };
 
-    // Get conversation for the user
-    let conversation = match state.user_conversations.get_conversation(&state, &user, user.preferred_number.clone().unwrap()).await {
-        Ok(conv) => conv,
-        Err(e) => {
-            error!("Failed to get conversation: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": "Failed to get or create conversation"
-                }))
-            ));
-        }
-    };
-
     let mut message_sids = Vec::new();
-
 
     // Handle email attachments if email_id is provided - spawn as background task
     if let Some(email_id) = payload.email_id.clone() {
         tracing::debug!("Spawning background task for email attachments processing for email ID: {}", email_id);
         
         let state_clone = Arc::clone(&state);
-        let conversation_clone = conversation.clone();
         let user_clone = user.clone();
-        
         tokio::spawn(async move {
             tracing::debug!("Background task: Fetching email attachments for email ID: {}", email_id);
             
@@ -656,7 +620,6 @@ pub async fn handle_send_sms_tool_call(
     // Send the main message using Twilio
     match crate::api::twilio_utils::send_conversation_message(
         &state,
-        &conversation.conversation_sid,
         &payload.message,
         None,
         &user,
@@ -675,7 +638,6 @@ pub async fn handle_send_sms_tool_call(
             Ok(Json(json!({
                 "status": "success",
                 "message_sid": message_sid,
-                "conversation_sid": conversation.conversation_sid,
                 "attachment_processing": attachment_info,
                 "total_messages_sent": message_sids.len(),
                 "all_message_sids": message_sids
@@ -1419,28 +1381,9 @@ pub async fn handle_whatsapp_confirm_send(
                     payload.message
                 );
 
-                // Get conversation for the user
-                let conversation = match state.user_conversations.get_conversation(
-                    &state,
-                    &user, 
-                    user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
-                ).await {
-                    Ok(conv) => conv,
-                    Err(e) => {
-                        error!("Failed to get conversation: {}", e);
-                        return Err((
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({
-                                "error": "Failed to get or create conversation"
-                            }))
-                        ));
-                    }
-                };
-
                 // Send the confirmation SMS
                 match crate::api::twilio_utils::send_conversation_message(
                     &state,
-                    &conversation.conversation_sid,
                     &confirmation_message,
                     None,
                     &user,
@@ -1568,28 +1511,9 @@ pub async fn handle_telegram_confirm_send(
                 payload.message
             );
 
-            // Get conversation for the user
-            let conversation = match state.user_conversations.get_conversation(
-                &state,
-                &user, 
-                user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
-            ).await {
-                Ok(conv) => conv,
-                Err(e) => {
-                    error!("Failed to get conversation: {}", e);
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({
-                            "error": "Failed to get or create conversation"
-                        }))
-                    ));
-                }
-            };
-
             // Send the confirmation SMS
             match crate::api::twilio_utils::send_conversation_message(
                 &state,
-                &conversation.conversation_sid,
                 &confirmation_message,
                 None,
                 &user,
@@ -1730,23 +1654,6 @@ pub async fn handle_calendar_event_confirm(
             }
         }
     } else {
-        // Get conversation for the user
-        let conversation = match state.user_conversations.get_conversation(
-            &state,
-            &user, 
-            user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
-        ).await {
-            Ok(conv) => conv,
-            Err(e) => {
-                error!("Failed to get conversation: {}", e);
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({
-                        "error": "Failed to get or create conversation"
-                    }))
-                ));
-            }
-        };
 
         // Format the confirmation message
         let confirmation_message = if let Some(ref desc) = payload.description {
@@ -1786,7 +1693,6 @@ pub async fn handle_calendar_event_confirm(
         // Send the confirmation SMS
         match crate::api::twilio_utils::send_conversation_message(
             &state,
-            &conversation.conversation_sid,
             &confirmation_message,
             None,
             &user,
@@ -2387,28 +2293,9 @@ pub async fn handle_email_response_tool_call(
                 subject
             );
 
-            // Get conversation for the user
-            let conversation = match state.user_conversations.get_conversation(
-                &state,
-                &user, 
-                user.preferred_number.clone().unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set"))
-            ).await {
-                Ok(conv) => conv,
-                Err(e) => {
-                    error!("Failed to get conversation: {}", e);
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({
-                            "error": "Failed to get or create conversation"
-                        }))
-                    ));
-                }
-            };
-
             // Send the confirmation SMS
             match crate::api::twilio_utils::send_conversation_message(
                 &state,
-                &conversation.conversation_sid,
                 &confirmation_message,
                 None,
                 &user,
@@ -2585,8 +2472,6 @@ pub async fn make_notification_call(
     dynamic_variables.insert("timezone".to_string(), json!(timezone_str));
     dynamic_variables.insert("timezone_offset_from_utc".to_string(), json!(offset));
 
-
-
     // Create the payload for the call
     let payload = NotificationCallPayload {
         agent_id: std::env::var("AGENT_ID").expect("AGENT_ID not set"),
@@ -2636,18 +2521,6 @@ pub async fn make_notification_call(
         ));
     }
 
-    // Parse the response to get the call SID
-    let response_json = response.json::<serde_json::Value>().await.map_err(|e| {
-        error!("Failed to parse ElevenLabs API response: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "error": "Failed to parse API response",
-                "details": e.to_string()
-            }))
-        )
-    })?;
-
     // Get user information before spawning the thread
     let user = match state.user_core.find_by_id(user_id.parse::<i32>().unwrap_or_default()) {
         Ok(Some(user)) => user,
@@ -2672,27 +2545,6 @@ pub async fn make_notification_call(
     };
 
 
-    // Clone necessary data before spawning the task
-    let user_preferred_number = user.preferred_number.clone()
-        .unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER")
-            .expect("SHAZAM_PHONE_NUMBER not set"));
-
-    // Get conversation before spawning the task
-    let conversation = match state.user_conversations.get_conversation(&state, &user, user_preferred_number.clone()).await {
-        Ok(conv) => conv,
-        Err(e) => {
-            error!("Failed to get conversation before spawning status check task: {}", e);
-            return Ok(Json(json!({
-                "status": "success",
-                "message": "Notification call initiated successfully, but failed to set up status updates",
-                "to_number": to_phone_number,
-                "from_number_id": phone_number_id,
-            })));
-        }
-    };
-
-    let conversation_sid = conversation.conversation_sid.clone();
-    let twilio_number = conversation.twilio_number.clone();
 
     // Send an immediate SMS notification
     // Truncate and clean notification message to ensure SMS compatibility
@@ -2713,7 +2565,6 @@ pub async fn make_notification_call(
     // Send the SMS notification
     if let Err(e) = crate::api::twilio_utils::send_conversation_message(
         &state,
-        &conversation_sid,
         &notification_sms,
         None,
         &user,

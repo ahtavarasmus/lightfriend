@@ -169,7 +169,7 @@ impl UserRepository {
             .execute(&mut self.pool.get().unwrap())
     }
 
-    pub fn delete_old_message_history(&self, user_id: i32, conversation_id: Option<&str>, save_context_limit: i64) -> Result<usize, diesel::result::Error> {
+    pub fn delete_old_message_history(&self, user_id: i32, save_context_limit: i64) -> Result<usize, diesel::result::Error> {
         use crate::schema::message_history;
         use diesel::prelude::*;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -198,13 +198,7 @@ impl UserRepository {
                         .filter(message_history::user_id.eq(user_id))
                         .filter(message_history::created_at.lt(timestamp));
 
-                    // Execute delete with optional conversation filter
-                    match conversation_id {
-                        Some(conv_id) => base_delete
-                            .filter(message_history::conversation_id.eq(conv_id))
-                            .execute(conn),
-                        None => base_delete.execute(conn)
-                    }
+                    base_delete.execute(conn)
                 },
                 None => Ok(0)
             }

@@ -96,7 +96,6 @@ mod models {
 mod repositories {
     pub mod user_core;
     pub mod user_repository;
-    pub mod user_conversations;
     pub mod user_subscriptions;
     pub mod connection_auth;
 }
@@ -107,7 +106,6 @@ mod jobs {
 
 use repositories::user_core::UserCore;
 use repositories::user_repository::UserRepository;
-use repositories::user_conversations::UserConversations;
 
 use handlers::{
     auth_handlers, self_host_handlers, profile_handlers, billing_handlers,
@@ -130,7 +128,6 @@ pub struct AppState {
     db_pool: DbPool,
     user_core: Arc<UserCore>,
     user_repository: Arc<UserRepository>,
-    user_conversations: Arc<UserConversations>,
     sessions: shazam_call::CallSessions,
     user_calls: shazam_call::UserCallMap,
     google_calendar_oauth_client: GoogleOAuthClient,
@@ -204,7 +201,6 @@ async fn main() {
 
     let user_core= Arc::new(UserCore::new(pool.clone()));
     let user_repository = Arc::new(UserRepository::new(pool.clone()));
-    let user_conversations = Arc::new(UserConversations::new(pool.clone()));
 
     let client_id = std::env::var("GOOGLE_CALENDAR_CLIENT_ID").expect("GOOGLE_CALENDAR_CLIENT_ID must be set");
     let client_secret = std::env::var("GOOGLE_CALENDAR_CLIENT_SECRET").expect("GOOGLE_CALENDAR_CLIENT_SECRET must be set");
@@ -244,7 +240,6 @@ async fn main() {
         password_reset_otps: DashMap::new(),
         user_core: user_core.clone(),
         user_repository: user_repository.clone(),
-        user_conversations: user_conversations.clone(),
         sessions: Arc::new(Mutex::new(HashMap::new())),
         user_calls: Arc::new(Mutex::new(HashMap::new())),
         google_calendar_oauth_client,
@@ -473,7 +468,6 @@ async fn main() {
         user_calls: state.user_calls.clone(),
         user_core: state.user_core.clone(),
         user_repository: state.user_repository.clone(),
-        user_conversations: state.user_conversations.clone(),
     };
     tokio::spawn(async move {
         crate::api::shazam_call::process_audio_with_shazam(Arc::new(shazam_state)).await;
