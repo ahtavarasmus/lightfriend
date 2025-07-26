@@ -1090,7 +1090,7 @@ pub async fn generate_digest(
     }];
 
     let request = chat_completion::ChatCompletionRequest::new(
-        "openai/gpt-4o-mini".to_string(),
+        "openai/gpt-4o".to_string(),
         messages,
     )
     .tools(tools)
@@ -1117,20 +1117,20 @@ pub async fn generate_digest(
                             }
                             Err(e) => {
                                 tracing::error!("Failed to parse digest response: {}", e);
-                                Ok("Failed to generate digest.".to_string())
+                                Ok("Failed to generate digest(parse error).".to_string())
                             }
                         }
                     } else {
                         tracing::error!("No arguments found in tool call");
-                        Ok("Failed to generate digest.".to_string())
+                        Ok("Failed to generate digest(arguments missing).".to_string())
                     }
                 } else {
                     tracing::error!("No tool calls found");
-                    Ok("Failed to generate digest.".to_string())
+                    Ok("Failed to generate digest(no first tool call).".to_string())
                 }
             } else {
                 tracing::error!("No tool calls section in response");
-                Ok("Failed to generate digest.".to_string())
+                Ok("Failed to generate digest(no tool calls).".to_string())
             }
         }
         Err(e) => {
