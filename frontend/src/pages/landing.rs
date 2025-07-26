@@ -13,11 +13,9 @@ use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 use gloo_timers::callback::Timeout;
 
-
 #[function_component(Landing)]
 pub fn landing() -> Html {
     let current_phone_word = use_state(|| 0);
-
 
     // Scroll to top only on initial mount
     {
@@ -32,136 +30,14 @@ pub fn landing() -> Html {
         );
     }
 
-
-    use_effect(|| {
-        let window = web_sys::window().unwrap();
-        let document = window.document().unwrap();
-        let window_clone = window.clone();
-
-        
-        let scroll_callback = Closure::wrap(Box::new(move || {
-            // Handle intro section visibility and image transitions
-            if let Some(intro_section) = document.query_selector(".intro-section").ok().flatten() {
-                let intro_html = intro_section.clone().dyn_into::<web_sys::HtmlElement>().unwrap();
-                let scroll_pos = window_clone.scroll_y().unwrap();
-                let window_height = window_clone.inner_height().unwrap().as_f64().unwrap();
-                
-                let sticky_scroll = scroll_pos - (window_height*2.3 * 1.7);  // Increased to 0.5 to delay appearance
-                let sticky_duration = window_height*2.3 * 4.0;  // Keep this the same
-                
-                // Calculate intro section opacity based on scroll position
-                if sticky_scroll > sticky_duration * 0.6 {  // Changed from 0.75 to 0.6 to start fading earlier
-                    let fade_progress = ((sticky_scroll - (sticky_duration * 0.6)) / (sticky_duration * 0.4)).min(1.0);  // Adjusted fade range
-                    let intro_opacity = (1.0 - fade_progress).max(0.0);
-                    let _ = intro_html.set_attribute("style", &format!(
-                        "opacity: {}; position: fixed; top: 0; left: 0; width: 100%; z-index: 2;", 
-                        intro_opacity
-                    ));
-                } else {
-                    let _ = intro_html.set_attribute("style", "opacity: 1; position: fixed; top: 0; left: 0; width: 100%; z-index: 2;");
-                }
-                
-                // Show intro section when scrolled past hero
-                let current_classes = intro_section.class_name();
-                let base_classes = "intro-section";
-                
-                if scroll_pos > window_height*2.3 * 1.1 {  // Increased to 0.6 to start transition later
-                    if !current_classes.contains("visible") {
-
-                        intro_section.set_class_name(&format!("{} visible", base_classes));
-                    }
-                    
-                    // Calculate relative scroll position within the sticky section
-                    let sticky_scroll = scroll_pos - (window_height*2.3 * 1.1);  // Increased to match the above change
-                    let sticky_duration = window_height * 1.5; // Reduced to 1.5 for shorter duration
-                    
-                    // Handle image transitions based on sticky scroll position
-                    if let Some(whatsapp_image) = document.query_selector(".whatsapp-image").ok().flatten() {
-                        if let Some(email_image) = document.query_selector(".email-image").ok().flatten() {
-                            if let Some(calendar_image) = document.query_selector(".calendar-image").ok().flatten() {
-                                // Reset all images first
-                                whatsapp_image.set_class_name("whatsapp-image example-image");
-                                email_image.set_class_name("email-image example-image");
-                                calendar_image.set_class_name("calendar-image example-image");
-
-                                if sticky_scroll < sticky_duration * 0.25 {
-                                    // First quarter: show WhatsApp image
-                                    whatsapp_image.set_class_name("whatsapp-image example-image visible");
-                                    let _ = intro_html.set_attribute("style", "opacity: 1");
-                                } else if sticky_scroll < sticky_duration * 0.45 {  // Adjusted from 0.5 to 0.45
-                                    // Second quarter: show email image
-                                    email_image.set_class_name("email-image example-image visible");
-                                    let _ = intro_html.set_attribute("style", "opacity: 1");
-                                } else if sticky_scroll < sticky_duration * 0.75 {
-                                    // Third quarter: show calendar image
-                                    calendar_image.set_class_name("calendar-image example-image visible");
-                                    let _ = intro_html.set_attribute("style", "opacity: 1");
-                                } else {
-                                    // Final quarter: fade out intro section
-                                    calendar_image.set_class_name("calendar-image example-image visible");
-                                    let _ = intro_html.set_attribute("style", "opacity: 0");
-                                }
-                            }
-                        }
-                    }
-
-                    // Add sticky class when in the sticky range
-                    if sticky_scroll < sticky_duration {
-                        if !current_classes.contains("sticky") {
-                            intro_section.set_class_name(&format!("{} visible sticky", base_classes));
-                        }
-                    } else {
-                        // Remove sticky class after duration
-                        if current_classes.contains("sticky") {
-                            intro_section.set_class_name(&format!("{} visible", base_classes));
-                        }
-                    }
-                } else {
-                    // Reset to base classes when not visible
-                    intro_section.set_class_name(base_classes);
-                    let _ = intro_html.set_attribute("style", "opacity: 0");
-                }
-            }
-
-        }) as Box<dyn FnMut()>);
-
-        window.add_event_listener_with_callback(
-            "scroll",
-            scroll_callback.as_ref().unchecked_ref(),
-        ).unwrap();
-
-        // Initial check
-        scroll_callback.as_ref().unchecked_ref::<web_sys::js_sys::Function>().call0(&JsValue::NULL).unwrap();
-
-        let scroll_callback = scroll_callback;  // Move ownership to closure
-        move || {
-            window.remove_event_listener_with_callback(
-                "scroll",
-                scroll_callback.as_ref().unchecked_ref(),
-            ).unwrap();
-        }
-    });
-
-    let is_privacy_expanded = use_state(|| false);
-    /*
-    let onclick = {
-        let is_privacy_expanded = is_privacy_expanded.clone();
-        Callback::from(move |_| {
-            is_privacy_expanded.set(!*is_privacy_expanded);
-        })
-    };
-    */
-
-
     html! {
-
         <div class="landing-page">
         <header class="hero">
                 <div class="hero-background"></div>
                 <div class="hero-content">
                     <div class="hero-header">
                         <p class="hero-subtitle">
-                            {"Your Personal Robot: Monitors Apps, Filters Noise, Lets You Live Free"}
+                            {"Ditch Smartphone Addiction Without Willpower, Even If Isolation Scares You"}
                         </p>
                     </div>
                     <div class="hero-cta-group">
@@ -175,11 +51,15 @@ pub fn landing() -> Html {
                 </div>
         </header>        
 
+        <div class="transition-spacer">
+            <h2 class="spacer-headline">{"How Lightfriend Delivers"}</h2>
+        </div>
+
         <section class="story-section">
             <div class="story-grid">
                 <div class="story-item">
                     <img src="/assets/lightfriend-robot-scene-1.png" alt="Tired of constant distractions" loading="lazy" />
-                    <p>{"Stuck to your phone?"}</p>
+                    <p>{"Trapped by the Scroll?"}</p>
                 </div>
                 <div class="story-item">
                     <img src="/assets/lightfriend-robot-scene-2.png" alt="Let robot handle monitoring" loading="lazy" />
@@ -187,7 +67,7 @@ pub fn landing() -> Html {
                 </div>
                 <div class="story-item">
                     <img src="/assets/lightfriend-robot-scene-3.png" alt="Live life freely" loading="lazy" />
-                    <p>{"Live free, call when needed."}</p>
+                    <p>{"Get notified when it matters"}</p>
                 </div>
             </div>
         </section>
@@ -195,8 +75,14 @@ pub fn landing() -> Html {
             <div class="filter-concept">
                 <div class="filter-content">
                     <div class="filter-text">
-                        <h2>{"Your Robot Filter"}</h2>
-                        <p>{"Lightfriend, your personal robot, filters digital services to your phone so you only get what's important."}</p>
+                        <h2>{"Finally switch to a dumbphone"}</h2>
+                        <p>{"Lightfriend lets you know when it's important and answers your questions anytime. Works between calling and SMS seamlessly without needing internet connection."}</p>
+
+                    <div class="section-intro">
+                            <Link<Route> to={Route::Pricing} classes="forward-link">
+                                <button class="hero-cta">{"Try with 7-Day Detox Now"}</button>
+                            </Link<Route>>
+                    </div>
                     </div>
                     <div class="filter-image">
                         <img src="/assets/lightfriend-filter.png" alt="Lightfriend filtering concept" loading="lazy" />
@@ -204,82 +90,9 @@ pub fn landing() -> Html {
                 </div>
             </div>
 
-            <div class="feature-block">
-                <div class="feature-content">
-                    <h2>{"Filter the Noise"}</h2>
-                    <p>{"Get alerts only for what matters."}</p>
-                    <ul class="feature-list">
-                        <li>{"🔔 Instant Alerts for Critical Messages"}</li>
-                        <li>{"⏰ Scheduled Summaries"}</li>
-                        <li>{"⭐ Priority Notifications"}</li>
-                        <li>{"🔍 Content Checks"}</li>
-                    </ul>
-                </div>
-                <div class="cta-image-container">
-                    <div class="feature-image">
-                        <img src="/assets/notifications.png" loading="lazy"  alt="Person receiving a meaningful notification" />
-                    </div>
-                    <div class="demo-link-container">
-                        <a href="https://www.youtube.com/shorts/KrVdJbHPB-o" target="_blank" rel="noopener noreferrer" class="demo-link">
-                            {"▶️ See It in Action"}
-                        </a>
-                        <a href="/faq#try-service" class="faq-link">
-                            {"Try Demo Chat"}
-                        </a>
-                    </div>
-                </div>
-            </div>
-
-            <section class="intro-section">
-                <div class="intro-content">
-                    <div class="intro-text">
-                        <h2>{"Ask Your Lightfriend Anytime"}</h2>
-                        <p>{"Call or text your personal lightfriend for info, web search, or photo analysis."}</p>
-                        <ul class="feature-list">
-                            <li><img src="/assets/perplexitylogo.png" loading="lazy" alt="Perplexity" class="perplexity-logo" /> {"Web Search & Weather"}</li>
-                            <li>{"📧 Check/Create Messages & Events"}</li>
-                            <li>{"📸 Photo Analysis & QR Reader (US/AUS)"}</li>
-                        </ul>
-                    </div>
-
-                        <div class="sticky-image">
-                            <img src="/assets/whatsappexample.png" alt="WhatsApp example interface" loading="lazy" class="example-image whatsapp-image" />
-                            <img src="/assets/calendarexample1.webp" alt="Calendar example interface" loading="lazy" class="example-image email-image" />
-                            <img src="/assets/phone_translation_example.png" alt="Photo example interface" loading="lazy" class="example-image calendar-image" />
-                        </div>
-                </div>
-
-            </section>
-
-
-        <section class="main-features">
-
             // Add mobile-only intro content first
-            <div class="intro-mobile">
-                    <div class="feature-content">
-                        <h2>{"Ask Your Robot Anytime"}</h2>
-                        <p>{"Call or text your personal robot for info, web search, or photo analysis."}</p>
-                        <ul class="feature-list">
-                            <li><img src="/assets/perplexitylogo.png" loading="lazy" alt="Perplexity" class="perplexity-logo" /> {"Web Search & Weather"}</li>
-                            <li>{"📧 Check/Create Messages & Events"}</li>
-                            <li>{"📸 Photo Analysis & QR Reader (US/AUS)"}</li>
-                        </ul>
-                    </div>
-
-                        <div class="sticky-image">
-                            <img src="/assets/whatsappexample.png" alt="WhatsApp example interface" loading="lazy" class="example-image whatsapp-image" />
-                            <img src="/assets/calendarexample1.webp" alt="Calendar example interface" loading="lazy" class="example-image email-image" />
-                            <img src="/assets/phone_translation_example.png" alt="Photo example interface" loading="lazy" class="example-image calendar-image" />
-                        </div>
-            </div>
             <div class="section-header">
-                <div class="section-intro">
-                    <Link<Route> to={Route::Pricing} classes="forward-link">
-                        <button class="hero-cta">{"Get Started"}</button>
-                    </Link<Route>>
-                </div>
             </div>
-        </section>
 
         <section class="how-it-works">
             <h2>{"Offload to Your Lightfriend"}</h2>
@@ -327,117 +140,6 @@ pub fn landing() -> Html {
         </footer>
             <style>
                 {r#"
-    .intro-section {
-        padding: 6rem 2rem;
-        background: transparent;
-        min-height: 100vh;
-        width: 100%;
-        opacity: 0;
-        visibility: hidden;
-        transition: opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1);
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        will-change: opacity, transform;
-        height: 100vh;
-        z-index: 1;
-        overflow-y: scroll;
-        transform: translateZ(0);
-        -webkit-overflow-scrolling: touch;
-        -webkit-backface-visibility: hidden;
-        scrollbar-width: none;
-        backface-visibility: hidden;
-        pointer-events: none;
-    }
-
-    @media (max-width: 768px) {
-        .intro-section {
-            display: none;
-        }
-    }
-
-    .intro-mobile {
-        display: none;
-    }
-
-    @media (max-width: 768px) {
-        .intro-mobile {
-            display: block !important;
-            margin: 4rem 1rem 2rem 1rem;
-            position: relative;
-            z-index: 5;
-            background: rgba(30, 30, 30, 0.8);
-            border: 1px solid rgba(30, 144, 255, 0.15);
-            border-radius: 24px;
-            padding: 2rem;
-        }
-
-        .intro-mobile p {
-            color: #999;
-            font-size: 1.1rem;
-            line-height: 1.6;
-            margin-bottom: 2rem;
-        }
-    }
-
-    @media (min-width: 769px) {
-        .intro-mobile {
-            display: none;
-        }
-    }
-
-    .intro-section.visible {
-        pointer-events: auto;
-        z-index: 1;
-        opacity: 1;
-        visibility: visible;
-        transform: translateY(0);
-        transition: opacity 0.8s ease;
-    }
-
-    .intro-section.sticky {
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        z-index: 2;
-    }
-
-    .intro-section::-webkit-scrollbar {
-        display: none;
-    }
-
-    @media (max-width: 768px) {
-        .intro-content {
-            flex-direction: column;
-            text-align: center;
-            gap: 0;
-            padding: 0;
-            height: 100vh;
-            overflow: hidden;
-        }
-    }
-
-    .intro-content {
-        max-width: 1200px;
-        margin: 0 auto;
-        display: flex;
-        align-items: center;
-        gap: 4rem;
-        position: relative;
-        padding: 0 2rem;
-    }
-
-    @media (max-width: 1024px) {
-        .intro-content {
-            flex-direction: column;
-            text-align: center;
-            gap: 2rem;
-            padding-top: 2rem;
-        }
-    }
-
     .cta-image-container {
         max-width: 300px;
         margin: 0 auto;
@@ -447,133 +149,6 @@ pub fn landing() -> Html {
         gap: 1rem;
         position: relative;
         padding: 0 2rem;
-    }
-
-    .example-image {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        object-fit: contain;
-        border-radius: 12px;
-        opacity: 0;
-        transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        pointer-events: none;
-        transform: translateZ(0);
-        -webkit-transform: translateZ(0);
-        backface-visibility: hidden;
-        -webkit-backface-visibility: hidden;
-        max-width: 400px;
-        will-change: opacity;
-        z-index: 5;
-    }
-
-    @media (max-width: 768px) {
-        .example-image {
-            position: absolute;
-            max-width: 280px;
-            height: auto;
-            max-height: none;
-            left: 50%;
-            top: 50%;
-            transform: translate(-50%, -50%);
-            -webkit-transform: translate(-50%, -50%);
-            object-fit: contain;
-        }
-    }
-
-    .example-image.visible {
-        opacity: 1;
-        z-index: 6;
-        pointer-events: auto; /* Enable pointer events only when visible */
-    }
-
-    .intro-section.visible .sticky-image {
-        pointer-events: auto; /* Enable pointer events only when the section is visible */
-    }
-
-    .sticky-image {
-        position: sticky;
-        top: 20vh;
-        width: 400px;
-        height: 600px;
-        margin: 0 !important;
-        z-index: 10;
-        pointer-events: none; /* Disable pointer events on the container by default */
-    }
-
-    @media (max-width: 768px) {
-        .sticky-image {
-            position: fixed !important;
-            top: 50% !important;
-            left: 50% !important;
-            transform: translate3d(-50%, -50%, 0) !important;
-            -webkit-transform: translate3d(-50%, -50%, 0) !important;
-            width: 320px !important;
-            height: 500px !important;
-            margin: 0 !important;
-            z-index: 10;
-            overflow: visible;
-            backface-visibility: hidden;
-            -webkit-backface-visibility: hidden;
-            pointer-events: none; /* Disable on mobile by default */
-        }
-        .intro-section.visible .sticky-image {
-            pointer-events: auto; /* Enable only when visible */
-        }
-    }
-
-    .whatsapp-image, .email-image, .calendar-image {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-    }
-
-    .intro-text {
-        z-index: 2;
-        padding: 20px 30px;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-around;
-        padding-right: 2rem;
-        background: rgba(30, 30, 30, 0.8);
-        border: 1px solid rgba(30, 144, 255, 0.15);
-        border-radius: 24px;
-    }
-
-    .intro-text h2 {
-        font-size: 2.5rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin-bottom: 1.5rem;
-    }
-
-    .intro-text p {
-        color: #999;
-        font-size: 1.2rem;
-        line-height: 1.6;
-    }
-
-    @media (max-width: 968px) {
-        .intro-content {
-            flex-direction: column;
-            text-align: center;
-            gap: 2rem;
-            padding-top: 2rem;
-        }
-    }
-
-    @media (max-width: 768px) {
-        .intro-section {
-            padding: 4rem 1rem;
-        }
-        .intro-text {
-            display: none !important;
-        }
     }
 
     .filter-concept {
@@ -612,12 +187,6 @@ pub fn landing() -> Html {
         -webkit-text-fill-color: transparent;
     }
 
-    .filter-text p {
-        color: #999;
-        font-size: 1.2rem;
-        line-height: 1.6;
-    }
-
     .filter-image {
         flex: 1;
         display: flex;
@@ -646,10 +215,6 @@ pub fn landing() -> Html {
 
         .filter-text h2 {
             font-size: 2rem;
-        }
-
-        .filter-text p {
-            font-size: 1.1rem;
         }
     }
 
@@ -702,10 +267,6 @@ pub fn landing() -> Html {
         border-color: rgba(30, 144, 255, 0.3);
     }
 
-    .feature-content {
-        flex: 1;
-    }
-
     .feature-image {
         flex: 1;
         display: flex;
@@ -718,49 +279,6 @@ pub fn landing() -> Html {
         height: auto;
         border-radius: 12px;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-    }
-
-    .feature-block h2 {
-        font-size: 2.5rem;
-        margin-bottom: 1rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }
-
-    .feature-block p {
-        color: #999;
-        font-size: 1.1rem;
-        line-height: 1.6;
-        margin-bottom: 2rem;
-    }
-
-    .feature-list {
-        list-style: none;
-        padding: 0;
-        margin: 0 0 2rem 0;
-    }
-
-    .feature-list li {
-        color: #fff;
-        font-size: 1.1rem;
-        padding: 0.5rem 0;
-        padding-left: 1.8rem;
-        position: relative;
-    }
-
-    .feature-list li::before {
-        content: '•';
-        position: absolute;
-        left: 0.5rem;
-        color: #1E90FF;
-    }
-
-    .perplexity-logo, .feature-logo {
-        height: 1em;
-        width: auto;
-        vertical-align: middle;
-        margin-right: 0.2em;
     }
 
     .demo-link-container {
@@ -801,10 +319,6 @@ pub fn landing() -> Html {
 
         .feature-image {
             order: -1;
-        }
-
-        .feature-block h2 {
-            font-size: 2rem;
         }
     }
 
@@ -1242,13 +756,6 @@ pub fn landing() -> Html {
         text-align: center;
     }
 
-    .section-header h2 {
-        font-size: 3rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-    }
-
     .section-intro {
         max-width: 600px;
         margin: 0 auto;
@@ -1289,10 +796,6 @@ pub fn landing() -> Html {
         .section-intro {
             padding: 1.5rem;
             margin-top: 2rem;
-        }
-
-        .section-header h2 {
-            font-size: 2rem;
         }
     }
 
@@ -1376,8 +879,25 @@ pub fn landing() -> Html {
     }
 
     .story-item p {
-        color: #999;
-        font-size: 1.1rem;
+        color: #ddd;
+        font-size: 1.4rem;
+        font-weight: 500;
+        margin: 0;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    }
+
+    .transition-spacer {
+        padding: 2rem 0;
+        text-align: center;
+        max-width: 1200px;
+        margin: 0 auto;
+    }
+
+    .spacer-headline {
+        font-size: 2rem;
+        background: linear-gradient(45deg, #fff, #7EB2FF);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
         margin: 0;
     }
 
@@ -1391,13 +911,16 @@ pub fn landing() -> Html {
         }
 
         .story-item p {
-            font-size: 1rem;
+            font-size: 1.2rem;
+        }
+
+        .spacer-headline {
+            font-size: 1.75rem;
         }
     }
                    
                 "#}
             </style>
         </div>
-
     }
 }

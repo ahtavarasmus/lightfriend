@@ -525,7 +525,7 @@ pub fn pricing(props: &PricingProps) -> Html {
 
     let currency_symbol = if *selected_country == "US" { "$" } else { "€" };
 
-    let hosted_mode = use_state(|| "hosted".to_string());
+    let hosted_mode = use_state(|| "trial".to_string());
 
     let onclick_trial = {
         let hosted_mode = hosted_mode.clone();
