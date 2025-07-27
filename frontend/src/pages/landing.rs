@@ -37,7 +37,7 @@ pub fn landing() -> Html {
                 <div class="hero-content">
                     <div class="hero-header">
                         <p class="hero-subtitle">
-                            {"Ditch Smartphone Addiction Without Willpower, Even If Isolation Scares You"}
+                            {"Ditch Smartphone Addiction Without Willpower"}
                         </p>
                     </div>
                     <div class="hero-cta-group">
@@ -51,8 +51,17 @@ pub fn landing() -> Html {
                 </div>
         </header>        
 
-        <div class="transition-spacer">
-            <h2 class="spacer-headline">{"How Lightfriend Delivers"}</h2>
+        // Updated section: Because if there is a way there's a will
+        <div class="difference-section">
+            <div class="difference-content">
+                <div class="difference-text">
+                    <h2>{"Because if there is a way there's a will"}</h2>
+                    <p>{"and why making scrolling "}<span class="highlight">{"impossible"}</span>{" makes all the difference"}</p>
+                </div>
+                <div class="difference-image">
+                    <img src="/assets/delete-blocker.png" alt="Man thinking about checking IG with delete blocker prompt" loading="lazy" />
+                </div>
+            </div>
         </div>
 
         <section class="story-section">
@@ -215,6 +224,93 @@ pub fn landing() -> Html {
 
         .filter-text h2 {
             font-size: 2rem;
+        }
+    }
+
+    /* Updated styles for difference-section */
+    .difference-section {
+        padding: 4rem 2rem;
+        margin: 0 auto;
+        max-width: 1200px;
+        position: relative;
+        z-index: 2;
+    }
+
+    .difference-content {
+        display: flex;
+        align-items: center;
+        gap: 4rem;
+        background: rgba(30, 30, 30, 0.8);
+        border: 1px solid rgba(30, 144, 255, 0.15);
+        border-radius: 24px;
+        padding: 3rem;
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .difference-content:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
+    }
+
+    .difference-text {
+        flex: 1;
+    }
+
+    .difference-text h2 {
+        font-size: 2.5rem;
+        margin-bottom: 1.5rem;
+        background: linear-gradient(45deg, #fff, #7EB2FF);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+
+    .difference-text p {
+        font-size: 1.4rem; /* Bigger for more pop */
+        color: #bbb; /* Higher contrast */
+        line-height: 1.8; /* Better spacing */
+        font-weight: 400;
+    }
+
+    .highlight {
+        font-weight: 700;
+        background: linear-gradient(45deg, #7EB2FF, #4169E1);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-shadow: 0 0 8px rgba(30, 144, 255, 0.3); /* Subtle glow */
+    }
+
+    .difference-image {
+        flex: 1;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+    }
+
+    .difference-image img {
+        max-width: 100%;
+        height: auto;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+
+    @media (max-width: 768px) {
+        .difference-section {
+            padding: 2rem 1rem;
+        }
+
+        .difference-content {
+            flex-direction: column;
+            padding: 2rem;
+            gap: 2rem;
+            text-align: center;
+        }
+
+        .difference-text h2 {
+            font-size: 2rem;
+        }
+
+        .difference-text p {
+            font-size: 1.2rem;
         }
     }
 
@@ -884,21 +980,6 @@ pub fn landing() -> Html {
         font-weight: 500;
         margin: 0;
         text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-    }
-
-    .transition-spacer {
-        padding: 2rem 0;
-        text-align: center;
-        max-width: 1200px;
-        margin: 0 auto;
-    }
-
-    .spacer-headline {
-        font-size: 2rem;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 0;
     }
 
     @media (max-width: 768px) {
