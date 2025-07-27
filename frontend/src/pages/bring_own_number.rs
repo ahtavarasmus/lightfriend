@@ -252,6 +252,8 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
         })
     };
 
+    let can_edit = props.is_logged_in && props.sub_tier.as_deref() == Some("tier 2");
+
     let is_phone_valid = {
         let val = &*phone_number;
         !val.is_empty() && val.starts_with('+') && val.len() >= 10 && val[1..].chars().all(|c| c.is_ascii_digit()) && !val.starts_with("...")
@@ -376,43 +378,37 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                             <li>{"5. Check the capabilities column to ensure the number supports your needs (Voice, SMS, MMS, etc.)"}</li>
                             <li>{"6. Click the 'Buy' button next to your chosen number and follow the steps"}</li>
                         </ul>
-                        {
-                            if props.is_logged_in && props.sub_tier.as_deref() == Some("tier 2") {
-                                html! {
-                                    <div class="input-field">
-                                        <label for="phone-number">{"Your Twilio Phone Number:"}</label>
-                                        <div class="input-with-button">
-                                            <input 
-                                                type="text" 
-                                                id="phone-number" 
-                                                placeholder="+1234567890" 
-                                                value={(*phone_number).clone()}
-                                                onchange={on_phone_change.clone()}
-                                            />
-                                            <button 
-                                                class={classes!("save-button", if !is_phone_valid { "invalid" } else { "" })}
-                                                onclick={on_save_phone.clone()}
-                                            >
-                                                {"Save"}
-                                            </button>
-                                            {
-                                                match &*phone_save_status {
-                                                    Some(Ok(_)) => html! {
-                                                        <span class="save-status success">{"✓ Saved"}</span>
-                                                    },
-                                                    Some(Err(err)) => html! {
-                                                        <span class="save-status error">{format!("Error: {}", err)}</span>
-                                                    },
-                                                    None => html! {}
-                                                }
-                                            }
-                                        </div>
-                                    </div>
+                        <div class="input-field">
+                            <label for="phone-number">{"Your Twilio Phone Number:"}</label>
+                            <div class="input-with-button">
+                                <input 
+                                    type="text" 
+                                    id="phone-number" 
+                                    placeholder="+1234567890" 
+                                    value={(*phone_number).clone()}
+                                    onchange={on_phone_change.clone()}
+                                    disabled={!can_edit}
+                                />
+                                <button 
+                                    class={classes!("save-button", if !is_phone_valid || !can_edit { "invalid" } else { "" })}
+                                    onclick={on_save_phone.clone()}
+                                    disabled={!can_edit || !is_phone_valid}
+                                >
+                                    {"Save"}
+                                </button>
+                                {
+                                    match &*phone_save_status {
+                                        Some(Ok(_)) => html! {
+                                            <span class="save-status success">{"✓ Saved"}</span>
+                                        },
+                                        Some(Err(err)) => html! {
+                                            <span class="save-status error">{format!("Error: {}", err)}</span>
+                                        },
+                                        None => html! {}
+                                    }
                                 }
-                            } else {
-                                html! {}
-                            }
-                        }
+                            </div>
+                        </div>
                     </div>
                     <div class="instruction-image">
                         <img 
@@ -434,55 +430,48 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                             <li>{"2. Find and copy your 'Account SID' from the dashboard"}</li>
                             <li>{"3. Reveal and copy your 'Auth Token' from the dashboard"}</li>
                         </ul>
+                        <div class="input-field">
+                            <label for="account-sid">{"Your Account SID:"}</label>
+                            <div class="input-with-button">
+                                <input 
+                                    type="text" 
+                                    id="account-sid" 
+                                    placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" 
+                                    value={(*account_sid).clone()}
+                                    onchange={on_sid_change.clone()}
+                                    disabled={!can_edit}
+                                />
+                            </div>
+                        </div>
+                        <div class="input-field">
+                            <label for="auth-token">{"Your Auth Token:"}</label>
+                            <div class="input-with-button">
+                                <input 
+                                    type="text" 
+                                    id="auth-token" 
+                                    placeholder="your_auth_token_here" 
+                                    value={(*auth_token).clone()}
+                                    onchange={on_token_change.clone()}
+                                    disabled={!can_edit}
+                                />
+                            </div>
+                        </div>
+                        <button 
+                            class={classes!("save-button", if !(is_sid_valid && is_token_valid) || !can_edit { "invalid" } else { "" })}
+                            onclick={on_save_creds.clone()}
+                            disabled={!can_edit || !(is_sid_valid && is_token_valid)}
+                        >
+                            {"Save"}
+                        </button>
                         {
-                            if props.is_logged_in && props.sub_tier.as_deref() == Some("tier 2") {
-                                html! {
-                                    <>
-                                        <div class="input-field">
-                                            <label for="account-sid">{"Your Account SID:"}</label>
-                                            <div class="input-with-button">
-                                                <input 
-                                                    type="text" 
-                                                    id="account-sid" 
-                                                    placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" 
-                                                    value={(*account_sid).clone()}
-                                                    onchange={on_sid_change.clone()}
-                                                />
-                                            </div>
-                                        </div>
-                                        <div class="input-field">
-                                            <label for="auth-token">{"Your Auth Token:"}</label>
-                                            <div class="input-with-button">
-                                                <input 
-                                                    type="text" 
-                                                    id="auth-token" 
-                                                    placeholder="your_auth_token_here" 
-                                                    value={(*auth_token).clone()}
-                                                    onchange={on_token_change.clone()}
-                                                />
-                                            </div>
-                                        </div>
-                                        <button 
-                                            class={classes!("save-button", if !(is_sid_valid && is_token_valid) { "invalid" } else { "" })}
-                                            onclick={on_save_creds.clone()}
-                                        >
-                                            {"Save"}
-                                        </button>
-                                        {
-                                            match &*creds_save_status {
-                                                Some(Ok(_)) => html! {
-                                                    <span class="save-status success">{"✓ Saved"}</span>
-                                                },
-                                                Some(Err(err)) => html! {
-                                                    <span class="save-status error">{format!("Error: {}", err)}</span>
-                                                },
-                                                None => html! {}
-                                            }
-                                        }
-                                    </>
-                                }
-                            } else {
-                                html! {}
+                            match &*creds_save_status {
+                                Some(Ok(_)) => html! {
+                                    <span class="save-status success">{"✓ Saved"}</span>
+                                },
+                                Some(Err(err)) => html! {
+                                    <span class="save-status error">{format!("Error: {}", err)}</span>
+                                },
+                                None => html! {}
                             }
                         }
                     </div>

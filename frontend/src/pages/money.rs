@@ -284,7 +284,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                             vec![main_item].into_iter().chain(sub_items.into_iter())
                         }) }
                         { if (props.subscription_type == "hosted" || props.subscription_type == "digital_detox") && props.selected_country != "US" {
-                            html! { <li>{"SMS costs vary ~€0.04-0.40/message, depending on region (normal usage <100 messages per month)"}</li> }
+                            html! { <li>{"Required: Bring your own Twilio number. Pay Twilio directly (zero markups from us) and unlock service in whatever country you're in. Grab local numbers easily where we can't."}</li> }
                         } else { html! {} }}
                     </ul>
                 </div>
@@ -292,7 +292,13 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     if props.is_self_hosting {
                         html! {
                             <div class="learn-more-section">
-                                <a href="/host-instructions" class="learn-more-link">{"Learn how self-hosting works"}</a>
+                                <a href="/host-instructions" class="learn-more-link">{"How self-hosting works"}</a>
+                            </div>
+                        }
+                    } else if (props.subscription_type == "hosted" || props.subscription_type == "digital_detox") && props.selected_country != "US" {
+                        html! {
+                            <div class="learn-more-section">
+                                <a href="/bring-own-number" class="learn-more-link">{"How to bring your own Twilio"}</a>
                             </div>
                         }
                     } else {
@@ -476,19 +482,19 @@ pub fn pricing(props: &PricingProps) -> Html {
 
     let self_hosting_features = vec![
         Feature {
-            text: "User-friendly setup with no coding required".to_string(),
+            text: "Your fully own Zero Access private service. Requires no trust: zero outside access.".to_string(),
             sub_items: vec![],
         },
         Feature {
-            text: "Automatic updates and built-in security".to_string(),
+            text: "Automatic updates and security".to_string(),
             sub_items: vec![],
         },
         Feature {
-            text: "Zero-access privacy: full control, no trust required".to_string(),
+            text: "User-friendly setup with zero coding required".to_string(),
             sub_items: vec![],
         },
         Feature {
-            text: "Use your own Twilio account for SMS and numbers".to_string(),
+            text: "Priority support and guidance".to_string(),
             sub_items: vec![],
         },
     ];
@@ -499,26 +505,22 @@ pub fn pricing(props: &PricingProps) -> Html {
             sub_items: vec![],
         },
         Feature {
-            text: "US: Twilio numbers included. Intl: Bring your own Twilio (guided setup)".to_string(),
+            text: "Simple setup, connect apps and go".to_string(),
             sub_items: vec![],
         },
         Feature {
-            text: "Automatic updates, security, and priority support".to_string(),
+            text: "Secure no-logging policy (requires trust from me, since zero access is impossible with this hosted version)".to_string(),
             sub_items: vec![],
         },
         Feature {
-            text: "No setup, connect apps and go".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: "Secure no-logging policy (requires trust, no zero-access)".to_string(),
+            text: "All future updates, security, and priority support".to_string(),
             sub_items: vec![],
         },
     ];
 
     let digital_detox_features = vec![
         Feature {
-            text: "Full Hosted Plan features for a one-week trial".to_string(),
+            text: "Full Hosted Plan for a one-week trial".to_string(),
             sub_items: vec![],
         },
     ];

@@ -847,6 +847,38 @@ impl UserCore {
 
         Ok(())
     }
+    pub fn get_elevenlabs_phone_number_id(&self, user_id: i32) -> Result<Option<String>, DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+
+        // Get the critical_enabled setting
+        let number= user_settings::table
+            .filter(user_settings::user_id.eq(user_id))
+            .select(user_settings::elevenlabs_phone_number_id)
+            .first::<Option<String>>(&mut conn)?;
+
+        Ok(number)
+    }
+
+
+    pub fn set_elevenlabs_phone_number_id(&self, user_id: i32, phone_number_id: &str) -> Result<(), DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+
+        // Update the server_instance_id
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::elevenlabs_phone_number_id.eq(Some(phone_number_id)))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
 
     pub fn set_server_instance_id(&self, user_id: i32, server_instance_id: &str) -> Result<(), DieselError> {
         use crate::schema::user_settings;

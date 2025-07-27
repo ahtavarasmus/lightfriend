@@ -664,7 +664,7 @@ pub fn admin_dashboard() -> Html {
                                                 <th>{"Email"}</th>
                                                 <th>{"Phone"}</th>
                                                 <th>{"Overage Credits"}</th>
-                                                <th>{"Daily Credits"}</th>
+                                                <th>{"Monthly Credits"}</th>
                                                 <th>{"Tier"}</th>
                                                 <th>{"BYON"}</th>
                                                 <th>{"Verified"}</th>

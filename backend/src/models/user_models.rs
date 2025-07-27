@@ -425,6 +425,7 @@ pub struct UserSettings {
     pub server_ip: Option<String>, // for self hosted instance
     pub encrypted_textbee_device_id: Option<String>,
     pub encrypted_textbee_api_key: Option<String>,
+    pub elevenlabs_phone_number_id: Option<String>, // used to make outbound calls(we get this from elevenlabs api call when adding the phone number)
 }
 
 #[derive(Insertable)]

@@ -68,7 +68,7 @@ pub fn landing() -> Html {
             <div class="story-grid">
                 <div class="story-item">
                     <img src="/assets/lightfriend-robot-scene-1.png" alt="Tired of constant distractions" loading="lazy" />
-                    <p>{"Trapped by the Scroll?"}</p>
+                    <p>{"Ready to escape?"}</p>
                 </div>
                 <div class="story-item">
                     <img src="/assets/lightfriend-robot-scene-2.png" alt="Let robot handle monitoring" loading="lazy" />

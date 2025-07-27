@@ -196,6 +196,147 @@ pub async fn delete_bot_conversations(
     Ok(())
 }
 
+#[derive(Deserialize)]
+struct PhoneNumbersResponse {
+    incoming_phone_numbers: Vec<PhoneNumberInfo>,
+}
+
+#[derive(Deserialize)]
+struct PhoneNumberInfo {
+    sid: String,
+}
+
+#[derive(Deserialize)]
+struct ElevenLabsResponse {
+    phone_number_id: String,
+}
+
+pub async fn set_twilio_webhook(
+    account_sid: &str,
+    auth_token: &str,
+    phone_number: &str,
+    user_id: i32,
+    state: Arc<AppState>,
+) -> Result<(), Box<dyn Error>> {
+    let client = Client::new();
+    let webhook_url = format!("{}/api/sms/server", env::var("SERVER_URL")?);
+
+    // Find the phone number SID
+    let params = [("PhoneNumber", phone_number)];
+    let response = client
+        .get(format!(
+            "https://api.twilio.com/2010-04-01/Accounts/{}/IncomingPhoneNumbers.json",
+            account_sid
+        ))
+        .basic_auth(account_sid, Some(auth_token))
+        .query(&params)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        return Err(format!("Failed to list phone numbers: {}", response.status()).into());
+    }
+
+    let data: PhoneNumbersResponse = response.json().await?;
+    let phone_sid = data.incoming_phone_numbers.first().ok_or("No matching phone number found")?.sid.clone();
+
+    // Update the webhook
+    let update_params = [
+        ("SmsUrl", webhook_url.as_str()),
+        ("SmsMethod", "POST"),
+    ];
+    let update_response = client
+        .post(format!(
+            "https://api.twilio.com/2010-04-01/Accounts/{}/IncomingPhoneNumbers/{}.json",
+            account_sid, phone_sid
+        ))
+        .basic_auth(account_sid, Some(auth_token))
+        .form(&update_params)
+        .send()
+        .await?;
+
+    if !update_response.status().is_success() {
+        return Err(format!("Failed to update webhook: {}", update_response.status()).into());
+    }
+
+    // If Twilio update succeeds, add to ElevenLabs
+    let eleven_key = env::var("ELEVENLABS_API_KEY")?;
+
+    // Check for existing phone number ID and delete if exists
+    let existing_id = state.user_core.get_elevenlabs_phone_number_id(user_id)?;
+    if let Some(id) = existing_id {
+        let delete_url = format!("https://api.elevenlabs.io/v1/convai/phone-numbers/{}", id);
+        let delete_response = client
+            .delete(delete_url)
+            .header("xi-api-key", eleven_key.clone())
+            .send()
+            .await?;
+
+        let delete_status = delete_response.status();
+        if !delete_status.is_success() {
+            let error_text = delete_response.text().await.unwrap_or_default();
+            tracing::error!("Failed to delete existing phone number from ElevenLabs: {} - {}", delete_status, error_text);
+            // Proceed anyway
+        } else {
+            tracing::debug!("Successfully deleted existing phone number from ElevenLabs");
+        }
+    }
+
+    let label = format!("{} number", user_id);
+    let el_body = json!({
+        "phone_number": phone_number,
+        "label": label,
+        "sid": account_sid,
+        "token": auth_token,
+        "provider": "twilio"
+    });
+
+    let el_response = client
+        .post("https://api.elevenlabs.io/v1/convai/phone-numbers")
+        .header("xi-api-key", eleven_key.clone())
+        .header("Content-Type", "application/json")
+        .json(&el_body)
+        .send()
+        .await?;
+
+    let status = el_response.status();
+    if !status.is_success() {
+        let error_text = el_response.text().await.unwrap_or_default();
+        tracing::error!("Failed to add phone number to ElevenLabs: {} - {}", status, error_text);
+        // Proceed anyway, as per requirements
+    } else {
+        let el_data: ElevenLabsResponse = el_response.json().await?;
+        if let Err(e) = state.user_core.set_elevenlabs_phone_number_id(user_id, &el_data.phone_number_id) {
+            tracing::error!("Failed to set ElevenLabs phone number ID: {}", e);
+        }
+        tracing::debug!("Successfully added phone number to ElevenLabs");
+        // Assign agent to the phone number
+        let agent_id = env::var("AGENT_ID")?;
+        let assign_body = json!({
+            "agent_id": agent_id
+        });
+
+        let assign_response = client
+            .patch(format!("https://api.elevenlabs.io/v1/convai/phone-numbers/{}", el_data.phone_number_id))
+            .header("xi-api-key", eleven_key)
+            .header("Content-Type", "application/json")
+            .json(&assign_body)
+            .send()
+            .await?;
+
+        let assign_status = assign_response.status();
+        if !assign_status.is_success() {
+            let error_text = assign_response.text().await.unwrap_or_default();
+            tracing::error!("Failed to assign agent to phone number in ElevenLabs: {} - {}", assign_status, error_text);
+            // Proceed anyway
+        } else {
+            tracing::debug!("Successfully assigned agent to phone number in ElevenLabs");
+        }
+    }
+
+    Ok(())
+}
+
 pub async fn delete_twilio_conversation(
     state: &Arc<AppState>,
     conversation_sid: &str, 
@@ -247,118 +388,6 @@ pub async fn delete_twilio_conversation(
 
     tracing::debug!("Successfully deleted conversation: {}", conversation_sid);
     Ok(())
-}
-
-
-pub async fn create_twilio_conversation_for_participant(
-    state: &Arc<AppState>,
-    user: &User, 
-    proxy_address: String
-) -> Result<(String, String), Box<dyn Error>> {
-    // Validate phone numbers
-    if !user.phone_number.starts_with("+") {
-        return Err("Invalid user phone number format - must start with +".into());
-    }
-
-    if !proxy_address.starts_with("+") {
-        return Err("Invalid proxy address format - must start with +".into());
-    }
-
-    // Check if user has SMS discount tier and use their credentials if they do
-    let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
-        (
-            env::var(format!("TWILIO_ACCOUNT_SID_{}", user.id))
-                .map_err(|_| format!("Missing TWILIO_ACCOUNT_SID_{}", user.id))?,
-            env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
-                .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
-        )
-    } else if user.sub_tier == Some("tier 3".to_string()) {
-        let (account_sid, auth_token) = state.user_core.get_twilio_credentials(user.id)?;
-        (
-            account_sid,
-            auth_token,
-        )
-    } else {
-        (
-            env::var("TWILIO_ACCOUNT_SID")?,
-            env::var("TWILIO_AUTH_TOKEN")?,
-        )
-    };
-    let client = Client::new();
-
-    // Create a new conversation
-    let conversation: ConversationResponse = client
-        .post("https://conversations.twilio.com/v1/Conversations")
-        .basic_auth(&account_sid, Some(&auth_token))
-        .form(&[("FriendlyName", format!("Chat with {}", user.email))])
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    let participant_response = client
-        .post(format!(
-            "https://conversations.twilio.com/v1/Conversations/{}/Participants",
-            conversation.sid
-        ))
-        .basic_auth(&account_sid, Some(&auth_token))
-        .form(&[
-            ("MessagingBinding.Address", &user.phone_number),
-            ("MessagingBinding.ProxyAddress", &proxy_address),
-        ])
-        .send()
-        .await?;
-
-    let status = participant_response.status();
-    if !status.is_success() {
-        let error_text = participant_response.text().await?;
-        tracing::error!(
-            "Failed to add participant. Status: {}, Error: {}",
-            status,
-            error_text
-        );
-        
-        // Handle specific error cases
-        match status.as_u16() {
-            409 => {
-                tracing::debug!("Participant already exists in a conversation");
-                // Extract the existing conversation SID from the error message
-                if let Some(conv_sid) = error_text.find("Conversation ").and_then(|i| {
-                    let start = i + "Conversation ".len();
-                    error_text[start..].find('"').map(|end| error_text[start..start+end].to_string())
-                }) {
-                    // Fetch the conversation details to get the service_sid
-                    let conversation: ConversationResponse = client
-                        .get(format!(
-                            "https://conversations.twilio.com/v1/Conversations/{}",
-                            conv_sid
-                        ))
-                        .basic_auth(&account_sid, Some(&auth_token))
-                        .send()
-                        .await?
-                        .json()
-                        .await?;
-                    
-                    tracing::debug!("Found existing conversation: {}", conv_sid);
-                    return Ok((conv_sid, conversation.chat_service_sid));
-                }
-            }
-            400 => {
-                if error_text.contains("Invalid messaging binding address") {
-                    return Err("Invalid phone number format. Please ensure both numbers are in E.164 format (+1234567890)".into());
-                }
-            }
-            401 => return Err("Authentication failed with Twilio. Please check your credentials.".into()),
-            403 => return Err("Permission denied. Please check your Twilio account permissions.".into()),
-            _ => {}
-        }
-        
-        return Err(format!("Failed to add participant: {}", error_text).into());
-    }
-
-    tracing::debug!("Successfully added participant to conversation");
-
-    Ok((conversation.sid, conversation.chat_service_sid))
 }
 
 
@@ -883,12 +912,14 @@ pub async fn send_conversation_message(
         tracing::error!("Failed to store WhatsApp confirmation message in history: {}", e);
     }
 
+    /*
     let running_environment= env::var("ENVIRONMENT")
             .map_err(|_| "ENVIRONMENT not set")?;
     if running_environment == "development".to_string() {
         println!("NOT SENDING MESSAGE SINCE ENVIRONMENT IS DEVELOPMENT");
         return Ok("dev not sending anything".to_string());
     }
+    */
     let is_self_hosted = user.sub_tier == Some("self_hosted".to_string());
 
     if is_self_hosted {
