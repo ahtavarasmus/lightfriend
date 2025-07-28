@@ -8,7 +8,8 @@ use openai_api_rs::v1::chat_completion::{self, ChatCompletionMessage, MessageRol
 pub async fn get_weather(
     state: &Arc<AppState>,
     location: &str, 
-    units: &str
+    units: &str,
+    user_id: i32,
 ) -> Result<String, Box<dyn Error>> {
     
     let client = reqwest::Client::new();
@@ -34,6 +35,10 @@ pub async fn get_weather(
             std::env::var("PIRATE_WEATHER_API_KEY").expect("PIRATE_WEATHER_API_KEY must be set")
         )
     };
+    
+    // Get user settings
+    let settings = state.user_core.get_user_settings(user_id).map_err(|e| format!("Failed to get user settings: {}", e))?;
+    let user_timezone = settings.timezone;
     
     // First, get coordinates using Geoapify
     let geocoding_url = format!(
@@ -101,6 +106,15 @@ pub async fn get_weather(
     };
 
     println!("{:#?}", weather_data);
+
+    // Get timezone: prefer user's if set, else location's from weather data
+    let location_timezone = weather_data["timezone"].as_str().unwrap_or("UTC").to_string();
+    let tz_str = user_timezone.unwrap_or(location_timezone);
+
+    // Parse timezone using chrono_tz
+    use chrono_tz::Tz;
+    let tz: Tz = tz_str.parse::<Tz>().unwrap_or(chrono_tz::UTC);
+
     // Process hourly forecast
     let mut hourly_forecast = String::new();
     if let Some(hourly) = weather_data["hourly"]["data"].as_array() {
@@ -114,9 +128,10 @@ pub async fn get_weather(
                     hourly_forecast.push_str("\n\nHourly forecast:");
                 }
                 let time = hour["time"].as_i64().unwrap_or(0);
-                let datetime = chrono::DateTime::from_timestamp(time, 0)
-                    .map(|dt| dt.format("%H:%M").to_string())
-                    .unwrap_or_else(|| "unknown time".to_string());
+                let dt_utc = chrono::DateTime::from_timestamp(time, 0)
+                    .unwrap_or(chrono::Utc::now());
+                let dt_local = dt_utc.with_timezone(&tz);
+                let datetime = dt_local.format("%H:%M").to_string();
                 
                 hourly_forecast.push_str(&format!(
                     "\n{}: {} degrees {} with {}% chance of precipitation",
@@ -131,7 +146,7 @@ pub async fn get_weather(
 
     let response = format!(
         "The weather in {} is {} with a temperature of {} degrees {}. \
-        The humidity is {}% and wind speed is {} {}.{}",
+        The humidity is {}% and wind speed is {} {}. \n{}",
         location_name,
         description.to_lowercase(),
         temp.round(),
@@ -144,7 +159,6 @@ pub async fn get_weather(
 
     Ok(response)
 }
-
 
 pub async fn ask_perplexity(
     state: &Arc<AppState>,

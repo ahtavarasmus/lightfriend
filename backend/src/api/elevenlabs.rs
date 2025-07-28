@@ -2586,8 +2586,18 @@ pub async fn handle_weather_tool_call(
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<LocationCallPayload>,
 ) -> Json<serde_json::Value> {
+
+    // Extract user_id from query parameters
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Json(json!({
+                "error": "Missing or invalid user_id",
+            }));
+        }
+    };
     
-    match crate::utils::tool_exec::get_weather(&state, &payload.location, &payload.units).await {
+    match crate::utils::tool_exec::get_weather(&state, &payload.location, &payload.units, user_id).await {
         Ok(weather_info) => {
             Json(json!({
                 "response": weather_info

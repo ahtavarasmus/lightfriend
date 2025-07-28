@@ -690,7 +690,7 @@ pub async fn process_sms(
                     let location= c.location;
                     let units= c.units;
 
-                    match crate::utils::tool_exec::get_weather(&state, &location, &units).await {
+                    match crate::utils::tool_exec::get_weather(&state, &location, &units, user.id).await {
                         Ok(answer) => {
                             tracing::debug!("Successfully received weather answer");
                             tool_answers.insert(tool_call_id, answer);
