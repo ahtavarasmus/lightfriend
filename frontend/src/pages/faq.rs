@@ -247,7 +247,7 @@ pub fn faq() -> Html {
                     question="Which countries are supported?"
                     id="supported-countries"
                 >
-                    <p>{"We're expanding the service based demand and availability to new countries. You can see info about supported countries from the "}<a href="/supported-countries">{"Supported Countries"}</a>{" page or check availability by emailing "}<a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com."}</a></p>
+                    <p>{"Lightfriend works wherever Twilio works. Twilio is a platform that lightfriend uses to call and send SMS messages to you. Ask about the service availability in your country by emailing "}<a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com."}</a></p>
                 </FaqItem>
 
                 <FaqItem 
@@ -446,12 +446,13 @@ pub fn faq() -> Html {
                     question="How does LightFriend protect my data?"
                     id="data-protection"
                 >
-                    <p>{"We keep your data minimal and secure:"}</p>
+                    <p>{"Your data is kept minimal, secure, and private. As a solo developer behind this bootstrapped project, I am committed to protecting your privacy. Your data is never sold or shared with third parties."}</p>
                     <ul>
                         <li><strong>{"Calls:"}</strong>{" No recordings. Just anonymous metrics to improve service."}</li>
-                        <li><strong>{"Messages:"}</strong>{" Deleted immediately from Twilio after processing and sending, with no logs kept anywhere. Users can optionally store up to 10 recent message exchanges (encrypted at rest) for better context and follow-up questions; older messages are automatically deleted as new ones are added. Users can also choose zero stored history, though this means the assistant starts each interaction with cleared memory, limiting follow-up capabilities."}</li>
-                        <li><strong>{"Self-Hosted Plans (DIY and Easy Self-Hosting):"}</strong>{" You fully control your data on your own server. Messages and other data are managed according to your configuration, with no reliance on our servers, offering maximum privacy and control."}</li>
-                        <li><strong>{"Other data:"}</strong>{" All sensitive credentials and user data are encrypted, never shared or sold to anyone, stored only temporarily, and deleted upon user command."}</li>
+                        <li><strong>{"Messages:"}</strong>{" Users can optionally store up to 10 recent message exchanges (encrypted at rest) for better context and follow-up questions; older messages are automatically deleted as new ones are added. Users can also choose zero stored history, though this means the assistant starts each interaction with cleared memory, limiting follow-up capabilities. We have a strict no-logging policy for message content."}</li>
+                        <li><strong>{"Hosted Plan"}</strong>{" While your messages are private and not logged, the hosted version requires some trust in me as the developer, since zero access is impossible. Dumbphones can't handle decryption, so the server must decrypt and analyze messages before responding. All sensitive data is encrypted where possible, stored only as needed, and deleted upon user command or naturally when not needed."}</li>
+                        <li><strong>{"Easy Self-Hostin Plan:"}</strong>{" For ultimate privacy, this plan is fully zero access. You own everything on your own server with no reliance on ours (other than possible new feature updates). This eliminates the need to trust any third party, as it's impossible for anyone else to access your messages or data."}</li>
+                        <li><strong>{"Other data:"}</strong>{" All sensitive credentials and user data are encrypted, never shared or sold to anyone, stored only temporarily, and deleted upon user command or naturally when not needed."}</li>
                     </ul>
                 </FaqItem>
 
