@@ -28,7 +28,7 @@ pub fn landing() -> Html {
                 <div class="hero-content">
                     <div class="hero-header">
                         <p class="hero-subtitle">
-                            {"Ditch Smartphone Addiction Without Willpower"}
+                            {"Ditch Phone Addiction Without Willpower"}
                         </p>
                     </div>
                     <div class="hero-cta-group">
@@ -58,16 +58,12 @@ pub fn landing() -> Html {
         <section class="story-section">
             <div class="story-grid">
                 <div class="story-item">
-                    <img src="/assets/lightfriend-robot-scene-1.png" alt="Tired of constant distractions" loading="lazy" />
-                    <p>{"Ready to escape?"}</p>
-                </div>
-                <div class="story-item">
                     <img src="/assets/lightfriend-robot-scene-2.png" alt="Let robot handle monitoring" loading="lazy" />
-                    <p>{"Let your lightfriend monitor apps."}</p>
+                    <p>{"Let lightfriend monitor your apps."}</p>
                 </div>
                 <div class="story-item">
                     <img src="/assets/lightfriend-robot-scene-3.png" alt="Live life freely" loading="lazy" />
-                    <p>{"Get notified when it matters"}</p>
+                    <p>{"Get notified when it matters."}</p>
                 </div>
             </div>
         </section>
@@ -76,35 +72,27 @@ pub fn landing() -> Html {
                 <div class="filter-content">
                     <AnimationComponent />
                 </div>
-            </div>
-
-            // Add mobile-only intro content first
-            <div class="section-header">
-            </div>
-
-        <section class="how-it-works">
-            <h2>{"Offload to Your Lightfriend"}</h2>
-            <p>{"Stay focused while your robot handles monitoring."}</p>
-            <div class="steps-grid">
-                <div class="step">
-                    <h3>{"Connect Apps"}</h3>
-                    <p>{"Link your services securely."}</p>
-                </div>
-                <div class="step">
-                    <h3>{"Set Priorities"}</h3>
-                    <p>{"Choose what matters."}</p>
-                </div>
-                <div class="step">
-                    <h3>{"Live Present"}</h3>
-                    <p>{"Focus on life, get alerts for important stuff."}</p>
+                <div class="faq-in-filter">
+                    <h2>{"Frequently Asked Questions"}</h2>
+                    <div class="faq-item">
+                        <h3>{"Do I need a phone with internet connection?"}</h3>
+                        <p>{"No, Lightfriend works through normal voice calling and text messaging (SMS)."}</p>
+                    </div>
+                    <div class="faq-item">
+                        <h3>{"Can Lightfriend also send messages?"}</h3>
+                        <p>{"Yes, it can send messages and fetch them when you call or text it."}</p>
+                    </div>
+                    <div class="faq-item">
+                        <h3>{"How private is Lightfriend?"}</h3>
+                        <p>{"It depends on the plan. I host the service on a secure server for user convenience (Hosted Plan) with a zero logging policy, but this means you need to trust me since I must have access to this server for obvious reasons. The Easy Self-Hosting plan on the other hand offers completely private service with zero access from anyone except you. It requires more upfront investment to setup, but once running it's supposed to be a hands-free experience with automatic updates and security."}</p>
+                    </div>
                 </div>
             </div>
-        </section>
 
         <footer class="footer-cta">
             <div class="footer-content">
                 <h2>{"Ready for Digital Peace?"}</h2>
-                <p class="subtitle">{"Let your personal robot monitor messages and notify only what matters."}</p>
+                <p class="subtitle">{"Join the other 100+ early adopters! You will have more impact on the direction of the service and permanently cheaper prices."}</p>
                 <Link<Route> to={Route::Pricing} classes="forward-link">
                     <button class="hero-cta">{"Start Today"}</button>
                 </Link<Route>>
@@ -178,6 +166,41 @@ pub fn landing() -> Html {
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     }
 
+    .faq-in-filter {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 2rem 0;
+    }
+
+    .faq-in-filter h2 {
+        font-size: 2.5rem;
+        margin-bottom: 1.5rem;
+        background: linear-gradient(45deg, #fff, #7EB2FF);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-align: center;
+    }
+
+    .faq-item {
+        margin-bottom: 1.5rem;
+        background: rgba(30, 30, 30, 0.8);
+        border: 1px solid rgba(30, 144, 255, 0.15);
+        border-radius: 12px;
+        padding: 1.5rem;
+    }
+
+    .faq-item h3 {
+        font-size: 1.4rem;
+        margin-bottom: 0.75rem;
+        color: #fff;
+    }
+
+    .faq-item p {
+        font-size: 1.1rem;
+        color: #bbb;
+        line-height: 1.6;
+    }
+
     @media (max-width: 768px) {
         .filter-concept {
             padding: 2rem;
@@ -193,6 +216,18 @@ pub fn landing() -> Html {
 
         .filter-text h2 {
             font-size: 2rem;
+        }
+
+        .faq-in-filter h2 {
+            font-size: 2rem;
+        }
+
+        .faq-item h3 {
+            font-size: 1.2rem;
+        }
+
+        .faq-item p {
+            font-size: 1rem;
         }
     }
 
@@ -916,7 +951,7 @@ pub fn landing() -> Html {
 
     .story-grid {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        grid-template-columns: repeat(2, 1fr);
         gap: 2rem;
     }
 

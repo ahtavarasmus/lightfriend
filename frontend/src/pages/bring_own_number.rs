@@ -25,15 +25,19 @@ pub struct AvailablePhoneNumber {
     pub postal_code: Option<String>,
     pub lata: Option<String>,
     pub rate_center: Option<String>,
-    pub latitude: Option<f64>,
-    pub longitude: Option<f64>,
+    pub latitude: Option<String>,  // Changed to String to match JSON
+    pub longitude: Option<String>, // Changed to String to match JSON
+    #[serde(default)]
     pub beta: bool,
 }
 
 #[derive(Deserialize, Clone)]
 pub struct Capabilities {
+    #[serde(default)]
     pub voice: bool,
+    #[serde(default)]
     pub sms: bool,
+    #[serde(default)]
     pub mms: bool,
 }
 
@@ -64,19 +68,15 @@ pub struct MessagingCountry {
     pub country: String,
     pub iso_country: String,
     pub url: String,
-    pub mcc: Option<String>,
-    pub mnc: Option<String>,
+    pub price_unit: String,  // Added
     pub inbound_sms_prices: Vec<InboundSmsPrice>,
     pub outbound_sms_prices: Vec<OutboundSmsPrice>,
 }
 
 #[derive(Deserialize, Clone)]
 pub struct InboundSmsPrice {
-    pub carrier: Option<String>,
-    pub mcc: Option<String>,
-    pub mnc: Option<String>,
     pub number_type: String,
-    pub prices: Vec<Price>,
+    pub current_price: String,  // Simplified: direct price, no array or extras
 }
 
 #[derive(Deserialize, Clone)]
@@ -90,12 +90,6 @@ pub struct OutboundSmsPrice {
 #[derive(Deserialize, Clone)]
 pub struct OutboundPrice {
     pub number_type: String,
-    pub base_price: String,
-    pub current_price: String,
-}
-
-#[derive(Deserialize, Clone)]
-pub struct Price {
     pub base_price: String,
     pub current_price: String,
 }
@@ -629,25 +623,7 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                                     { for info.prices.messaging.inbound_sms_prices.iter().map(|inp| {
                                         html! {
                                             <div>
-                                                <p>{ &inp.number_type } { " " } { inp.carrier.as_ref().map(|c| c.as_str()).unwrap_or("") }</p>
-                                                <table class="setup-table">
-                                                    <thead>
-                                                        <tr>
-                                                            <th>{"Base Price"}</th>
-                                                            <th>{"Current Price"}</th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        { for inp.prices.iter().map(|pr| {
-                                                            html! {
-                                                                <tr>
-                                                                    <td>{ &pr.base_price }</td>
-                                                                    <td>{ &pr.current_price }</td>
-                                                                </tr>
-                                                            }
-                                                        }) }
-                                                    </tbody>
-                                                </table>
+                                                <p>{ &inp.number_type } { " Current Price: " } { &inp.current_price }</p>
                                             </div>
                                         }
                                     }) }

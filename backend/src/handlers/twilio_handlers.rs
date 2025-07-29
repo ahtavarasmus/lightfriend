@@ -30,9 +30,9 @@ pub struct AvailablePhoneNumber {
     #[serde(default)]
     pub lata: Option<String>,
     #[serde(default)]
-    pub latitude: Option<f64>,
+    pub latitude: Option<String>,
     #[serde(default)]
-    pub longitude: Option<f64>,
+    pub longitude: Option<String>,
     #[serde(default)]
     pub postal_code: Option<String>,
     #[serde(default)]
@@ -45,11 +45,11 @@ pub struct AvailablePhoneNumber {
 pub struct Capabilities {
     #[serde(default)]
     pub voice: bool,
-    #[serde(default)]
+    #[serde(default, rename = "SMS", alias = "sms")]  // Handles both cases
     pub sms: bool,
-    #[serde(default)]
+    #[serde(default, rename = "MMS", alias = "mms")]  // Handles both cases
     pub mms: bool,
-    #[serde(default)]
+    #[serde(default, rename = "fax", alias = "FAX")]  // Optional, handles potential variants
     pub fax: bool,
 }
 
@@ -75,27 +75,23 @@ pub struct PhoneNumberPrice {
     pub current_price: String,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct MessagingCountry {
     pub country: String,
     pub iso_country: String,
     pub url: String,
-    pub mcc: Option<String>,
-    pub mnc: Option<String>,
+    pub price_unit: String,
     pub inbound_sms_prices: Vec<InboundSmsPrice>,
     pub outbound_sms_prices: Vec<OutboundSmsPrice>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct InboundSmsPrice {
-    pub carrier: Option<String>,
-    pub mcc: Option<String>,
-    pub mnc: Option<String>,
     pub number_type: String,
-    pub prices: Vec<Price>,
+    pub current_price: String,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct OutboundSmsPrice {
     pub carrier: String,
     pub mcc: String,
@@ -103,7 +99,7 @@ pub struct OutboundSmsPrice {
     pub prices: Vec<OutboundPrice>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct OutboundPrice {
     pub number_type: String,
     pub base_price: String,
@@ -307,17 +303,19 @@ pub async fn get_country_info(
         Vec::new()
     } else {
         println!("Parsing local numbers response: {:#?}", local_resp);
-        let local_json: AvailablePhoneNumbersResponse = match local_resp.json().await {
+        match local_resp.json::<AvailablePhoneNumbersResponse>().await {
             Ok(json) => {
                 println!("Successfully parsed local numbers response");
-                json
+                json.available_phone_numbers
             },
             Err(e) => {
                 println!("Failed to parse local numbers: {}", e);
-                return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to parse local numbers: {}", e)}))))
+                // Optionally, log the raw body for debugging:
+                // let raw_body = local_resp.text().await.unwrap_or_default();
+                // println!("Raw response body: {}", raw_body);
+                Vec::new()  // Fallback to empty on parse error
             },
-        };
-        local_json.available_phone_numbers
+        }
     };
     println!("Retrieved {} local numbers", locals.len());
 
@@ -350,27 +348,28 @@ pub async fn get_country_info(
             return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to send request for mobile numbers: {}", e)}))))
         },
     };
-
-    let mobiles = if !mobile_resp.status().is_success() {
+    let mobiles= if !mobile_resp.status().is_success() {
         let err_text = match mobile_resp.text().await {
             Ok(text) => text,
             Err(e) => format!("Failed to read error body: {}", e),
         };
-        println!("Twilio API error for mobile numbers: {}", err_text);
+        println!("Twilio API error for local numbers: {}", err_text);
         Vec::new()
     } else {
         println!("Parsing mobile numbers response: {:#?}", mobile_resp);
-        let mobile_json: AvailablePhoneNumbersResponse = match mobile_resp.json().await {
+        match mobile_resp.json::<AvailablePhoneNumbersResponse>().await {
             Ok(json) => {
                 println!("Successfully parsed mobile numbers response");
-                json
+                json.available_phone_numbers
             },
             Err(e) => {
                 println!("Failed to parse mobile numbers: {}", e);
-                return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to parse mobile numbers: {}", e)}))))
+                // Optionally, log the raw body for debugging:
+                // let raw_body = local_resp.text().await.unwrap_or_default();
+                // println!("Raw response body: {}", raw_body);
+                Vec::new()  // Fallback to empty on parse error
             },
-        };
-        mobile_json.available_phone_numbers
+        }
     };
     println!("Retrieved {} mobile numbers", mobiles.len());
 
@@ -434,14 +433,43 @@ pub async fn get_country_info(
     };
 
     println!("Parsing messaging prices response");
-    let messaging: MessagingCountry = match messaging_send.json().await {
+
+    let status = messaging_send.status();
+
+    if !status.is_success() {
+        let err_text = match messaging_send.text().await {
+            Ok(text) => text,
+            Err(e) => format!("Failed to read error body: {}", e),
+        };
+        println!("Twilio API error for messaging prices: {}", err_text);
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("API error: {}", err_text)}))));
+    }
+
+    let text = match messaging_send.text().await {
+        Ok(t) => t,
+        Err(e) => {
+            println!("Failed to read response body: {}", e);
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to read response body: {}", e)}))));
+        },
+    };
+
+    let messaging: MessagingCountry = match serde_json::from_str(&text) {
         Ok(json) => {
             println!("Successfully parsed messaging prices");
             json
         },
         Err(e) => {
             println!("Failed to parse messaging prices: {}", e);
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to parse messaging prices: {}", e)}))))
+            println!("Raw messaging response body: {}", text);
+            // Fallback to a default with empty data
+            MessagingCountry {
+                country: req.country_code.clone(),
+                iso_country: req.country_code.clone(),
+                url: messaging_url.clone(),
+                price_unit: "USD".to_string(),  // Assume default
+                inbound_sms_prices: Vec::new(),
+                outbound_sms_prices: Vec::new(),
+            }
         },
     };
 

@@ -37,7 +37,7 @@ pub fn animation_component() -> Html {
     }
 
     let notification = match *stage {
-        1 | 2 | 3 | 4 => Some(("Luukas", "Hey I see saw you cycled past me, stop!!")),
+        1 | 2 | 3 | 4 => Some(("Luukas", "Hey I saw you cycled past me, stop!!")),
         6 | 7 => Some(("Krister", "look this meme is so funny XD")),
         _ => None,
     };
