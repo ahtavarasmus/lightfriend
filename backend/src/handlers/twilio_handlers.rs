@@ -16,7 +16,7 @@ pub struct AvailablePhoneNumbersResponse {
     pub available_phone_numbers: Vec<AvailablePhoneNumber>,
 }
 
-#[derive(Deserialize, Debug, Serialize)]
+#[derive(Deserialize, Debug, Serialize, Clone)]
 pub struct AvailablePhoneNumber {
     pub phone_number: String,
     pub friendly_name: String,
@@ -41,7 +41,7 @@ pub struct AvailablePhoneNumber {
     pub region: Option<String>,
 }
 
-#[derive(Deserialize, Debug, Serialize)]
+#[derive(Deserialize, Debug, Serialize, Clone)]
 pub struct Capabilities {
     #[serde(default)]
     pub voice: bool,
@@ -160,7 +160,7 @@ pub struct Meta {
     pub key: String,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Regulation {
     pub sid: String,
     pub friendly_name: String,
@@ -171,13 +171,13 @@ pub struct Regulation {
     pub url: String,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct Requirements {
     pub end_user: Vec<EndUserRequirement>,
     pub supporting_document: Vec<Vec<SupportingDocumentRequirement>>,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct EndUserRequirement {
     pub name: String,
     #[serde(rename = "type")]
@@ -188,7 +188,7 @@ pub struct EndUserRequirement {
     pub detailed_fields: Vec<FieldDetail>,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct SupportingDocumentRequirement {
     pub name: String,
     #[serde(rename = "type")]
@@ -198,7 +198,7 @@ pub struct SupportingDocumentRequirement {
     pub accepted_documents: Vec<AcceptedDocument>,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct AcceptedDocument {
     pub name: String,
     #[serde(rename = "type")]
@@ -208,7 +208,7 @@ pub struct AcceptedDocument {
     pub detailed_fields: Vec<FieldDetail>,
 }
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct FieldDetail {
     pub machine_name: String,
     pub friendly_name: String,
@@ -264,117 +264,7 @@ pub async fn get_country_info(
     let client = Client::new();
     println!("Created new HTTP client");
 
-    // Fetch local numbers
-    println!("Fetching local numbers for country: {}", req.country_code);
-    let local_url = format!(
-        "https://api.twilio.com/2010-04-01/Accounts/{}/AvailablePhoneNumbers/{}/Local.json",
-        account_sid, req.country_code
-    );
-    println!("Local numbers URL: {}", local_url);
-    
-    let local_resp = client
-        .get(&local_url)
-        .basic_auth(&account_sid, Some(&auth_token))
-        .query(&[
-            ("smsEnabled", "true"),
-            ("voiceEnabled", "true"),
-            ("pageSize", "5"),
-        ])
-        .send()
-        .await;
 
-    let local_resp = match local_resp {
-        Ok(resp) => {
-            println!("Successfully sent request for local numbers");
-            resp
-        },
-        Err(e) => {
-            println!("Failed to send request for local numbers: {}", e);
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to send request for local numbers: {}", e)}))))
-        },
-    };
-
-    let locals = if !local_resp.status().is_success() {
-        let err_text = match local_resp.text().await {
-            Ok(text) => text,
-            Err(e) => format!("Failed to read error body: {}", e),
-        };
-        println!("Twilio API error for local numbers: {}", err_text);
-        Vec::new()
-    } else {
-        println!("Parsing local numbers response: {:#?}", local_resp);
-        match local_resp.json::<AvailablePhoneNumbersResponse>().await {
-            Ok(json) => {
-                println!("Successfully parsed local numbers response");
-                json.available_phone_numbers
-            },
-            Err(e) => {
-                println!("Failed to parse local numbers: {}", e);
-                // Optionally, log the raw body for debugging:
-                // let raw_body = local_resp.text().await.unwrap_or_default();
-                // println!("Raw response body: {}", raw_body);
-                Vec::new()  // Fallback to empty on parse error
-            },
-        }
-    };
-    println!("Retrieved {} local numbers", locals.len());
-
-    // Fetch mobile numbers
-    println!("Fetching mobile numbers for country: {}", req.country_code);
-    let mobile_url = format!(
-        "https://api.twilio.com/2010-04-01/Accounts/{}/AvailablePhoneNumbers/{}/Mobile.json",
-        account_sid, req.country_code
-    );
-    println!("Mobile numbers URL: {}", mobile_url);
-
-    let mobile_resp = client
-        .get(&mobile_url)
-        .basic_auth(&account_sid, Some(&auth_token))
-        .query(&[
-            ("smsEnabled", "true"),
-            ("voiceEnabled", "true"),
-            ("pageSize", "5"),
-        ])
-        .send()
-        .await;
-
-    let mobile_resp = match mobile_resp {
-        Ok(resp) => {
-            println!("Successfully sent request for mobile numbers");
-            resp
-        },
-        Err(e) => {
-            println!("Failed to send request for mobile numbers: {}", e);
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to send request for mobile numbers: {}", e)}))))
-        },
-    };
-    let mobiles= if !mobile_resp.status().is_success() {
-        let err_text = match mobile_resp.text().await {
-            Ok(text) => text,
-            Err(e) => format!("Failed to read error body: {}", e),
-        };
-        println!("Twilio API error for local numbers: {}", err_text);
-        Vec::new()
-    } else {
-        println!("Parsing mobile numbers response: {:#?}", mobile_resp);
-        match mobile_resp.json::<AvailablePhoneNumbersResponse>().await {
-            Ok(json) => {
-                println!("Successfully parsed mobile numbers response");
-                json.available_phone_numbers
-            },
-            Err(e) => {
-                println!("Failed to parse mobile numbers: {}", e);
-                // Optionally, log the raw body for debugging:
-                // let raw_body = local_resp.text().await.unwrap_or_default();
-                // println!("Raw response body: {}", raw_body);
-                Vec::new()  // Fallback to empty on parse error
-            },
-        }
-    };
-    println!("Retrieved {} mobile numbers", mobiles.len());
-
-    let available_numbers = AvailableNumbers { locals, mobiles };
-    println!("Combined available numbers: {} local, {} mobile", available_numbers.locals.len(), available_numbers.mobiles.len());
 
     // Fetch phone number prices
     println!("Fetching phone number prices for country: {}", req.country_code);
@@ -410,6 +300,73 @@ pub async fn get_country_info(
         },
     };
 
+    let mut type_prices: Vec<(String, f64)> = phone_numbers.phone_number_prices.iter()
+        .filter_map(|p| {
+            if p.number_type == "local" || p.number_type == "mobile" {
+                p.current_price.parse::<f64>().ok().map(|pr| (p.number_type.clone(), pr))
+            } else {
+                None
+            }
+        })
+        .collect();
+    type_prices.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    let mut best_number: Option<AvailablePhoneNumber> = None;
+    let mut best_type: String = String::new();
+    for (num_type, _) in type_prices {
+        let url_type = match num_type.as_str() {
+            "local" => Some("Local"),
+            "mobile" => Some("Mobile"),
+            _ => None,
+        };
+        if let Some(u_type) = url_type {
+            let url = format!(
+                "https://api.twilio.com/2010-04-01/Accounts/{}/AvailablePhoneNumbers/{}/{}.json",
+                account_sid, req.country_code.to_uppercase(), u_type
+            );
+            let resp = match client
+                .get(&url)
+                .basic_auth(&account_sid, Some(&auth_token))
+                .query(&[("pageSize", "20")])
+                .send()
+                .await {
+                    Ok(r) => r,
+                    Err(e) => {
+                        println!("Failed to fetch {} numbers: {}", num_type, e);
+                        continue;
+                    }
+                };
+            if !resp.status().is_success() {
+                let err_text = resp.text().await.unwrap_or_default();
+                println!("Twilio API error for {} numbers: {}", num_type, err_text);
+                continue;
+            }
+            let avail_resp = match resp.json::<AvailablePhoneNumbersResponse>().await {
+                Ok(json) => json,
+                Err(e) => {
+                    println!("Failed to parse {} numbers: {}", num_type, e);
+                    continue;
+                }
+            };
+            let mut candidates = avail_resp.available_phone_numbers
+                .into_iter()
+                .filter(|n| n.capabilities.sms || n.capabilities.voice)
+                .collect::<Vec<_>>();
+            if candidates.is_empty() {
+                continue;
+            }
+            candidates.sort_by_key(|n| {
+                -(if n.capabilities.sms && n.capabilities.voice { 3 } else if n.capabilities.sms && n.capabilities.mms { 2 } else if n.capabilities.sms || n.capabilities.voice { 1 } else { 0 })
+            });
+            best_number = Some(candidates[0].clone());
+            best_type = num_type;
+            break;
+        }
+    }
+    let locals = if best_type == "local" { best_number.clone().map(|n| vec![n]).unwrap_or_default() } else { vec![] };
+    let mobiles = if best_type == "mobile" { best_number.clone().map(|n| vec![n]).unwrap_or_default() } else { vec![] };
+    let available_numbers = AvailableNumbers { locals, mobiles };
+    println!("Selected best number: type={}, count={}", best_type, if best_number.is_some() { 1 } else { 0 });
+
     // Fetch messaging prices
     println!("Fetching messaging prices for country: {}", req.country_code);
     let messaging_url = format!("https://pricing.twilio.com/v1/Messaging/Countries/{}", req.country_code);
@@ -434,44 +391,46 @@ pub async fn get_country_info(
 
     println!("Parsing messaging prices response");
 
-    let status = messaging_send.status();
-
-    if !status.is_success() {
-        let err_text = match messaging_send.text().await {
-            Ok(text) => text,
-            Err(e) => format!("Failed to read error body: {}", e),
-        };
-        println!("Twilio API error for messaging prices: {}", err_text);
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("API error: {}", err_text)}))));
-    }
-
     let text = match messaging_send.text().await {
         Ok(t) => t,
         Err(e) => {
-            println!("Failed to read response body: {}", e);
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to read response body: {}", e)}))));
+            println!("Failed to read messaging response body: {}", e);
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to read messaging response body: {}", e)}))));
         },
     };
-
-    let messaging: MessagingCountry = match serde_json::from_str(&text) {
-        Ok(json) => {
-            println!("Successfully parsed messaging prices");
-            json
-        },
+    let value = match serde_json::from_str::<serde_json::Value>(&text) {
+        Ok(v) => v,
         Err(e) => {
-            println!("Failed to parse messaging prices: {}", e);
+            println!("Failed to parse messaging as Value: {}", e);
             println!("Raw messaging response body: {}", text);
-            // Fallback to a default with empty data
-            MessagingCountry {
-                country: req.country_code.clone(),
-                iso_country: req.country_code.clone(),
-                url: messaging_url.clone(),
-                price_unit: "USD".to_string(),  // Assume default
-                inbound_sms_prices: Vec::new(),
-                outbound_sms_prices: Vec::new(),
-            }
-        },
+            json!({})
+        }
     };
+    let country = value["country"].as_str().unwrap_or(&req.country_code).to_string();
+    let iso_country = value["iso_country"].as_str().unwrap_or(&req.country_code).to_string();
+    let url = value["url"].as_str().unwrap_or("").to_string();
+    let price_unit = value["price_unit"].as_str().unwrap_or("USD").to_string();
+    let inbound_sms_prices = value["inbound_sms_prices"].as_array().unwrap_or(&vec![]).iter().map(|item| {
+        let number_type = item["number_type"].as_str().unwrap_or("").to_string();
+        let current_price = item["prices"].as_array().and_then(|arr| arr.get(0)).and_then(|p| p["current_price"].as_str()).unwrap_or("0.00").to_string();
+        InboundSmsPrice { number_type, current_price }
+    }).collect::<Vec<_>>();
+    let outbound_sms_prices: Vec<OutboundSmsPrice> = match serde_json::from_value(value["outbound_sms_prices"].clone()) {
+        Ok(o) => o,
+        Err(e) => {
+            println!("Failed to parse outbound_sms_prices: {}", e);
+            vec![]
+        }
+    };
+    let messaging = MessagingCountry {
+        country,
+        iso_country,
+        url,
+        price_unit,
+        inbound_sms_prices,
+        outbound_sms_prices,
+    };
+    println!("Parsed messaging prices with {} inbound and {} outbound", messaging.inbound_sms_prices.len(), messaging.outbound_sms_prices.len());
 
     // Fetch voice prices
     println!("Fetching voice prices for country: {}", req.country_code);
@@ -514,98 +473,59 @@ pub async fn get_country_info(
     };
     println!("Combined prices data structure created");
 
-    let mut local_regs = Vec::new();
-    if !available_numbers.locals.is_empty() {
-        println!("Fetching local regulations for country: {}", req.country_code);
-        let local_regs_send = client
-            .get("https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations")
-            .basic_auth(&account_sid, Some(&auth_token))
-            .query(&[
-                ("IsoCountry", req.country_code.as_str()),
-                ("NumberType", "local"),
-                ("IncludeConstraints", "true"),
-            ])
-            .send()
-            .await;
-
-        let local_regs_send = match local_regs_send {
-            Ok(resp) => {
-                println!("Successfully sent request for local regulations");
-                resp
-            },
-            Err(e) => {
-                println!("Failed to send request for local regulations: {}", e);
-                return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to send request for local regulations: {}", e)}))))
-            },
+    let mut local = vec![];
+    let mut mobile = vec![];
+    if !best_type.is_empty() {
+        let reg_number_type = match best_type.as_str() {
+            "local" => "local",
+            "mobile" => "mobile",
+            _ => "",
         };
-
-        println!("Parsing local regulations response");
-        let local_regs_json: RegulationsResponse = match local_regs_send.json().await {
-            Ok(json) => {
-                println!("Successfully parsed local regulations");
-                json
-            },
-            Err(e) => {
-                println!("Failed to parse local regulations: {}", e);
-                return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to parse local regulations: {}", e)}))))
-            },
-        };
-
-        local_regs = local_regs_json.results;
-        println!("Retrieved {} local regulations", local_regs.len());
-    } else {
-        println!("No local numbers available, skipping local regulations");
+        if !reg_number_type.is_empty() {
+            println!("Fetching regulations for type: {}", reg_number_type);
+            let regs_resp = client
+                .get("https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations")
+                .basic_auth(&account_sid, Some(&auth_token))
+                .query(&[
+                    ("IsoCountry", req.country_code.to_uppercase().as_str()),
+                    ("NumberType", reg_number_type),
+                    ("IncludeConstraints", "true"),
+                ])
+                .send()
+                .await;
+            let regs_resp = match regs_resp {
+                Ok(resp) => resp,
+                Err(e) => {
+                    println!("Failed to send request for regulations: {}", e);
+                    return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to fetch regulations: {}", e)}))));
+                },
+            };
+            if !regs_resp.status().is_success() {
+                let err_text = regs_resp.text().await.unwrap_or_default();
+                println!("Twilio API error for regulations: {}", err_text);
+            } else {
+                let regs_json: RegulationsResponse = match regs_resp.json().await {
+                    Ok(json) => json,
+                    Err(e) => {
+                        println!("Failed to parse regulations: {}", e);
+                        RegulationsResponse { results: vec![], meta: Meta { page: 0, page_size: 0, first_page_url: "".to_string(), previous_page_url: None, url: "".to_string(), next_page_url: None, key: "".to_string() } }
+                    },
+                };
+                let regs = regs_json.results;
+                if best_type == "local" {
+                    local = regs.clone();
+                } else if best_type == "mobile" {
+                    mobile = regs.clone();
+                }
+                println!("Retrieved {} regulations for {}", regs.len(), best_type);
+            }
+        }
     }
-
-    let mut mobile_regs = Vec::new();
-    if !available_numbers.mobiles.is_empty() {
-        println!("Fetching mobile regulations for country: {}", req.country_code);
-        let mobile_regs_send = client
-            .get("https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations")
-            .basic_auth(&account_sid, Some(&auth_token))
-            .query(&[
-                ("IsoCountry", req.country_code.as_str()),
-                ("NumberType", "mobile"),
-                ("IncludeConstraints", "true"),
-            ])
-            .send()
-            .await;
-
-        let mobile_regs_send = match mobile_regs_send {
-            Ok(resp) => {
-                println!("Successfully sent request for mobile regulations");
-                resp
-            },
-            Err(e) => {
-                println!("Failed to send request for mobile regulations: {}", e);
-                return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to send request for mobile regulations: {}", e)}))))
-            },
-        };
-
-        println!("Parsing mobile regulations response");
-        let mobile_regs_json: RegulationsResponse = match mobile_regs_send.json().await {
-            Ok(json) => {
-                println!("Successfully parsed mobile regulations");
-                json
-            },
-            Err(e) => {
-                println!("Failed to parse mobile regulations: {}", e);
-                return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to parse mobile regulations: {}", e)}))))
-            },
-        };
-
-        mobile_regs = mobile_regs_json.results;
-        println!("Retrieved {} mobile regulations", mobile_regs.len());
-    } else {
-        println!("No mobile numbers available, skipping mobile regulations");
-    }
-
     let regulations = TwilioRegulations {
-        local: local_regs,
-        mobile: mobile_regs,
+        local: local.clone(),
+        mobile: mobile.clone(),
     };
-    println!("Combined regulations data structure created");
-
+    println!("Combined regulations data: {} local, {} mobile", local.len(), mobile.len());
     println!("Returning successful response");
     Ok(Json(CountryInfoResponse {
         available_numbers,

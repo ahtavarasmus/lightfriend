@@ -164,7 +164,7 @@ pub async fn create_unified_subscription_checkout(
             } else {
                 std::env::var("STRIPE_DIGITALDETOX_ONETIME_FEE_ID_OTHER")
             }
-                .expect("Stripe one-time fee ID not found");
+            .expect("Stripe one-time fee ID not found");
             (price_id, Some(7), Some(one_time_fee_id))
         }
     };

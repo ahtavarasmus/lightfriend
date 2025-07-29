@@ -913,7 +913,7 @@ pub async fn send_conversation_message(
     ];
 
     // Use MessagingServiceSid for US recipients if available
-    let user_preferred_number = user.preferred_number.clone().unwrap();
+    let user_preferred_number = user.phone_number.clone();
     let use_messaging_service = user_preferred_number.starts_with("+1");
     let mut sid: String;
     if use_messaging_service {
