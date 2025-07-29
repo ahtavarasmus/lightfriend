@@ -48,6 +48,7 @@ mod handlers {
     pub mod telegram_auth;
     pub mod telegram_handlers;
     pub mod self_host_handlers;
+    pub mod twilio_handlers;
 }
 
 mod utils {
@@ -112,7 +113,7 @@ use handlers::{
     admin_handlers, stripe_handlers, google_calendar_auth, google_calendar,
     google_tasks_auth, google_tasks, imap_auth, imap_handlers,
     whatsapp_auth, whatsapp_handlers, telegram_auth, telegram_handlers,
-    filter_handlers,
+    filter_handlers, twilio_handlers,
 };
 use api::{twilio_sms, elevenlabs, elevenlabs_webhook, shazam_call};
 
@@ -311,7 +312,8 @@ async fn main() {
         .route("/api/self-hosted/login", post(self_host_handlers::self_hosted_login))
         .route("/api/self-hosting-status", get(self_host_handlers::self_hosted_status))
         .route("/api/check-pairing", post(self_host_handlers::check_pairing))
-        .route("/api/self-host-ping", post(self_host_handlers::self_host_ping));
+        .route("/api/self-host-ping", post(self_host_handlers::self_host_ping))
+        .route("/api/country-info", post(twilio_handlers::get_country_info));
 
     // Admin routes that need admin authentication
     let admin_routes = Router::new()

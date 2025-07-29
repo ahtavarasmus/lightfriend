@@ -3,6 +3,7 @@ use web_sys::MouseEvent;
 use yew::{Children, Properties};
 use gloo_timers::callback::Timeout;
 use wasm_bindgen::prelude::*;
+use std::rc::Rc;
 
 #[derive(Clone, PartialEq)]
 struct ChatMessage {
@@ -88,6 +89,7 @@ fn faq_item(props: &FaqItemProps) -> Html {
         </div>
     }
 }
+
 
 #[function_component(Faq)]
 pub fn faq() -> Html {
@@ -989,6 +991,11 @@ pub fn faq() -> Html {
                     text-align: left;
                 }
 
+                .notification-demo-container {
+                    position: relative;
+                    margin-top: 1rem;
+                }
+
                 @media (min-width: 768px) {
                     .phone-comparison {
                         grid-template-columns: 1fr 1fr;
@@ -1056,4 +1063,3 @@ pub fn faq() -> Html {
         </div>
     }
 }
-

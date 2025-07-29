@@ -32,6 +32,10 @@ mod pages {
     pub mod bring_own_number;
 }
 
+mod components {
+    pub mod notification;
+}
+
 mod proactive {
     pub mod email;
     pub mod calendar;

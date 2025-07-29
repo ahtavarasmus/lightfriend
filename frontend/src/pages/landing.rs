@@ -1,17 +1,8 @@
 use yew::prelude::*;
-use crate::auth::connect::Connect;
-use wasm_bindgen::prelude::*;
-use web_sys::{Element, HtmlElement, HtmlElement as HtmlElementTrait};
-use yew_router::prelude::*;
 use crate::Route;
 use yew_router::components::Link;
-use crate::config;
-use web_sys::{window, HtmlInputElement};
-use gloo_net::http::Request;
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use wasm_bindgen_futures::spawn_local;
-use gloo_timers::callback::Timeout;
+
+use crate::components::notification::AnimationComponent;
 
 #[function_component(Landing)]
 pub fn landing() -> Html {
@@ -83,19 +74,7 @@ pub fn landing() -> Html {
 
             <div class="filter-concept">
                 <div class="filter-content">
-                    <div class="filter-text">
-                        <h2>{"Finally switch to a dumbphone"}</h2>
-                        <p>{"Lightfriend lets you know when it's important and answers your questions anytime. Works between calling and SMS seamlessly without needing internet connection."}</p>
-
-                    <div class="section-intro">
-                            <Link<Route> to={Route::Pricing} classes="forward-link">
-                                <button class="hero-cta">{"Try with 7-Day Detox Now"}</button>
-                            </Link<Route>>
-                    </div>
-                    </div>
-                    <div class="filter-image">
-                        <img src="/assets/lightfriend-filter.png" alt="Lightfriend filtering concept" loading="lazy" />
-                    </div>
+                    <AnimationComponent />
                 </div>
             </div>
 
@@ -161,7 +140,7 @@ pub fn landing() -> Html {
     }
 
     .filter-concept {
-        padding: 4rem 2rem;
+        padding: 4rem 4rem;
         margin: 0 auto;
         max-width: 1200px;
         position: relative;
@@ -171,17 +150,6 @@ pub fn landing() -> Html {
     .filter-content {
         display: flex;
         align-items: center;
-        gap: 4rem;
-        background: rgba(30, 30, 30, 0.8);
-        border: 1px solid rgba(30, 144, 255, 0.15);
-        border-radius: 24px;
-        padding: 3rem;
-        transition: transform 0.3s ease, box-shadow 0.3s ease;
-    }
-
-    .filter-content:hover {
-        transform: translateY(-5px);
-        box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
     }
 
     .filter-text {
@@ -212,11 +180,12 @@ pub fn landing() -> Html {
 
     @media (max-width: 768px) {
         .filter-concept {
-            padding: 2rem 1rem;
+            padding: 2rem;
         }
 
         .filter-content {
             flex-direction: column;
+            min-height: 1000px;
             padding: 2rem;
             gap: 2rem;
             text-align: center;

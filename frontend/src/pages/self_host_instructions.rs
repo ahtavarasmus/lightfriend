@@ -54,9 +54,8 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
         .iter()
         .all(|o| o.as_deref().map_or(false, |s| !s.is_empty()));
     let is_ai_filled = props.openrouter_api_key.as_deref().map_or(false, |s| !s.is_empty());
-    let is_voice_filled = false;
+    let is_voice_filled = false; // Update this to true based on Voice props if added
 
-    // print sub_tier here
     web_sys::console::log_1(&format!("Current subscription tier: {:?}", sub_tier).into());
     let initial_page = if is_logged_in {
         match sub_tier.as_ref().map(|s| s.as_str()) {
@@ -64,9 +63,8 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
             _ => InstructionPage::Server,
         }
     } else {
-        InstructionPage::Server
+        InstructionPage::SetupCosts
     };
-    // print initial_page here
     web_sys::console::log_1(&format!("Initial page: {:#?}", initial_page).into());
 
     let current_page = use_state(|| initial_page);
@@ -115,7 +113,6 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
         })
     };
 
-
     let get_title = |applicable: bool, is_server: bool| {
         if !is_logged_in {
             "Please log in to configure this setup.".to_string()
@@ -137,63 +134,87 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
         }
     };
 
+    // Calculate progress for gamification
+    // Assuming Text and Photo both tied to Twilio (2 points), Calling to Voice (1), AI (1), Server (1) - total 5
+    let completed = (is_server_filled as u32) + (is_twilio_filled as u32 * 2) + (is_ai_filled as u32) + (is_voice_filled as u32);
+    let progress = ((completed as f32 / 5.0) * 100.0) as u32;
+
     html! {
         <div class="instructions-container">
-            <h1 class="main-header">{"Self-Host Instructions"}</h1>
             <div class="instructions-tabs">
-                <button 
-                    class={classes!("tab-button", (*current_page == InstructionPage::SetupCosts).then(|| "active"))}
-                    onclick={let switch_page = switch_page.clone(); 
-                        Callback::from(move |_| switch_page.emit(InstructionPage::SetupCosts))}
-                    title={get_title(server_applicable, true)}
-                >
-                    /*<img src="/assets/" alt="" class="tab-logo" />
-                    */
-                    <i class="fa-solid fa-tag"></i>
-                    {"Setup Costs"}
-                </button>
-                <button 
-                    class={classes!("tab-button", (*current_page == InstructionPage::Server).then(|| "active"), server_applicable.then(|| if is_server_filled { "completed" } else { "" }), (!server_applicable).then(|| "disabled"))}
-                    onclick={let switch_page = switch_page.clone(); 
-                        Callback::from(move |_| switch_page.emit(InstructionPage::Server))}
-                    title={get_title(server_applicable, true)}
-                >
-                    <img src="/assets/hostinger-logo.png" alt="" class="tab-logo" />
-                    {if server_applicable { if is_server_filled { "Server Setup (Ready)".to_string() } else { "Server Setup (Required)".to_string() } } else { "Server Setup".to_string() }}
-                </button>
-                <button 
-                    class={classes!("tab-button", (*current_page == InstructionPage::Twilio).then(|| "active"), twilio_applicable.then(|| if is_twilio_filled { "completed" } else { "" }), (!twilio_applicable).then(|| "disabled"))}
-                    onclick={let switch_page = switch_page.clone(); 
-                        Callback::from(move |_| switch_page.emit(InstructionPage::Twilio))}
-                    title={get_title(twilio_applicable, false)}
-                >
-                    <img src="/assets/twilio-logo.png" alt="Twilio Logo" class="tab-logo" />
-                    {if twilio_applicable { if is_twilio_filled { "Twilio Setup (Ready)".to_string() } else { "Twilio Setup (Required)".to_string() } } else { "Twilio Setup".to_string() }}
-                </button>
-                <button 
-                    class={classes!("tab-button", (*current_page == InstructionPage::AI).then(|| "active"), ai_applicable.then(|| if is_ai_filled { "completed" } else { "" }), (!ai_applicable).then(|| "disabled"))}
-                    onclick={let switch_page = switch_page.clone(); 
-                        Callback::from(move |_| switch_page.emit(InstructionPage::AI))}
-                    title={get_title(ai_applicable, false)}
-                >
-                    <img src="/assets/openrouter-logo.png" alt="OpenRouter Logo" class="tab-logo" />
-                    {if ai_applicable { if is_ai_filled { "OpenRouter Setup (Ready)".to_string() } else { "OpenRouter Setup (Required)".to_string() } } else { "OpenRouter Setup".to_string() }}
-                </button>
-                <button 
-                    class={classes!("tab-button", (*current_page == InstructionPage::Voice).then(|| "active"), voice_applicable.then(|| if is_voice_filled { "completed" } else { "" }), (!voice_applicable).then(|| "disabled"))}
-                    onclick={let switch_page = switch_page.clone(); 
-                        Callback::from(move |_| switch_page.emit(InstructionPage::Voice))}
-                    title={get_title(voice_applicable, false)}
-                >
-                    <img src="/assets/elevenlabs-logo.png" alt="Elevenlabs Logo" class="tab-logo" />
-                    {if voice_applicable { if is_voice_filled { "ElevenLabs Setup (Ready)".to_string() } else { "ElevenLabs Setup (Optional)".to_string() } } else { "ElevenLabs Setup".to_string() }}
-                </button>
+                <div class="nav-section">
+                    <span class="section-label">{"Channels"}</span>
+                    <div class="sub-section">
+                        <span class="sub-label">{"Messaging"}</span>
+                        <button 
+                            class={classes!("bubble", if is_twilio_filled { "green" } else { "gray" }, (*current_page == InstructionPage::Twilio).then(|| "active"))}
+                            onclick={let switch_page = switch_page.clone(); 
+                                Callback::from(move |_| switch_page.emit(InstructionPage::Twilio))}
+                            title={if is_twilio_filled { "Text (Ready)" } else { "Text (Required)" }}
+                        >
+                            {"Text"}
+                        </button>
+                        <button 
+                            class={classes!("bubble", if is_twilio_filled { "green" } else { "gray" }, (*current_page == InstructionPage::Twilio).then(|| "active"))}
+                            onclick={let switch_page = switch_page.clone(); 
+                                Callback::from(move |_| switch_page.emit(InstructionPage::Twilio))}
+                            title={if is_twilio_filled { "Photo (Ready)" } else { "Photo (Required)" }}
+                        >
+                            {"Photo"}
+                        </button>
+                    </div>
+                    <div class="sub-section">
+                        <span class="sub-label">{"Calling"}</span>
+                        <button 
+                            class={classes!("bubble", if is_voice_filled { "green" } else { "gray" }, (*current_page == InstructionPage::Voice).then(|| "active"))}
+                            onclick={let switch_page = switch_page.clone(); 
+                                Callback::from(move |_| switch_page.emit(InstructionPage::Voice))}
+                            title={if is_voice_filled { "Calling (Ready)" } else { "Calling (Optional)" }}
+                        >
+                            {"Calling"}
+                        </button>
+                    </div>
+                </div>
+                <div class="nav-section">
+                    <span class="section-label">{"Features"}</span>
+                    <div class="sub-section">
+                        <button 
+                            class={classes!("bubble", "gray", (*current_page == InstructionPage::SetupCosts).then(|| "active"))}
+                            onclick={let switch_page = switch_page.clone(); 
+                                Callback::from(move |_| switch_page.emit(InstructionPage::SetupCosts))}
+                            title={"Setup Costs"}
+                        >
+                            {"Costs"}
+                        </button>
+                        <button 
+                            class={classes!("bubble", if is_server_filled { "green" } else { "gray" }, (*current_page == InstructionPage::Server).then(|| "active"))}
+                            onclick={let switch_page = switch_page.clone(); 
+                                Callback::from(move |_| switch_page.emit(InstructionPage::Server))}
+                            title={if is_server_filled { "Server (Ready)" } else { "Server (Required)" }}
+                        >
+                            {"Server"}
+                        </button>
+                        <button 
+                            class={classes!("bubble", if is_ai_filled { "green" } else { "gray" }, (*current_page == InstructionPage::AI).then(|| "active"))}
+                            onclick={let switch_page = switch_page.clone(); 
+                                Callback::from(move |_| switch_page.emit(InstructionPage::AI))}
+                            title={if is_ai_filled { "AI (Ready)" } else { "AI (Required)" }}
+                        >
+                            {"AI"}
+                        </button>
+                    </div>
+                </div>
+                <div class="progress-container">
+                    <span>{format!("Progress: {}%", progress)}</span>
+                    <div class="progress-bg">
+                        <div class="progress-bar" style={format!("width: {}%;", progress)}></div>
+                    </div>
+                </div>
             </div>
 
             <div class="instructions-content">
                 {
                     match *current_page {
-
                         InstructionPage::SetupCosts => html! {
                             <SetupCosts />
                         },
@@ -252,98 +273,126 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
                     flex-direction: column;
                 }
 
-                .main-header {
-                    text-align: center;
-                    font-size: 2.5rem;
-                    margin: 0;
-                    color: #ffffff;
-                    padding: 5rem 1rem 0;
-                    background: rgba(26, 26, 26, 0.85);
-                    backdrop-filter: blur(10px);
-                }
-
                 .instructions-tabs {
+                    position: fixed;
+                    top: 60px;
+                    left: 0;
+                    width: 100%;
                     display: flex;
                     justify-content: center;
-                    gap: 1rem;
-                    padding: 1rem;
-                    margin: 0;
-                    border-bottom: 1px solid rgba(30, 144, 255, 0.1);
-                    background: rgba(26, 26, 26, 0.85);
+                    align-items: center;
+                    gap: 2rem;
+                    padding: 0.5rem;
+                    background: rgba(26, 26, 26, 0.95);
                     backdrop-filter: blur(10px);
+                    border-bottom: 1px solid rgba(30, 144, 255, 0.1);
+                    z-index: 1000;
+                    overflow-x: auto;
                 }
 
-                .tab-button {
-                    padding: 0.75rem 1.5rem;
-                    background: transparent;
-                    color: #999;
-                    border: 1px solid rgba(30, 144, 255, 0.1);
-                    border-radius: 6px;
-                    cursor: pointer;
+                .nav-section {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 0.5rem;
+                    padding: 0 1rem;
+                    border-right: 1px solid rgba(30, 144, 255, 0.1);
+                }
+
+                .nav-section:last-child {
+                    border-right: none;
+                }
+
+                .section-label {
+                    font-weight: bold;
+                    color: #fff;
                     font-size: 1rem;
-                    transition: all 0.3s ease;
+                }
+
+                .sub-section {
                     display: flex;
                     align-items: center;
                     gap: 0.5rem;
                 }
 
-                .tab-logo {
-                    width: 28px;
-                    height: 28px;
-                    object-fit: contain;
-                }
-
-                /* Specific adjustment for Twilio logo to match OpenRouter size visually */
-                button:first-child .tab-logo {
-                    width: 32px;
-                    height: 32px;
-                }
-
-                .tab-button:hover {
-                    border-color: rgba(30, 144, 255, 0.3);
-                    color: #fff;
-                }
-
-                .tab-button.active {
-                    background: rgba(30, 144, 255, 0.1);
-                    border-color: rgba(30, 144, 255, 0.5);
-                    color: #fff;
-                }
-
-                .tab-button.completed {
-                    border-color: rgba(50, 205, 50, 0.5);
-                    color: #fff;
-                }
-
-                .tab-button.completed:hover {
-                    border-color: rgba(50, 205, 50, 0.7);
-                }
-
-                .tab-button.completed.active {
-                    border-color: rgba(50, 205, 50, 0.7);
-                }
-
-                .tab-button.disabled {
-                    color: #666;
-                    border-color: rgba(30, 144, 255, 0.05);
+                .sub-label {
+                    color: #ccc;
                     font-size: 0.9rem;
-                    opacity: 0.8;
+                    margin-right: 0.5rem;
                 }
 
-                .tab-button.disabled:hover {
-                    border-color: rgba(30, 144, 255, 0.1);
-                    color: #777;
-                }
-
-                .tab-button.disabled.active {
-                    background: rgba(30, 144, 255, 0.05);
-                    border-color: rgba(30, 144, 255, 0.3);
+                .bubble {
+                    width: 80px;
+                    height: 40px;
+                    border-radius: 20px;
+                    background: transparent;
+                    border: 2px solid #999;
                     color: #999;
+                    cursor: pointer;
+                    font-size: 0.9rem;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    transition: transform 0.2s, border 0.2s, background 0.2s;
+                }
+
+                .bubble:hover {
+                    transform: scale(1.05);
+                }
+
+                .bubble.green {
+                    background: rgba(50, 205, 50, 0.2);
+                    border: 2px solid #32CD32;
+                    color: #fff;
+                    animation: pulse 0.5s;
+                }
+
+                .bubble.gray {
+                    background: rgba(128, 128, 128, 0.1);
+                    border: 2px solid #999;
+                    color: #999;
+                }
+
+                .bubble.active {
+                    box-shadow: 0 0 10px rgba(30, 144, 255, 0.5);
+                }
+
+                @keyframes pulse {
+                    0% { transform: scale(1); }
+                    50% { transform: scale(1.1); }
+                    100% { transform: scale(1); }
+                }
+
+                .progress-container {
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    gap: 0.25rem;
+                }
+
+                .progress-container span {
+                    color: #fff;
+                    font-size: 0.9rem;
+                }
+
+                .progress-bg {
+                    width: 100px;
+                    height: 5px;
+                    background: #333;
+                    border-radius: 5px;
+                    overflow: hidden;
+                }
+
+                .progress-bar {
+                    height: 100%;
+                    background: #32CD32;
+                    transition: width 0.3s ease;
                 }
 
                 .instructions-content {
                     flex: 1;
                     width: 100%;
+                    padding-top: 120px;
                 }
 
                 .navigation-buttons {
@@ -379,17 +428,28 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
 
                 @media (max-width: 768px) {
                     .instructions-tabs {
-                        padding: 0.5rem;
+                        justify-content: flex-start;
+                        padding: 0.5rem 1rem;
+                        gap: 1rem;
                     }
 
-                    .tab-button {
-                        padding: 0.5rem 1rem;
-                        font-size: 0.9rem;
+                    .nav-section {
+                        align-items: flex-start;
+                    }
+
+                    .bubble {
+                        width: 60px;
+                        height: 30px;
+                        font-size: 0.8rem;
                     }
 
                     .navigation-buttons {
                         bottom: 1rem;
                         right: 1rem;
+                    }
+
+                    .progress-bg {
+                        width: 80px;
                     }
                 }
                 "#}

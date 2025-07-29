@@ -6,6 +6,215 @@ use gloo_net::http::Request;
 use wasm_bindgen_futures::spawn_local;
 use serde_json::json;
 use crate::config;
+use serde::Deserialize;
+
+#[derive(Deserialize, Clone)]
+pub struct AvailablePhoneNumbersResponse {
+    pub available_phone_numbers: Vec<AvailablePhoneNumber>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct AvailablePhoneNumber {
+    pub phone_number: String,
+    pub friendly_name: String,
+    pub address_requirements: String,
+    pub capabilities: Capabilities,
+    pub iso_country: String,
+    pub locality: Option<String>,
+    pub region: Option<String>,
+    pub postal_code: Option<String>,
+    pub lata: Option<String>,
+    pub rate_center: Option<String>,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    pub beta: bool,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct Capabilities {
+    pub voice: bool,
+    pub sms: bool,
+    pub mms: bool,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct AvailableNumbers {
+    pub locals: Vec<AvailablePhoneNumber>,
+    pub mobiles: Vec<AvailablePhoneNumber>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct PhoneNumberCountry {
+    pub country: String,
+    pub iso_country: String,
+    pub phone_number_prices: Vec<PhoneNumberPrice>,
+    pub price_unit: String,
+    pub url: String,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct PhoneNumberPrice {
+    pub number_type: String,
+    pub base_price: String,
+    pub current_price: String,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct MessagingCountry {
+    pub country: String,
+    pub iso_country: String,
+    pub url: String,
+    pub mcc: Option<String>,
+    pub mnc: Option<String>,
+    pub inbound_sms_prices: Vec<InboundSmsPrice>,
+    pub outbound_sms_prices: Vec<OutboundSmsPrice>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct InboundSmsPrice {
+    pub carrier: Option<String>,
+    pub mcc: Option<String>,
+    pub mnc: Option<String>,
+    pub number_type: String,
+    pub prices: Vec<Price>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct OutboundSmsPrice {
+    pub carrier: String,
+    pub mcc: String,
+    pub mnc: String,
+    pub prices: Vec<OutboundPrice>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct OutboundPrice {
+    pub number_type: String,
+    pub base_price: String,
+    pub current_price: String,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct Price {
+    pub base_price: String,
+    pub current_price: String,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct VoiceCountry {
+    pub country: String,
+    pub iso_country: String,
+    pub url: String,
+    pub inbound_call_prices: Vec<InboundCallPrice>,
+    pub outbound_prefix_prices: Vec<OutboundPrefixPrice>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct InboundCallPrice {
+    pub number_type: String,
+    pub base_price: String,
+    pub current_price: String,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct OutboundPrefixPrice {
+    pub prefixes: Vec<String>,
+    pub base_price: String,
+    pub current_price: String,
+    pub friendly_name: String,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct TwilioPrices {
+    pub phone_numbers: PhoneNumberCountry,
+    pub messaging: MessagingCountry,
+    pub voice: VoiceCountry,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct RegulationsResponse {
+    pub results: Vec<Regulation>,
+    pub meta: Meta,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct Meta {
+    pub page: i32,
+    pub page_size: i32,
+    pub first_page_url: String,
+    pub previous_page_url: Option<String>,
+    pub url: String,
+    pub next_page_url: Option<String>,
+    pub key: String,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct Regulation {
+    pub sid: String,
+    pub friendly_name: String,
+    pub iso_country: String,
+    pub number_type: String,
+    pub end_user_type: String,
+    pub requirements: Requirements,
+    pub url: String,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct Requirements {
+    pub end_user: Vec<EndUserRequirement>,
+    pub supporting_document: Vec<Vec<SupportingDocumentRequirement>>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct EndUserRequirement {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub req_type: String,
+    pub requirement_name: String,
+    pub url: String,
+    pub fields: Vec<String>,
+    pub detailed_fields: Vec<FieldDetail>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct SupportingDocumentRequirement {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub req_type: String,
+    pub requirement_name: String,
+    pub description: String,
+    pub accepted_documents: Vec<AcceptedDocument>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct AcceptedDocument {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub doc_type: String,
+    pub url: String,
+    pub fields: Vec<String>,
+    pub detailed_fields: Vec<FieldDetail>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct FieldDetail {
+    pub machine_name: String,
+    pub friendly_name: String,
+    pub description: String,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct TwilioRegulations {
+    pub local: Vec<Regulation>,
+    pub mobile: Vec<Regulation>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct CountryInfoResponse {
+    pub available_numbers: AvailableNumbers,
+    pub prices: TwilioPrices,
+    pub regulations: TwilioRegulations,
+}
 
 #[derive(Properties, PartialEq)]
 pub struct TwilioHostedInstructionsProps {
@@ -116,7 +325,7 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
     let on_save_phone = {
         let phone_number = phone_number.clone();
         let phone_save_status = phone_save_status.clone();
-        Callback::from(move |_| {
+        Callback::from(move |_: MouseEvent| {
             let phone_number = phone_number.clone();
             let phone_save_status = phone_save_status.clone();
             
@@ -174,7 +383,7 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
         let account_sid = account_sid.clone();
         let auth_token = auth_token.clone();
         let creds_save_status = creds_save_status.clone();
-        Callback::from(move |_| {
+        Callback::from(move |_: MouseEvent| {
             let account_sid = account_sid.clone();
             let auth_token = auth_token.clone();
             let creds_save_status = creds_save_status.clone();
@@ -269,27 +478,50 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
         val.len() == 32 && val.chars().all(|c| c.is_ascii_hexdigit()) && !val.starts_with("...")
     };
 
-    let country = (*selected_country).clone();
+    let country_info = use_state(|| None::<CountryInfoResponse>);
+    let fetch_error = use_state(|| None::<String>);
+    let is_loading = use_state(|| false);
 
-    let twilio_cost = match country.as_str() {
-        "fi" => "normal 5$-25$/month (for 20-100 messages)".to_string(),
-        "gb" => "3.5$-17.5$/month (for 20-100 messages)".to_string(),
-        "au" => "3.5$-17.5$/month (for 20-100 messages)".to_string(),
-        "se" => "normal 4$-20$/month (for 20-100 messages)".to_string(),
-        "dk" => "3.5$-17.5$/month (for 20-100 messages)".to_string(),
-        "de" => "Hard to setup: 15$/month number with registered business and 120 day validation time. Messages cost ~2x UK rates. Easier to use a UK number.".to_string(),
-        _ => "3.5$-17.5$/month (for 20-100 messages)".to_string(),
-    };
+    {
+        let selected_country = selected_country.clone();
+        let country_info = country_info.clone();
+        let fetch_error = fetch_error.clone();
+        let is_loading = is_loading.clone();
+        use_effect_with_deps(
+            move |country| {
+                let country = (*country).clone();
+                if !country.is_empty() {
+                    is_loading.set(true);
+                    fetch_error.set(None);
+                    country_info.set(None);
+                    spawn_local(async move {
+                        let request_body = json!({"country_code": country.to_uppercase()});
+                        let response = Request::post(&format!("{}/api/country-info", config::get_backend_url()))
+                            .json(&request_body)
+                            .unwrap()
+                            .send()
+                            .await;
 
-    let twilio_link = match country.as_str() {
-        "fi" => "https://www.twilio.com/en-us/sms/pricing/fi".to_string(),
-        "gb" => "https://www.twilio.com/en-us/sms/pricing/gb".to_string(),
-        "au" => "https://www.twilio.com/en-us/sms/pricing/au".to_string(),
-        "se" => "https://www.twilio.com/en-us/sms/pricing/se".to_string(),
-        "dk" => "https://www.twilio.com/en-us/sms/pricing/dk".to_string(),
-        "de" => "https://www.twilio.com/en-us/sms/pricing/de".to_string(),
-        _ => "https://www.twilio.com/en-us/sms/pricing/en".to_string(),
-    };
+                        match response {
+                            Ok(resp) if resp.ok() => {
+                                match resp.json::<CountryInfoResponse>().await {
+                                    Ok(data) => {
+                                        country_info.set(Some(data));
+                                        fetch_error.set(None);
+                                    }
+                                    Err(e) => fetch_error.set(Some(e.to_string())),
+                                }
+                            }
+                            _ => fetch_error.set(Some("Failed to fetch country information".to_string())),
+                        }
+                        is_loading.set(false);
+                    });
+                }
+                || ()
+            },
+            selected_country,
+        );
+    }
 
     html! {
         <div class="instructions-page">
@@ -313,33 +545,259 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
 
                 <div class="instruction-block">
                     <div class="instruction-content">
-                        <h2>{"Twilio Expected Costs"}</h2>
-                        <p>{"Select a country to view the estimated costs for Twilio messaging services."}</p>
+                        <h2>{"Twilio Information"}</h2>
+                        <p>{"Select a country to view available phone numbers, costs, and regulations."}</p>
                         <div class="country-selector">
                             <label for="country-select">{"Country: "}</label>
                             <select id="country-select" onchange={on_country_change}>
-                                <option value="fi" selected={country == "fi"}>{"FI"}</option>
-                                <option value="gb" selected={country == "gb"}>{"GB"}</option>
-                                <option value="au" selected={country == "au"}>{"AU"}</option>
-                                <option value="se" selected={country == "se"}>{"SE"}</option>
-                                <option value="dk" selected={country == "dk"}>{"DK"}</option>
-                                <option value="de" selected={country == "de"}>{"DE"}</option>
+                                <option value="fi" selected={*selected_country == "fi"}>{"FI"}</option>
+                                <option value="gb" selected={*selected_country == "gb"}>{"GB"}</option>
+                                <option value="au" selected={*selected_country == "au"}>{"AU"}</option>
+                                <option value="se" selected={*selected_country == "se"}>{"SE"}</option>
+                                <option value="dk" selected={*selected_country == "dk"}>{"DK"}</option>
+                                <option value="de" selected={*selected_country == "de"}>{"DE"}</option>
                             </select>
                         </div>
-                        <table class="setup-table">
-                            <thead>
-                                <tr>
-                                    <th>{"Service"}</th>
-                                    <th>{"Approx Cost"}</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr>
-                                    <td>{"Twilio for Messaging"}</td>
-                                    <td><a href={twilio_link} target="_blank" class="cost-link">{twilio_cost}</a></td>
-                                </tr>
-                            </tbody>
-                        </table>
+                        { if *is_loading {
+                            html! { <p>{"Loading..."}</p> }
+                        } else if let Some(err) = &*fetch_error {
+                            html! { <p class="error">{err}</p> }
+                        } else if let Some(info) = (*country_info).clone() {
+                            html! {
+                                <div class="country-info">
+                                    <h3>{"Available Numbers"}</h3>
+                                    <h4>{"Local Numbers"}</h4>
+                                    { if info.available_numbers.locals.is_empty() {
+                                        html! { <p>{"No local numbers available"}</p> }
+                                    } else {
+                                        html! {
+                                            <ul>
+                                                { for info.available_numbers.locals.iter().map(|n| {
+                                                    html! {
+                                                        <li>
+                                                            { &n.friendly_name } { " (" } { &n.phone_number } { ")" }
+                                                            { ", Address Requirements: " } { &n.address_requirements }
+                                                        </li>
+                                                    }
+                                                }) }
+                                            </ul>
+                                        }
+                                    } }
+
+                                    <h4>{"Mobile Numbers"}</h4>
+                                    { if info.available_numbers.mobiles.is_empty() {
+                                        html! { <p>{"No mobile numbers available"}</p> }
+                                    } else {
+                                        html! {
+                                            <ul>
+                                                { for info.available_numbers.mobiles.iter().map(|n| {
+                                                    html! {
+                                                        <li>
+                                                            { &n.friendly_name } { " (" } { &n.phone_number } { ")" }
+                                                            { ", Address Requirements: " } { &n.address_requirements }
+                                                        </li>
+                                                    }
+                                                }) }
+                                            </ul>
+                                        }
+                                    } }
+
+                                    <h3>{"Prices"}</h3>
+                                    <h4>{"Phone Number Prices"}</h4>
+                                    <table class="setup-table">
+                                        <thead>
+                                            <tr>
+                                                <th>{"Type"}</th>
+                                                <th>{"Base Price"}</th>
+                                                <th>{"Current Price"}</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            { for info.prices.phone_numbers.phone_number_prices.iter().map(|p| {
+                                                html! {
+                                                    <tr>
+                                                        <td>{ &p.number_type }</td>
+                                                        <td>{ &p.base_price }</td>
+                                                        <td>{ &p.current_price }</td>
+                                                    </tr>
+                                                }
+                                            }) }
+                                        </tbody>
+                                    </table>
+
+                                    <h4>{"Inbound SMS Prices"}</h4>
+                                    { for info.prices.messaging.inbound_sms_prices.iter().map(|inp| {
+                                        html! {
+                                            <div>
+                                                <p>{ &inp.number_type } { " " } { inp.carrier.as_ref().map(|c| c.as_str()).unwrap_or("") }</p>
+                                                <table class="setup-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>{"Base Price"}</th>
+                                                            <th>{"Current Price"}</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        { for inp.prices.iter().map(|pr| {
+                                                            html! {
+                                                                <tr>
+                                                                    <td>{ &pr.base_price }</td>
+                                                                    <td>{ &pr.current_price }</td>
+                                                                </tr>
+                                                            }
+                                                        }) }
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        }
+                                    }) }
+
+                                    <h4>{"Outbound SMS Prices"}</h4>
+                                    { for info.prices.messaging.outbound_sms_prices.iter().map(|out| {
+                                        html! {
+                                            <div>
+                                                <p>{ &out.carrier } { " MCC: " } { &out.mcc } { " MNC: " } { &out.mnc }</p>
+                                                <table class="setup-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>{"Type"}</th>
+                                                            <th>{"Base Price"}</th>
+                                                            <th>{"Current Price"}</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        { for out.prices.iter().map(|pr| {
+                                                            html! {
+                                                                <tr>
+                                                                    <td>{ &pr.number_type }</td>
+                                                                    <td>{ &pr.base_price }</td>
+                                                                    <td>{ &pr.current_price }</td>
+                                                                </tr>
+                                                            }
+                                                        }) }
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        }
+                                    }) }
+
+                                    <h4>{"Inbound Call Prices"}</h4>
+                                    <table class="setup-table">
+                                        <thead>
+                                            <tr>
+                                                <th>{"Type"}</th>
+                                                <th>{"Base Price"}</th>
+                                                <th>{"Current Price"}</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            { for info.prices.voice.inbound_call_prices.iter().map(|inp| {
+                                                html! {
+                                                    <tr>
+                                                        <td>{ &inp.number_type }</td>
+                                                        <td>{ &inp.base_price }</td>
+                                                        <td>{ &inp.current_price }</td>
+                                                    </tr>
+                                                }
+                                            }) }
+                                        </tbody>
+                                    </table>
+
+                                    <h4>{"Outbound Call Prices"}</h4>
+                                    <table class="setup-table">
+                                        <thead>
+                                            <tr>
+                                                <th>{"Friendly Name"}</th>
+                                                <th>{"Prefixes"}</th>
+                                                <th>{"Base Price"}</th>
+                                                <th>{"Current Price"}</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            { for info.prices.voice.outbound_prefix_prices.iter().map(|out| {
+                                                html! {
+                                                    <tr>
+                                                        <td>{ &out.friendly_name }</td>
+                                                        <td>{ out.prefixes.join(", ") }</td>
+                                                        <td>{ &out.base_price }</td>
+                                                        <td>{ &out.current_price }</td>
+                                                    </tr>
+                                                }
+                                            }) }
+                                        </tbody>
+                                    </table>
+
+                                    <h3>{"Regulations"}</h3>
+                                    <h4>{"Local Regulations"}</h4>
+                                    { if info.regulations.local.is_empty() {
+                                        html! { <p>{"No specific regulations found"}</p> }
+                                    } else {
+                                        html! {
+                                            { for info.regulations.local.iter().map(|reg| {
+                                                html! {
+                                                    <div>
+                                                        <p>{ &reg.friendly_name } { " (" } { &reg.end_user_type } { ")" }</p>
+                                                        <ul>
+                                                            { for reg.requirements.end_user.iter().map(|eu| {
+                                                                html! {
+                                                                    <li>
+                                                                        { &eu.name } { " (" } { &eu.req_type } { "): " } { eu.fields.join(", ") }
+                                                                    </li>
+                                                                }
+                                                            }) }
+                                                        </ul>
+                                                        <p>{"Supporting Documents"}</p>
+                                                        { for reg.requirements.supporting_document.iter().flatten().map(|doc| {
+                                                            html! {
+                                                                <div>
+                                                                    { &doc.name } { ": " } { &doc.description }
+                                                                    { " Accepted: " } { doc.accepted_documents.iter().map(|ad| ad.name.clone()).collect::<Vec<_>>().join(", ") }
+                                                                </div>
+                                                            }
+                                                        }) }
+                                                    </div>
+                                                }
+                                            }) }
+                                        }
+                                    } }
+
+                                    <h4>{"Mobile Regulations"}</h4>
+                                    { if info.regulations.mobile.is_empty() {
+                                        html! { <p>{"No specific regulations found"}</p> }
+                                    } else {
+                                        html! {
+                                            { for info.regulations.mobile.iter().map(|reg| {
+                                                html! {
+                                                    <div>
+                                                        <p>{ &reg.friendly_name } { " (" } { &reg.end_user_type } { ")" }</p>
+                                                        <ul>
+                                                            { for reg.requirements.end_user.iter().map(|eu| {
+                                                                html! {
+                                                                    <li>
+                                                                        { &eu.name } { " (" } { &eu.req_type } { "): " } { eu.fields.join(", ") }
+                                                                    </li>
+                                                                }
+                                                            }) }
+                                                        </ul>
+                                                        <p>{"Supporting Documents"}</p>
+                                                        { for reg.requirements.supporting_document.iter().flatten().map(|doc| {
+                                                            html! {
+                                                                <div>
+                                                                    { &doc.name } { ": " } { &doc.description }
+                                                                    { " Accepted: " } { doc.accepted_documents.iter().map(|ad| ad.name.clone()).collect::<Vec<_>>().join(", ") }
+                                                                </div>
+                                                            }
+                                                        }) }
+                                                    </div>
+                                                }
+                                            }) }
+                                        }
+                                    } }
+                                </div>
+                            }
+                        } else {
+                            html! { <p>{"Select a country to view information"}</p> }
+                        } }
                     </div>
                 </div>
                 <div class="instruction-block">
@@ -361,61 +819,6 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                             alt="Navigating to Twilio Billing Page" 
                             loading="lazy"
                             onclick={let open_modal = open_modal.clone(); let src = "/assets/billing-twilio.png".to_string(); 
-                                Callback::from(move |_| open_modal.emit(src.clone()))}
-                            style="cursor: pointer;"
-                        />
-                    </div>
-                </div>
-
-                <div class="instruction-block">
-                    <div class="instruction-content">
-                        <h2>{"Twilio Buy a Phone Number"}</h2>
-                        <ul>
-                            <li>{"1. On the Twilio Dashboard, click on the 'Phone Numbers' button in the left sidebar when 'Develop' is selected above."}</li>
-                            <li>{"2. Click the 'Buy a number' button under the new sub menu"}</li>
-                            <li>{"3. Use the country search box to select your desired country"}</li>
-                            <li>{"4. (Optional) Use advanced search options to find specific number types"}</li>
-                            <li>{"5. Check the capabilities column to ensure the number supports your needs (Voice, SMS, MMS, etc.)"}</li>
-                            <li>{"6. Click the 'Buy' button next to your chosen number and follow the steps"}</li>
-                        </ul>
-                        <div class="input-field">
-                            <label for="phone-number">{"Your Twilio Phone Number:"}</label>
-                            <div class="input-with-button">
-                                <input 
-                                    type="text" 
-                                    id="phone-number" 
-                                    placeholder="+1234567890" 
-                                    value={(*phone_number).clone()}
-                                    onchange={on_phone_change.clone()}
-                                    disabled={!can_edit}
-                                />
-                                <button 
-                                    class={classes!("save-button", if !is_phone_valid || !can_edit { "invalid" } else { "" })}
-                                    onclick={on_save_phone.clone()}
-                                    disabled={!can_edit || !is_phone_valid}
-                                >
-                                    {"Save"}
-                                </button>
-                                {
-                                    match &*phone_save_status {
-                                        Some(Ok(_)) => html! {
-                                            <span class="save-status success">{"✓ Saved"}</span>
-                                        },
-                                        Some(Err(err)) => html! {
-                                            <span class="save-status error">{format!("Error: {}", err)}</span>
-                                        },
-                                        None => html! {}
-                                    }
-                                }
-                            </div>
-                        </div>
-                    </div>
-                    <div class="instruction-image">
-                        <img 
-                            src="/assets/number-twilio.png" 
-                            alt="Buy Twilio Phone Number Image" 
-                            loading="lazy"
-                            onclick={let open_modal = open_modal.clone(); let src = "/assets/number-twilio.png".to_string(); 
                                 Callback::from(move |_| open_modal.emit(src.clone()))}
                             style="cursor: pointer;"
                         />
@@ -927,6 +1330,24 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
 
                 .back-home-button:active {
                     transform: translateY(1px);
+                }
+
+                .country-info h3, .country-info h4 {
+                    color: #7EB2FF;
+                }
+
+                .country-info ul {
+                    list-style-type: disc;
+                    padding-left: 20px;
+                }
+
+                .country-info li {
+                    color: #999;
+                    margin-bottom: 0.5rem;
+                }
+
+                .error {
+                    color: #f44336;
                 }
                 "#}
             </style>
