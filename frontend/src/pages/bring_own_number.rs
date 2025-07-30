@@ -473,826 +473,1029 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
     };
 
     let country_info = use_state(|| None::<CountryInfoResponse>);
-let fetch_error = use_state(|| None::<String>);
-let is_loading = use_state(|| false);
+    let fetch_error = use_state(|| None::<String>);
+    let is_loading = use_state(|| false);
 
-{
-    let selected_country = selected_country.clone();
-    let country_info = country_info.clone();
-    let fetch_error = fetch_error.clone();
-    let is_loading = is_loading.clone();
-    use_effect_with_deps(
-        move |country| {
-            let country = (*country).clone();
-            if !country.is_empty() {
-                is_loading.set(true);
-                fetch_error.set(None);
-                country_info.set(None);
-                spawn_local(async move {
-                    let request_body = json!({"country_code": country.to_uppercase()});
-                    let response = Request::post(&format!("{}/api/country-info", config::get_backend_url()))
-                        .json(&request_body)
-                        .unwrap()
-                        .send()
-                        .await;
+    {
+        let selected_country = selected_country.clone();
+        let country_info = country_info.clone();
+        let fetch_error = fetch_error.clone();
+        let is_loading = is_loading.clone();
+        use_effect_with_deps(
+            move |country| {
+                let country = (*country).clone();
+                if !country.is_empty() {
+                    is_loading.set(true);
+                    fetch_error.set(None);
+                    country_info.set(None);
+                    spawn_local(async move {
+                        let request_body = json!({"country_code": country.to_uppercase()});
+                        let response = Request::post(&format!("{}/api/country-info", config::get_backend_url()))
+                            .json(&request_body)
+                            .unwrap()
+                            .send()
+                            .await;
 
-                    match response {
-                        Ok(resp) if resp.ok() => {
-                            match resp.json::<CountryInfoResponse>().await {
-                                Ok(data) => {
-                                    country_info.set(Some(data));
-                                    fetch_error.set(None);
+                        match response {
+                            Ok(resp) if resp.ok() => {
+                                match resp.json::<CountryInfoResponse>().await {
+                                    Ok(data) => {
+                                        country_info.set(Some(data));
+                                        fetch_error.set(None);
+                                    }
+                                    Err(e) => fetch_error.set(Some(e.to_string())),
                                 }
-                                Err(e) => fetch_error.set(Some(e.to_string())),
                             }
+                            _ => fetch_error.set(Some("Failed to fetch country information".to_string())),
                         }
-                        _ => fetch_error.set(Some("Failed to fetch country information".to_string())),
-                    }
-                    is_loading.set(false);
-                });
-            }
-            || ()
-        },
-        selected_country,
-    );
-}
-
-html! {
-    <div class="instructions-page">
-        <div class="instructions-background"></div>
-        <section class="instructions-section">
-            { if !props.message.is_empty() {
-                html! {
-                    <div class="applicable-message">
-                        { props.message.clone() }
-                    </div>
+                        is_loading.set(false);
+                    });
                 }
-            } else {
-                html! {}
-            } }
-            <div class="instruction-block overview-block">
-                <div class="instruction-content">
-                    <h2>{"SMS and Voice Communication Setup"}</h2>
-                    <p>{"Lightfriend uses Twilio for SMS messaging and voice calls, giving your AI assistant the ability to communicate via a dedicated phone number. International users can bring their own number and pay for messages straight to Twilio."}</p>
-                </div>
-            </div>
+                || ()
+            },
+            selected_country,
+        );
+    }
 
-            <div class="instruction-block">
-                <div class="instruction-content">
-                    <h2>{"Twilio Information"}</h2>
-                    <p>{"Select a country to view available phone numbers, costs, and regulations."}</p>
-                    <div class="country-selector">
-                        <label for="country-select">{"Country: "}</label>
-                        <select id="country-select" onchange={on_country_change}>
-                            <option value="fi" selected={*selected_country == "fi"}>{"FI"}</option>
-                            <option value="gb" selected={*selected_country == "gb"}>{"GB"}</option>
-                            <option value="au" selected={*selected_country == "au"}>{"AU"}</option>
-                            <option value="se" selected={*selected_country == "se"}>{"SE"}</option>
-                            <option value="dk" selected={*selected_country == "dk"}>{"DK"}</option>
-                            <option value="de" selected={*selected_country == "de"}>{"DE"}</option>
-                        </select>
-                    </div>
-                    { if *is_loading {
-                        html! { <p>{"Loading..."}</p> }
-                    } else if let Some(err) = &*fetch_error {
-                        html! { <p class="error">{err}</p> }
-                    } else if let Some(info) = (*country_info).clone() {
-                        let locals = info.available_numbers.locals;
-                        let mobiles = info.available_numbers.mobiles;
-                        let best_num_opt: Option<&AvailablePhoneNumber> = if !locals.is_empty() {
-                            locals.first()
-                        } else if !mobiles.is_empty() {
-                            mobiles.first()
-                        } else {
-                            None
-                        };
-                        let best_type = if !locals.is_empty() {
-                            "local".to_string()
-                        } else if !mobiles.is_empty() {
-                            "mobile".to_string()
-                        } else {
-                            String::new()
-                        };
-                        let mut regs = if best_type == "local" {
-                            info.regulations.local
-                        } else if best_type == "mobile" {
-                            info.regulations.mobile
-                        } else {
-                            vec![]
-                        };
-                        regs = regs.into_iter().filter(|reg| reg.end_user_type == "individual").collect();
-                        let outbound_sms_min_price = info.prices.messaging.outbound_sms_prices.iter()
-                            .flat_map(|out| &out.prices)
-                            .filter(|pr| pr.number_type == best_type)
-                            .map(|pr| pr.current_price.parse::<f64>().unwrap_or(f64::MAX))
-                            .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                            .map(|p| p.to_string())
-                            .unwrap_or("N/A".to_string());
-                        let outbound_call_price = info.prices.voice.outbound_prefix_prices.iter()
-                            .find(|out| out.friendly_name == info.prices.voice.country)
-                            .map(|out| out.current_price.clone())
-                            .unwrap_or("N/A".to_string());
-                        html! {
-                            <div class="country-info">
-                                <h3>{"Best Available Number"}</h3>
-                                {
-                                    if let Some(num) = best_num_opt {
-                                        html! {
-                                            <div>
-                                                <p>{ num.friendly_name.clone() } { " (" } { num.phone_number.clone() } { ")" }</p>
-                                                <p>{"Type: "} { best_type.clone() } { ", Address Requirements: " } { num.address_requirements.clone() }</p>
-                                                <h4>{"Capabilities"}</h4>
-                                                <ul>
-                                                    { if num.capabilities.voice { html! { <li>{"Voice"}</li> } } else { html! {} } }
-                                                    { if num.capabilities.sms { html! { <li>{"SMS"}</li> } } else { html! {} } }
-                                                    { if num.capabilities.mms { html! { <li>{"MMS"}</li> } } else { html! {} } }
-                                                </ul>
-                                                <h4>{"Monthly Price"}</h4>
-                                                <p>
-                                                    { info.prices.phone_numbers.phone_number_prices.iter().find(|p| p.number_type == best_type).map(|p| p.current_price.clone()).unwrap_or("N/A".to_string()) }
-                                                    { " " } { info.prices.phone_numbers.price_unit.clone() }
-                                                </p>
-                                            </div>
-                                        }
-                                    } else {
-                                        html! { <p>{"No available number found that meets the criteria."}</p> }
-                                    }
-                                }
-
-                                <h3>{"Prices"}</h3>
-                                <h4>{"Inbound SMS Price for this number"}</h4>
-                                <p>
-                                    { info.prices.messaging.inbound_sms_prices.iter().find(|inp| inp.number_type == best_type).map(|inp| inp.current_price.clone()).unwrap_or("N/A".to_string()) }
-                                    { " per message" }
-                                </p>
-
-                                <h4>{"Outbound SMS Price for this number"}</h4>
-                                <p>
-                                    { outbound_sms_min_price }
-                                    { " per message" }
-                                </p>
-
-                                <h4>{"Inbound Call Price for this number"}</h4>
-                                <p>
-                                    { info.prices.voice.inbound_call_prices.iter().find(|inp| inp.number_type == best_type).map(|inp| inp.current_price.clone()).unwrap_or("N/A".to_string()) }
-                                    { " per minute" }
-                                </p>
-
-                                <h4>{"Outbound Call Price for this number"}</h4>
-                                <p>
-                                    { outbound_call_price }
-                                    { " per minute" }
-                                </p>
-
-                                <h3>{"Regulations"}</h3>
-                                {
-                                    if regs.is_empty() {
-                                        html! { <p>{"No specific regulations found"}</p> }
-                                    } else {
-                                        html! {
-                                            { for regs.iter().map(|reg| {
-                                                html! {
-                                                    <div>
-                                                       <p>{ reg.friendly_name.clone() } { " (" } { reg.end_user_type.clone() } { ")" }</p>
-                                                        <ul>
-                                                            { for reg.requirements.end_user.iter().map(|eu| {
-                                                                let fields_joined = eu.fields.iter().fold(String::new(), |acc, f| if acc.is_empty() { f.clone() } else { acc + ", " + f });
-                                                                html! {
-                                                                    <li>
-                                                                        { eu.name.clone() } { " (" } { eu.req_type.clone() } { "): " } { fields_joined }
-                                                                    </li>
-                                                                }
-                                                            }) }
-                                                        </ul>
-                                                        <p>{"Supporting Documents"}</p>
-                                                        { for reg.requirements.supporting_document.iter().flatten().map(|doc| {
-                                                            let accepted_joined = doc.accepted_documents.iter().fold(String::new(), |acc, ad| if acc.is_empty() { ad.name.clone() } else { acc + ", " + &ad.name });
-                                                            html! {
-                                                                <div>
-                                                                    { doc.name.clone() } { ": " } { doc.description.clone() }
-                                                                    { " Accepted: " } { accepted_joined }
-                                                                </div>
-                                                            }
-                                                        }) }
-                                                    </div>
-                                                }
-                                            }) }
-                                        }
-                                    }
-                                }
-                            </div>
-                        }
-                    } else {
-                        html! { <p>{"Select a country to view information"}</p> }
-                    } }
-                    </div>
-                </div>
-                <div class="instruction-block">
-                    <div class="instruction-content">
-                        <h2>{"Twilio Sign up and Add Funds"}</h2>
-                        <ul>
-                            <li>{"Go to Twilio's website (twilio.com) and click 'Sign up'"}</li>
-                            <li>{"Complete the registration process with your email and other required information"}</li>
-                            <li>{"Once registered, you'll need to add funds to your account:"}</li>
-                            <li>{"1. Click on 'Admin' in the top right"}</li>
-                            <li>{"2. Select 'Account billing' from the dropdown"}</li>
-                            <li>{"3. Click 'Add funds' on the new billing page that opens up and input desired amount (minimum usually $20)"}</li>
-                            <li>{"After adding funds, your account will be ready to purchase a phone number"}</li>
-                        </ul>
-                    </div>
-                    <div class="instruction-image">
-                        <img 
-                            src="/assets/billing-twilio.png" 
-                            alt="Navigating to Twilio Billing Page" 
-                            loading="lazy"
-                            onclick={let open_modal = open_modal.clone(); let src = "/assets/billing-twilio.png".to_string(); 
-                                Callback::from(move |_| open_modal.emit(src.clone()))}
-                            style="cursor: pointer;"
-                        />
-                    </div>
-                </div>
-
-                <div class="instruction-block">
-                    <div class="instruction-content">
-                        <h2>{"Twilio Buy a Phone Number"}</h2>
-                        <ul>
-                            <li>{"1. On the Twilio Dashboard, click on the 'Phone Numbers' button in the left sidebar when 'Develop' is selected above."}</li>
-                            <li>{"2. Click the 'Buy a number' button under the new sub menu"}</li>
-                            <li>{"3. Use the country search box to select your desired country"}</li>
-                            <li>{"4. (Optional) Use advanced search options to find specific number types"}</li>
-                            <li>{"5. Check the capabilities column to ensure the number supports your needs (Voice, SMS, MMS, etc.)"}</li>
-                            <li>{"6. Click the 'Buy' button next to your chosen number and follow the steps"}</li>
-                        </ul>
-                        <div class="input-field">
-                            <label for="phone-number">{"Your Twilio Phone Number:"}</label>
-                            <div class="input-with-button">
-                                <input 
-                                    type="text" 
-                                    id="phone-number" 
-                                    placeholder="+1234567890" 
-                                    value={(*phone_number).clone()}
-                                    onchange={on_phone_change.clone()}
-                                    disabled={!can_edit}
-                                />
-                                <button 
-                                    class={classes!("save-button", if !is_phone_valid || !can_edit { "invalid" } else { "" })}
-                                    onclick={on_save_phone.clone()}
-                                    disabled={!can_edit || !is_phone_valid}
-                                >
-                                    {"Save"}
-                                </button>
-                                {
-                                    match &*phone_save_status {
-                                        Some(Ok(_)) => html! {
-                                            <span class="save-status success">{"✓ Saved"}</span>
-                                        },
-                                        Some(Err(err)) => html! {
-                                            <span class="save-status error">{format!("Error: {}", err)}</span>
-                                        },
-                                        None => html! {}
-                                    }
-                                }
-                            </div>
-                        </div>
-                    </div>
-                    <div class="instruction-image">
-                        <img 
-                            src="/assets/number-twilio.png" 
-                            alt="Buy Twilio Phone Number Image" 
-                            loading="lazy"
-                            onclick={let open_modal = open_modal.clone(); let src = "/assets/number-twilio.png".to_string(); 
-                                Callback::from(move |_| open_modal.emit(src.clone()))}
-                            style="cursor: pointer;"
-                        />
-                    </div>
-                </div>
-
-                <div class="instruction-block">
-                    <div class="instruction-content">
-                        <h2>{"Twilio Finding Credentials"}</h2>
-                        <ul>
-                            <li>{"1. Click on the 'Account Dashboard' in the left sidebar"}</li>
-                            <li>{"2. Find and copy your 'Account SID' from the dashboard"}</li>
-                            <li>{"3. Reveal and copy your 'Auth Token' from the dashboard"}</li>
-                        </ul>
-                        <div class="input-field">
-                            <label for="account-sid">{"Your Account SID:"}</label>
-                            <div class="input-with-button">
-                                <input 
-                                    type="text" 
-                                    id="account-sid" 
-                                    placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" 
-                                    value={(*account_sid).clone()}
-                                    onchange={on_sid_change.clone()}
-                                    disabled={!can_edit}
-                                />
-                            </div>
-                        </div>
-                        <div class="input-field">
-                            <label for="auth-token">{"Your Auth Token:"}</label>
-                            <div class="input-with-button">
-                                <input 
-                                    type="text" 
-                                    id="auth-token" 
-                                    placeholder="your_auth_token_here" 
-                                    value={(*auth_token).clone()}
-                                    onchange={on_token_change.clone()}
-                                    disabled={!can_edit}
-                                />
-                            </div>
-                        </div>
-                        <button 
-                            class={classes!("save-button", if !(is_sid_valid && is_token_valid) || !can_edit { "invalid" } else { "" })}
-                            onclick={on_save_creds.clone()}
-                            disabled={!can_edit || !(is_sid_valid && is_token_valid)}
-                        >
-                            {"Save"}
-                        </button>
-                        {
-                            match &*creds_save_status {
-                                Some(Ok(_)) => html! {
-                                    <span class="save-status success">{"✓ Saved"}</span>
-                                },
-                                Some(Err(err)) => html! {
-                                    <span class="save-status error">{format!("Error: {}", err)}</span>
-                                },
-                                None => html! {}
-                            }
-                        }
-                    </div>
-                    <div class="instruction-image">
-                        <img 
-                            src="/assets/creds-twilio.png" 
-                            alt="Twilio Credentials Dashboard" 
-                            loading="lazy"
-                            onclick={let open_modal = open_modal.clone(); let src = "/assets/creds-twilio.png".to_string(); 
-                                Callback::from(move |_| open_modal.emit(src.clone()))}
-                            style="cursor: pointer;"
-                        />
-                    </div>
-                </div>
-
-                <div class="back-home-container">
-                    <Link<Route> to={Route::Home} classes="back-home-button">
-                        {"Back to Home"}
-                    </Link<Route>>
-                </div>
-            </section>
-
-            {
-                if *modal_visible {
+    html! {
+        <div class="instructions-page">
+            <div class="instructions-background"></div>
+            <section class="instructions-section">
+                { if !props.message.is_empty() {
                     html! {
-                        <div class="modal-overlay" onclick={close_modal.clone()}>
-                            <div class="modal-content" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
-                                <img src={(*selected_image).clone()} alt="Large preview" />
-                                <button class="modal-close" onclick={close_modal}>{"×"}</button>
-                            </div>
+                        <div class="applicable-message">
+                            { props.message.clone() }
                         </div>
                     }
                 } else {
                     html! {}
-                }
-            }
+                } }
+                <div class="instruction-block overview-block">
+                    <div class="instruction-content">
+                        <h2>{"SMS and Voice Communication Setup"}</h2>
+                        <p>{"Lightfriend uses Twilio for SMS messaging and voice calls, giving your AI assistant the ability to communicate via a dedicated phone number. International users can bring their own number and pay for messages straight to Twilio."}</p>
+                    </div>
+                </div>
 
-            <style>
-                {r#"
-                .instructions-page {
-                    padding-top: 74px;
-                    min-height: 100vh;
-                    color: #ffffff;
-                    position: relative;
-                    background: transparent;
+                <div class="instruction-block">
+                    <div class="instruction-content">
+                        <h2>{"Twilio Information"}</h2>
+                        <p>{"Select a country to view available phone numbers, costs, and regulations."}</p>
+                        <div class="country-selector">
+                            <label for="country-select">{"Country: "}</label>
+                            <select id="country-select" onchange={on_country_change}>
+                                <option value="ae" selected={*selected_country == "ae"}>{"AE"}</option>
+                                <option value="ar" selected={*selected_country == "ar"}>{"AR"}</option>
+                                <option value="at" selected={*selected_country == "at"}>{"AT"}</option>
+                                <option value="au" selected={*selected_country == "au"}>{"AU"}</option>
+                                <option value="ba" selected={*selected_country == "ba"}>{"BA"}</option>
+                                <option value="bb" selected={*selected_country == "bb"}>{"BB"}</option>
+                                <option value="bd" selected={*selected_country == "bd"}>{"BD"}</option>
+                                <option value="be" selected={*selected_country == "be"}>{"BE"}</option>
+                                <option value="bg" selected={*selected_country == "bg"}>{"BG"}</option>
+                                <option value="bh" selected={*selected_country == "bh"}>{"BH"}</option>
+                                <option value="bj" selected={*selected_country == "bj"}>{"BJ"}</option>
+                                <option value="bo" selected={*selected_country == "bo"}>{"BO"}</option>
+                                <option value="br" selected={*selected_country == "br"}>{"BR"}</option>
+                                <option value="ca" selected={*selected_country == "ca"}>{"CA"}</option>
+                                <option value="ch" selected={*selected_country == "ch"}>{"CH"}</option>
+                                <option value="cl" selected={*selected_country == "cl"}>{"CL"}</option>
+                                <option value="co" selected={*selected_country == "co"}>{"CO"}</option>
+                                <option value="cr" selected={*selected_country == "cr"}>{"CR"}</option>
+                                <option value="cy" selected={*selected_country == "cy"}>{"CY"}</option>
+                                <option value="cz" selected={*selected_country == "cz"}>{"CZ"}</option>
+                                <option value="de" selected={*selected_country == "de"}>{"DE"}</option>
+                                <option value="dk" selected={*selected_country == "dk"}>{"DK"}</option>
+                                <option value="do" selected={*selected_country == "do"}>{"DO"}</option>
+                                <option value="dz" selected={*selected_country == "dz"}>{"DZ"}</option>
+                                <option value="ec" selected={*selected_country == "ec"}>{"EC"}</option>
+                                <option value="ee" selected={*selected_country == "ee"}>{"EE"}</option>
+                                <option value="eg" selected={*selected_country == "eg"}>{"EG"}</option>
+                                <option value="es" selected={*selected_country == "es"}>{"ES"}</option>
+                                <option value="fi" selected={*selected_country == "fi"}>{"FI"}</option>
+                                <option value="fr" selected={*selected_country == "fr"}>{"FR"}</option>
+                                <option value="gb" selected={*selected_country == "gb"}>{"GB"}</option>
+                                <option value="gd" selected={*selected_country == "gd"}>{"GD"}</option>
+                                <option value="gh" selected={*selected_country == "gh"}>{"GH"}</option>
+                                <option value="gr" selected={*selected_country == "gr"}>{"GR"}</option>
+                                <option value="gt" selected={*selected_country == "gt"}>{"GT"}</option>
+                                <option value="hk" selected={*selected_country == "hk"}>{"HK"}</option>
+                                <option value="hr" selected={*selected_country == "hr"}>{"HR"}</option>
+                                <option value="hu" selected={*selected_country == "hu"}>{"HU"}</option>
+                                <option value="id" selected={*selected_country == "id"}>{"ID"}</option>
+                                <option value="ie" selected={*selected_country == "ie"}>{"IE"}</option>
+                                <option value="im" selected={*selected_country == "im"}>{"IM"}</option>
+                                <option value="in" selected={*selected_country == "in"}>{"IN"}</option>
+                                <option value="is" selected={*selected_country == "is"}>{"IS"}</option>
+                                <option value="it" selected={*selected_country == "it"}>{"IT"}</option>
+                                <option value="jm" selected={*selected_country == "jm"}>{"JM"}</option>
+                                <option value="jo" selected={*selected_country == "jo"}>{"JO"}</option>
+                                <option value="jp" selected={*selected_country == "jp"}>{"JP"}</option>
+                                <option value="ke" selected={*selected_country == "ke"}>{"KE"}</option>
+                                <option value="kr" selected={*selected_country == "kr"}>{"KR"}</option>
+                                <option value="lk" selected={*selected_country == "lk"}>{"LK"}</option>
+                                <option value="lt" selected={*selected_country == "lt"}>{"LT"}</option>
+                                <option value="lu" selected={*selected_country == "lu"}>{"LU"}</option>
+                                <option value="lv" selected={*selected_country == "lv"}>{"LV"}</option>
+                                <option value="md" selected={*selected_country == "md"}>{"MD"}</option>
+                                <option value="mg" selected={*selected_country == "mg"}>{"MG"}</option>
+                                <option value="ml" selected={*selected_country == "ml"}>{"ML"}</option>
+                                <option value="mo" selected={*selected_country == "mo"}>{"MO"}</option>
+                                <option value="mu" selected={*selected_country == "mu"}>{"MU"}</option>
+                                <option value="mx" selected={*selected_country == "mx"}>{"MX"}</option>
+                                <option value="my" selected={*selected_country == "my"}>{"MY"}</option>
+                                <option value="na" selected={*selected_country == "na"}>{"NA"}</option>
+                                <option value="ng" selected={*selected_country == "ng"}>{"NG"}</option>
+                                <option value="ni" selected={*selected_country == "ni"}>{"NI"}</option>
+                                <option value="nl" selected={*selected_country == "nl"}>{"NL"}</option>
+                                <option value="no" selected={*selected_country == "no"}>{"NO"}</option>
+                                <option value="nz" selected={*selected_country == "nz"}>{"NZ"}</option>
+                                <option value="pa" selected={*selected_country == "pa"}>{"PA"}</option>
+                                <option value="ph" selected={*selected_country == "ph"}>{"PH"}</option>
+                                <option value="pl" selected={*selected_country == "pl"}>{"PL"}</option>
+                                <option value="pt" selected={*selected_country == "pt"}>{"PT"}</option>
+                                <option value="py" selected={*selected_country == "py"}>{"PY"}</option>
+                                <option value="qa" selected={*selected_country == "qa"}>{"QA"}</option>
+                                <option value="ro" selected={*selected_country == "ro"}>{"RO"}</option>
+                                <option value="sa" selected={*selected_country == "sa"}>{"SA"}</option>
+                                <option value="se" selected={*selected_country == "se"}>{"SE"}</option>
+                                <option value="sg" selected={*selected_country == "sg"}>{"SG"}</option>
+                                <option value="si" selected={*selected_country == "si"}>{"SI"}</option>
+                                <option value="sk" selected={*selected_country == "sk"}>{"SK"}</option>
+                                <option value="sv" selected={*selected_country == "sv"}>{"SV"}</option>
+                                <option value="th" selected={*selected_country == "th"}>{"TH"}</option>
+                                <option value="tn" selected={*selected_country == "tn"}>{"TN"}</option>
+                                <option value="tr" selected={*selected_country == "tr"}>{"TR"}</option>
+                                <option value="tw" selected={*selected_country == "tw"}>{"TW"}</option>
+                                <option value="ug" selected={*selected_country == "ug"}>{"UG"}</option>
+                                <option value="uy" selected={*selected_country == "uy"}>{"UY"}</option>
+                                <option value="ve" selected={*selected_country == "ve"}>{"VE"}</option>
+                                <option value="vn" selected={*selected_country == "vn"}>{"VN"}</option>
+                                <option value="za" selected={*selected_country == "za"}>{"ZA"}</option>
+                            </select>
+                        </div>
+                        { if *is_loading {
+                            html! { <p>{"Loading..."}</p> }
+                        } else if let Some(err) = &*fetch_error {
+                            html! { <p class="error">{err}</p> }
+                        } else if let Some(info) = (*country_info).clone() {
+                            let locals = info.available_numbers.locals;
+                            let mobiles = info.available_numbers.mobiles;
+                            let outbound_call_price = info.prices.voice.outbound_prefix_prices.iter()
+                                .find(|out| out.friendly_name == info.prices.voice.country)
+                                .map(|out| out.current_price.clone())
+                                .unwrap_or("N/A".to_string());
+                            let price_unit = info.prices.phone_numbers.price_unit.clone();
+                            let mut local_regs = info.regulations.local.clone();
+                            local_regs = local_regs.into_iter().filter(|reg| reg.end_user_type == "individual").collect();
+                            let mut mobile_regs = info.regulations.mobile.clone();
+                            mobile_regs = mobile_regs.into_iter().filter(|reg| reg.end_user_type == "individual").collect();
+                            html! {
+                                <div class="country-info">
+                                    <h3>{"Available Numbers"}</h3>
+                                    {
+                                        if locals.is_empty() && mobiles.is_empty() {
+                                            html! { <p>{"No available numbers found that meet the criteria."}</p> }
+                                        } else {
+                                            html! {
+                                                <table class="country-table">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>{"Number Type"}</th>
+                                                            <th>{"Example Number"}</th>
+                                                            <th>{"Address Requirements"}</th>
+                                                            <th>{"Capabilities"}</th>
+                                                            <th>{format!("Monthly Price ({})", price_unit)}</th>
+                                                            <th>{"Inbound SMS Price (per message)"}</th>
+                                                            <th>{"Outbound SMS Price (min per message)"}</th>
+                                                            <th>{"Inbound Call Price (per minute)"}</th>
+                                                            <th>{"Outbound Call Price (per minute)"}</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {
+                                                            if !locals.is_empty() {
+                                                                let num = locals[0].clone();
+                                                                let num_type = "local".to_string();
+                                                                let monthly_price = info.prices.phone_numbers.phone_number_prices.iter()
+                                                                    .find(|p| p.number_type == num_type)
+                                                                    .map(|p| p.current_price.clone())
+                                                                    .unwrap_or("N/A".to_string());
+                                                                let inbound_sms_price = info.prices.messaging.inbound_sms_prices.iter()
+                                                                    .find(|inp| inp.number_type == num_type)
+                                                                    .map(|inp| inp.current_price.clone())
+                                                                    .unwrap_or("N/A".to_string());
+                                                                let outbound_sms_min_price = info.prices.messaging.outbound_sms_prices.iter()
+                                                                    .flat_map(|out| &out.prices)
+                                                                    .filter(|pr| pr.number_type == num_type)
+                                                                    .map(|pr| pr.current_price.parse::<f64>().unwrap_or(f64::MAX))
+                                                                    .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                                                                    .map(|p| p.to_string())
+                                                                    .unwrap_or("N/A".to_string());
+                                                                let inbound_call_price = info.prices.voice.inbound_call_prices.iter()
+                                                                    .find(|inp| inp.number_type == num_type)
+                                                                    .map(|inp| inp.current_price.clone())
+                                                                    .unwrap_or("N/A".to_string());
+                                                                let mut caps: Vec<String> = Vec::new();
+                                                                if num.capabilities.voice { caps.push("Voice".to_string()); }
+                                                                if num.capabilities.sms { caps.push("SMS".to_string()); }
+                                                                if num.capabilities.mms { caps.push("MMS".to_string()); }
+                                                                let caps_str = if caps.is_empty() { "None".to_string() } else { caps.join(", ") };
+                                                                html! {
+                                                                    <tr>
+                                                                        <td>{"Local"}</td>
+                                                                        <td>{ format!("{} ({})", num.friendly_name, num.phone_number) }</td>
+                                                                        <td>{ num.address_requirements }</td>
+                                                                        <td>{ caps_str }</td>
+                                                                        <td>{ monthly_price }</td>
+                                                                        <td>{ inbound_sms_price }</td>
+                                                                        <td>{ outbound_sms_min_price }</td>
+                                                                        <td>{ inbound_call_price }</td>
+                                                                        <td>{ outbound_call_price.clone() }</td>
+                                                                    </tr>
+                                                                }
+                                                            } else {
+                                                                html! {}
+                                                            }
+                                                        }
+                                                        {
+                                                            if !mobiles.is_empty() {
+                                                                let num = mobiles[0].clone();
+                                                                let num_type = "mobile".to_string();
+                                                                let monthly_price = info.prices.phone_numbers.phone_number_prices.iter()
+                                                                    .find(|p| p.number_type == num_type)
+                                                                    .map(|p| p.current_price.clone())
+                                                                    .unwrap_or("N/A".to_string());
+                                                                let inbound_sms_price = info.prices.messaging.inbound_sms_prices.iter()
+                                                                    .find(|inp| inp.number_type == num_type)
+                                                                    .map(|inp| inp.current_price.clone())
+                                                                    .unwrap_or("N/A".to_string());
+                                                                let outbound_sms_min_price = info.prices.messaging.outbound_sms_prices.iter()
+                                                                    .flat_map(|out| &out.prices)
+                                                                    .filter(|pr| pr.number_type == num_type)
+                                                                    .map(|pr| pr.current_price.parse::<f64>().unwrap_or(f64::MAX))
+                                                                    .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                                                                    .map(|p| p.to_string())
+                                                                    .unwrap_or("N/A".to_string());
+                                                                let inbound_call_price = info.prices.voice.inbound_call_prices.iter()
+                                                                    .find(|inp| inp.number_type == num_type)
+                                                                    .map(|inp| inp.current_price.clone())
+                                                                    .unwrap_or("N/A".to_string());
+                                                                let mut caps: Vec<String> = Vec::new();
+                                                                if num.capabilities.voice { caps.push("Voice".to_string()); }
+                                                                if num.capabilities.sms { caps.push("SMS".to_string()); }
+                                                                if num.capabilities.mms { caps.push("MMS".to_string()); }
+                                                                let caps_str = if caps.is_empty() { "None".to_string() } else { caps.join(", ") };
+                                                                html! {
+                                                                    <tr>
+                                                                        <td>{"Mobile"}</td>
+                                                                        <td>{ format!("{} ({})", num.friendly_name, num.phone_number) }</td>
+                                                                        <td>{ num.address_requirements }</td>
+                                                                        <td>{ caps_str }</td>
+                                                                        <td>{ monthly_price }</td>
+                                                                        <td>{ inbound_sms_price }</td>
+                                                                        <td>{ outbound_sms_min_price }</td>
+                                                                        <td>{ inbound_call_price }</td>
+                                                                        <td>{ outbound_call_price }</td>
+                                                                    </tr>
+                                                                }
+                                                            } else {
+                                                                html! {}
+                                                            }
+                                                        }
+                                                    </tbody>
+                                                </table>
+                                            }
+                                        }
+                                    }
+                                    <h3>{"Regulations"}</h3>
+                                    {
+                                        if !locals.is_empty() {
+                                            html! {
+                                                <div>
+                                                    <h4>{"Local"}</h4>
+                                                    {
+                                                        if local_regs.is_empty() {
+                                                            html! { <p>{"No specific regulations found"}</p> }
+                                                        } else {
+                                                            html! {
+                                                                { for local_regs.iter().map(|reg| {
+                                                                    html! {
+                                                                        <div>
+                                                                            <p>{ reg.friendly_name.clone() } { " (" } { reg.end_user_type.clone() } { ")" }</p>
+                                                                            <ul>
+                                                                                { for reg.requirements.end_user.iter().map(|eu| {
+                                                                                    let fields_joined = eu.fields.iter().fold(String::new(), |acc, f| if acc.is_empty() { f.clone() } else { acc + ", " + f });
+                                                                                    html! {
+                                                                                        <li>
+                                                                                            { eu.name.clone() } { " (" } { eu.req_type.clone() } { "): " } { fields_joined }
+                                                                                        </li>
+                                                                                    }
+                                                                                }) }
+                                                                            </ul>
+                                                                            <p>{"Supporting Documents"}</p>
+                                                                            { for reg.requirements.supporting_document.iter().flatten().map(|doc| {
+                                                                                let accepted_joined = doc.accepted_documents.iter().fold(String::new(), |acc, ad| if acc.is_empty() { ad.name.clone() } else { acc + ", " + &ad.name });
+                                                                                html! {
+                                                                                    <div>
+                                                                                        { doc.name.clone() } { ": " } { doc.description.clone() }
+                                                                                        { " Accepted: " } { accepted_joined }
+                                                                                    </div>
+                                                                                }
+                                                                            }) }
+                                                                        </div>
+                                                                    }
+                                                                }) }
+                                                            }
+                                                        }
+                                                    }
+                                                </div>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                                    {
+                                        if !mobiles.is_empty() {
+                                            html! {
+                                                <div>
+                                                    <h4>{"Mobile"}</h4>
+                                                    {
+                                                        if mobile_regs.is_empty() {
+                                                            html! { <p>{"No specific regulations found"}</p> }
+                                                        } else {
+                                                            html! {
+                                                                { for mobile_regs.iter().map(|reg| {
+                                                                    html! {
+                                                                        <div>
+                                                                            <p>{ reg.friendly_name.clone() } { " (" } { reg.end_user_type.clone() } { ")" }</p>
+                                                                            <ul>
+                                                                                { for reg.requirements.end_user.iter().map(|eu| {
+                                                                                    let fields_joined = eu.fields.iter().fold(String::new(), |acc, f| if acc.is_empty() { f.clone() } else { acc + ", " + f });
+                                                                                    html! {
+                                                                                        <li>
+                                                                                            { eu.name.clone() } { " (" } { eu.req_type.clone() } { "): " } { fields_joined }
+                                                                                        </li>
+                                                                                    }
+                                                                                }) }
+                                                                            </ul>
+                                                                            <p>{"Supporting Documents"}</p>
+                                                                            { for reg.requirements.supporting_document.iter().flatten().map(|doc| {
+                                                                                let accepted_joined = doc.accepted_documents.iter().fold(String::new(), |acc, ad| if acc.is_empty() { ad.name.clone() } else { acc + ", " + &ad.name });
+                                                                                html! {
+                                                                                    <div>
+                                                                                        { doc.name.clone() } { ": " } { doc.description.clone() }
+                                                                                        { " Accepted: " } { accepted_joined }
+                                                                                    </div>
+                                                                                }
+                                                                            }) }
+                                                                        </div>
+                                                                    }
+                                                                }) }
+                                                            }
+                                                        }
+                                                    }
+                                                </div>
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                                </div>
+                            }
+                        } else {
+                            html! { <p>{"Select a country to view information"}</p> }
+                        } }
+                        </div>
+                    </div>
+                    <div class="instruction-block">
+                        <div class="instruction-content">
+                            <h2>{"Twilio Sign up and Add Funds"}</h2>
+                            <ul>
+                                <li>{"Go to Twilio's website (twilio.com) and click 'Sign up'"}</li>
+                                <li>{"Complete the registration process with your email and other required information"}</li>
+                                <li>{"Once registered, you'll need to add funds to your account:"}</li>
+                                <li>{"1. Click on 'Admin' in the top right"}</li>
+                                <li>{"2. Select 'Account billing' from the dropdown"}</li>
+                                <li>{"3. Click 'Add funds' on the new billing page that opens up and input desired amount (minimum usually $20)"}</li>
+                                <li>{"After adding funds, your account will be ready to purchase a phone number"}</li>
+                            </ul>
+                        </div>
+                        <div class="instruction-image">
+                            <img 
+                                src="/assets/billing-twilio.png" 
+                                alt="Navigating to Twilio Billing Page" 
+                                loading="lazy"
+                                onclick={let open_modal = open_modal.clone(); let src = "/assets/billing-twilio.png".to_string(); 
+                                    Callback::from(move |_| open_modal.emit(src.clone()))}
+                                style="cursor: pointer;"
+                            />
+                        </div>
+                    </div>
+
+                    <div class="instruction-block">
+                        <div class="instruction-content">
+                            <h2>{"Twilio Buy a Phone Number"}</h2>
+                            <ul>
+                                <li>{"1. On the Twilio Dashboard, click on the 'Phone Numbers' button in the left sidebar when 'Develop' is selected above."}</li>
+                                <li>{"2. Click the 'Buy a number' button under the new sub menu"}</li>
+                                <li>{"3. Use the country search box to select your desired country"}</li>
+                                <li>{"4. (Optional) Use advanced search options to find specific number types"}</li>
+                                <li>{"5. Check the capabilities column to ensure the number supports your needs (Voice, SMS, MMS, etc.)"}</li>
+                                <li>{"6. Click the 'Buy' button next to your chosen number and follow the steps"}</li>
+                            </ul>
+                            <div class="input-field">
+                                <label for="phone-number">{"Your Twilio Phone Number:"}</label>
+                                <div class="input-with-button">
+                                    <input 
+                                        type="text" 
+                                        id="phone-number" 
+                                        placeholder="+1234567890" 
+                                        value={(*phone_number).clone()}
+                                        onchange={on_phone_change.clone()}
+                                        disabled={!can_edit}
+                                    />
+                                    <button 
+                                        class={classes!("save-button", if !is_phone_valid || !can_edit { "invalid" } else { "" })}
+                                        onclick={on_save_phone.clone()}
+                                        disabled={!can_edit || !is_phone_valid}
+                                    >
+                                        {"Save"}
+                                    </button>
+                                    {
+                                        match &*phone_save_status {
+                                            Some(Ok(_)) => html! {
+                                                <span class="save-status success">{"✓ Saved"}</span>
+                                            },
+                                            Some(Err(err)) => html! {
+                                                <span class="save-status error">{format!("Error: {}", err)}</span>
+                                            },
+                                            None => html! {}
+                                        }
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                        <div class="instruction-image">
+                            <img 
+                                src="/assets/number-twilio.png" 
+                                alt="Buy Twilio Phone Number Image" 
+                                loading="lazy"
+                                onclick={let open_modal = open_modal.clone(); let src = "/assets/number-twilio.png".to_string(); 
+                                    Callback::from(move |_| open_modal.emit(src.clone()))}
+                                style="cursor: pointer;"
+                            />
+                        </div>
+                    </div>
+
+                    <div class="instruction-block">
+                        <div class="instruction-content">
+                            <h2>{"Twilio Finding Credentials"}</h2>
+                            <ul>
+                                <li>{"1. Click on the 'Account Dashboard' in the left sidebar"}</li>
+                                <li>{"2. Find and copy your 'Account SID' from the dashboard"}</li>
+                                <li>{"3. Reveal and copy your 'Auth Token' from the dashboard"}</li>
+                            </ul>
+                            <div class="input-field">
+                                <label for="account-sid">{"Your Account SID:"}</label>
+                                <div class="input-with-button">
+                                    <input 
+                                        type="text" 
+                                        id="account-sid" 
+                                        placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" 
+                                        value={(*account_sid).clone()}
+                                        onchange={on_sid_change.clone()}
+                                        disabled={!can_edit}
+                                    />
+                                </div>
+                            </div>
+                            <div class="input-field">
+                                <label for="auth-token">{"Your Auth Token:"}</label>
+                                <div class="input-with-button">
+                                    <input 
+                                        type="text" 
+                                        id="auth-token" 
+                                        placeholder="your_auth_token_here" 
+                                        value={(*auth_token).clone()}
+                                        onchange={on_token_change.clone()}
+                                        disabled={!can_edit}
+                                    />
+                                </div>
+                            </div>
+                            <button 
+                                class={classes!("save-button", if !(is_sid_valid && is_token_valid) || !can_edit { "invalid" } else { "" })}
+                                onclick={on_save_creds.clone()}
+                                disabled={!can_edit || !(is_sid_valid && is_token_valid)}
+                            >
+                                {"Save"}
+                            </button>
+                            {
+                                match &*creds_save_status {
+                                    Some(Ok(_)) => html! {
+                                        <span class="save-status success">{"✓ Saved"}</span>
+                                    },
+                                    Some(Err(err)) => html! {
+                                        <span class="save-status error">{format!("Error: {}", err)}</span>
+                                    },
+                                    None => html! {}
+                                }
+                            }
+                        </div>
+                        <div class="instruction-image">
+                            <img 
+                                src="/assets/creds-twilio.png" 
+                                alt="Twilio Credentials Dashboard" 
+                                loading="lazy"
+                                onclick={let open_modal = open_modal.clone(); let src = "/assets/creds-twilio.png".to_string(); 
+                                    Callback::from(move |_| open_modal.emit(src.clone()))}
+                                style="cursor: pointer;"
+                            />
+                        </div>
+                    </div>
+
+                    <div class="back-home-container">
+                        <Link<Route> to={Route::Home} classes="back-home-button">
+                            {"Back to Home"}
+                        </Link<Route>>
+                    </div>
+                </section>
+
+                {
+                    if *modal_visible {
+                        html! {
+                            <div class="modal-overlay" onclick={close_modal.clone()}>
+                                <div class="modal-content" onclick={Callback::from(|e: MouseEvent| e.stop_propagation())}>
+                                    <img src={(*selected_image).clone()} alt="Large preview" />
+                                    <button class="modal-close" onclick={close_modal}>{"×"}</button>
+                                </div>
+                            </div>
+                        }
+                    } else {
+                        html! {}
+                    }
                 }
 
-                .instructions-background {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100vh;
-                    background-image: url('/assets/bicycle_field.webp');
-                    background-size: cover;
-                    background-position: center;
-                    background-repeat: no-repeat;
-                    opacity: 1;
-                    z-index: -2;
-                    pointer-events: none;
-                }
+                <style>
+                    {r#"
+                    .instructions-page {
+                        padding-top: 74px;
+                        min-height: 100vh;
+                        color: #ffffff;
+                        position: relative;
+                        background: transparent;
+                    }
 
-                .instructions-background::after {
-                    content: '';
-                    position: absolute;
-                    bottom: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 50%;
-                    background: linear-gradient(
-                        to bottom, 
-                        rgba(26, 26, 26, 0) 0%,
-                        rgba(26, 26, 26, 1) 100%
-                    );
-                }
+                    .instructions-background {
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100vh;
+                        background-image: url('/assets/bicycle_field.webp');
+                        background-size: cover;
+                        background-position: center;
+                        background-repeat: no-repeat;
+                        opacity: 1;
+                        z-index: -2;
+                        pointer-events: none;
+                    }
 
-                .instructions-hero {
-                    text-align: center;
-                    padding: 6rem 2rem;
-                    background: rgba(26, 26, 26, 0.75);
-                    backdrop-filter: blur(5px);
-                    margin-top: 2rem;
-                    border: 1px solid rgba(30, 144, 255, 0.1);
-                    margin-bottom: 2rem;
-                }
+                    .instructions-background::after {
+                        content: '';
+                        position: absolute;
+                        bottom: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 50%;
+                        background: linear-gradient(
+                            to bottom, 
+                            rgba(26, 26, 26, 0) 0%,
+                            rgba(26, 26, 26, 1) 100%
+                        );
+                    }
 
-                .instructions-hero h1 {
-                    font-size: 3.5rem;
-                    margin-bottom: 1.5rem;
-                    background: linear-gradient(45deg, #fff, #7EB2FF);
-                    -webkit-background-clip: text;
-                    -webkit-text-fill-color: transparent;
-                }
+                    .instructions-hero {
+                        text-align: center;
+                        padding: 6rem 2rem;
+                        background: rgba(26, 26, 26, 0.75);
+                        backdrop-filter: blur(5px);
+                        margin-top: 2rem;
+                        border: 1px solid rgba(30, 144, 255, 0.1);
+                        margin-bottom: 2rem;
+                    }
 
-                .instructions-hero p {
-                    font-size: 1.5rem;
-                    color: #999;
-                    max-width: 600px;
-                    margin: 0 auto;
-                }
+                    .instructions-hero h1 {
+                        font-size: 3.5rem;
+                        margin-bottom: 1.5rem;
+                        background: linear-gradient(45deg, #fff, #7EB2FF);
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                    }
 
-                .instructions-section {
-                    max-width: 1200px;
-                    margin: 0 auto;
-                    padding: 2rem;
-                }
+                    .instructions-hero p {
+                        font-size: 1.5rem;
+                        color: #999;
+                        max-width: 600px;
+                        margin: 0 auto;
+                    }
 
-                .instruction-block {
-                    display: flex;
-                    align-items: center;
-                    gap: 4rem;
-                    margin-bottom: 4rem;
-                    background: rgba(26, 26, 26, 0.85);
-                    backdrop-filter: blur(10px);
-                    border: 1px solid rgba(30, 144, 255, 0.1);
-                    border-radius: 12px;
-                    padding: 4rem;
-                    transition: all 0.3s ease;
-                }
+                    .instructions-section {
+                        max-width: 1200px;
+                        margin: 0 auto;
+                        padding: 2rem;
+                    }
 
-                .instruction-block:hover {
-                    border-color: rgba(30, 144, 255, 0.3);
-                }
-
-                .instruction-content {
-                    flex: 1;
-                    order: 1;
-                }
-
-                .instruction-image {
-                    flex: 1;
-                    order: 2;
-                }
-
-                .instruction-content h2 {
-                    font-size: 2rem;
-                    margin-bottom: 1.5rem;
-                    background: linear-gradient(45deg, #fff, #7EB2FF);
-                    -webkit-background-clip: text;
-                    -webkit-text-fill-color: transparent;
-                }
-
-                .instruction-content ul {
-                    list-style: none;
-                    padding: 0;
-                }
-
-                .instruction-content li {
-                    color: #999;
-                    padding: 0.75rem 0;
-                    padding-left: 1.5rem;
-                    position: relative;
-                    line-height: 1.6;
-                }
-
-                .instruction-content li::before {
-                    content: '•';
-                    position: absolute;
-                    left: 0.5rem;
-                    color: #1E90FF;
-                }
-
-                .instruction-content ul ul li::before {
-                    content: '◦';
-                }
-
-                .instruction-image {
-                    flex: 1.2;
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                }
-
-                .instruction-image img {
-                    max-width: 110%;
-                    height: auto;
-                    border-radius: 12px;
-                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-                    transition: transform 0.3s ease;
-                }
-
-                .instruction-image img:hover {
-                    transform: scale(1.02);
-                }
-
-                .country-selector {
-                    display: flex;
-                    align-items: center;
-                    gap: 1rem;
-                    margin-bottom: 2rem;
-                }
-
-                .country-selector label {
-                    color: #7EB2FF;
-                    font-size: 1.1rem;
-                }
-
-                .country-selector select {
-                    padding: 0.75rem;
-                    background: rgba(26, 26, 26, 0.5);
-                    border: 1px solid rgba(30, 144, 255, 0.3);
-                    color: #fff;
-                    border-radius: 6px;
-                    font-size: 1rem;
-                    cursor: pointer;
-                    transition: all 0.3s ease;
-                }
-
-                .country-selector select:focus {
-                    outline: none;
-                    border-color: rgba(30, 144, 255, 0.8);
-                }
-
-                .setup-table {
-                    width: 100%;
-                    border-collapse: separate;
-                    border-spacing: 0;
-                    border-radius: 8px;
-                    overflow: hidden;
-                }
-
-                .setup-table th,
-                .setup-table td {
-                    padding: 1rem 1.5rem;
-                    text-align: left;
-                    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-                    color: #999;
-                }
-
-                .setup-table th {
-                    background: rgba(30, 144, 255, 0.1);
-                    color: #fff;
-                    font-weight: normal;
-                }
-
-                .setup-table td:first-child {
-                    color: #fff;
-                }
-
-                .cost-link {
-                    color: #1E90FF;
-                    text-decoration: none;
-                }
-
-                .cost-link:hover {
-                    text-decoration: underline;
-                }
-
-                @media (max-width: 968px) {
                     .instruction-block {
-                        flex-direction: column;
-                        gap: 2rem;
+                        display: flex;
+                        align-items: center;
+                        gap: 4rem;
+                        margin-bottom: 4rem;
+                        background: rgba(26, 26, 26, 0.85);
+                        backdrop-filter: blur(10px);
+                        border: 1px solid rgba(30, 144, 255, 0.1);
+                        border-radius: 12px;
+                        padding: 4rem;
+                        transition: all 0.3s ease;
+                    }
+
+                    .instruction-block:hover {
+                        border-color: rgba(30, 144, 255, 0.3);
                     }
 
                     .instruction-content {
+                        flex: 1;
                         order: 1;
                     }
 
                     .instruction-image {
+                        flex: 1;
                         order: 2;
                     }
 
-                    .instructions-hero h1 {
-                        font-size: 2.5rem;
-                    }
-
                     .instruction-content h2 {
-                        font-size: 1.75rem;
+                        font-size: 2rem;
+                        margin-bottom: 1.5rem;
+                        background: linear-gradient(45deg, #fff, #7EB2FF);
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
                     }
 
-                    .instructions-section {
-                        padding: 1rem;
+                    .instruction-content ul {
+                        list-style: none;
+                        padding: 0;
+                    }
+
+                    .instruction-content li {
+                        color: #999;
+                        padding: 0.75rem 0;
+                        padding-left: 1.5rem;
+                        position: relative;
+                        line-height: 1.6;
+                    }
+
+                    .instruction-content li::before {
+                        content: '•';
+                        position: absolute;
+                        left: 0.5rem;
+                        color: #1E90FF;
+                    }
+
+                    .instruction-content ul ul li::before {
+                        content: '◦';
+                    }
+
+                    .instruction-image {
+                        flex: 1.2;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                    }
+
+                    .instruction-image img {
+                        max-width: 110%;
+                        height: auto;
+                        border-radius: 12px;
+                        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+                        transition: transform 0.3s ease;
+                    }
+
+                    .instruction-image img:hover {
+                        transform: scale(1.02);
+                    }
+
+                    .country-selector {
+                        display: flex;
+                        align-items: center;
+                        gap: 1rem;
+                        margin-bottom: 2rem;
+                    }
+
+                    .country-selector label {
+                        color: #7EB2FF;
+                        font-size: 1.1rem;
+                    }
+
+                    .country-selector select {
+                        padding: 0.75rem;
+                        background: rgba(26, 26, 26, 0.5);
+                        border: 1px solid rgba(30, 144, 255, 0.3);
+                        color: #fff;
+                        border-radius: 6px;
+                        font-size: 1rem;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                    }
+
+                    .country-selector select:focus {
+                        outline: none;
+                        border-color: rgba(30, 144, 255, 0.8);
+                    }
+
+                    .setup-table {
+                        width: 100%;
+                        border-collapse: separate;
+                        border-spacing: 0;
+                        border-radius: 8px;
+                        overflow: hidden;
                     }
 
                     .setup-table th,
                     .setup-table td {
-                        padding: 0.75rem 1rem;
+                        padding: 1rem 1.5rem;
+                        text-align: left;
+                        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                        color: #999;
                     }
-                }
 
-                .input-field {
-                    margin-top: 1.5rem;
-                }
+                    .setup-table th {
+                        background: rgba(30, 144, 255, 0.1);
+                        color: #fff;
+                        font-weight: normal;
+                    }
 
-                .input-field label {
-                    display: block;
-                    margin-bottom: 0.5rem;
-                    color: #7EB2FF;
-                }
+                    .setup-table td:first-child {
+                        color: #fff;
+                    }
 
-                .input-field input {
-                    width: 100%;
-                    padding: 0.75rem;
-                    border: 1px solid rgba(30, 144, 255, 0.3);
-                    border-radius: 6px;
-                    background: rgba(26, 26, 26, 0.5);
-                    color: #fff;
-                    font-size: 1rem;
-                    transition: all 0.3s ease;
-                }
+                    .cost-link {
+                        color: #1E90FF;
+                        text-decoration: none;
+                    }
 
-                .input-field input:focus {
-                    outline: none;
-                    border-color: rgba(30, 144, 255, 0.8);
-                    box-shadow: 0 0 0 2px rgba(30, 144, 255, 0.2);
-                }
+                    .cost-link:hover {
+                        text-decoration: underline;
+                    }
 
-                .input-field input::placeholder {
-                    color: rgba(255, 255, 255, 0.3);
-                }
+                    @media (max-width: 968px) {
+                        .instruction-block {
+                            flex-direction: column;
+                            gap: 2rem;
+                        }
 
-                .input-with-button {
-                    display: flex;
-                    gap: 0.5rem;
-                }
+                        .instruction-content {
+                            order: 1;
+                        }
 
-                .input-with-button input {
-                    flex: 1;
-                }
+                        .instruction-image {
+                            order: 2;
+                        }
 
-                .save-button {
-                    padding: 0.75rem 1.5rem;
-                    background: #1E90FF;
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    font-size: 1rem;
-                    transition: all 0.3s ease;
-                }
+                        .instructions-hero h1 {
+                            font-size: 2.5rem;
+                        }
 
-                .save-button:hover {
-                    background: #1976D2;
-                }
+                        .instruction-content h2 {
+                            font-size: 1.75rem;
+                        }
 
-                .save-button:active {
-                    transform: translateY(1px);
-                }
+                        .instructions-section {
+                            padding: 1rem;
+                        }
 
-                .save-button.invalid {
-                    background: #cccccc;
-                    color: #666666;
-                    cursor: not-allowed;
-                }
+                        .setup-table th,
+                        .setup-table td {
+                            padding: 0.75rem 1rem;
+                        }
+                    }
 
-                .save-button.invalid:hover {
-                    background: #cccccc;
-                }
+                    .input-field {
+                        margin-top: 1.5rem;
+                    }
 
-                .save-status {
-                    margin-left: 1rem;
-                    padding: 0.5rem 1rem;
-                    border-radius: 4px;
-                    font-size: 0.9rem;
-                }
+                    .input-field label {
+                        display: block;
+                        margin-bottom: 0.5rem;
+                        color: #7EB2FF;
+                    }
 
-                .save-status.success {
-                    color: #4CAF50;
-                    background: rgba(76, 175, 80, 0.1);
-                }
+                    .input-field input {
+                        width: 100%;
+                        padding: 0.75rem;
+                        border: 1px solid rgba(30, 144, 255, 0.3);
+                        border-radius: 6px;
+                        background: rgba(26, 26, 26, 0.5);
+                        color: #fff;
+                        font-size: 1rem;
+                        transition: all 0.3s ease;
+                    }
 
-                .save-status.error {
-                    color: #f44336;
-                    background: rgba(244, 67, 54, 0.1);
-                }
+                    .input-field input:focus {
+                        outline: none;
+                        border-color: rgba(30, 144, 255, 0.8);
+                        box-shadow: 0 0 0 2px rgba(30, 144, 255, 0.2);
+                    }
 
-                .modal-overlay {
-                    position: fixed;
-                    top: 0;
-                    left: 0;
-                    width: 100%;
-                    height: 100%;
-                    background: rgba(0, 0, 0, 0.85);
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
-                    z-index: 1000;
-                    backdrop-filter: blur(5px);
-                }
+                    .input-field input::placeholder {
+                        color: rgba(255, 255, 255, 0.3);
+                    }
 
-                .modal-content {
-                    position: relative;
-                    max-width: 90%;
-                    max-height: 90vh;
-                    border-radius: 12px;
-                    overflow: hidden;
-                    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-                }
+                    .input-with-button {
+                        display: flex;
+                        gap: 0.5rem;
+                    }
 
-                .modal-content img {
-                    display: block;
-                    max-width: 100%;
-                    max-height: 90vh;
-                    object-fit: contain;
-                }
+                    .input-with-button input {
+                        flex: 1;
+                    }
 
-                .modal-close {
-                    position: absolute;
-                    top: 10px;
-                    right: 10px;
-                    width: 40px;
-                    height: 40px;
-                    border-radius: 50%;
-                    background: rgba(0, 0, 0, 0.5);
-                    border: 2px solid rgba(255, 255,255, 0.5);
-                    color: white;
-                    font-size: 24px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    cursor: pointer;
-                    transition: all 0.3s ease;
-                }
+                    .save-button {
+                        padding: 0.75rem 1.5rem;
+                        background: #1E90FF;
+                        color: white;
+                        border: none;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        font-size: 1rem;
+                        transition: all 0.3s ease;
+                    }
 
-                .modal-close:hover {
-                    background: rgba(0, 0, 0, 0.8);
-                    border-color: white;
-                }
+                    .save-button:hover {
+                        background: #1976D2;
+                    }
 
-                .applicable-message {
-                    color: #ffcc00;
-                    font-size: 1.2rem;
-                    margin-bottom: 2rem;
-                    text-align: center;
-                    padding: 1rem;
-                    background: rgba(255, 204, 0, 0.1);
-                    border: 1px solid rgba(255, 204, 0, 0.3);
-                    border-radius: 6px;
-                }
+                    .save-button:active {
+                        transform: translateY(1px);
+                    }
 
-                .back-home-container {
-                    text-align: center;
-                    margin-top: 2rem;
-                    margin-bottom: 2rem;
-                }
+                    .save-button.invalid {
+                        background: #cccccc;
+                        color: #666666;
+                        cursor: not-allowed;
+                    }
 
-                .back-home-button {
-                    padding: 0.75rem 1.5rem;
-                    background: #1E90FF;
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    cursor: pointer;
-                    font-size: 1rem;
-                    text-decoration: none;
-                    display: inline-block;
-                    transition: all 0.3s ease;
-                }
+                    .save-button.invalid:hover {
+                        background: #cccccc;
+                    }
 
-                .back-home-button:hover {
-                    background: #1976D2;
-                }
+                    .save-status {
+                        margin-left: 1rem;
+                        padding: 0.5rem 1rem;
+                        border-radius: 4px;
+                        font-size: 0.9rem;
+                    }
 
-                .back-home-button:active {
-                    transform: translateY(1px);
-                }
+                    .save-status.success {
+                        color: #4CAF50;
+                        background: rgba(76, 175, 80, 0.1);
+                    }
 
-                .country-info h3, .country-info h4 {
-                    color: #7EB2FF;
-                }
+                    .save-status.error {
+                        color: #f44336;
+                        background: rgba(244, 67, 54, 0.1);
+                    }
 
-                .country-info ul {
-                    list-style-type: disc;
-                    padding-left: 20px;
-                }
+                    .modal-overlay {
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        width: 100%;
+                        height: 100%;
+                        background: rgba(0, 0, 0, 0.85);
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        z-index: 1000;
+                        backdrop-filter: blur(5px);
+                    }
 
-                .country-info li {
-                    color: #999;
-                    margin-bottom: 0.5rem;
-                }
+                    .modal-content {
+                        position: relative;
+                        max-width: 90%;
+                        max-height: 90vh;
+                        border-radius: 12px;
+                        overflow: hidden;
+                        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+                    }
 
-                .error {
-                    color: #f44336;
-                }
-                "#}
-            </style>
-        </div>
+                    .modal-content img {
+                        display: block;
+                        max-width: 100%;
+                        max-height: 90vh;
+                        object-fit: contain;
+                    }
+
+                    .modal-close {
+                        position: absolute;
+                        top: 10px;
+                        right: 10px;
+                        width: 40px;
+                        height: 40px;
+                        border-radius: 50%;
+                        background: rgba(0, 0, 0, 0.5);
+                        border: 2px solid rgba(255, 255,255, 0.5);
+                        color: white;
+                        font-size: 24px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                    }
+
+                    .modal-close:hover {
+                        background: rgba(0, 0, 0, 0.8);
+                        border-color: white;
+                    }
+
+                    .applicable-message {
+                        color: #ffcc00;
+                        font-size: 1.2rem;
+                        margin-bottom: 2rem;
+                        text-align: center;
+                        padding: 1rem;
+                        background: rgba(255, 204, 0, 0.1);
+                        border: 1px solid rgba(255, 204, 0, 0.3);
+                        border-radius: 6px;
+                    }
+
+                    .back-home-container {
+                        text-align: center;
+                        margin-top: 2rem;
+                        margin-bottom: 2rem;
+                    }
+
+                    .back-home-button {
+                        padding: 0.75rem 1.5rem;
+                        background: #1E90FF;
+                        color: white;
+                        border: none;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        font-size: 1rem;
+                        text-decoration: none;
+                        display: inline-block;
+                        transition: all 0.3s ease;
+                    }
+
+                    .back-home-button:hover {
+                        background: #1976D2;
+                    }
+
+                    .back-home-button:active {
+                        transform: translateY(1px);
+                    }
+
+                    .country-info h3, .country-info h4, .country-info h5 {
+                        color: #7EB2FF;
+                    }
+
+                    .country-info ul {
+                        list-style-type: disc;
+                        padding-left: 20px;
+                    }
+
+                    .country-info li {
+                        color: #999;
+                        margin-bottom: 0.5rem;
+                    }
+
+                    .country-table {
+                        width: 100%;
+                        border-collapse: collapse;
+                        margin-bottom: 2rem;
+                    }
+
+                    .country-table th, .country-table td {
+                        border: 1px solid rgba(255, 255, 255, 0.1);
+                        padding: 0.75rem;
+                        text-align: left;
+                        color: #999;
+                    }
+
+                    .country-table th {
+                        background: rgba(30, 144, 255, 0.1);
+                        color: #fff;
+                    }
+
+                    .country-table td {
+                        color: #fff;
+                    }
+
+                    .error {
+                        color: #f44336;
+                    }
+                    "#}
+                </style>
+            </div>
+        }
     }
-}

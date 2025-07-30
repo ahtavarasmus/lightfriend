@@ -252,7 +252,7 @@ pub async fn get_country_info(
 
     let auth_token = match env::var("TWILIO_AUTH_TOKEN") {
         Ok(token) => {
-            println!("Successfully parsed local numbers response");
+            println!("Successfully retrieved TWILIO_AUTH_TOKEN");
             token
         },
         Err(e) => {
@@ -263,8 +263,6 @@ pub async fn get_country_info(
 
     let client = Client::new();
     println!("Created new HTTP client");
-
-
 
     // Fetch phone number prices
     println!("Fetching phone number prices for country: {}", req.country_code);
@@ -300,72 +298,85 @@ pub async fn get_country_info(
         },
     };
 
-    let mut type_prices: Vec<(String, f64)> = phone_numbers.phone_number_prices.iter()
-        .filter_map(|p| {
-            if p.number_type == "local" || p.number_type == "mobile" {
-                p.current_price.parse::<f64>().ok().map(|pr| (p.number_type.clone(), pr))
-            } else {
-                None
-            }
-        })
-        .collect();
-    type_prices.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-    let mut best_number: Option<AvailablePhoneNumber> = None;
-    let mut best_type: String = String::new();
-    for (num_type, _) in type_prices {
-        let url_type = match num_type.as_str() {
-            "local" => Some("Local"),
-            "mobile" => Some("Mobile"),
-            _ => None,
-        };
-        if let Some(u_type) = url_type {
-            let url = format!(
-                "https://api.twilio.com/2010-04-01/Accounts/{}/AvailablePhoneNumbers/{}/{}.json",
-                account_sid, req.country_code.to_uppercase(), u_type
-            );
-            let resp = match client
-                .get(&url)
-                .basic_auth(&account_sid, Some(&auth_token))
-                .query(&[("pageSize", "20")])
-                .send()
-                .await {
-                    Ok(r) => r,
-                    Err(e) => {
-                        println!("Failed to fetch {} numbers: {}", num_type, e);
-                        continue;
+    // Fetch available numbers for local
+    let mut local_number: Option<AvailablePhoneNumber> = None;
+    let local_url = format!(
+        "https://api.twilio.com/2010-04-01/Accounts/{}/AvailablePhoneNumbers/{}/Local.json",
+        account_sid, req.country_code.to_uppercase()
+    );
+    let local_resp = client
+        .get(&local_url)
+        .basic_auth(&account_sid, Some(&auth_token))
+        .query(&[("pageSize", "20")])
+        .send()
+        .await;
+    match local_resp {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<AvailablePhoneNumbersResponse>().await {
+                Ok(avail_resp) => {
+                    let mut candidates = avail_resp.available_phone_numbers
+                        .into_iter()
+                        .filter(|n| n.capabilities.sms || n.capabilities.voice)
+                        .collect::<Vec<_>>();
+                    if !candidates.is_empty() {
+                        candidates.sort_by_key(|n| {
+                            -(if n.capabilities.sms && n.capabilities.voice { 3 } else if n.capabilities.sms && n.capabilities.mms { 2 } else if n.capabilities.sms || n.capabilities.voice { 1 } else { 0 })
+                        });
+                        local_number = Some(candidates[0].clone());
                     }
-                };
-            if !resp.status().is_success() {
-                let err_text = resp.text().await.unwrap_or_default();
-                println!("Twilio API error for {} numbers: {}", num_type, err_text);
-                continue;
-            }
-            let avail_resp = match resp.json::<AvailablePhoneNumbersResponse>().await {
-                Ok(json) => json,
-                Err(e) => {
-                    println!("Failed to parse {} numbers: {}", num_type, e);
-                    continue;
                 }
-            };
-            let mut candidates = avail_resp.available_phone_numbers
-                .into_iter()
-                .filter(|n| n.capabilities.sms || n.capabilities.voice)
-                .collect::<Vec<_>>();
-            if candidates.is_empty() {
-                continue;
+                Err(e) => println!("Failed to parse local numbers: {}", e),
             }
-            candidates.sort_by_key(|n| {
-                -(if n.capabilities.sms && n.capabilities.voice { 3 } else if n.capabilities.sms && n.capabilities.mms { 2 } else if n.capabilities.sms || n.capabilities.voice { 1 } else { 0 })
-            });
-            best_number = Some(candidates[0].clone());
-            best_type = num_type;
-            break;
         }
+        Ok(resp) => {
+            let err_text = resp.text().await.unwrap_or_default();
+            println!("Twilio API error for local numbers: {}", err_text);
+        }
+        Err(e) => println!("Failed to fetch local numbers: {}", e),
     }
-    let locals = if best_type == "local" { best_number.clone().map(|n| vec![n]).unwrap_or_default() } else { vec![] };
-    let mobiles = if best_type == "mobile" { best_number.clone().map(|n| vec![n]).unwrap_or_default() } else { vec![] };
-    let available_numbers = AvailableNumbers { locals, mobiles };
-    println!("Selected best number: type={}, count={}", best_type, if best_number.is_some() { 1 } else { 0 });
+
+    // Fetch available numbers for mobile
+    let mut mobile_number: Option<AvailablePhoneNumber> = None;
+    let mobile_url = format!(
+        "https://api.twilio.com/2010-04-01/Accounts/{}/AvailablePhoneNumbers/{}/Mobile.json",
+        account_sid, req.country_code.to_uppercase()
+    );
+    let mobile_resp = client
+        .get(&mobile_url)
+        .basic_auth(&account_sid, Some(&auth_token))
+        .query(&[("pageSize", "20")])
+        .send()
+        .await;
+    match mobile_resp {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<AvailablePhoneNumbersResponse>().await {
+                Ok(avail_resp) => {
+                    let mut candidates = avail_resp.available_phone_numbers
+                        .into_iter()
+                        .filter(|n| n.capabilities.sms || n.capabilities.voice)
+                        .collect::<Vec<_>>();
+                    if !candidates.is_empty() {
+                        candidates.sort_by_key(|n| {
+                            -(if n.capabilities.sms && n.capabilities.voice { 3 } else if n.capabilities.sms && n.capabilities.mms { 2 } else if n.capabilities.sms || n.capabilities.voice { 1 } else { 0 })
+                        });
+                        mobile_number = Some(candidates[0].clone());
+                    }
+                }
+                Err(e) => println!("Failed to parse mobile numbers: {}", e),
+            }
+        }
+        Ok(resp) => {
+            let err_text = resp.text().await.unwrap_or_default();
+            println!("Twilio API error for mobile numbers: {}", err_text);
+        }
+        Err(e) => println!("Failed to fetch mobile numbers: {}", e),
+    }
+
+    let available_numbers = AvailableNumbers {
+        locals: local_number.clone().map(|n| vec![n]).unwrap_or_default(),
+        mobiles: mobile_number.clone().map(|n| vec![n]).unwrap_or_default(),
+    };
+    println!("Selected numbers: locals={}, mobiles={}", available_numbers.locals.len(), available_numbers.mobiles.len());
 
     // Fetch messaging prices
     println!("Fetching messaging prices for country: {}", req.country_code);
@@ -473,59 +484,72 @@ pub async fn get_country_info(
     };
     println!("Combined prices data structure created");
 
-    let mut local = vec![];
-    let mut mobile = vec![];
-    if !best_type.is_empty() {
-        let reg_number_type = match best_type.as_str() {
-            "local" => "local",
-            "mobile" => "mobile",
-            _ => "",
-        };
-        if !reg_number_type.is_empty() {
-            println!("Fetching regulations for type: {}", reg_number_type);
-            let regs_resp = client
-                .get("https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations")
-                .basic_auth(&account_sid, Some(&auth_token))
-                .query(&[
-                    ("IsoCountry", req.country_code.to_uppercase().as_str()),
-                    ("NumberType", reg_number_type),
-                    ("IncludeConstraints", "true"),
-                ])
-                .send()
-                .await;
-            let regs_resp = match regs_resp {
-                Ok(resp) => resp,
-                Err(e) => {
-                    println!("Failed to send request for regulations: {}", e);
-                    return Err((StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": format!("Failed to fetch regulations: {}", e)}))));
-                },
-            };
-            if !regs_resp.status().is_success() {
-                let err_text = regs_resp.text().await.unwrap_or_default();
-                println!("Twilio API error for regulations: {}", err_text);
-            } else {
-                let regs_json: RegulationsResponse = match regs_resp.json().await {
-                    Ok(json) => json,
-                    Err(e) => {
-                        println!("Failed to parse regulations: {}", e);
-                        RegulationsResponse { results: vec![], meta: Meta { page: 0, page_size: 0, first_page_url: "".to_string(), previous_page_url: None, url: "".to_string(), next_page_url: None, key: "".to_string() } }
-                    },
-                };
-                let regs = regs_json.results;
-                if best_type == "local" {
-                    local = regs.clone();
-                } else if best_type == "mobile" {
-                    mobile = regs.clone();
+    // Fetch regulations for local
+    let mut local_regs = vec![];
+    println!("Fetching regulations for local");
+    let local_regs_resp = client
+        .get("https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations")
+        .basic_auth(&account_sid, Some(&auth_token))
+        .query(&[
+            ("IsoCountry", req.country_code.to_uppercase().as_str()),
+            ("NumberType", "local"),
+            ("IncludeConstraints", "true"),
+        ])
+        .send()
+        .await;
+    match local_regs_resp {
+        Ok(resp) if resp.status().is_success() => {
+            println!("resp: {:#?}", resp);
+            match resp.json::<RegulationsResponse>().await {
+                Ok(json) => {
+                    local_regs = json.results;
+                    println!("Retrieved {} local regulations", local_regs.len());
                 }
-                println!("Retrieved {} regulations for {}", regs.len(), best_type);
+                Err(e) => println!("Failed to parse local regulations: {}", e),
             }
         }
+        Ok(resp) => {
+            let err_text = resp.text().await.unwrap_or_default();
+            println!("Twilio API error for local regulations: {}", err_text);
+        }
+        Err(e) => println!("Failed to fetch local regulations: {}", e),
     }
+
+    // Fetch regulations for mobile
+    let mut mobile_regs = vec![];
+    println!("Fetching regulations for mobile");
+    let mobile_regs_resp = client
+        .get("https://numbers.twilio.com/v2/RegulatoryCompliance/Regulations")
+        .basic_auth(&account_sid, Some(&auth_token))
+        .query(&[
+            ("IsoCountry", req.country_code.to_uppercase().as_str()),
+            ("NumberType", "mobile"),
+            ("IncludeConstraints", "true"),
+        ])
+        .send()
+        .await;
+    match mobile_regs_resp {
+        Ok(resp) if resp.status().is_success() => {
+            match resp.json::<RegulationsResponse>().await {
+                Ok(json) => {
+                    mobile_regs = json.results;
+                    println!("Retrieved {} mobile regulations", mobile_regs.len());
+                }
+                Err(e) => println!("Failed to parse mobile regulations: {}", e),
+            }
+        }
+        Ok(resp) => {
+            let err_text = resp.text().await.unwrap_or_default();
+            println!("Twilio API error for mobile regulations: {}", err_text);
+        }
+        Err(e) => println!("Failed to fetch mobile regulations: {}", e),
+    }
+
     let regulations = TwilioRegulations {
-        local: local.clone(),
-        mobile: mobile.clone(),
+        local: local_regs,
+        mobile: mobile_regs,
     };
-    println!("Combined regulations data: {} local, {} mobile", local.len(), mobile.len());
+    println!("Combined regulations data: {} local, {} mobile", regulations.local.len(), regulations.mobile.len());
     println!("Returning successful response");
     Ok(Json(CountryInfoResponse {
         available_numbers,
