@@ -46,14 +46,25 @@ pub fn landing() -> Html {
             <div class="difference-content">
                 <div class="difference-text">
                     <h2>{"Your attention is the product."}</h2>
-                    <p>{"Lightfriend is your "}<span class="highlight">{"shield"}</span>{" from the casino."}</p>
-                    <p>{"You stay free, and still know when it matters."}</p>
+                    <p>{"Every feed is optimized to hook you."}</p>
+                      <p>{"Every ping is a trap."}</p>
+                    <p>{"You’re up against casinos built by behavioral psychologists."}</p>
+                    <p>{"Lightfriend helps you "}<span class="highlight">{"opt out."}</span>{" You stay connected, but free."}</p>
                 </div>
                 <div class="difference-image">
                     <img src="/assets/lightfriend-filter.png" alt="Lightfriend being a filter between you and the apps." loading="lazy" />
                 </div>
             </div>
         </div>
+
+        <section class="story-section">
+            <div class="story-grid">
+                <div class="story-item">
+                    <img src="/assets/lightfriend-robot-scene-3.png" alt="Get notified" loading="lazy" />
+                    <p>{"Leave your smartphone behind. If it matters, Lightfriend will call you."}</p>
+                </div>
+            </div>
+        </section>
 
         // Updated section: Because if there is a way there's a will
         <div class="difference-section">
@@ -68,49 +79,45 @@ pub fn landing() -> Html {
             </div>
         </div>
 
-        /*
-        <section class="story-section">
-            <div class="story-grid">
-                <div class="story-item">
-                    <img src="/assets/lightfriend-robot-scene-2.png" alt="Let robot handle monitoring" loading="lazy" />
-                    <p>{"Leave your smartphone behind. Lightfriend will call or text you if something important happens."}</p>
-                </div>
-                <div class="story-item">
-                    <img src="/assets/lightfriend-robot-scene-3.png" alt="Get notified" loading="lazy" />
-                    <p>{"Only hear from your digital life when it actually matters."}</p>
-                </div>
-            </div>
-        </section>
-        */
-
-        <section class="before-after">
-            <div class="section-intro">
-                <h2>{"What if your time was really yours again?"}</h2>
-                <p>{"Every feed is optimized to hook you. Every ping is a trap. You’re up against casinos built by behavioral psychologists. Lightfriend helps you opt out. You stay connected, but you stay free."}</p>
-            </div>
-        </section>
-
 
             <div class="filter-concept">
                 <div class="filter-content">
                     <AnimationComponent />
                 </div>
-                <div class="faq-in-filter">
-                    <h2>{"Frequently Asked Questions"}</h2>
-                    <div class="faq-item">
-                        <h3>{"Do I need a phone with internet connection?"}</h3>
-                        <p>{"No, Lightfriend works through normal voice calling and text messaging (SMS)."}</p>
-                    </div>
-                    <div class="faq-item">
-                        <h3>{"Can Lightfriend also send messages?"}</h3>
-                        <p>{"Yes, it can send messages and fetch them when you call or text it."}</p>
-                    </div>
-                    <div class="faq-item">
-                        <h3>{"How private is Lightfriend?"}</h3>
-                        <p>{"It depends on the plan. I host the service on a secure server for user convenience (Hosted Plan) with a zero logging policy, but this means you need to trust me since I must have access to this server for obvious reasons. The Easy Self-Hosting plan on the other hand offers completely private service with zero access from anyone except you. It requires more upfront investment to setup, but once running it's supposed to be a hands-free experience with automatic updates and security."}</p>
-                    </div>
+            </div>
+
+        <section class="trust-proof">
+            <div class="section-intro">
+                <h2>{"I Needed an Escape, So I Built one"}</h2>
+                <p>{"I'm a solo developer, and honestly, I have very low willpower. I was tired of wasting hours on my smartphone. I tried blockers, detox apps, everything. But I always found a way around them."}</p>
+                <p>{"Then I discovered the Light Phone. It's a beautifully designed dumbphone that gave me peace again. I now use the Light Phone 3 and I love it. But it's missing a few key features I need to function in daily life."}</p>
+                <p>{"So I started building Lightfriend as my own AI assistant. Something I could call or text from a dumbphone and check messages, search, get calendar updates, and stay in the loop. I use it every day. I rely on it to keep me updated, and it works."}</p>
+                <p>{"I recently switched from usage-based pricing with over 100 users to a subscription model. The project also is open-source and 55 developers have starred the project on GitHub."}</p>
+                <p>{"I'm trying to make the service better everyday and very open to new suggestions so feel free to email me at rasmus@ahtava.com!"}</p>
+
+            </div>
+        </section>
+
+        <div class="filter-concept">
+            <div class="filter-content">
+            <div class="faq-in-filter">
+                <h2>{"Frequently Asked Questions"}</h2>
+                <div class="faq-item">
+                    <h3>{"Do I need a phone with internet connection?"}</h3>
+                    <p>{"No, Lightfriend works through normal voice calling and text messaging (SMS)."}</p>
+                </div>
+                <div class="faq-item">
+                    <h3>{"Can Lightfriend also send messages?"}</h3>
+                    <p>{"Yes, it can send messages and fetch them when you call or text it."}</p>
+                </div>
+                <div class="faq-item">
+                    <h3>{"How private is Lightfriend?"}</h3>
+                    <p>{"It depends on the plan. I host the service on a secure server for user convenience (Hosted Plan) with a zero logging policy, but this means you need to trust me since I must have access to this server for obvious reasons. The Easy Self-Hosting plan on the other hand offers completely private service with zero access from anyone except you. It requires more upfront investment to setup, but once running it's supposed to be a hands-free experience with automatic updates and security."}</p>
                 </div>
             </div>
+            </div>
+        </div>
+
 
         <footer class="footer-cta">
             <div class="footer-content">
@@ -167,6 +174,7 @@ pub fn landing() -> Html {
         flex: 1;
     }
 
+
     .filter-text h2 {
         font-size: 2.5rem;
         margin-bottom: 1.5rem;
@@ -203,6 +211,52 @@ pub fn landing() -> Html {
         -webkit-text-fill-color: transparent;
         text-align: center;
     }
+
+    .trust-proof {
+        padding: 4rem 2rem;
+        max-width: 800px;
+        margin: 0 auto;
+        text-align: center;
+        position: relative;
+        z-index: 2;
+    }
+    .trust-proof::before {
+        content: '';
+        display: block;
+        height: 2px;
+        width: 60%;
+        margin: 0 auto 2rem;
+        background: linear-gradient(to right, transparent, rgba(126, 178, 255, 0.4), transparent);
+    }
+
+    .trust-proof h2 {
+        font-size: 2.5rem;
+        margin-bottom: 1.5rem;
+        background: linear-gradient(45deg, #fff, #7EB2FF);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 700;
+        text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
+    }
+
+    .trust-proof p {
+        font-size: 1.3rem;
+        color: #bbb;
+        line-height: 1.8;
+        font-weight: 400;
+        margin-bottom: 1.5rem;
+    }
+
+    @media (max-width: 768px) {
+        .trust-proof h2 {
+            font-size: 2rem;
+        }
+
+        .trust-proof p {
+            font-size: 1.1rem;
+        }
+    }
+
 
     .faq-item {
         margin-bottom: 1.5rem;
@@ -1004,7 +1058,7 @@ pub fn landing() -> Html {
 
     .story-section {
         padding: 4rem 2rem;
-        max-width: 1200px;
+        max-width: 500px;
         margin: 0 auto;
         text-align: center;
         position: relative;
@@ -1013,7 +1067,7 @@ pub fn landing() -> Html {
 
     .story-grid {
         display: grid;
-        grid-template-columns: repeat(2, 1fr);
+        grid-template-columns: repeat(1, 1fr);
         gap: 2rem;
     }
 
