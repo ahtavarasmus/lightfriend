@@ -286,7 +286,7 @@ pub async fn get_country_info(
         },
     };
 
-    println!("Parsing phone number prices response");
+    println!("Parsing phone number prices response: {:#?}", phone_send);
     let phone_numbers: PhoneNumberCountry = match phone_send.json().await {
         Ok(json) => {
             println!("Successfully parsed phone number prices");

@@ -533,7 +533,7 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                 <div class="instruction-block overview-block">
                     <div class="instruction-content">
                         <h2>{"SMS and Voice Communication Setup"}</h2>
-                        <p>{"Lightfriend uses Twilio for SMS messaging and voice calls, giving your AI assistant the ability to communicate via a dedicated phone number. International users can bring their own number and pay for messages straight to Twilio."}</p>
+                        <p>{"Lightfriend uses Twilio to send voice calls and text messages. Users outside the US need to use their own Twilio number, because many countries require local address to be able to buy a phone number or even send messages."}</p>
                     </div>
                 </div>
 
@@ -637,7 +637,20 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                         { if *is_loading {
                             html! { <p>{"Loading..."}</p> }
                         } else if let Some(err) = &*fetch_error {
-                            html! { <p class="error">{err}</p> }
+                            html! {
+                                <div>
+                                    <p class="error">{err}</p>
+                                    if !selected_country.is_empty() {
+                                        <p>
+                                            {"Check these or email me rasmus@ahtava.com"}
+                                            <a href={format!("https://www.twilio.com/en-us/sms/pricing/{}", *selected_country)} target="_blank">{"Pricing"}</a>
+                                            {" and "}
+                                            <a href={format!("https://www.twilio.com/en-us/guidelines/{}/regulatory", *selected_country)} target="_blank">{"Regulations"}</a>
+                                            {"."}
+                                        </p>
+                                    }
+                                </div>
+                            }
                         } else if let Some(info) = (*country_info).clone() {
                             let locals = info.available_numbers.locals;
                             let mobiles = info.available_numbers.mobiles;
@@ -655,19 +668,19 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                                     <h3>{"Available Numbers"}</h3>
                                     {
                                         if locals.is_empty() && mobiles.is_empty() {
-                                            html! { <p>{"No available numbers found that meet the criteria."}</p> }
+                                            html! { <p>{"No available numbers found for this country."}</p> }
                                         } else {
                                             html! {
                                                 <table class="country-table">
                                                     <thead>
                                                         <tr>
                                                             <th>{"Number Type"}</th>
-                                                            <th>{"Example Number"}</th>
+                                                            <th>{"Number"}</th>
                                                             <th>{"Address Requirements"}</th>
                                                             <th>{"Capabilities"}</th>
                                                             <th>{format!("Monthly Price ({})", price_unit)}</th>
-                                                            <th>{"Inbound SMS Price (per message)"}</th>
-                                                            <th>{"Outbound SMS Price (min per message)"}</th>
+                                                            <th>{"Inbound SMS Price (per 160 chars)"}</th>
+                                                            <th>{"Outbound SMS Price (per 160 chars)"}</th>
                                                             <th>{"Inbound Call Price (per minute)"}</th>
                                                             <th>{"Outbound Call Price (per minute)"}</th>
                                                         </tr>
@@ -696,12 +709,46 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                                                                     .find(|inp| inp.number_type == num_type)
                                                                     .map(|inp| inp.current_price.clone())
                                                                     .unwrap_or("N/A".to_string());
+                                                                let outbound_call_price = info.prices.voice.outbound_prefix_prices.iter()
+                                                                    .map(|outp| outp.current_price.parse::<f64>().unwrap_or(f64::MAX))
+                                                                    .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                                                                    .map(|p| p.to_string())
+                                                                    .unwrap_or("N/A".to_string());
                                                                 let mut caps: Vec<String> = Vec::new();
                                                                 if num.capabilities.voice { caps.push("Voice".to_string()); }
                                                                 if num.capabilities.sms { caps.push("SMS".to_string()); }
                                                                 if num.capabilities.mms { caps.push("MMS".to_string()); }
                                                                 let caps_str = if caps.is_empty() { "None".to_string() } else { caps.join(", ") };
+                                                                let monthly_f = monthly_price.parse::<f64>().ok();
+                                                                let outbound_sms_f = outbound_sms_min_price.parse::<f64>().ok();
+                                                                let outbound_call_f = outbound_call_price.parse::<f64>().ok();
+                                                                let sms_est_str = if let (Some(_m), Some(o)) = (monthly_f, outbound_sms_f) {
+                                                                    let avg_cost = 1.5 * o;
+                                                                    let min_usage = 50.0 * avg_cost;
+                                                                    let max_usage = 200.0 * avg_cost;
+                                                                    format!("{:.4} - {:.4}", min_usage, max_usage)
+                                                                } else {
+                                                                    "N/A".to_string()
+                                                                };
+                                                                let voice_est_str = if let Some(oc) = outbound_call_f {
+                                                                    let minutes = 1.5 * 30.0;
+                                                                    let voice_est = minutes * oc;
+                                                                    format!("{:.4}", voice_est)
+                                                                } else {
+                                                                    "N/A".to_string()
+                                                                };
+                                                                let total_est_str = if let (Some(m), Some(o), Some(oc)) = (monthly_f, outbound_sms_f, outbound_call_f) {
+                                                                    let avg_sms_cost = 1.5 * o;
+                                                                    let min_sms = 50.0 * avg_sms_cost;
+                                                                    let max_sms = 200.0 * avg_sms_cost;
+                                                                    let minutes = 1.5 * 30.0;
+                                                                    let voice_est = minutes * oc;
+                                                                    format!("{:.4} - {:.4}", m + min_sms + voice_est, m + max_sms + voice_est)
+                                                                } else {
+                                                                    "N/A".to_string()
+                                                                };
                                                                 html! {
+                                                                    <>
                                                                     <tr>
                                                                         <td>{"Local"}</td>
                                                                         <td>{ format!("{} ({})", num.friendly_name, num.phone_number) }</td>
@@ -711,8 +758,16 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                                                                         <td>{ inbound_sms_price }</td>
                                                                         <td>{ outbound_sms_min_price }</td>
                                                                         <td>{ inbound_call_price }</td>
-                                                                        <td>{ outbound_call_price.clone() }</td>
+                                                                        <td>{ outbound_call_price }</td>
                                                                     </tr>
+                                                                    <tr>
+                                                                        <td colspan="9">
+                                                                            { "Estimated SMS usage cost: " } { sms_est_str } <br />
+                                                                            { "Estimated Voice usage cost: " } { voice_est_str } <br />
+                                                                            { "Estimated total monthly cost: " } { total_est_str }
+                                                                        </td>
+                                                                    </tr>
+                                                                    </>
                                                                 }
                                                             } else {
                                                                 html! {}
@@ -741,12 +796,46 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                                                                     .find(|inp| inp.number_type == num_type)
                                                                     .map(|inp| inp.current_price.clone())
                                                                     .unwrap_or("N/A".to_string());
+                                                                let outbound_call_price = info.prices.voice.outbound_prefix_prices.iter()
+                                                                    .map(|outp| outp.current_price.parse::<f64>().unwrap_or(f64::MAX))
+                                                                    .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                                                                    .map(|p| p.to_string())
+                                                                    .unwrap_or("N/A".to_string());
                                                                 let mut caps: Vec<String> = Vec::new();
                                                                 if num.capabilities.voice { caps.push("Voice".to_string()); }
                                                                 if num.capabilities.sms { caps.push("SMS".to_string()); }
                                                                 if num.capabilities.mms { caps.push("MMS".to_string()); }
                                                                 let caps_str = if caps.is_empty() { "None".to_string() } else { caps.join(", ") };
+                                                                let monthly_f = monthly_price.parse::<f64>().ok();
+                                                                let outbound_sms_f = outbound_sms_min_price.parse::<f64>().ok();
+                                                                let outbound_call_f = outbound_call_price.parse::<f64>().ok();
+                                                                let sms_est_str = if let (Some(_m), Some(o)) = (monthly_f, outbound_sms_f) {
+                                                                    let avg_cost = 1.5 * o;
+                                                                    let min_usage = 50.0 * avg_cost;
+                                                                    let max_usage = 200.0 * avg_cost;
+                                                                    format!("{:.4} - {:.4}", min_usage, max_usage)
+                                                                } else {
+                                                                    "N/A".to_string()
+                                                                };
+                                                                let voice_est_str = if let Some(oc) = outbound_call_f {
+                                                                    let minutes = 1.5 * 30.0;
+                                                                    let voice_est = minutes * oc;
+                                                                    format!("{:.4}", voice_est)
+                                                                } else {
+                                                                    "N/A".to_string()
+                                                                };
+                                                                let total_est_str = if let (Some(m), Some(o), Some(oc)) = (monthly_f, outbound_sms_f, outbound_call_f) {
+                                                                    let avg_sms_cost = 1.5 * o;
+                                                                    let min_sms = 50.0 * avg_sms_cost;
+                                                                    let max_sms = 200.0 * avg_sms_cost;
+                                                                    let minutes = 1.5 * 30.0;
+                                                                    let voice_est = minutes * oc;
+                                                                    format!("{:.4} - {:.4}", m + min_sms + voice_est, m + max_sms + voice_est)
+                                                                } else {
+                                                                    "N/A".to_string()
+                                                                };
                                                                 html! {
+                                                                    <>
                                                                     <tr>
                                                                         <td>{"Mobile"}</td>
                                                                         <td>{ format!("{} ({})", num.friendly_name, num.phone_number) }</td>
@@ -758,6 +847,14 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                                                                         <td>{ inbound_call_price }</td>
                                                                         <td>{ outbound_call_price }</td>
                                                                     </tr>
+                                                                    <tr>
+                                                                        <td colspan="9">
+                                                                            { "Estimated SMS usage cost: " } { sms_est_str } <br />
+                                                                            { "Estimated Voice usage cost: " } { voice_est_str } <br />
+                                                                            { "Estimated total monthly cost: " } { total_est_str }
+                                                                        </td>
+                                                                    </tr>
+                                                                    </>
                                                                 }
                                                             } else {
                                                                 html! {}
