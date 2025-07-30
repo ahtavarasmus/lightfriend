@@ -404,7 +404,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
 
     .header-background {
         position: relative;
-        height: 750px;
+        height: 350px;
         background-size: cover;
         background-position: center;
         display: flex;
@@ -636,7 +636,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
             font-size: 0.9rem;
         }
         .header-background {
-            height: 150px;
+            height: 200px;
         }
         .card-content {
             padding: 1rem;
@@ -648,7 +648,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
 
     @media (min-width: 969px) {
         .pricing-card {
-            flex: 0 1 100%;
+            flex: 0 1 calc(50% - 1rem);
         }
     }
     "#;
@@ -685,7 +685,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                         html! { 
                             <p class="billing-note">
                                 {if props.subscription_type == "self_hosting" {
-                                    "Free for first 10 customers on launch, sign up now for free to know about the launch!".to_string()
+                                    format!("Normally billed monthly at {}{:.2}, free for first 10 customers on launch!", props.currency, props.price)
                                 } else {
                                     format!("Billed monthly at {}{:.2}", props.currency, props.price)
                                 }}
@@ -1035,10 +1035,6 @@ pub fn pricing(props: &PricingProps) -> Html {
         justify-content: center;
         max-width: 1200px;
         margin: 2rem auto;
-    }
-
-    .self-hosted-grid {
-        justify-content: center;
     }
 
     .hosted-plans-section, .self-hosted-plans-section {
@@ -1484,6 +1480,9 @@ pub fn pricing(props: &PricingProps) -> Html {
         .pricing-panel {
             padding: 4rem 1rem;
         }
+        .pricing-grid {
+            flex-direction: column;
+        }
     }
     "#;
 
@@ -1541,63 +1540,55 @@ pub fn pricing(props: &PricingProps) -> Html {
                 }
             }
 
-            <div class="hosted-plans-section">
-                <h2 class="section-title">{"Hosted Plans"}</h2>
-                <div class="pricing-grid">
-                    <PricingCard
-                        plan_name={if *hosted_mode == "trial" {"Digital Detox Trial"} else {"Hosted Plan"}}
-                        best_for={if *hosted_mode == "trial" {"Try our full-featured cloud service for a week."} else {"Full-featured cloud service ready to go."}}
-                        price={if *hosted_mode == "trial" {*digital_detox_total_price} else {*hosted_total_price}}
-                        currency={if *selected_country == "US" { "$" } else { "€" }}
-                        period={if *hosted_mode == "trial" {"/week"} else {"/day"}}
-                        features={if *hosted_mode == "trial" {digital_detox_features.clone()} else {hosted_features.clone()}}
-                        subscription_type={if *hosted_mode == "trial" {"digital_detox"} else {"hosted"}}
-                        is_popular={false}
-                        is_premium={*hosted_mode == "hosted"}
-                        is_trial={*hosted_mode == "trial"}
-                        is_self_hosting={false}
-                        user_id={props.user_id}
-                        user_email={props.user_email.clone()}
-                        is_logged_in={props.is_logged_in}
-                        verified={props.verified}
-                        sub_tier={props.sub_tier.clone()}
-                        selected_country={(*selected_country).clone()}
-                        coming_soon={false}
-                        hosted_prices={hosted_prices.clone()} 
-                    >
-                        <div class="toggle-container">
-                            <button class={classes!("toggle-button", if *hosted_mode == "trial" {"active"} else {""})} onclick={onclick_trial}>{"Week Trial"}</button>
-                            <button class={classes!("toggle-button", if *hosted_mode == "hosted" {"active"} else {""})} onclick={onclick_hosted}>{"Month Hosted"}</button>
-                        </div>
-                    </PricingCard>
-                </div>
-            </div>
-
-            <div class="self-hosted-plans-section">
-                <h2 class="section-title">{"Self-Hosted Plan"}</h2>
-                <div class="pricing-grid self-hosted-grid">
-                    <PricingCard
-                        plan_name="Easy Self-Hosting Plan"
-                        best_for="Self-Hosted setup for non-technical users with automatic management."
-                        price={self_hosting_total_price}
-                        currency={if *selected_country == "US" { "$" } else { "€" }}
-                        period="/day"
-                        features={self_hosting_features.clone()}
-                        subscription_type="self_hosting"
-                        is_popular=false
-                        is_premium=false
-                        is_trial=false
-                        is_self_hosting={true}
-                        user_id={props.user_id}
-                        user_email={props.user_email.clone()}
-                        is_logged_in={props.is_logged_in}
-                        verified={props.verified}
-                        sub_tier={props.sub_tier.clone()}
-                        selected_country={(*selected_country).clone()}
-                        coming_soon={true}
-                        hosted_prices={hosted_prices.clone()} 
-                    />
-                </div>
+            <h2 class="section-title">{"Plans"}</h2>
+            <div class="pricing-grid">
+                <PricingCard
+                    plan_name={if *hosted_mode == "trial" {"Digital Detox Trial"} else {"Hosted Plan"}}
+                    best_for={if *hosted_mode == "trial" {"Try our full-featured cloud service for a week."} else {"Full-featured cloud service ready to go."}}
+                    price={if *hosted_mode == "trial" {*digital_detox_total_price} else {*hosted_total_price}}
+                    currency={if *selected_country == "US" { "$" } else { "€" }}
+                    period={if *hosted_mode == "trial" {"/week"} else {"/day"}}
+                    features={if *hosted_mode == "trial" {digital_detox_features.clone()} else {hosted_features.clone()}}
+                    subscription_type={if *hosted_mode == "trial" {"digital_detox"} else {"hosted"}}
+                    is_popular={true}
+                    is_premium={*hosted_mode == "hosted"}
+                    is_trial={*hosted_mode == "trial"}
+                    is_self_hosting={false}
+                    user_id={props.user_id}
+                    user_email={props.user_email.clone()}
+                    is_logged_in={props.is_logged_in}
+                    verified={props.verified}
+                    sub_tier={props.sub_tier.clone()}
+                    selected_country={(*selected_country).clone()}
+                    coming_soon={false}
+                    hosted_prices={hosted_prices.clone()} 
+                >
+                    <div class="toggle-container">
+                        <button class={classes!("toggle-button", if *hosted_mode == "trial" {"active"} else {""})} onclick={onclick_trial}>{"Week Trial"}</button>
+                        <button class={classes!("toggle-button", if *hosted_mode == "hosted" {"active"} else {""})} onclick={onclick_hosted}>{"Month Hosted"}</button>
+                    </div>
+                </PricingCard>
+                <PricingCard
+                    plan_name="Easy Self-Hosting Plan"
+                    best_for="Self-Hosted setup for non-technical users with automatic management."
+                    price={self_hosting_total_price}
+                    currency={if *selected_country == "US" { "$" } else { "€" }}
+                    period="/day"
+                    features={self_hosting_features.clone()}
+                    subscription_type="self_hosting"
+                    is_popular=false
+                    is_premium=false
+                    is_trial=false
+                    is_self_hosting={true}
+                    user_id={props.user_id}
+                    user_email={props.user_email.clone()}
+                    is_logged_in={props.is_logged_in}
+                    verified={props.verified}
+                    sub_tier={props.sub_tier.clone()}
+                    selected_country={(*selected_country).clone()}
+                    coming_soon={true}
+                    hosted_prices={hosted_prices.clone()} 
+                />
             </div>
 
             <FeatureList selected_country={(*selected_country).clone()} />

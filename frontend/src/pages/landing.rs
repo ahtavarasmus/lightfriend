@@ -24,30 +24,43 @@ pub fn landing() -> Html {
     html! {
         <div class="landing-page">
         <header class="hero">
-                <div class="hero-background"></div>
-                <div class="hero-content">
-                    <div class="hero-header">
-                        <p class="hero-subtitle">
-                            {"Ditch Phone Addiction Without Willpower"}
-                        </p>
-                    </div>
-                    <div class="hero-cta-group">
-                        <Link<Route> to={Route::Pricing} classes="forward-link">
-                            <button class="hero-cta">{"Get Started"}</button>
-                        </Link<Route>>
-                        <a href="/faq#try-service" class="faq-link">
-                            {"Try demo first"}
-                        </a>
-                    </div>
+            <div class="hero-background"></div>
+            <div class="hero-content">
+                <div class="hero-header">
+                    <p class="hero-subtitle">
+                        {"Switch to a dumbphone without missing anything important"}
+                    </p>
                 </div>
+                <div class="hero-cta-group">
+                    <Link<Route> to={Route::Pricing} classes="forward-link">
+                        <button class="hero-cta">{"Get Started"}</button>
+                    </Link<Route>>
+                    <a href="/faq#try-service" class="faq-link">
+                        {"Try demo first"}
+                    </a>
+                </div>
+            </div>
         </header>        
+
+        <div class="difference-section">
+            <div class="difference-content">
+                <div class="difference-text">
+                    <h2>{"Your attention is the product."}</h2>
+                    <p>{"Lightfriend is your "}<span class="highlight">{"shield"}</span>{" from the casino."}</p>
+                    <p>{"You stay free, and still know when it matters."}</p>
+                </div>
+                <div class="difference-image">
+                    <img src="/assets/lightfriend-filter.png" alt="Lightfriend being a filter between you and the apps." loading="lazy" />
+                </div>
+            </div>
+        </div>
 
         // Updated section: Because if there is a way there's a will
         <div class="difference-section">
             <div class="difference-content">
                 <div class="difference-text">
-                    <h2>{"Because if there is a way there's a will"}</h2>
-                    <p>{"and why making scrolling "}<span class="highlight">{"impossible"}</span>{" makes all the difference"}</p>
+                    <h2>{"Willpower is not the solution."}</h2>
+                    <p>{"Making scrolling "}<span class="highlight">{"impossible"}</span>{" makes all the difference."}</p>
                 </div>
                 <div class="difference-image">
                     <img src="/assets/delete-blocker.png" alt="Man thinking about checking IG with delete blocker prompt" loading="lazy" />
@@ -55,18 +68,28 @@ pub fn landing() -> Html {
             </div>
         </div>
 
+        /*
         <section class="story-section">
             <div class="story-grid">
                 <div class="story-item">
                     <img src="/assets/lightfriend-robot-scene-2.png" alt="Let robot handle monitoring" loading="lazy" />
-                    <p>{"Let lightfriend monitor your apps."}</p>
+                    <p>{"Leave your smartphone behind. Lightfriend will call or text you if something important happens."}</p>
                 </div>
                 <div class="story-item">
-                    <img src="/assets/lightfriend-robot-scene-3.png" alt="Live life freely" loading="lazy" />
-                    <p>{"Get notified when it matters."}</p>
+                    <img src="/assets/lightfriend-robot-scene-3.png" alt="Get notified" loading="lazy" />
+                    <p>{"Only hear from your digital life when it actually matters."}</p>
                 </div>
             </div>
         </section>
+        */
+
+        <section class="before-after">
+            <div class="section-intro">
+                <h2>{"What if your time was really yours again?"}</h2>
+                <p>{"Every feed is optimized to hook you. Every ping is a trap. You’re up against casinos built by behavioral psychologists. Lightfriend helps you opt out. You stay connected, but you stay free."}</p>
+            </div>
+        </section>
+
 
             <div class="filter-concept">
                 <div class="filter-content">
@@ -94,7 +117,7 @@ pub fn landing() -> Html {
                 <h2>{"Ready for Digital Peace?"}</h2>
                 <p class="subtitle">{"Join the other 100+ early adopters! You will have more impact on the direction of the service and permanently cheaper prices."}</p>
                 <Link<Route> to={Route::Pricing} classes="forward-link">
-                    <button class="hero-cta">{"Start Today"}</button>
+                    <button class="hero-cta">{"Start Today - Live Without the Phone, Not the FOMO"}</button>
                 </Link<Route>>
                 <p class="disclaimer">{"Works with smartphones and basic phones. Customize to your needs."}</p>
                 <div class="development-links">
@@ -872,6 +895,45 @@ pub fn landing() -> Html {
         margin: 1rem auto;
         display: block;
     }
+
+    .before-after {
+        padding: 4rem 2rem;
+        max-width: 800px;
+        margin: 0 auto;
+        text-align: center;
+        position: relative;
+        z-index: 2;
+    }
+
+    .before-after h2 {
+        font-size: 2.5rem;
+        margin-bottom: 1.5rem;
+        background: linear-gradient(45deg, #fff, #7EB2FF);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 700;
+        text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
+    }
+
+    .before-after p {
+        font-size: 1.3rem;
+        color: #bbb;
+        line-height: 1.8;
+        font-weight: 400;
+        max-width: 700px;
+        margin: 0 auto;
+    }
+
+    @media (max-width: 768px) {
+        .before-after h2 {
+            font-size: 2rem;
+        }
+
+        .before-after p {
+            font-size: 1.1rem;
+        }
+    }
+
 
     .legal-links {
         margin-top: 1rem;
