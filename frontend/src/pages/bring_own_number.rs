@@ -958,6 +958,16 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                                             html! {}
                                         }
                                     }
+
+                                    if !selected_country.is_empty() {
+                                        <p>
+                                            {"Check these more at"}
+                                            <a href={format!("https://www.twilio.com/en-us/sms/pricing/{}", *selected_country)} target="_blank">{"Pricing"}</a>
+                                            {" and "}
+                                            <a href={format!("https://www.twilio.com/en-us/guidelines/{}/regulatory", *selected_country)} target="_blank">{"Regulations"}</a>
+                                            {"."}
+                                        </p>
+                                    }
                                 </div>
                             }
                         } else {
