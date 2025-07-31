@@ -186,7 +186,7 @@ pub async fn ask_perplexity(
     ];
 
     let request = chat_completion::ChatCompletionRequest::new(
-        "perplexity/sonar".to_string(),
+        "perplexity/sonar-pro".to_string(),
         messages,
     );
 
