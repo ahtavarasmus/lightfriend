@@ -1,13 +1,11 @@
 use yew::prelude::*;
 use crate::Route;
 use yew_router::components::Link;
-
 use crate::components::notification::AnimationComponent;
+use wasm_bindgen::JsCast;
 
 #[function_component(Landing)]
 pub fn landing() -> Html {
-    let current_phone_word = use_state(|| 0);
-
     // Scroll to top only on initial mount
     {
         use_effect_with_deps(
@@ -17,137 +15,137 @@ pub fn landing() -> Html {
                 }
                 || ()
             },
-            (), // Empty dependencies array means this effect runs only once on mount
+            (),
         );
     }
 
     html! {
         <div class="landing-page">
-        <header class="hero">
-            <div class="hero-background"></div>
-            <div class="hero-content">
-                <div class="hero-header">
-                    <p class="hero-subtitle">
-                        {"Switch to a dumbphone without missing anything important"}
-                    </p>
+            <head>
+                <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" integrity="sha512-SnH5WK+bZxgPHs44uWIX+LLJAJ9/2PkPKZ5QiAj6Ta86w+fsb2TkcmfRyVX3pBnMFcV7oQPJkl9QevSCWr3W6A==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+            </head>
+            <header class="hero">
+                <div class="hero-background"></div>
+                <div class="hero-content">
+                    <div class="hero-header">
+                        <h1 class="hero-title">{"Break Your Phone Addiction Without Willpower"}</h1>
+                        <p class="hero-subtitle">
+                            {"Switch to a dumbphone without feeling isolated, even if your life depends on "}
+                            <span class="highlight-icon"><i class="fab fa-whatsapp"></i></span>
+                            <span class="highlight-icon"><i class="fas fa-envelope"></i></span>
+                            <span class="highlight-icon"><i class="fas fa-calendar"></i></span>
+                            <span class="highlight-icon"><i class="fas fa-globe"></i></span>
+                            {"."}
+                        </p>
+                    </div>
+                    <div class="hero-cta-group">
+                        <Link<Route> to={Route::Pricing} classes="forward-link">
+                            <button class="hero-cta">{"Get Started"}</button>
+                        </Link<Route>>
+                        <a href="/faq#try-service" class="faq-link">
+                            {"Try demo first"}
+                        </a>
+                    </div>
                 </div>
-                <div class="hero-cta-group">
+            </header>
+            <div class="difference-section">
+                <div class="difference-content">
+                    <div class="difference-text">
+                        <h2>{"Your attention is the product."}</h2>
+                        <p>{"Every feed is optimized to hook you."}</p>
+                        <p>{"Every ping is a trap."}</p>
+                        <p>{"You’re up against casinos built by behavioral psychologists."}</p>
+                        <p>{"Lightfriend helps you "}<span class="highlight">{"opt out."}</span>{" You stay connected, but free."}</p>
+                    </div>
+                    <div class="difference-image">
+                        <img src="/assets/lightfriend-filter.png" alt="Lightfriend being a filter between you and the apps." loading="lazy" />
+                    </div>
+                </div>
+            </div>
+            <section class="story-section">
+                <div class="story-grid">
+                    <div class="story-item">
+                        <img src="/assets/lightfriend-robot-scene-3.png" alt="Get notified" loading="lazy" />
+                        <p>{"Leave your smartphone behind. If it matters, Lightfriend will call you."}</p>
+                    </div>
+                    <div class="story-item">
+                        <img src="/assets/lightfriend-robot-scene-4.png" alt="Ask whenever whatever" loading="lazy" />
+                        <p>{"Enjoy the freedom knowing everything is just a call or text away."}</p>
+                    </div>
+                </div>
+            </section>
+            <div class="filter-concept">
+                <div class="filter-content">
+                    <AnimationComponent />
+                </div>
+            </div>
+            <div class="difference-section">
+                <div class="difference-content">
+                    <div class="difference-text">
+                        <h2>{"Willpower is not the solution."}</h2>
+                        <p>{"Making scrolling "}<span class="highlight">{"impossible"}</span>{" makes all the difference."}</p>
+                    </div>
+                    <div class="difference-image">
+                        <img src="/assets/delete-blocker.png" alt="Man thinking about checking IG with delete blocker prompt" loading="lazy" />
+                    </div>
+                </div>
+            </div>
+            <section class="trust-proof">
+                <div class="section-intro">
+                    <h2>{"Why I'm Building Lightfriend"}</h2>
+                    <p>{"I'm a solo developer, and honestly, I have very low willpower. I work in bursts of inspiration, but that’s not always enough when things have deadlines. Smartphones were stealing my time and focus. I knew I needed to engineer my environment to work for me, not against me. Tried blockers, detox apps, everything. But I always found a way around them."}</p>
+                    <p>{"Before all this, I was a full-time athlete who had just started studying Computer Science. My first semester was brutal. I had to be sharp in every short study session I had between training. But scrolling wrecked my focus and stole what little time I had."}</p>
+                    <p>{"That’s when I switched to a dumbphone. Everything changed. I could finally focus. I wasn’t always behind anymore. I stopped saying no to friends because I actually got my school work done. I had time and energy again, and the freedom to say yes to things I actually wanted to do."}</p>
+                    <p>{"Now I’m juggling a CS master's, high-level sports, part-time work, and building Lightfriend every day. And I never feel rushed. I can direct my attention where I want it."}</p>
+                    <p>{"I discovered the Light Phone, a beautifully designed dumbphone, and I love using the Light Phone 3. But it was missing features I needed to keep functioning day to day."}</p>
+                    <p>{"So I built Lightfriend as my own assistant. Something I could call or text from a dumbphone to check messages, search, get calendar updates, and stay in the loop. I use it daily and rely on it to stay updated. I wouldn’t go back to a smartphone, not even close."}</p>
+                    <p>{"I recently switched from usage-based pricing with over 100 users to a subscription model. The project is open-source, and 55 developers have starred it on GitHub. I'm trying to make it better every day and I'm always open to feedback. You can reach me at rasmus@ahtava.com."}</p>
+                </div>
+            </section>
+            <div class="filter-concept">
+                <div class="filter-content">
+                    <div class="faq-in-filter">
+                        <h2>{"Frequently Asked Questions"}</h2>
+                        <div class="faq-item">
+                            <h3>{"Do I need a phone with internet connection?"}</h3>
+                            <p>{"No, Lightfriend works through normal voice calling and text messaging (SMS)."}</p>
+                        </div>
+                        <div class="faq-item">
+                            <h3>{"Can Lightfriend also send messages?"}</h3>
+                            <p>{"Yes, it can send messages and fetch them when you call or text it."}</p>
+                        </div>
+                        <div class="faq-item">
+                            <h3>{"How private is Lightfriend?"}</h3>
+                            <p>{"It depends on the plan. I host the service on a secure server for user convenience (Hosted Plan) with a zero logging policy, but this means you need to trust me since I must have access to this server for obvious reasons. The Easy Self-Hosting plan on the other hand offers completely private service with zero access from anyone except you. It requires more upfront investment to setup, but once running it's supposed to be a hands-free experience with automatic updates and security."}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <footer class="footer-cta">
+                <div class="footer-content">
+                    <h2>{"Ready for Digital Peace?"}</h2>
+                    <p class="subtitle">{"Join the other 100+ early adopters! You will have more impact on the direction of the service and permanently cheaper prices."}</p>
                     <Link<Route> to={Route::Pricing} classes="forward-link">
-                        <button class="hero-cta">{"Get Started"}</button>
+                        <button class="hero-cta">{"Start Today - Live Without the Phone, Not the FOMO"}</button>
                     </Link<Route>>
-                    <a href="/faq#try-service" class="faq-link">
-                        {"Try demo first"}
-                    </a>
+                    <p class="disclaimer">{"Works with smartphones and basic phones. Customize to your needs."}</p>
+                    <div class="development-links">
+                        <p>{"Source code on "}
+                            <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">{"GitHub"}</a>
+                        </p>
+                        <p>{"Follow us at "}
+                            <a href="https://pacepeek.com/ahtavarasmus" target="_blank" rel="noopener noreferrer">{"pacepeek.com/ahtavarasmus"}</a>
+                            {" and "}
+                            <a href="https://x.com/rasmuscodes" target="_blank" rel="noopener noreferrer">{"x.com/rasmuscodes"}</a>
+                        </p>
+                        <div class="legal-links">
+                            <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
+                            {" | "}
+                            <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
+                        </div>
+                    </div>
                 </div>
-            </div>
-        </header>        
-
-        <div class="difference-section">
-            <div class="difference-content">
-                <div class="difference-text">
-                    <h2>{"Your attention is the product."}</h2>
-                    <p>{"Every feed is optimized to hook you."}</p>
-                      <p>{"Every ping is a trap."}</p>
-                    <p>{"You’re up against casinos built by behavioral psychologists."}</p>
-                    <p>{"Lightfriend helps you "}<span class="highlight">{"opt out."}</span>{" You stay connected, but free."}</p>
-                </div>
-                <div class="difference-image">
-                    <img src="/assets/lightfriend-filter.png" alt="Lightfriend being a filter between you and the apps." loading="lazy" />
-                </div>
-            </div>
-        </div>
-
-        /*
-        <section class="story-section">
-            <div class="story-grid">
-                <div class="story-item">
-                    <img src="/assets/lightfriend-robot-scene-3.png" alt="Get notified" loading="lazy" />
-                    <p>{"Leave your smartphone behind. If it matters, Lightfriend will call you."}</p>
-                </div>
-            </div>
-        </section>
-        */
-
-
-        <div class="filter-concept">
-            <div class="filter-content">
-                <AnimationComponent />
-            </div>
-        </div>
-
-        // Updated section: Because if there is a way there's a will
-        <div class="difference-section">
-            <div class="difference-content">
-                <div class="difference-text">
-                    <h2>{"Willpower is not the solution."}</h2>
-                    <p>{"Making scrolling "}<span class="highlight">{"impossible"}</span>{" makes all the difference."}</p>
-                </div>
-                <div class="difference-image">
-                    <img src="/assets/delete-blocker.png" alt="Man thinking about checking IG with delete blocker prompt" loading="lazy" />
-                </div>
-            </div>
-        </div>
-
-
-        <section class="trust-proof">
-            <div class="section-intro">
-                <h2>{"Why I'm Building Lightfriend"}</h2>
-                <p>{"I'm a solo developer, and honestly, I have very low willpower. I work in bursts of inspiration, but that’s not always enough when things have deadlines. Smartphones were stealing my time and focus. I knew I needed to engineer my environment to work for me, not against me. Tried blockers, detox apps, everything. But I always found a way around them."}</p>
-                <p>{"Before all this, I was a full-time athlete who had just started studying Computer Science. My first semester was brutal. I had to be sharp in every short study session I had between training. But scrolling wrecked my focus and stole what little time I had."}</p>
-                <p>{"That’s when I switched to a dumbphone. Everything changed. I could finally focus. I wasn’t always behind anymore. I stopped saying no to friends because I actually got my school work done. I had time and energy again, and the freedom to say yes to things I actually wanted to do."}</p>
-                <p>{"Now I’m juggling a CS master's, high-level sports, part-time work, and building Lightfriend every day. And I never feel rushed. I can direct my attention where I want it."}</p>
-                <p>{"I discovered the Light Phone, a beautifully designed dumbphone, and I love using the Light Phone 3. But it was missing features I needed to keep functioning day to day."}</p>
-                <p>{"So I built Lightfriend as my own assistant. Something I could call or text from a dumbphone to check messages, search, get calendar updates, and stay in the loop. I use it daily and rely on it to stay updated. I wouldn’t go back to a smartphone, not even close."}</p>
-                <p>{"I recently switched from usage-based pricing with over 100 users to a subscription model. The project is open-source, and 55 developers have starred it on GitHub. I'm trying to make it better every day and I'm always open to feedback. You can reach me at rasmus@ahtava.com."}</p>
-            </div>
-        </section>
-
-        <div class="filter-concept">
-            <div class="filter-content">
-            <div class="faq-in-filter">
-                <h2>{"Frequently Asked Questions"}</h2>
-                <div class="faq-item">
-                    <h3>{"Do I need a phone with internet connection?"}</h3>
-                    <p>{"No, Lightfriend works through normal voice calling and text messaging (SMS)."}</p>
-                </div>
-                <div class="faq-item">
-                    <h3>{"Can Lightfriend also send messages?"}</h3>
-                    <p>{"Yes, it can send messages and fetch them when you call or text it."}</p>
-                </div>
-                <div class="faq-item">
-                    <h3>{"How private is Lightfriend?"}</h3>
-                    <p>{"It depends on the plan. I host the service on a secure server for user convenience (Hosted Plan) with a zero logging policy, but this means you need to trust me since I must have access to this server for obvious reasons. The Easy Self-Hosting plan on the other hand offers completely private service with zero access from anyone except you. It requires more upfront investment to setup, but once running it's supposed to be a hands-free experience with automatic updates and security."}</p>
-                </div>
-            </div>
-            </div>
-        </div>
-
-
-        <footer class="footer-cta">
-            <div class="footer-content">
-                <h2>{"Ready for Digital Peace?"}</h2>
-                <p class="subtitle">{"Join the other 100+ early adopters! You will have more impact on the direction of the service and permanently cheaper prices."}</p>
-                <Link<Route> to={Route::Pricing} classes="forward-link">
-                    <button class="hero-cta">{"Start Today - Live Without the Phone, Not the FOMO"}</button>
-                </Link<Route>>
-                <p class="disclaimer">{"Works with smartphones and basic phones. Customize to your needs."}</p>
-                <div class="development-links">
-                    <p>{"Source code on "}
-                        <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">{"GitHub"}</a>
-                    </p>
-                    <p>{"Follow us at "}
-                        <a href="https://pacepeek.com/ahtavarasmus" target="_blank" rel="noopener noreferrer">{"pacepeek.com/ahtavarasmus"}</a>
-                        {" and "}
-                        <a href="https://x.com/rasmuscodes" target="_blank" rel="noopener noreferrer">{"x.com/rasmuscodes"}</a>
-                    </p>
-                                <div class="legal-links">
-                                    <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
-                                    {" | "}
-                                    <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
-                                </div>
-                </div>
-            </div>
-        </footer>
+            </footer>
             <style>
                 {r#"
     .cta-image-container {
@@ -160,7 +158,6 @@ pub fn landing() -> Html {
         position: relative;
         padding: 0 2rem;
     }
-
     .filter-concept {
         padding: 4rem 4rem;
         margin: 0 auto;
@@ -168,17 +165,13 @@ pub fn landing() -> Html {
         position: relative;
         z-index: 2;
     }
-
     .filter-content {
         display: flex;
         align-items: center;
     }
-
     .filter-text {
         flex: 1;
     }
-
-
     .filter-text h2 {
         font-size: 2.5rem;
         margin-bottom: 1.5rem;
@@ -186,27 +179,23 @@ pub fn landing() -> Html {
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
     }
-
     .filter-image {
         flex: 1;
         display: flex;
         justify-content: center;
         align-items: center;
     }
-
     .filter-image img {
         max-width: 100%;
         height: auto;
         border-radius: 12px;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     }
-
     .faq-in-filter {
         max-width: 800px;
         margin: 0 auto;
         padding: 2rem 0;
     }
-
     .faq-in-filter h2 {
         font-size: 2.5rem;
         margin-bottom: 1.5rem;
@@ -215,7 +204,6 @@ pub fn landing() -> Html {
         -webkit-text-fill-color: transparent;
         text-align: center;
     }
-
     .trust-proof {
         padding: 4rem 2rem;
         max-width: 800px;
@@ -232,7 +220,6 @@ pub fn landing() -> Html {
         margin: 0 auto 2rem;
         background: linear-gradient(to right, transparent, rgba(126, 178, 255, 0.4), transparent);
     }
-
     .trust-proof h2 {
         font-size: 2.5rem;
         margin-bottom: 1.5rem;
@@ -242,7 +229,6 @@ pub fn landing() -> Html {
         font-weight: 700;
         text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
     }
-
     .trust-proof p {
         font-size: 1.3rem;
         color: #bbb;
@@ -250,18 +236,14 @@ pub fn landing() -> Html {
         font-weight: 400;
         margin-bottom: 1.5rem;
     }
-
     @media (max-width: 768px) {
         .trust-proof h2 {
             font-size: 2rem;
         }
-
         .trust-proof p {
             font-size: 1.1rem;
         }
     }
-
-
     .faq-item {
         margin-bottom: 1.5rem;
         background: rgba(30, 30, 30, 0.8);
@@ -269,24 +251,20 @@ pub fn landing() -> Html {
         border-radius: 12px;
         padding: 1.5rem;
     }
-
     .faq-item h3 {
         font-size: 1.4rem;
         margin-bottom: 0.75rem;
         color: #fff;
     }
-
     .faq-item p {
         font-size: 1.1rem;
         color: #bbb;
         line-height: 1.6;
     }
-
     @media (max-width: 768px) {
         .filter-concept {
             padding: 2rem;
         }
-
         .filter-content {
             flex-direction: column;
             min-height: 1000px;
@@ -294,25 +272,19 @@ pub fn landing() -> Html {
             gap: 2rem;
             text-align: center;
         }
-
         .filter-text h2 {
             font-size: 2rem;
         }
-
         .faq-in-filter h2 {
             font-size: 2rem;
         }
-
         .faq-item h3 {
             font-size: 1.2rem;
         }
-
         .faq-item p {
             font-size: 1rem;
         }
     }
-
-    /* Updated styles for difference-section */
     .difference-section {
         padding: 4rem 2rem;
         margin: 0 auto;
@@ -320,7 +292,6 @@ pub fn landing() -> Html {
         position: relative;
         z-index: 2;
     }
-
     .difference-content {
         display: flex;
         align-items: center;
@@ -331,16 +302,13 @@ pub fn landing() -> Html {
         padding: 3rem;
         transition: transform 0.3s ease, box-shadow 0.3s ease;
     }
-
     .difference-content:hover {
         transform: translateY(-5px);
         box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
     }
-
     .difference-text {
         flex: 1;
     }
-
     .difference-text h2 {
         font-size: 2.5rem;
         margin-bottom: 1.5rem;
@@ -348,57 +316,48 @@ pub fn landing() -> Html {
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
     }
-
     .difference-text p {
-        font-size: 1.4rem; /* Bigger for more pop */
-        color: #bbb; /* Higher contrast */
-        line-height: 1.8; /* Better spacing */
+        font-size: 1.4rem;
+        color: #bbb;
+        line-height: 1.8;
         font-weight: 400;
     }
-
     .highlight {
         font-weight: 700;
         background: linear-gradient(45deg, #7EB2FF, #4169E1);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
-        text-shadow: 0 0 8px rgba(30, 144, 255, 0.3); /* Subtle glow */
+        text-shadow: 0 0 8px rgba(30, 144, 255, 0.3);
     }
-
     .difference-image {
         flex: 1;
         display: flex;
         justify-content: center;
         align-items: center;
     }
-
     .difference-image img {
         max-width: 100%;
         height: auto;
         border-radius: 12px;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     }
-
     @media (max-width: 768px) {
         .difference-section {
             padding: 2rem 1rem;
         }
-
         .difference-content {
             flex-direction: column;
             padding: 2rem;
             gap: 2rem;
             text-align: center;
         }
-
         .difference-text h2 {
             font-size: 2rem;
         }
-
         .difference-text p {
             font-size: 1.2rem;
         }
     }
-
     .landing-page {
         position: relative;
         min-height: 100vh;
@@ -411,7 +370,6 @@ pub fn landing() -> Html {
         box-sizing: border-box;
         z-index: 0;
     }
-
     .main-features {
         max-width: 1200px;
         margin: 0 auto;
@@ -423,7 +381,6 @@ pub fn landing() -> Html {
         pointer-events: auto;
         margin-top: -30vh;
     }
-
     .feature-block {
         display: flex;
         align-items: center;
@@ -433,41 +390,36 @@ pub fn landing() -> Html {
         border-radius: 24px;
         padding: 3rem;
         z-index: 3;
-        transition: transform 1.8s cubic-bezier(0.4, 0, 0.2, 1), 
-                    border-color 1.8s ease, 
+        transition: transform 1.8s cubic-bezier(0.4, 0, 0.2, 1),
+                    border-color 1.8s ease,
                     box-shadow 1.8s ease;
         overflow: hidden;
         position: relative;
         margin: 10%;
         margin-bottom: 180vh;
     }
-
     .feature-block:hover {
         transform: translateY(-5px) scale(1.02);
         box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
         border-color: rgba(30, 144, 255, 0.3);
     }
-
     .feature-image {
         flex: 1;
         display: flex;
         justify-content: center;
         align-items: center;
     }
-
     .feature-image img {
         max-width: 100%;
         height: auto;
         border-radius: 12px;
         box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     }
-
     .demo-link-container {
         margin-top: 2rem;
         display: flex;
         justify-content: center;
     }
-
     .demo-link {
         display: inline-flex;
         align-items: center;
@@ -484,12 +436,10 @@ pub fn landing() -> Html {
         font-size: 1rem;
         transition: all 0.3s ease;
     }
-
     .demo-link:hover {
         transform: translateY(-2px);
         box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
     }
-
     @media (max-width: 1024px) {
         .feature-block {
             flex-direction: column;
@@ -497,62 +447,49 @@ pub fn landing() -> Html {
             gap: 2rem;
             margin-bottom: 50vh;
         }
-
         .feature-image {
             order: -1;
         }
     }
-
     @media (max-width: 768px) {
         .landing-page {
             padding: 0;
         }
-
         .hero {
             padding: 2rem 1rem;
             padding-top: 100px;
         }
-
         .hero-subtitle {
             font-size: 1rem;
             padding: 0 1rem;
         }
-
         .how-it-works {
             padding: 0 3rem;
         }
-
         .how-it-works h2 {
             font-size: 1.75rem;
         }
-
         .steps-grid {
             grid-template-columns: 1fr;
             gap: 1.5rem;
             padding: 0 1rem;
         }
-
         .footer-cta {
             padding: 3rem 1rem;
         }
-
         .footer-cta h2 {
             font-size: 2rem;
         }
-
         .footer-cta .subtitle {
             font-size: 1rem;
         }
-
         .footer-content {
             padding: 0 1rem;
         }
-
         .development-links {
             padding: 0 1rem;
         }
     }
-
     .how-it-works {
         padding: 2rem 2rem;
         text-align: center;
@@ -560,7 +497,6 @@ pub fn landing() -> Html {
         z-index: 1;
         margin-top: 0;
     }
-
     .how-it-works::before {
         content: '';
         position: absolute;
@@ -577,30 +513,25 @@ pub fn landing() -> Html {
         z-index: -1;
         pointer-events: none;
     }
-
     .how-it-works * {
         pointer-events: auto;
     }
-
     .how-it-works h2 {
         font-size: 3rem;
         margin-bottom: 1rem;
         text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
     }
-
     .how-it-works > p {
         color: #7EB2FF;
         margin-bottom: 4rem;
         font-size: 1.2rem;
     }
-
     .steps-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         gap: 2rem;
         margin-top: 4rem;
     }
-
     .step {
         background: rgba(255, 255, 255, 0.03);
         border-radius: 16px;
@@ -611,7 +542,6 @@ pub fn landing() -> Html {
         position: relative;
         overflow: hidden;
     }
-
     .step::before {
         content: '';
         position: absolute;
@@ -626,26 +556,22 @@ pub fn landing() -> Html {
             transparent
         );
     }
-
     .step:hover {
         transform: translateY(-5px);
         box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
         border-color: rgba(30, 144, 255, 0.4);
     }
-
     .step h3 {
         color: #1E90FF;
         font-size: 1.5rem;
         margin-bottom: 1.5rem;
         font-weight: 600;
     }
-
     .step p {
         color: #999;
         font-size: 1rem;
         line-height: 1.6;
     }
-
     .step::after {
         content: '';
         position: absolute;
@@ -661,19 +587,15 @@ pub fn landing() -> Html {
         font-size: 0.9rem;
         color: #1E90FF;
     }
-
     .step:nth-child(1)::after {
         content: '1';
     }
-
     .step:nth-child(2)::after {
         content: '2';
     }
-
     .step:nth-child(3)::after {
         content: '3';
     }
-
     .footer-cta {
         padding: 6rem 0;
         background: linear-gradient(
@@ -689,7 +611,6 @@ pub fn landing() -> Html {
         background: rgba(26, 26, 26, 0.9);
         pointer-events: auto;
     }
-
     .footer-cta::before {
         content: '';
         position: absolute;
@@ -705,7 +626,6 @@ pub fn landing() -> Html {
         z-index: -1;
         pointer-events: none;
     }
-
     .footer-content {
         max-width: 800px;
         margin: 0 auto;
@@ -713,7 +633,6 @@ pub fn landing() -> Html {
         width: 100%;
         box-sizing: border-box;
     }
-
     .footer-cta h2 {
         font-size: 3.5rem;
         margin-bottom: 1.5rem;
@@ -722,14 +641,12 @@ pub fn landing() -> Html {
         -webkit-text-fill-color: transparent;
         font-weight: 700;
     }
-
     .footer-cta .subtitle {
         font-size: 1.2rem;
         color: #999;
         margin-bottom: 2.5rem;
         line-height: 1.6;
     }
-
     .hero {
         height: 100vh;
         display: flex;
@@ -741,7 +658,6 @@ pub fn landing() -> Html {
         background: transparent;
         z-index: 1;
     }
-
     .hero-content {
         z-index: 3;
         width: 100%;
@@ -751,13 +667,11 @@ pub fn landing() -> Html {
         padding: 40px;
         pointer-events: auto;
     }
-
     .hero-header {
         display: flex;
         flex-direction: column;
         justify-content: flex-end;
     }
-
     .hero-background {
         position: fixed;
         top: 0;
@@ -772,7 +686,6 @@ pub fn landing() -> Html {
         z-index: -2;
         pointer-events: none;
     }
-
     .hero-background::after {
         content: '';
         position: absolute;
@@ -780,18 +693,26 @@ pub fn landing() -> Html {
         left: 0;
         width: 100%;
         height: 50%;
-        background: linear-gradient(to bottom, 
+        background: linear-gradient(to bottom,
             rgba(26, 26, 26, 0) 0%,
             rgba(26, 26, 26, 1) 100%
         );
     }
-
     @media (max-width: 700px) {
         .hero-background {
             background-position: 70% center;
         }
     }
-
+    .hero-title {
+        font-size: 3rem;
+        font-weight: 700;
+        background: linear-gradient(45deg, #fff, #7EB2FF);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
+        margin: 0 auto 1rem;
+        max-width: 600px;
+    }
     .hero-subtitle {
         position: relative;
         font-size: 1.3rem;
@@ -807,21 +728,33 @@ pub fn landing() -> Html {
         -webkit-text-fill-color: transparent;
         text-shadow: none;
     }
-
+    .highlight-icon {
+        font-size: 1.2rem;
+        margin: 0 0.2rem;
+        background: linear-gradient(45deg, #7EB2FF, #4169E1);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-shadow: 0 0 8px rgba(30, 144, 255, 0.3);
+        vertical-align: middle;
+    }
     @media (max-width: 768px) {
         .hero-content {
             padding: 20px;
             flex-direction: column;
             justify-content: flex-end;
         }
-
+        .hero-title {
+            font-size: 2rem;
+        }
         .hero-subtitle {
             font-size: 1.1rem;
             line-height: 1.6;
             margin-bottom: 2rem;
         }
+        .highlight-icon {
+            font-size: 1rem;
+        }
     }
-
     .hero-cta {
         background: linear-gradient(
             45deg,
@@ -846,13 +779,11 @@ pub fn landing() -> Html {
         border: 1px solid rgba(255, 255, 255, 0.2);
         backdrop-filter: blur(5px);
     }
-
     @media (min-width: 769px) {
         .hero-cta {
             margin: 3rem 0 3rem 0;
         }
     }
-
     .hero-cta::before {
         content: '';
         position: absolute;
@@ -869,15 +800,12 @@ pub fn landing() -> Html {
         transform: translateX(-100%);
         transition: transform 0.6s;
     }
-
     .hero-cta::after {
         content: '→';
     }
-
     .hero-cta:hover::before {
         transform: translateX(100%);
     }
-
     .hero-cta:hover {
         transform: translateY(-2px);
         box-shadow: 0 4px 20px rgba(126, 178, 255, 0.4);
@@ -887,14 +815,12 @@ pub fn landing() -> Html {
             #5479f1
         );
     }
-
     .hero-cta-group {
         display: flex;
         flex-direction: row;
         align-items: center;
         gap: 1rem;
     }
-
     .faq-link {
         color: #7EB2FF;
         text-decoration: none;
@@ -903,7 +829,6 @@ pub fn landing() -> Html {
         position: relative;
         padding: 0.5rem 1rem;
     }
-
     .faq-link::after {
         content: '';
         position: absolute;
@@ -916,27 +841,22 @@ pub fn landing() -> Html {
         transform-origin: bottom right;
         transition: transform 0.3s ease;
     }
-
     .faq-link:hover {
         color: #90c2ff;
         text-shadow: 0 0 8px rgba(30, 144, 255, 0.3);
     }
-
     .faq-link:hover::after {
         transform: scaleX(1);
         transform-origin: bottom left;
     }
-
     @media (max-width: 768px) {
         .hero-cta-group {
             gap: 0.75rem;
         }
     }
-
     .section-header {
         text-align: center;
     }
-
     .section-intro {
         max-width: 600px;
         margin: 0 auto;
@@ -948,12 +868,10 @@ pub fn landing() -> Html {
         align-items: center;
         justify-content: center;
     }
-
     .section-intro .hero-cta {
         margin: 1rem auto;
         display: block;
     }
-
     .before-after {
         padding: 4rem 2rem;
         max-width: 800px;
@@ -962,7 +880,6 @@ pub fn landing() -> Html {
         position: relative;
         z-index: 2;
     }
-
     .before-after h2 {
         font-size: 2.5rem;
         margin-bottom: 1.5rem;
@@ -972,7 +889,6 @@ pub fn landing() -> Html {
         font-weight: 700;
         text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
     }
-
     .before-after p {
         font-size: 1.3rem;
         color: #bbb;
@@ -981,54 +897,39 @@ pub fn landing() -> Html {
         max-width: 700px;
         margin: 0 auto;
     }
-
     @media (max-width: 768px) {
         .before-after h2 {
             font-size: 2rem;
         }
-
         .before-after p {
             font-size: 1.1rem;
         }
     }
-
-
     .legal-links {
         margin-top: 1rem;
     }
-
     .legal-links a {
         color: #666;
         text-decoration: none;
         transition: color 0.3s ease;
     }
-
     .legal-links a:hover {
         color: #7EB2FF;
     }
-
     @media (max-width: 768px) {
         .section-intro {
             padding: 1.5rem;
             margin-top: 2rem;
         }
-
-        .section-intro {
-            padding: 1.5rem;
-            margin-top: 2rem;
-        }
     }
-
     .development-links {
         margin-top: 2rem;
         font-size: 0.9rem;
         color: #666;
     }
-
     .development-links p {
         margin: 0.5rem 0;
     }
-
     .development-links a {
         color: #007bff;
         text-decoration: none;
@@ -1036,7 +937,6 @@ pub fn landing() -> Html {
         padding: 0 2px;
         transition: all 0.3s ease;
     }
-
     .development-links a::after {
         content: '';
         position: absolute;
@@ -1049,32 +949,27 @@ pub fn landing() -> Html {
         transform-origin: bottom right;
         transition: transform 0.3s ease;
     }
-
     .development-links a:hover {
         color: #7EB2FF;
         text-shadow: 0 0 8px rgba(30, 144, 255, 0.3);
     }
-
     .development-links a:hover::after {
         transform: scaleX(1);
         transform-origin: bottom left;
     }
-
     .story-section {
         padding: 4rem 2rem;
-        max-width: 500px;
+        max-width: 1200px;
         margin: 0 auto;
         text-align: center;
         position: relative;
         z-index: 2;
     }
-
     .story-grid {
         display: grid;
-        grid-template-columns: repeat(1, 1fr);
+        grid-template-columns: repeat(2, 1fr);
         gap: 2rem;
     }
-
     .story-item {
         background: rgba(30, 30, 30, 0.8);
         border: 1px solid rgba(30, 144, 255, 0.15);
@@ -1085,19 +980,16 @@ pub fn landing() -> Html {
         align-items: center;
         transition: transform 0.3s ease, box-shadow 0.3s ease;
     }
-
     .story-item:hover {
         transform: translateY(-5px);
         box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
     }
-
     .story-item img {
         max-width: 100%;
         height: auto;
         border-radius: 12px;
         margin-bottom: 1rem;
     }
-
     .story-item p {
         color: #ddd;
         font-size: 1.4rem;
@@ -1105,25 +997,20 @@ pub fn landing() -> Html {
         margin: 0;
         text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
     }
-
     @media (max-width: 768px) {
         .story-section {
             padding: 2rem 1rem;
         }
-
         .story-grid {
             grid-template-columns: 1fr;
         }
-
         .story-item p {
             font-size: 1.2rem;
         }
-
         .spacer-headline {
             font-size: 1.75rem;
         }
     }
-                   
                 "#}
             </style>
         </div>
