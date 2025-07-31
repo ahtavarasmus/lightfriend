@@ -88,13 +88,14 @@ pub fn landing() -> Html {
 
         <section class="trust-proof">
             <div class="section-intro">
-                <h2>{"I Needed an Escape, So I Built one"}</h2>
-                <p>{"I'm a solo developer, and honestly, I have very low willpower. I was tired of wasting hours on my smartphone. I tried blockers, detox apps, everything. But I always found a way around them."}</p>
-                <p>{"Then I discovered the Light Phone. It's a beautifully designed dumbphone that gave me peace again. I now use the Light Phone 3 and I love it. But it's missing a few key features I need to function in daily life."}</p>
-                <p>{"So I started building Lightfriend as my own AI assistant. Something I could call or text from a dumbphone and check messages, search, get calendar updates, and stay in the loop. I use it every day. I rely on it to keep me updated, and it works."}</p>
-                <p>{"I recently switched from usage-based pricing with over 100 users to a subscription model. The project also is open-source and 55 developers have starred the project on GitHub."}</p>
-                <p>{"I'm trying to make the service better everyday and very open to new suggestions so feel free to email me at rasmus@ahtava.com!"}</p>
-
+                <h2>{"Why I'm Building Lightfriend"}</h2>
+                <p>{"I'm a solo developer, and honestly, I have very low willpower. I work through bursts of inspiration, but you can't always rely on that when stuff needs to get done. I was tired of wasting hours on my smartphone. I tried blockers, detox apps, everything. But I always found a way around them."}</p>
+                <p>{"Before all this, I was a full-time athlete who had just started studying Computer Science. My first semester was brutal. I had to be sharp in every short study session I had between training. But scrolling wrecked my focus and stole what little time I had."}</p>
+                <p>{"That’s when I switched to a dumbphone. Everything changed. I could finally focus. I wasn’t always behind anymore. I stopped saying no to friends because I actually got my school work done. I had time and energy again, and the freedom to say yes to things I actually wanted to do."}</p>
+                <p>{"Now I’m juggling a CS master's, high-level sports, part-time work, and building Lightfriend every day. And I never feel rushed. I can direct my attention where I want it."}</p>
+                <p>{"I discovered the Light Phone, a beautifully designed dumbphone, and I love using the Light Phone 3. But it was missing features I needed to keep functioning day to day."}</p>
+                <p>{"So I built Lightfriend as my own assistant. Something I could call or text from a dumbphone to check messages, search, get calendar updates, and stay in the loop. I use it daily and rely on it to stay updated. I wouldn’t go back to a smartphone, not even close."}</p>
+                <p>{"I recently switched from usage-based pricing with over 100 users to a subscription model. The project is open-source, and 55 developers have starred it on GitHub. I'm trying to make it better every day and I'm always open to feedback. You can reach me at rasmus@ahtava.com."}</p>
             </div>
         </section>
 
