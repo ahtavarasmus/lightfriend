@@ -290,7 +290,7 @@ pub async fn fetch_assistant(
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            dynamic_variables.insert("conversation_history".to_string(), json!(history_string));
+            //dynamic_variables.insert("conversation_history".to_string(), json!(history_string));
 
 
             let charge_back_threshold= std::env::var("CHARGE_BACK_THRESHOLD")
