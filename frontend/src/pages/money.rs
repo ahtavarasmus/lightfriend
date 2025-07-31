@@ -741,7 +741,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                             <div class="learn-more-section">
                                 <a href="/bring-own-number" class="learn-more-link">{"How to bring your own Twilio"}</a>
                             </div>
-                        }
+                            }
                     } else {
                         html! {}
                     }

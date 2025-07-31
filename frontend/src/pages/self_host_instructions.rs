@@ -2,17 +2,13 @@ use yew::prelude::*;
 use web_sys::{MouseEvent, window};
 use crate::pages::twilio_self_host_instructions::TwilioSelfHostInstructions;
 use crate::pages::llm_self_host_instructions::AISelfHostInstructions;
-use crate::pages::voice_self_host_instructions::VoiceSelfHostInstructions;
 use crate::pages::server_self_host_instructions::ServerSelfHostInstructions;
-use crate::pages::setup_costs::SetupCosts;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum InstructionPage {
     Twilio,
     AI,
-    Voice,
     Server,
-    SetupCosts
 }
 
 #[derive(Properties, PartialEq)]
@@ -47,14 +43,12 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
     let server_applicable = is_logged_in && sub_tier.as_ref().map_or(false, |t| t == "tier 3");
     let twilio_applicable = is_logged_in && sub_tier.as_ref().map_or(false, |t| t == "self_hosted");
     let ai_applicable = twilio_applicable;
-    let voice_applicable = twilio_applicable;
 
     let is_server_filled = props.server_ip.as_deref().map_or(false, |s| !s.is_empty());
     let is_twilio_filled = [&props.twilio_phone, &props.twilio_sid, &props.twilio_token]
         .iter()
         .all(|o| o.as_deref().map_or(false, |s| !s.is_empty()));
     let is_ai_filled = props.openrouter_api_key.as_deref().map_or(false, |s| !s.is_empty());
-    let is_voice_filled = false; // Update this to true based on Voice props if added
 
     web_sys::console::log_1(&format!("Current subscription tier: {:?}", sub_tier).into());
     let initial_page = if is_logged_in {
@@ -63,7 +57,7 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
             _ => InstructionPage::Server,
         }
     } else {
-        InstructionPage::SetupCosts
+        InstructionPage::Server
     };
     web_sys::console::log_1(&format!("Initial page: {:#?}", initial_page).into());
 
@@ -78,7 +72,7 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
                     _ => InstructionPage::Server,
                 }
             } else {
-                InstructionPage::SetupCosts
+                InstructionPage::Server
             };
             current_page_effect.set(new_initial);
             || ()
@@ -100,11 +94,9 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
         let current_page = current_page.clone();
         Callback::from(move |_: MouseEvent| {
             let next = match *current_page {
-                InstructionPage::Server => InstructionPage::SetupCosts,
-                InstructionPage::SetupCosts => InstructionPage::Twilio,
+                InstructionPage::Server => InstructionPage::Twilio,
                 InstructionPage::Twilio => InstructionPage::AI,
-                InstructionPage::AI => InstructionPage::Voice,
-                InstructionPage::Voice => InstructionPage::Server,
+                InstructionPage::AI => InstructionPage::Server,
             };
             current_page.set(next);
             if let Some(window) = window() {
@@ -134,76 +126,36 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
         }
     };
 
-    // Calculate progress for gamification
-    // Assuming Text and Photo both tied to Twilio (2 points), Calling to Voice (1), AI (1), Server (1) - total 5
-    let completed = (is_server_filled as u32) + (is_twilio_filled as u32 * 2) + (is_ai_filled as u32) + (is_voice_filled as u32);
-    let progress = ((completed as f32 / 5.0) * 100.0) as u32;
+    let completed = (is_server_filled as u32) + (is_twilio_filled as u32) + (is_ai_filled as u32);
+    let progress = ((completed as f32 / 3.0) * 100.0) as u32;
 
     html! {
         <div class="instructions-container">
             <div class="instructions-tabs">
-                <div class="nav-section">
-                    <span class="section-label">{"Channels"}</span>
-                    <div class="sub-section">
-                        <span class="sub-label">{"Messaging"}</span>
-                        <button 
-                            class={classes!("bubble", if is_twilio_filled { "green" } else { "gray" }, (*current_page == InstructionPage::Twilio).then(|| "active"))}
-                            onclick={let switch_page = switch_page.clone(); 
-                                Callback::from(move |_| switch_page.emit(InstructionPage::Twilio))}
-                            title={if is_twilio_filled { "Text (Ready)" } else { "Text (Required)" }}
-                        >
-                            {"Text"}
-                        </button>
-                        <button 
-                            class={classes!("bubble", if is_twilio_filled { "green" } else { "gray" }, (*current_page == InstructionPage::Twilio).then(|| "active"))}
-                            onclick={let switch_page = switch_page.clone(); 
-                                Callback::from(move |_| switch_page.emit(InstructionPage::Twilio))}
-                            title={if is_twilio_filled { "Photo (Ready)" } else { "Photo (Required)" }}
-                        >
-                            {"Photo"}
-                        </button>
-                    </div>
-                    <div class="sub-section">
-                        <span class="sub-label">{"Calling"}</span>
-                        <button 
-                            class={classes!("bubble", if is_voice_filled { "green" } else { "gray" }, (*current_page == InstructionPage::Voice).then(|| "active"))}
-                            onclick={let switch_page = switch_page.clone(); 
-                                Callback::from(move |_| switch_page.emit(InstructionPage::Voice))}
-                            title={if is_voice_filled { "Calling (Ready)" } else { "Calling (Optional)" }}
-                        >
-                            {"Calling"}
-                        </button>
-                    </div>
-                </div>
-                <div class="nav-section">
-                    <span class="section-label">{"Features"}</span>
-                    <div class="sub-section">
-                        <button 
-                            class={classes!("bubble", "gray", (*current_page == InstructionPage::SetupCosts).then(|| "active"))}
-                            onclick={let switch_page = switch_page.clone(); 
-                                Callback::from(move |_| switch_page.emit(InstructionPage::SetupCosts))}
-                            title={"Setup Costs"}
-                        >
-                            {"Costs"}
-                        </button>
-                        <button 
-                            class={classes!("bubble", if is_server_filled { "green" } else { "gray" }, (*current_page == InstructionPage::Server).then(|| "active"))}
-                            onclick={let switch_page = switch_page.clone(); 
-                                Callback::from(move |_| switch_page.emit(InstructionPage::Server))}
-                            title={if is_server_filled { "Server (Ready)" } else { "Server (Required)" }}
-                        >
-                            {"Server"}
-                        </button>
-                        <button 
-                            class={classes!("bubble", if is_ai_filled { "green" } else { "gray" }, (*current_page == InstructionPage::AI).then(|| "active"))}
-                            onclick={let switch_page = switch_page.clone(); 
-                                Callback::from(move |_| switch_page.emit(InstructionPage::AI))}
-                            title={if is_ai_filled { "AI (Ready)" } else { "AI (Required)" }}
-                        >
-                            {"AI"}
-                        </button>
-                    </div>
-                </div>
+                <button 
+                    class={classes!("bubble", if is_server_filled { "green" } else { "gray" }, (*current_page == InstructionPage::Server).then(|| "active"))}
+                    onclick={let switch_page = switch_page.clone(); 
+                        Callback::from(move |_| switch_page.emit(InstructionPage::Server))}
+                    title={if is_server_filled { "Hostinger Server (Ready)" } else { "Hostinger Server (Required)" }}
+               >
+                    {"Hostinger Server"}
+                </button>
+                <button 
+                    class={classes!("bubble", if is_twilio_filled { "green" } else { "gray" }, (*current_page == InstructionPage::Twilio).then(|| "active"))}
+                    onclick={let switch_page = switch_page.clone(); 
+                        Callback::from(move |_| switch_page.emit(InstructionPage::Twilio))}
+                    title={if is_twilio_filled { "Twilio (Ready)" } else { "Twilio (Required)" }}
+                >
+                    {"Twilio"}
+                </button>
+                <button 
+                    class={classes!("bubble", if is_ai_filled { "green" } else { "gray" }, (*current_page == InstructionPage::AI).then(|| "active"))}
+                    onclick={let switch_page = switch_page.clone(); 
+                        Callback::from(move |_| switch_page.emit(InstructionPage::AI))}
+                    title={if is_ai_filled { "OpenRouter AI (Ready)" } else { "OpenRouter AI (Required)" }}
+                >
+                    {"OpenRouter AI"}
+                </button>
                 <div class="progress-container">
                     <span>{format!("Progress: {}%", progress)}</span>
                     <div class="progress-bg">
@@ -215,9 +167,6 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
             <div class="instructions-content">
                 {
                     match *current_page {
-                        InstructionPage::SetupCosts => html! {
-                            <SetupCosts />
-                        },
                         InstructionPage::Server => html! {
                             <ServerSelfHostInstructions 
                                 is_logged_in={props.is_logged_in}
@@ -247,13 +196,6 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
                                 message={get_title(ai_applicable, false)}
                             />
                         },
-                        InstructionPage::Voice => html! {
-                            <VoiceSelfHostInstructions 
-                                is_logged_in={props.is_logged_in}
-                                sub_tier={props.sub_tier.clone()}
-                                message={get_title(voice_applicable, false)}
-                            />
-                        },
                     }
                 }
             </div>
@@ -281,7 +223,7 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
                     display: flex;
                     justify-content: center;
                     align-items: center;
-                    gap: 2rem;
+                    gap: 1rem;
                     padding: 0.5rem;
                     background: rgba(26, 26, 26, 0.95);
                     backdrop-filter: blur(10px);
@@ -290,39 +232,9 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
                     overflow-x: auto;
                 }
 
-                .nav-section {
-                    display: flex;
-                    flex-direction: column;
-                    align-items: center;
-                    gap: 0.5rem;
-                    padding: 0 1rem;
-                    border-right: 1px solid rgba(30, 144, 255, 0.1);
-                }
-
-                .nav-section:last-child {
-                    border-right: none;
-                }
-
-                .section-label {
-                    font-weight: bold;
-                    color: #fff;
-                    font-size: 1rem;
-                }
-
-                .sub-section {
-                    display: flex;
-                    align-items: center;
-                    gap: 0.5rem;
-                }
-
-                .sub-label {
-                    color: #ccc;
-                    font-size: 0.9rem;
-                    margin-right: 0.5rem;
-                }
-
                 .bubble {
-                    width: 80px;
+                    width: auto;
+                    padding: 0 1rem;
                     height: 40px;
                     border-radius: 20px;
                     background: transparent;
@@ -433,13 +345,8 @@ pub fn self_host_instructions(props: &SelfHostInstructionsProps) -> Html {
                         gap: 1rem;
                     }
 
-                    .nav-section {
-                        align-items: flex-start;
-                    }
-
                     .bubble {
-                        width: 60px;
-                        height: 30px;
+                        padding: 0 0.5rem;
                         font-size: 0.8rem;
                     }
 

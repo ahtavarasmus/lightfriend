@@ -251,6 +251,8 @@ fn intro_and_country_component(props: &IntroAndCountryProps) -> Html {
                 <div class="instruction-content">
                     <h2>{"SMS and Voice Communication Setup"}</h2>
                     <p>{"Lightfriend uses Twilio to send voice calls and text messages. Users outside the US need to use their own Twilio number, because many countries require local address to be able to buy a phone number or even send messages."}</p>
+
+                    <a href="https://youtu.be/WARw4REp584?si=ghmMYGzTKTLcgss_" class="learn-more-link" target="_blank">{"Don't bother to read? Watch me explain this page on youtube ->"}</a>
                 </div>
             </div>
 
@@ -662,6 +664,20 @@ fn intro_and_country_component(props: &IntroAndCountryProps) -> Html {
                     -webkit-background-clip: text;
                     -webkit-text-fill-color: transparent;
                 }
+
+                .learn-more-link {
+                    color: #1E90FF;
+                    text-decoration: none;
+                    font-size: 1.1rem;
+                    font-weight: 500;
+                    transition: color 0.3s ease;
+                }
+
+                .learn-more-link:hover {
+                    color: #7EB2FF;
+                    text-decoration: underline;
+                }
+
 
                 .country-selector {
                     display: flex;

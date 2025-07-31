@@ -1000,7 +1000,7 @@ Rules
 • Start each item on a new line; you may prefix items with a hyphen (“-”) if helpful, but keep the newline.
 • Put truly critical or actionable items first.
 • Mention the platform (EMAIL / WHATSAPP / CALENDAR) only when it adds essential context.
-• Add timestamp to messages when it makes sense, using vague terms like "in the morning" or "at night" if precise time isn't crucial.
+• Add timestamp to messages when it makes sense.
 • For calendar, include only events starting in the next few hours; mention next-day events if relevant, with brief clues about what they involve.
 • Tease information to encourage follow-ups, e.g., "Email from boss re: project deadline" instead of full message body.
 
