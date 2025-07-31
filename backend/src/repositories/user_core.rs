@@ -226,39 +226,8 @@ impl UserCore {
         Ok(())
     }
 
-    pub fn set_preferred_number_to_default(&self, user_id: i32, phone_number: &str) -> Result<String, Box<dyn Error>> {
-        // Get all Twilio phone numbers from environment
-        let phone_numbers = [
-            ("FIN_PHONE", "+358"),
-            ("USA_PHONE", "+1"),
-            ("AUS_PHONE", "+61"),
-            ("GB_PHONE", "+44"),
-        ];
-
-        // Collect phone numbers into a HashMap for easier matching
-        let mut number_map = std::collections::HashMap::new();
-        for (env_key, prefix) in phone_numbers {
-            if let Ok(number) = std::env::var(env_key) {
-                number_map.insert(prefix, number);
-            }
-        }
-
-        // Validate phone number format
-        if !phone_number.starts_with('+') {
-            return Err("Invalid phone number format".into());
-        }
-
-        // Find the matching Twilio number based on the country code prefix
-        let preferred_number = phone_numbers.iter()
-            .find(|(_, prefix)| phone_number.starts_with(prefix))
-            .and_then(|(env_key, _)| std::env::var(env_key).ok())
-            .unwrap_or_else(|| {
-                // If no match is found, use the country code from the phone number to find a match
-                number_map
-                    .get("+358") // Default to Finnish number if no match
-                    .expect("FIN_PHONE not set")
-                    .clone()
-            });
+    pub fn set_preferred_number_to_us_default(&self, user_id: i32) -> Result<String, Box<dyn Error>> {
+        let preferred_number = std::env::var("USA_PHONE").expect("USA_PHONE not found");
 
         // Update the user's preferred number in the database
         self.update_preferred_number(user_id, &preferred_number)?;

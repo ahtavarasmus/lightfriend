@@ -533,8 +533,9 @@ pub async fn register(
             Json(json!({"error": "User not found after registration"}))
         ))?;
 
-    // Set preferred number
-    state.user_core.set_preferred_number_to_default(user.id, &reg_req.phone_number)
+    // Set preferred number if user has US number
+    if reg_req.phone_number.starts_with("+1") {
+        state.user_core.set_preferred_number_to_us_default(user.id)
         .map_err(|e| {
             println!("Failed to set preferred number: {}", e);
             (
@@ -542,8 +543,9 @@ pub async fn register(
                 Json(json!({ "error": format!("Failed to set preferred number") })),
             )
         })?;
+        println!("Preferred number set successfully, generating tokens");
+    }
 
-    println!("Preferred number set successfully, generating tokens");
     let user = state.user_core.find_by_email(&reg_req.email)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,

@@ -301,7 +301,7 @@ pub async fn check_message_importance(
         },
     }];
 
-    let request = chat_completion::ChatCompletionRequest::new("openai/gpt-4o-mini".to_string(), messages)
+    let request = chat_completion::ChatCompletionRequest::new("openai/gpt-4o".to_string(), messages)
         .tools(tools)
         .tool_choice(chat_completion::ToolChoiceType::Required)
         // Lower temperature for more deterministic classification
@@ -990,7 +990,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
 }
 
 // Prompt for generating an SMS digest
-const DIGEST_PROMPT: &str = r#"You are an AI called lightfriend that creates concise SMS digests of messages and calendar events. You have helping user keep on top of their unread messages and possible next calendar events. Not all messages are as important, hightlight the ones that might be and just mention shortly the ones that seem like they can wait. 
+const DIGEST_PROMPT: &str = r#"You are an AI called lightfriend that creates concise SMS digests of messages and calendar events. Your goal is to help users stay on top of unread messages and upcoming calendar events without needing to open their apps. Highlight the existence of important items to prompt user follow-ups, but avoid revealing full content—provide just enough clues (e.g., sender, topic hint, or urgency) so users can ask for more details. Prioritize critical or actionable items, mention less urgent ones briefly, and group similar items to keep it short. Not all details need inclusion; focus on teasers that inform without overwhelming.
 
 Rules
 • Absolute length limit: 480 characters.
@@ -1000,8 +1000,9 @@ Rules
 • Start each item on a new line; you may prefix items with a hyphen (“-”) if helpful, but keep the newline.
 • Put truly critical or actionable items first.
 • Mention the platform (EMAIL / WHATSAPP / CALENDAR) only when it adds essential context.
-• Add timestamp to messages when it makes sense and vague time like in the morning, at night etc.
-• For calendar, include only events starting in few hours unless they are scheduled for next day, then you should mention them.
+• Add timestamp to messages when it makes sense, using vague terms like "in the morning" or "at night" if precise time isn't crucial.
+• For calendar, include only events starting in the next few hours; mention next-day events if relevant, with brief clues about what they involve.
+• Tease information to encourage follow-ups, e.g., "Email from boss re: project deadline" instead of full message body.
 
 Return JSON with a single field:
 • `digest` – the plain-text SMS message, with newlines separating items.
