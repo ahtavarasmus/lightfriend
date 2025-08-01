@@ -250,7 +250,6 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
         })
     };
 
-    /*
     let on_save_textbee = {
         let textbee_api_key = textbee_api_key.clone();
         let textbee_device_id = textbee_device_id.clone();
@@ -327,7 +326,6 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
         let val = &*textbee_device_id;
         !val.is_empty() && !val.starts_with("...")
     };
-    */
 
     let close_modal = {
         let modal_visible = modal_visible.clone();
@@ -381,7 +379,6 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
                     </div>
                 </div>
 
-                /*
                 <div class="instruction-block">
                     <div class="instruction-content">
                         <h2>{"Alternative: TextBee for SMS Messaging"}</h2>
@@ -457,7 +454,6 @@ pub fn twilio_self_host_instructions(props: &TwilioSelfHostInstructionsProps) ->
                         }
                     </div>
                 </div>
-                */
 
                 <div class="instruction-block">
                     <div class="instruction-content">

@@ -117,6 +117,7 @@ impl UserCore {
                     save_context: Some(5),
                     number_of_digests_locked: 0,
                     critical_enabled: Some("sms".to_string()),
+                    proactive_agent_on: true,
                 };
                 
                 diesel::insert_into(user_settings::table)
@@ -156,6 +157,7 @@ impl UserCore {
                 save_context: Some(5),
                 number_of_digests_locked: 0,
                 critical_enabled: Some("sms".to_string()),
+                proactive_agent_on: true,
             };
             
             diesel::insert_into(user_settings::table)
@@ -503,6 +505,37 @@ impl UserCore {
             .first::<(Option<String>, Option<String>, Option<String>)>(&mut conn)?;
 
         Ok(settings)
+    }
+    
+    pub fn update_proactive_agent_on(&self, user_id: i32, enabled: bool) -> Result<(), DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+
+        // Update the setting
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::proactive_agent_on.eq(enabled))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn get_proactive_agent_on(&self, user_id: i32) -> Result<bool, DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+
+        // Get the setting
+        let proactive_agent_on= user_settings::table
+            .filter(user_settings::user_id.eq(user_id))
+            .select(user_settings::proactive_agent_on)
+            .first::<bool>(&mut conn)?;
+
+        Ok(proactive_agent_on)
     }
 
     pub fn update_critical_enabled(&self, user_id: i32, enabled: Option<String>) -> Result<(), DieselError> {

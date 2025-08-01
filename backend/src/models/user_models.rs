@@ -1,4 +1,3 @@
-
 use diesel::prelude::*;
 use crate::schema::users;
 use crate::schema::conversations;
@@ -426,6 +425,7 @@ pub struct UserSettings {
     pub encrypted_textbee_device_id: Option<String>,
     pub encrypted_textbee_api_key: Option<String>,
     pub elevenlabs_phone_number_id: Option<String>, // used to make outbound calls(we get this from elevenlabs api call when adding the phone number)
+    pub proactive_agent_on: bool, // whether the user wants to receive any kinds of notifications
 }
 
 #[derive(Insertable)]
@@ -442,6 +442,7 @@ pub struct NewUserSettings {
     pub info: Option<String>,
     pub number_of_digests_locked: i32,
     pub critical_enabled: Option<String>,
+    pub proactive_agent_on: bool,
 }
 
 

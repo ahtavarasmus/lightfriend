@@ -694,6 +694,8 @@ async fn fetch_messages_from_room(
     Ok((messages, room_name))
 }
 
+use std::time::{SystemTime, UNIX_EPOCH};
+use matrix_sdk::ruma::MilliSecondsSinceUnixEpoch;
 
 pub async fn handle_bridge_message(
     event: OriginalSyncRoomMessageEvent,
@@ -706,6 +708,27 @@ pub async fn handle_bridge_message(
         return;
     }
     tracing::debug!("Entering bridge message handler");
+
+    // Check message age
+    /*
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as u64;
+    let message_ts = event.origin_server_ts.0;
+    let age_ms = now.saturating_sub(message_ts.into()); // Use saturating_sub to handle any potential clock skew
+    const HALF_HOUR_MS: u64 = 30 * 60 * 1000;
+
+    if age_ms > HALF_HOUR_MS {
+        tracing::debug!(
+            "Skipping old message: age {} ms (event ID: {})",
+            age_ms,
+            event.event_id
+        );
+        return;
+    }
+    */
+
 
     // Get room name
     let room_name = match room.display_name().await {
@@ -756,7 +779,6 @@ pub async fn handle_bridge_message(
     };
 
     let user_id = user.id;
-
     // Check if user has valid subscription
     let has_valid_sub = state.user_repository.has_valid_subscription_tier(user_id, "tier 2").unwrap_or(false) || 
         state.user_repository.has_valid_subscription_tier(user_id, "self_hosted").unwrap_or(false);
@@ -764,6 +786,11 @@ pub async fn handle_bridge_message(
         tracing::debug!("User {} does not have valid subscription for WhatsApp monitoring", user_id);
         return;
     }
+    if !state.user_core.get_proactive_agent_on(user_id).unwrap_or(true) {
+        tracing::debug!("User {} does not have monitoring enabled", user_id);
+        return;
+    }
+
 
     // Extract message content
     let content = match event.content.msgtype {

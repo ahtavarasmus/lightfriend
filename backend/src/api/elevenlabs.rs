@@ -419,6 +419,66 @@ pub async fn handle_create_waiting_check_tool_call(
     }
 }
 
+#[derive(Deserialize)]
+pub struct SetProactiveAgentPayload {
+    pub user_id: i32,
+    pub enabled: bool,
+}
+
+pub async fn handle_update_monitoring_status_tool_call(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<SetProactiveAgentPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    tracing::debug!("Received monitoring status update request");
+
+    // Verify user exists
+    match state.user_core.find_by_id(payload.user_id) {
+        Ok(Some(_user)) => {
+            match state.user_core.update_proactive_agent_on(payload.user_id, payload.enabled) {
+                Ok(_) => {
+                    tracing::debug!("Successfully updated monitoring status for user: {}",
+                        payload.user_id);
+                    let status = if payload.enabled { "on" } else { "off" };
+                    Ok(Json(json!({
+                        "response": format!("Monitoring turned {}.", status),
+                        "status": "success",
+                        "user_id": payload.user_id,
+                    })))
+                },
+                Err(e) => {
+                    error!("Failed to update monitoring status: {}", e);
+                    Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "Failed to update monitoring status",
+                            "details": e.to_string()
+                        }))
+                    ))
+                }
+            }
+        },
+        Ok(None) => {
+            tracing::error!("User not found: {}", payload.user_id);
+            Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": "User not found"
+                }))
+            ))
+        },
+        Err(e) => {
+            error!("Error fetching user: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to fetch user",
+                    "details": e.to_string()
+                }))
+            ))
+        }
+    }
+}
+
 pub async fn handle_email_fetch_tool_call(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,

@@ -7,12 +7,10 @@ use wasm_bindgen_futures::spawn_local;
 use serde_json::json;
 use crate::config;
 use serde::Deserialize;
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct AvailablePhoneNumbersResponse {
     pub available_phone_numbers: Vec<AvailablePhoneNumber>,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct AvailablePhoneNumber {
     pub phone_number: String,
@@ -25,28 +23,25 @@ pub struct AvailablePhoneNumber {
     pub postal_code: Option<String>,
     pub lata: Option<String>,
     pub rate_center: Option<String>,
-    pub latitude: Option<String>,  // Changed to String to match JSON
-    pub longitude: Option<String>, // Changed to String to match JSON
+    pub latitude: Option<String>,
+    pub longitude: Option<String>,
     #[serde(default)]
     pub beta: bool,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct Capabilities {
     #[serde(default)]
     pub voice: bool,
-    #[serde(default, rename = "SMS", alias = "sms")]  // Handles both cases
+    #[serde(default, rename = "SMS", alias = "sms")]
     pub sms: bool,
-    #[serde(default, rename = "MMS", alias = "mms")]  // Handles both cases
+    #[serde(default, rename = "MMS", alias = "mms")]
     pub mms: bool,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct AvailableNumbers {
     pub locals: Vec<AvailablePhoneNumber>,
     pub mobiles: Vec<AvailablePhoneNumber>,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct PhoneNumberCountry {
     pub country: String,
@@ -55,30 +50,26 @@ pub struct PhoneNumberCountry {
     pub price_unit: String,
     pub url: String,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct PhoneNumberPrice {
     pub number_type: String,
     pub base_price: String,
     pub current_price: String,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct MessagingCountry {
     pub country: String,
     pub iso_country: String,
     pub url: String,
-    pub price_unit: String,  // Added
+    pub price_unit: String,
     pub inbound_sms_prices: Vec<InboundSmsPrice>,
     pub outbound_sms_prices: Vec<OutboundSmsPrice>,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct InboundSmsPrice {
     pub number_type: String,
-    pub current_price: String,  // Simplified: direct price, no array or extras
+    pub current_price: String,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct OutboundSmsPrice {
     pub carrier: String,
@@ -86,14 +77,12 @@ pub struct OutboundSmsPrice {
     pub mnc: String,
     pub prices: Vec<OutboundPrice>,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct OutboundPrice {
     pub number_type: String,
     pub base_price: String,
     pub current_price: String,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct VoiceCountry {
     pub country: String,
@@ -102,14 +91,12 @@ pub struct VoiceCountry {
     pub inbound_call_prices: Vec<InboundCallPrice>,
     pub outbound_prefix_prices: Vec<OutboundPrefixPrice>,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct InboundCallPrice {
     pub number_type: String,
     pub base_price: String,
     pub current_price: String,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct OutboundPrefixPrice {
     pub prefixes: Vec<String>,
@@ -117,20 +104,17 @@ pub struct OutboundPrefixPrice {
     pub current_price: String,
     pub friendly_name: String,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct TwilioPrices {
     pub phone_numbers: PhoneNumberCountry,
     pub messaging: MessagingCountry,
     pub voice: VoiceCountry,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct RegulationsResponse {
     pub results: Vec<Regulation>,
     pub meta: Meta,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct Meta {
     pub page: i32,
@@ -141,7 +125,6 @@ pub struct Meta {
     pub next_page_url: Option<String>,
     pub key: String,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct Regulation {
     pub sid: String,
@@ -152,13 +135,11 @@ pub struct Regulation {
     pub requirements: Requirements,
     pub url: String,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct Requirements {
     pub end_user: Vec<EndUserRequirement>,
     pub supporting_document: Vec<Vec<SupportingDocumentRequirement>>,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct EndUserRequirement {
     pub name: String,
@@ -169,7 +150,6 @@ pub struct EndUserRequirement {
     pub fields: Vec<String>,
     pub detailed_fields: Vec<FieldDetail>,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct SupportingDocumentRequirement {
     pub name: String,
@@ -179,7 +159,6 @@ pub struct SupportingDocumentRequirement {
     pub description: String,
     pub accepted_documents: Vec<AcceptedDocument>,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct AcceptedDocument {
     pub name: String,
@@ -189,27 +168,23 @@ pub struct AcceptedDocument {
     pub fields: Vec<String>,
     pub detailed_fields: Vec<FieldDetail>,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct FieldDetail {
     pub machine_name: String,
     pub friendly_name: String,
     pub description: String,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct TwilioRegulations {
     pub local: Vec<Regulation>,
     pub mobile: Vec<Regulation>,
 }
-
 #[derive(Deserialize, Clone, PartialEq)]
 pub struct CountryInfoResponse {
     pub available_numbers: AvailableNumbers,
     pub prices: TwilioPrices,
     pub regulations: TwilioRegulations,
 }
-
 #[derive(Properties, PartialEq)]
 pub struct TwilioHostedInstructionsProps {
     #[prop_or_default]
@@ -223,11 +198,14 @@ pub struct TwilioHostedInstructionsProps {
     #[prop_or_default]
     pub twilio_token: Option<String>,
     #[prop_or_default]
+    pub textbee_api_key: Option<String>,
+    #[prop_or_default]
+    pub textbee_device_id: Option<String>,
+    #[prop_or_default]
     pub message: String,
     #[prop_or_default]
     pub country: Option<String>,
 }
-
 #[derive(Properties, PartialEq)]
 struct IntroAndCountryProps {
     selected_country: UseStateHandle<String>,
@@ -236,7 +214,6 @@ struct IntroAndCountryProps {
     fetch_error: UseStateHandle<Option<String>>,
     country_info: UseStateHandle<Option<CountryInfoResponse>>,
 }
-
 #[function_component(IntroAndCountryComponent)]
 fn intro_and_country_component(props: &IntroAndCountryProps) -> Html {
     let selected_country = props.selected_country.clone();
@@ -244,18 +221,15 @@ fn intro_and_country_component(props: &IntroAndCountryProps) -> Html {
     let is_loading = props.is_loading.clone();
     let fetch_error = props.fetch_error.clone();
     let country_info = props.country_info.clone();
-
     html! {
         <>
             <div class="instruction-block overview-block">
                 <div class="instruction-content">
                     <h2>{"SMS and Voice Communication Setup"}</h2>
                     <p>{"Lightfriend uses Twilio to send voice calls and text messages. Users outside the US need to use their own Twilio number, because many countries require local address to be able to buy a phone number or even send messages."}</p>
-
                     <a href="https://youtu.be/WARw4REp584?si=ghmMYGzTKTLcgss_" class="learn-more-link" target="_blank">{"Don't bother to read? Watch me explain this page on youtube ->"}</a>
                 </div>
             </div>
-
             <div class="instruction-block">
                 <div class="instruction-content">
                     <h2>{"Twilio Information"}</h2>
@@ -361,8 +335,8 @@ fn intro_and_country_component(props: &IntroAndCountryProps) -> Html {
                                 <p class="error">{err}</p>
                                 if !selected_country.is_empty() {
                                     <p>
-                                        {"Check these or email me rasmus@ahtava.com"}
-                                        <a href={format!("https://www.twilio.com/en-us/sms/pricing/{}", *selected_country)} target="_blank">{"Pricing"}</a>
+                                        {"More info from these links or email me rasmus@ahtava.com"}
+                                        <a href={format!("https://www.twilio.com/en-us/sms/pricing/{}", *selected_country)} target="_blank">{" Pricing"}</a>
                                         {" and "}
                                         <a href={format!("https://www.twilio.com/en-us/guidelines/{}/regulatory", *selected_country)} target="_blank">{"Regulations"}</a>
                                         {"."}
@@ -616,7 +590,6 @@ fn intro_and_country_component(props: &IntroAndCountryProps) -> Html {
                                         html! {}
                                     }
                                 }
-
                                 if !selected_country.is_empty() {
                                     <p>
                                         {"Check these more at"}
@@ -647,16 +620,13 @@ fn intro_and_country_component(props: &IntroAndCountryProps) -> Html {
                     padding: 4rem;
                     transition: all 0.3s ease;
                 }
-
                 .instruction-block:hover {
                     border-color: rgba(30, 144, 255, 0.3);
                 }
-
                 .instruction-content {
                     flex: 1;
                     order: 1;
                 }
-
                 .instruction-content h2 {
                     font-size: 2rem;
                     margin-bottom: 1.5rem;
@@ -664,7 +634,6 @@ fn intro_and_country_component(props: &IntroAndCountryProps) -> Html {
                     -webkit-background-clip: text;
                     -webkit-text-fill-color: transparent;
                 }
-
                 .learn-more-link {
                     color: #1E90FF;
                     text-decoration: none;
@@ -672,25 +641,20 @@ fn intro_and_country_component(props: &IntroAndCountryProps) -> Html {
                     font-weight: 500;
                     transition: color 0.3s ease;
                 }
-
                 .learn-more-link:hover {
                     color: #7EB2FF;
                     text-decoration: underline;
                 }
-
-
                 .country-selector {
                     display: flex;
                     align-items: center;
                     gap: 1rem;
                     margin-bottom: 2rem;
                 }
-
                 .country-selector label {
                     color: #7EB2FF;
                     font-size: 1.1rem;
                 }
-
                 .country-selector select {
                     padding: 0.75rem;
                     background: rgba(26, 26, 26, 0.5);
@@ -701,48 +665,39 @@ fn intro_and_country_component(props: &IntroAndCountryProps) -> Html {
                     cursor: pointer;
                     transition: all 0.3s ease;
                 }
-
                 .country-selector select:focus {
                     outline: none;
                     border-color: rgba(30, 144, 255, 0.8);
                 }
-
                 .country-info h3, .country-info h4, .country-info h5 {
                     color: #7EB2FF;
                 }
-
                 .country-info ul {
                     list-style-type: disc;
                     padding-left: 20px;
                 }
-
                 .country-info li {
                     color: #999;
                     margin-bottom: 0.5rem;
                 }
-
                 .country-table {
                     width: 100%;
                     border-collapse: collapse;
                     margin-bottom: 2rem;
                 }
-
                 .country-table th, .country-table td {
                     border: 1px solid rgba(255, 255, 255, 0.1);
                     padding: 0.75rem;
                     text-align: left;
                     color: #999;
                 }
-
                 .country-table th {
                     background: rgba(30, 144, 255, 0.1);
                     color: #fff;
                 }
-
                 .country-table td {
                     color: #fff;
                 }
-
                 .error {
                     color: #f44336;
                 }
@@ -751,7 +706,6 @@ fn intro_and_country_component(props: &IntroAndCountryProps) -> Html {
         </>
     }
 }
-
 #[derive(Properties, PartialEq)]
 struct InstructionsProps {
     can_edit: bool,
@@ -770,7 +724,6 @@ struct InstructionsProps {
     is_sid_valid: bool,
     is_token_valid: bool,
 }
-
 #[function_component(InstructionsComponent)]
 fn instructions_component(props: &InstructionsProps) -> Html {
     let open_modal = props.open_modal.clone();
@@ -788,7 +741,6 @@ fn instructions_component(props: &InstructionsProps) -> Html {
     let is_phone_valid = props.is_phone_valid;
     let is_sid_valid = props.is_sid_valid;
     let is_token_valid = props.is_token_valid;
-
     html! {
         <>
             <div class="instruction-block">
@@ -805,17 +757,16 @@ fn instructions_component(props: &InstructionsProps) -> Html {
                     </ul>
                 </div>
                 <div class="instruction-image">
-                    <img 
-                        src="/assets/billing-twilio.png" 
-                        alt="Navigating to Twilio Billing Page" 
+                    <img
+                        src="/assets/billing-twilio.png"
+                        alt="Navigating to Twilio Billing Page"
                         loading="lazy"
-                        onclick={let open_modal = open_modal.clone(); let src = "/assets/billing-twilio.png".to_string(); 
+                        onclick={let open_modal = open_modal.clone(); let src = "/assets/billing-twilio.png".to_string();
                             Callback::from(move |_| open_modal.emit(src.clone()))}
                         style="cursor: pointer;"
                     />
                 </div>
             </div>
-
             <div class="instruction-block">
                 <div class="instruction-content">
                     <h2>{"Twilio Buy a Phone Number"}</h2>
@@ -830,15 +781,15 @@ fn instructions_component(props: &InstructionsProps) -> Html {
                     <div class="input-field">
                         <label for="phone-number">{"Your Twilio Phone Number:"}</label>
                         <div class="input-with-button">
-                            <input 
-                                type="text" 
-                                id="phone-number" 
-                                placeholder="+1234567890" 
+                            <input
+                                type="text"
+                                id="phone-number"
+                                placeholder="+1234567890"
                                 value={(*phone_number).clone()}
                                 onchange={on_phone_change.clone()}
                                 disabled={!can_edit}
                             />
-                            <button 
+                            <button
                                 class={classes!("save-button", if !is_phone_valid || !can_edit { "invalid" } else { "" })}
                                 onclick={on_save_phone.clone()}
                                 disabled={!can_edit || !is_phone_valid}
@@ -860,17 +811,16 @@ fn instructions_component(props: &InstructionsProps) -> Html {
                     </div>
                 </div>
                 <div class="instruction-image">
-                    <img 
-                        src="/assets/number-twilio.png" 
-                        alt="Buy Twilio Phone Number Image" 
+                    <img
+                        src="/assets/number-twilio.png"
+                        alt="Buy Twilio Phone Number Image"
                         loading="lazy"
-                        onclick={let open_modal = open_modal.clone(); let src = "/assets/number-twilio.png".to_string(); 
+                        onclick={let open_modal = open_modal.clone(); let src = "/assets/number-twilio.png".to_string();
                             Callback::from(move |_| open_modal.emit(src.clone()))}
                         style="cursor: pointer;"
                     />
                 </div>
             </div>
-
             <div class="instruction-block">
                 <div class="instruction-content">
                     <h2>{"Twilio Finding Credentials"}</h2>
@@ -882,10 +832,10 @@ fn instructions_component(props: &InstructionsProps) -> Html {
                     <div class="input-field">
                         <label for="account-sid">{"Your Account SID:"}</label>
                         <div class="input-with-button">
-                            <input 
-                                type="text" 
-                                id="account-sid" 
-                                placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" 
+                            <input
+                                type="text"
+                                id="account-sid"
+                                placeholder="ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                                 value={(*account_sid).clone()}
                                 onchange={on_sid_change.clone()}
                                 disabled={!can_edit}
@@ -895,17 +845,17 @@ fn instructions_component(props: &InstructionsProps) -> Html {
                     <div class="input-field">
                         <label for="auth-token">{"Your Auth Token:"}</label>
                         <div class="input-with-button">
-                            <input 
-                                type="text" 
-                                id="auth-token" 
-                                placeholder="your_auth_token_here" 
+                            <input
+                                type="text"
+                                id="auth-token"
+                                placeholder="your_auth_token_here"
                                 value={(*auth_token).clone()}
                                 onchange={on_token_change.clone()}
                                 disabled={!can_edit}
                             />
                         </div>
                     </div>
-                    <button 
+                    <button
                         class={classes!("save-button", if !(is_sid_valid && is_token_valid) || !can_edit { "invalid" } else { "" })}
                         onclick={on_save_creds.clone()}
                         disabled={!can_edit || !(is_sid_valid && is_token_valid)}
@@ -925,11 +875,11 @@ fn instructions_component(props: &InstructionsProps) -> Html {
                     }
                 </div>
                 <div class="instruction-image">
-                    <img 
-                        src="/assets/creds-twilio.png" 
-                        alt="Twilio Credentials Dashboard" 
+                    <img
+                        src="/assets/creds-twilio.png"
+                        alt="Twilio Credentials Dashboard"
                         loading="lazy"
-                        onclick={let open_modal = open_modal.clone(); let src = "/assets/creds-twilio.png".to_string(); 
+                        onclick={let open_modal = open_modal.clone(); let src = "/assets/creds-twilio.png".to_string();
                             Callback::from(move |_| open_modal.emit(src.clone()))}
                         style="cursor: pointer;"
                     />
@@ -949,16 +899,13 @@ fn instructions_component(props: &InstructionsProps) -> Html {
                     padding: 4rem;
                     transition: all 0.3s ease;
                 }
-
                 .instruction-block:hover {
                     border-color: rgba(30, 144, 255, 0.3);
                 }
-
                 .instruction-content {
                     flex: 1;
                     order: 1;
                 }
-
                 .instruction-content h2 {
                     font-size: 2rem;
                     margin-bottom: 1.5rem;
@@ -966,12 +913,10 @@ fn instructions_component(props: &InstructionsProps) -> Html {
                     -webkit-background-clip: text;
                     -webkit-text-fill-color: transparent;
                 }
-
                 .instruction-content ul {
                     list-style: none;
                     padding: 0;
                 }
-
                 .instruction-content li {
                     color: #999;
                     padding: 0.75rem 0;
@@ -979,25 +924,21 @@ fn instructions_component(props: &InstructionsProps) -> Html {
                     position: relative;
                     line-height: 1.6;
                 }
-
                 .instruction-content li::before {
                     content: '•';
                     position: absolute;
                     left: 0.5rem;
                     color: #1E90FF;
                 }
-
                 .instruction-content ul ul li::before {
                     content: '◦';
                 }
-
                 .instruction-image {
                     flex: 1.2;
                     display: flex;
                     justify-content: center;
                     align-items: center;
                 }
-
                 .instruction-image img {
                     max-width: 110%;
                     height: auto;
@@ -1005,21 +946,17 @@ fn instructions_component(props: &InstructionsProps) -> Html {
                     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
                     transition: transform 0.3s ease;
                 }
-
                 .instruction-image img:hover {
                     transform: scale(1.02);
                 }
-
                 .input-field {
                     margin-top: 1.5rem;
                 }
-
                 .input-field label {
                     display: block;
                     margin-bottom: 0.5rem;
                     color: #7EB2FF;
                 }
-
                 .input-field input {
                     width: 100%;
                     padding: 0.75rem;
@@ -1030,26 +967,21 @@ fn instructions_component(props: &InstructionsProps) -> Html {
                     font-size: 1rem;
                     transition: all 0.3s ease;
                 }
-
                 .input-field input:focus {
                     outline: none;
                     border-color: rgba(30, 144, 255, 0.8);
                     box-shadow: 0 0 0 2px rgba(30, 144, 255, 0.2);
                 }
-
                 .input-field input::placeholder {
                     color: rgba(255, 255, 255, 0.3);
                 }
-
                 .input-with-button {
                     display: flex;
                     gap: 0.5rem;
                 }
-
                 .input-with-button input {
                     flex: 1;
                 }
-
                 .save-button {
                     padding: 0.75rem 1.5rem;
                     background: #1E90FF;
@@ -1060,37 +992,30 @@ fn instructions_component(props: &InstructionsProps) -> Html {
                     font-size: 1rem;
                     transition: all 0.3s ease;
                 }
-
                 .save-button:hover {
                     background: #1976D2;
                 }
-
                 .save-button:active {
                     transform: translateY(1px);
                 }
-
                 .save-button.invalid {
                     background: #cccccc;
                     color: #666666;
                     cursor: not-allowed;
                 }
-
                 .save-button.invalid:hover {
                     background: #cccccc;
                 }
-
                 .save-status {
                     margin-left: 1rem;
                     padding: 0.5rem 1rem;
                     border-radius: 4px;
                     font-size: 0.9rem;
                 }
-
                 .save-status.success {
                     color: #4CAF50;
                     background: rgba(76, 175, 80, 0.1);
                 }
-
                 .save-status.error {
                     color: #f44336;
                     background: rgba(244, 67, 54, 0.1);
@@ -1100,18 +1025,15 @@ fn instructions_component(props: &InstructionsProps) -> Html {
         </>
     }
 }
-
 #[derive(Properties, PartialEq)]
 struct ModalProps {
     visible: bool,
     selected_image: String,
     on_close: Callback<MouseEvent>,
 }
-
 #[function_component(ModalComponent)]
 fn modal_component(props: &ModalProps) -> Html {
     let on_close = props.on_close.clone();
-
     html! {
         <>
             {
@@ -1143,7 +1065,6 @@ fn modal_component(props: &ModalProps) -> Html {
                     z-index: 1000;
                     backdrop-filter: blur(5px);
                 }
-
                 .modal-content {
                     position: relative;
                     max-width: 90%;
@@ -1152,14 +1073,12 @@ fn modal_component(props: &ModalProps) -> Html {
                     overflow: hidden;
                     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
                 }
-
                 .modal-content img {
                     display: block;
                     max-width: 100%;
                     max-height: 90vh;
                     object-fit: contain;
                 }
-
                 .modal-close {
                     position: absolute;
                     top: 10px;
@@ -1177,7 +1096,6 @@ fn modal_component(props: &ModalProps) -> Html {
                     cursor: pointer;
                     transition: all 0.3s ease;
                 }
-
                 .modal-close:hover {
                     background: rgba(0, 0, 0, 0.8);
                     border-color: white;
@@ -1187,8 +1105,6 @@ fn modal_component(props: &ModalProps) -> Html {
         </>
     }
 }
-
-
 #[function_component(TwilioHostedInstructions)]
 pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html {
     let modal_visible = use_state(|| false);
@@ -1205,7 +1121,6 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             props.country.clone(),
         );
     }
-
     {
         let selected_country = selected_country.clone();
         let country = props.country.clone();
@@ -1227,20 +1142,22 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             (),
         );
     }
-
     let phone_number = use_state(|| props.twilio_phone.clone().unwrap_or_default());
     let account_sid = use_state(|| props.twilio_sid.clone().unwrap_or_default());
     let auth_token = use_state(|| props.twilio_token.clone().unwrap_or_default());
-
+    let textbee_api_key = use_state(|| props.textbee_api_key.clone().unwrap_or_default());
+    let textbee_device_id = use_state(|| props.textbee_device_id.clone().unwrap_or_default());
     let phone_save_status = use_state(|| None::<Result<(), String>>);
     let creds_save_status = use_state(|| None::<Result<(), String>>);
-
+    let textbee_save_status = use_state(|| None::<Result<(), String>>);
     {
         let phone_number = phone_number.clone();
         let account_sid = account_sid.clone();
         let auth_token = auth_token.clone();
+        let textbee_api_key = textbee_api_key.clone();
+        let textbee_device_id = textbee_device_id.clone();
         use_effect_with_deps(
-            move |(new_phone, new_sid, new_token)| {
+            move |(new_phone, new_sid, new_token, new_textbee_key, new_textbee_id)| {
                 if let Some(phone) = new_phone {
                     if phone != &*phone_number {
                         phone_number.set(phone.clone());
@@ -1256,16 +1173,27 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                         auth_token.set(token.clone());
                     }
                 }
+                if let Some(key) = new_textbee_key {
+                    if key != &*textbee_api_key {
+                        textbee_api_key.set(key.clone());
+                    }
+                }
+                if let Some(id) = new_textbee_id {
+                    if id != &*textbee_device_id {
+                        textbee_device_id.set(id.clone());
+                    }
+                }
                 || {}
             },
             (
                 props.twilio_phone.clone(),
                 props.twilio_sid.clone(),
                 props.twilio_token.clone(),
+                props.textbee_api_key.clone(),
+                props.textbee_device_id.clone(),
             ),
         );
     }
-
     let on_phone_change = {
         let phone_number = phone_number.clone();
         Callback::from(move |e: Event| {
@@ -1273,7 +1201,6 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             phone_number.set(input.value());
         })
     };
-
     let on_sid_change = {
         let account_sid = account_sid.clone();
         Callback::from(move |e: Event| {
@@ -1281,7 +1208,6 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             account_sid.set(input.value());
         })
     };
-
     let on_token_change = {
         let auth_token = auth_token.clone();
         Callback::from(move |e: Event| {
@@ -1289,7 +1215,20 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             auth_token.set(input.value());
         })
     };
-
+    let on_textbee_key_change = {
+        let textbee_api_key = textbee_api_key.clone();
+        Callback::from(move |e: Event| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            textbee_api_key.set(input.value());
+        })
+    };
+    let on_textbee_id_change = {
+        let textbee_device_id = textbee_device_id.clone();
+        Callback::from(move |e: Event| {
+            let input: web_sys::HtmlInputElement = e.target_unchecked_into();
+            textbee_device_id.set(input.value());
+        })
+    };
     let on_country_change = {
         let selected_country = selected_country.clone();
         Callback::from(move |e: Event| {
@@ -1297,22 +1236,18 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             selected_country.set(input.value());
         })
     };
-
     let on_save_phone = {
         let phone_number = phone_number.clone();
         let phone_save_status = phone_save_status.clone();
         Callback::from(move |_: MouseEvent| {
             let phone_number = phone_number.clone();
             let phone_save_status = phone_save_status.clone();
-            
             let val = (*phone_number).clone();
             if val.is_empty() || !val.starts_with('+') || val.len() < 10 || !val[1..].chars().all(|c| c.is_ascii_digit()) || val.starts_with("...") {
                 phone_save_status.set(Some(Err("Invalid phone number format".to_string())));
                 return;
             }
-            
             phone_save_status.set(None);
-            
             spawn_local(async move {
                 if let Some(token) = window()
                     .and_then(|w| w.local_storage().ok())
@@ -1328,7 +1263,6 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                         .unwrap()
                         .send()
                         .await;
-
                     match result {
                         Ok(response) => {
                             if response.status() == 401 {
@@ -1354,7 +1288,6 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             });
         })
     };
-
     let on_save_creds = {
         let account_sid = account_sid.clone();
         let auth_token = auth_token.clone();
@@ -1363,21 +1296,17 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             let account_sid = account_sid.clone();
             let auth_token = auth_token.clone();
             let creds_save_status = creds_save_status.clone();
-            
             let sid_val = (*account_sid).clone();
             if sid_val.len() != 34 || !sid_val.starts_with("AC") || !sid_val[2..].chars().all(|c| c.is_ascii_hexdigit()) || sid_val.starts_with("...") {
                 creds_save_status.set(Some(Err("Invalid Account SID format".to_string())));
                 return;
             }
-            
             let token_val = (*auth_token).clone();
             if token_val.len() != 32 || !token_val.chars().all(|c| c.is_ascii_hexdigit()) || token_val.starts_with("...") {
                 creds_save_status.set(Some(Err("Invalid Auth Token format".to_string())));
                 return;
             }
-            
             creds_save_status.set(None);
-            
             spawn_local(async move {
                 if let Some(token) = window()
                     .and_then(|w| w.local_storage().ok())
@@ -1394,7 +1323,6 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                         .unwrap()
                         .send()
                         .await;
-
                     match result {
                         Ok(response) => {
                             if response.status() == 401 {
@@ -1420,14 +1348,72 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             });
         })
     };
-
+    let on_save_textbee = {
+        let textbee_api_key = textbee_api_key.clone();
+        let textbee_device_id = textbee_device_id.clone();
+        let textbee_save_status = textbee_save_status.clone();
+        Callback::from(move |_: MouseEvent| {
+            let textbee_api_key = textbee_api_key.clone();
+            let textbee_device_id = textbee_device_id.clone();
+            let textbee_save_status = textbee_save_status.clone();
+            let key_val = (*textbee_api_key).clone();
+            if key_val.is_empty() || key_val.starts_with("...") {
+                textbee_save_status.set(Some(Err("Invalid API Key".to_string())));
+                return;
+            }
+            let id_val = (*textbee_device_id).clone();
+            if id_val.is_empty() || id_val.starts_with("...") {
+                textbee_save_status.set(Some(Err("Invalid Device ID".to_string())));
+                return;
+            }
+            textbee_save_status.set(None);
+            spawn_local(async move {
+                if let Some(token) = window()
+                    .and_then(|w| w.local_storage().ok())
+                    .flatten()
+                    .and_then(|storage| storage.get_item("token").ok())
+                    .flatten()
+                {
+                    let result = Request::post(&format!("{}/api/profile/textbee-creds", config::get_backend_url()))
+                        .header("Authorization", &format!("Bearer {}", token))
+                        .json(&json!({
+                            "textbee_api_key": *textbee_api_key,
+                            "textbee_device_id": *textbee_device_id
+                        }))
+                        .unwrap()
+                        .send()
+                        .await;
+                    match result {
+                        Ok(response) => {
+                            if response.status() == 401 {
+                                if let Some(window) = window() {
+                                    if let Ok(Some(storage)) = window.local_storage() {
+                                        let _ = storage.remove_item("token");
+                                    }
+                                }
+                                textbee_save_status.set(Some(Err("Session expired. Please log in again.".to_string())));
+                            } else if response.ok() {
+                                textbee_save_status.set(Some(Ok(())));
+                            } else {
+                                textbee_save_status.set(Some(Err("Failed to save TextBee credentials".to_string())));
+                            }
+                        }
+                        Err(_) => {
+                            textbee_save_status.set(Some(Err("Network error occurred".to_string())));
+                        }
+                    }
+                } else {
+                    textbee_save_status.set(Some(Err("Please log in to save TextBee credentials".to_string())));
+                }
+            });
+        })
+    };
     let close_modal = {
         let modal_visible = modal_visible.clone();
         Callback::from(move |_: MouseEvent| {
             modal_visible.set(false);
         })
     };
-
     let open_modal = {
         let modal_visible = modal_visible.clone();
         let selected_image = selected_image.clone();
@@ -1436,28 +1422,30 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             modal_visible.set(true);
         })
     };
-
     let can_edit = props.is_logged_in && props.sub_tier.as_deref() == Some("tier 2");
-
     let is_phone_valid = {
         let val = &*phone_number;
         !val.is_empty() && val.starts_with('+') && val.len() >= 10 && val[1..].chars().all(|c| c.is_ascii_digit()) && !val.starts_with("...")
     };
-
     let is_sid_valid = {
         let val = &*account_sid;
         val.len() == 34 && val.starts_with("AC") && val[2..].chars().all(|c| c.is_ascii_hexdigit()) && !val.starts_with("...")
     };
-
     let is_token_valid = {
         let val = &*auth_token;
         val.len() == 32 && val.chars().all(|c| c.is_ascii_hexdigit()) && !val.starts_with("...")
     };
-
+    let is_textbee_key_valid = {
+        let val = &*textbee_api_key;
+        !val.is_empty() && !val.starts_with("...")
+    };
+    let is_textbee_id_valid = {
+        let val = &*textbee_device_id;
+        !val.is_empty() && !val.starts_with("...")
+    };
     let country_info = use_state(|| None::<CountryInfoResponse>);
     let fetch_error = use_state(|| None::<String>);
     let is_loading = use_state(|| false);
-
     {
         let selected_country = selected_country.clone();
         let country_info = country_info.clone();
@@ -1477,7 +1465,6 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                             .unwrap()
                             .send()
                             .await;
-
                         match response {
                             Ok(resp) if resp.ok() => {
                                 match resp.json::<CountryInfoResponse>().await {
@@ -1498,7 +1485,6 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
             selected_country,
         );
     }
-
     html! {
         <div class="instructions-page">
             <div class="instructions-background"></div>
@@ -1519,6 +1505,80 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                     fetch_error={fetch_error.clone()}
                     country_info={country_info.clone()}
                 />
+                <div class="instruction-block">
+                    <div class="instruction-content">
+                        <h2>{"Alternative: TextBee for SMS Messaging"}</h2>
+                        <p>{"If you have a spare Android phone (version 7.0+) with a secondary phone number lying around, connect it to Lightfriend via TextBee. This lets your AI send and receive texts using your existing phone plan, supporting up to 300 messages per month on the free tier at no extra cost beyond your carrier's standard SMS charges."}</p>
+                        <p>{"Note: TextBee is for texting only. If you need phone calls, set up Twilio in addition."}</p>
+                        <p>{"Note: TextBee does not support sending images or other media."}</p>
+                        <p>{"TextBee also offers a Pro plan ($6.99/month currently) for higher limits (up to 5,000 messages/month) and additional features like multi-device support."}</p>
+                        <h3>{"Setup Steps"}</h3>
+                        <ul>
+                            <li>{"Register for a free account at "}<a href="https://textbee.dev" target="_blank" style="color: #7EB2FF; text-decoration: underline;">{"textbee.dev"}</a>{" using email/password or Google."}</li>
+                            <li>{"Download and install the TextBee app on your Android phone from "}<a href="https://dl.textbee.dev" target="_blank" style="color: #7EB2FF; text-decoration: underline;">{"dl.textbee.dev"}</a>{"."}</li>
+                            <li>{"Grant SMS permissions in the app."}</li>
+                            <li>{"Link the device:"}
+                                <ul>
+                                    <li>{"Recommended: In the dashboard, click 'Register Device', scan the QR code with the app."}</li>
+                                    <li>{"Alternative: Generate an API key in the dashboard, enter it in the app."}</li>
+                                </ul>
+                            </li>
+                            <li>{"Once linked, note your Device ID from the devices list in the dashboard."}</li>
+                            <li>{"Generate or use your API Key from the dashboard."}</li>
+                        </ul>
+                        {
+                            if props.is_logged_in && props.sub_tier.as_deref() == Some("tier 2") {
+                                html! {
+                                    <>
+                                        <div class="input-field">
+                                            <label for="textbee-device-id">{"Your TextBee Device ID:"}</label>
+                                            <div class="input-with-button">
+                                                <input
+                                                    type="text"
+                                                    id="textbee-device-id"
+                                                    placeholder="your_device_id_here"
+                                                    value={(*textbee_device_id).clone()}
+                                                    onchange={on_textbee_id_change.clone()}
+                                                />
+                                            </div>
+                                        </div>
+                                        <div class="input-field">
+                                            <label for="textbee-api-key">{"Your TextBee API Key:"}</label>
+                                            <div class="input-with-button">
+                                                <input
+                                                    type="text"
+                                                    id="textbee-api-key"
+                                                    placeholder="your_api_key_here"
+                                                    value={(*textbee_api_key).clone()}
+                                                    onchange={on_textbee_key_change.clone()}
+                                                />
+                                            </div>
+                                        </div>
+                                        <button
+                                            class={classes!("save-button", if !(is_textbee_key_valid && is_textbee_id_valid) { "invalid" } else { "" })}
+                                            onclick={on_save_textbee.clone()}
+                                        >
+                                            {"Save TextBee Credentials"}
+                                        </button>
+                                        {
+                                            match &*textbee_save_status {
+                                                Some(Ok(_)) => html! {
+                                                    <span class="save-status success">{"✓ Saved"}</span>
+                                                },
+                                                Some(Err(err)) => html! {
+                                                    <span class="save-status error">{format!("Error: {}", err)}</span>
+                                                },
+                                                None => html! {}
+                                            }
+                                        }
+                                    </>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
+                    </div>
+                </div>
                 <InstructionsComponent
                     can_edit={can_edit}
                     phone_number={phone_number.clone()}
@@ -1556,7 +1616,6 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                     position: relative;
                     background: transparent;
                 }
-
                 .instructions-background {
                     position: fixed;
                     top: 0;
@@ -1571,7 +1630,6 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                     z-index: -2;
                     pointer-events: none;
                 }
-
                 .instructions-background::after {
                     content: '';
                     position: absolute;
@@ -1580,18 +1638,16 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                     width: 100%;
                     height: 50%;
                     background: linear-gradient(
-                        to bottom, 
+                        to bottom,
                         rgba(26, 26, 26, 0) 0%,
                         rgba(26, 26, 26, 1) 100%
                     );
                 }
-
                 .instructions-section {
                     max-width: 1200px;
                     margin: 0 auto;
                     padding: 2rem;
                 }
-
                 .applicable-message {
                     color: #ffcc00;
                     font-size: 1.2rem;
@@ -1602,13 +1658,11 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                     border: 1px solid rgba(255, 204, 0, 0.3);
                     border-radius: 6px;
                 }
-
                 .back-home-container {
                     text-align: center;
                     margin-top: 2rem;
                     margin-bottom: 2rem;
                 }
-
                 .back-home-button {
                     padding: 0.75rem 1.5rem;
                     background: #1E90FF;
@@ -1621,29 +1675,23 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
                     display: inline-block;
                     transition: all 0.3s ease;
                 }
-
                 .back-home-button:hover {
                     background: #1976D2;
                 }
-
                 .back-home-button:active {
                     transform: translateY(1px);
                 }
-
                 @media (max-width: 968px) {
                     .instruction-block {
                         flex-direction: column;
                         gap: 2rem;
                     }
-
                     .instruction-content {
                         order: 1;
                     }
-
                     .instruction-image {
                         order: 2;
                     }
-
                     .instructions-section {
                         padding: 1rem;
                     }
@@ -1653,4 +1701,3 @@ pub fn twilio_hosted_instructions(props: &TwilioHostedInstructionsProps) -> Html
         </div>
     }
 }
-

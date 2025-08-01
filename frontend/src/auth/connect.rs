@@ -318,6 +318,28 @@ let group_states = use_state(|| {
                                 "collapsed"
                             }
                         )}>
+                        // Proactive Agent Section
+                        <div class={classes!(
+                            "service-item",
+                            if !(*email_connected || *calendar_connected || *whatsapp_connected) { "inactive" } else { "" }
+                        )}>
+                            {
+                                if !(*email_connected || *calendar_connected || *whatsapp_connected) {
+                                    html! {
+                                        <div class="feature-overlay">
+                                            <div class="overlay-content" style="color: #999;">
+                                                <i class="fas fa-lock"></i>
+                                                <p>{"Connect Email, Calendar, or WhatsApp to use Proactive Agent"}</p>
+                                            </div>
+                                        </div>
+                                    }
+                                } else {
+                                    html! {
+                                        <crate::proactive::agent_on::ProactiveAgentSection/>
+                                    }
+                                }
+                            }
+                        </div>
                             // Critical Section
                             <div class={classes!(
                                 "service-item",
@@ -739,7 +761,7 @@ let group_states = use_state(|| {
 }
 
 .service-list.expanded {
-    max-height: 2000px;
+    max-height: 5000px;
     opacity: 1;
     margin-top: 1.5rem;
 }

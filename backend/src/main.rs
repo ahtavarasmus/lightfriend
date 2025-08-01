@@ -263,6 +263,10 @@ async fn main() {
         .route("/api/sms/server/{user_id}", post(twilio_sms::handle_incoming_sms))
         .route_layer(middleware::from_fn(api::twilio_utils::validate_user_twilio_signature));
 
+    let textbee_routes = Router::new()
+        .route("/api/sms/textbee-server", post(twilio_sms::handle_textbee_sms));
+        // textbee requests are validated using device_id and phone number combo
+
     let elevenlabs_free_routes = Router::new()
         .route("/api/call/assistant", post(elevenlabs::fetch_assistant))
         .route("/api/call/weather", post(elevenlabs::handle_weather_tool_call))
@@ -277,6 +281,7 @@ async fn main() {
         .route("/api/call/email", get(elevenlabs::handle_email_fetch_tool_call))
         .route("/api/call/email/specific", post(elevenlabs::handle_email_search_tool_call))
         .route("/api/call/waiting_check", post(elevenlabs::handle_create_waiting_check_tool_call))
+        .route("/api/call/monitoring-status", post(elevenlabs::handle_update_monitoring_status_tool_call))
         .route("/api/call/email/respond-confirm", post(elevenlabs::handle_email_response_tool_call))
         .route("/api/call/tasks", get(elevenlabs::handle_tasks_fetching_tool_call))
         .route("/api/call/tasks/create", post(elevenlabs::handle_tasks_creation_tool_call))
@@ -348,6 +353,8 @@ async fn main() {
         .route("/api/profile/digests", get(profile_handlers::get_digests))
         .route("/api/profile/critical", post(profile_handlers::update_critical_enabled))
         .route("/api/profile/critical", get(profile_handlers::get_critical_enabled))
+        .route("/api/profile/proactive-agent", post(profile_handlers::update_proactive_agent_on))
+        .route("/api/profile/proactive-agent", get(profile_handlers::get_proactive_agent_on))
 
         .route("/api/billing/increase-credits/{user_id}", post(billing_handlers::increase_credits))
         .route("/api/billing/usage", post(billing_handlers::get_usage_data))
@@ -430,6 +437,7 @@ async fn main() {
         .route("/api/stream", get(shazam_call::stream_handler))
         .route("/api/listen/{call_sid}", get(shazam_call::listen_handler))
         .merge(user_twilio_routes)  // More specific routes first
+        .merge(textbee_routes)
         .merge(twilio_routes)       // More general routes last
         .merge(elevenlabs_routes)
         .merge(elevenlabs_free_routes)

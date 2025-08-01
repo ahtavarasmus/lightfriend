@@ -44,12 +44,16 @@ pub async fn check_user_credits(
 
 
     // Check if the event type is free based on discount_tier
-    let is_free = match user.discount_tier.as_deref() {
+    let mut is_free = match user.discount_tier.as_deref() {
         Some("full") => true,
         Some("msg") if event_type == "message" => true,
         Some("voice") if event_type != "message" => true,
         _ => false,
     };
+    if !user.phone_number.starts_with("+1") {
+        tracing::debug!("user pays their own messages");
+        is_free = true;
+    }
 
     let is_self_hosted= std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
 
@@ -152,12 +156,17 @@ pub fn deduct_user_credits(
 
 
     // Check if the event type is free based on discount_tier
-    let is_free = match user.discount_tier.as_deref() {
+    let mut is_free = match user.discount_tier.as_deref() {
         Some("full") => true,
         Some("msg") if event_type == "message" => true,
         Some("voice") if event_type != "message" => true,
         _ => false,
     };
+
+    if !user.phone_number.starts_with("+1") {
+        tracing::debug!("user pays their own messages");
+        is_free = true;
+    }
 
     let is_self_hosted= std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
 

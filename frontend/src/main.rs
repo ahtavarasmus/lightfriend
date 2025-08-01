@@ -44,6 +44,7 @@ mod proactive {
     pub mod constant_monitoring;
     pub mod digest;
     pub mod critical;
+    pub mod agent_on;
 }
 
 mod connections {
@@ -253,6 +254,8 @@ pub fn twilio_hosted_instructions_wrapper() -> Html {
                 twilio_phone={profile.preferred_number.clone()}
                 twilio_sid={profile.twilio_sid.clone()}
                 twilio_token={profile.twilio_token.clone()}
+                textbee_api_key={profile.textbee_api_key.clone()}
+                textbee_device_id={profile.textbee_device_id.clone()}
                 country={profile.sub_country.clone()}
             />
         }
@@ -264,6 +267,8 @@ pub fn twilio_hosted_instructions_wrapper() -> Html {
                 twilio_phone={None::<String>}
                 twilio_sid={None::<String>}
                 twilio_token={None::<String>}
+                textbee_api_key={None::<String>}
+                textbee_device_id={None::<String>}
                 country={None::<String>}
             />
         }

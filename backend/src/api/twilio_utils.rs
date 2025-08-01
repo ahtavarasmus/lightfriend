@@ -57,145 +57,6 @@ pub struct MessagingBinding {
     pub proxy_address: Option<String>,
 }
 
-#[derive(Deserialize, Debug)]
-pub struct ParticipantsListResponse {
-    participants: Vec<ParticipantResponse>,
-}
-
-pub async fn fetch_conversation_participants(
-    state: &Arc<AppState>, 
-    user: &User, 
-    conversation_sid: &str
-) -> Result<Vec<ParticipantResponse>, Box<dyn Error>> {
-    // Check if user has SMS discount tier and use their credentials if they do
-    let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
-        (
-            env::var(format!("TWILIO_ACCOUNT_SID_{}", user.id))
-                .map_err(|_| format!("Missing TWILIO_ACCOUNT_SID_{}", user.id))?,
-            env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
-                .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
-        )
-    } else if user.sub_tier == Some("tier 3".to_string()) {
-        let (account_sid, auth_token) = state.user_core.get_twilio_credentials(user.id)?;
-        (
-            account_sid,
-            auth_token,
-        )
-    } else {
-        (
-            env::var("TWILIO_ACCOUNT_SID")?,
-            env::var("TWILIO_AUTH_TOKEN")?,
-        )
-    };
-
-    let client = Client::new();
-
-    let response: ParticipantsListResponse = client
-        .get(format!(
-            "https://conversations.twilio.com/v1/Conversations/{}/Participants",
-            conversation_sid
-        ))
-        .basic_auth(&account_sid, Some(&auth_token))
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    Ok(response.participants)
-}
-
-
-pub async fn delete_bot_conversations(
-    state: &Arc<AppState>,
-    user_phone: &str, 
-    user: &User
-) -> Result<(), Box<dyn Error>> {
-    // Check if user has SMS discount tier and use their credentials if they do
-    let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
-        (
-            env::var(format!("TWILIO_ACCOUNT_SID_{}", user.id))
-                .map_err(|_| format!("Missing TWILIO_ACCOUNT_SID_{}", user.id))?,
-            env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
-                .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
-        )
-    } else if user.sub_tier == Some("tier 3".to_string()) {
-        let (account_sid, auth_token) = state.user_core.get_twilio_credentials(user.id)?;
-        (
-            account_sid,
-            auth_token,
-        )
-    } else if !user.phone_number.starts_with("+1") {
-        match state.user_core.get_twilio_credentials(user.id) {
-            Ok(credentials) => credentials,
-            Err(_) => (
-                env::var("TWILIO_ACCOUNT_SID")?,
-                env::var("TWILIO_AUTH_TOKEN")?,
-            ),
-        }
-    } else {
-        (
-            env::var("TWILIO_ACCOUNT_SID")?,
-            env::var("TWILIO_AUTH_TOKEN")?,
-        )
-    };
-    let client = Client::new();
-
-    // Fetch all conversations
-    let response: ConversationsListResponse = client
-        .get("https://conversations.twilio.com/v1/Conversations")
-        .basic_auth(&account_sid, Some(&auth_token))
-        .send()
-        .await?
-        .json()
-        .await?;
-
-    let mut deleted_count = 0;
-    for conversation in response.conversations {
-        // Check if user is a participant in this conversation
-        let participants = fetch_conversation_participants(&state, &user, &conversation.sid).await?;
-        let user_is_participant = participants.iter().any(|p| {
-            if let Some(binding) = &p.messaging_binding {
-                if let Some(address) = &binding.address {
-                    return address == user_phone;
-                }
-            }
-            false
-        });
-
-        if user_is_participant {
-            // Verify this is a conversation with the bot by checking messages
-            let messages: MessagesListResponse = client
-                .get(format!(
-                    "https://conversations.twilio.com/v1/Conversations/{}/Messages",
-                    conversation.sid
-                ))
-                .basic_auth(&account_sid, Some(&auth_token))
-                .send()
-                .await?
-                .json()
-                .await?;
-
-            // Check if any message is from "lightfriend" (our bot)
-            let has_bot_messages = messages.messages.iter().any(|msg| msg.author == "lightfriend");
-
-            if has_bot_messages {
-                match delete_twilio_conversation(&state, &conversation.sid, &user).await {
-                    Ok(_) => {
-                        deleted_count += 1;
-                        tracing::debug!("Deleted conversation: {}", conversation.sid);
-                    }
-                    Err(e) => {
-                        eprintln!("Failed to delete conversation {}: {}", conversation.sid, e);
-                    }
-                }
-            }
-        }
-    }
-
-    tracing::debug!("Successfully deleted {} conversations for user {}", deleted_count, user_phone);
-    Ok(())
-}
-
 #[derive(Deserialize)]
 struct PhoneNumbersResponse {
     incoming_phone_numbers: Vec<PhoneNumberInfo>,
@@ -336,60 +197,6 @@ pub async fn set_twilio_webhook(
 
     Ok(())
 }
-
-pub async fn delete_twilio_conversation(
-    state: &Arc<AppState>,
-    conversation_sid: &str, 
-    user: &User
-) -> Result<(), Box<dyn Error>> {
-    // Check if user has SMS discount tier and use their credentials if they do
-    let (account_sid, auth_token) = if user.discount_tier.as_deref() == Some("msg") {
-        (
-            env::var(format!("TWILIO_ACCOUNT_SID_{}", user.id))
-                .map_err(|_| format!("Missing TWILIO_ACCOUNT_SID_{}", user.id))?,
-            env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
-                .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
-        )
-    } else if user.sub_tier == Some("tier 3".to_string()) {
-        let (account_sid, auth_token) = state.user_core.get_twilio_credentials(user.id)?;
-        (
-            account_sid,
-            auth_token,
-        )
-    } else if !user.phone_number.starts_with("+1") {
-        match state.user_core.get_twilio_credentials(user.id) {
-            Ok(credentials) => credentials,
-            Err(_) => (
-                env::var("TWILIO_ACCOUNT_SID")?,
-                env::var("TWILIO_AUTH_TOKEN")?,
-            ),
-        }
-    } else {
-        (
-            env::var("TWILIO_ACCOUNT_SID")?,
-            env::var("TWILIO_AUTH_TOKEN")?,
-        )
-    };
-    let client = Client::new();
-
-    let response = client
-        .delete(format!(
-            "https://conversations.twilio.com/v1/Conversations/{}",
-            conversation_sid
-        ))
-        .basic_auth(&account_sid, Some(&auth_token))
-        .send()
-        .await?;
-
-    if !response.status().is_success() {
-        let error_text = response.text().await?;
-        return Err(error_text.into());
-    }
-
-    tracing::debug!("Successfully deleted conversation: {}", conversation_sid);
-    Ok(())
-}
-
 
 pub async fn validate_user_twilio_signature(
     request: Request<Body>,
@@ -621,8 +428,7 @@ pub async fn validate_twilio_signature(
         auth_token = if !user.phone_number.starts_with("+1") {
             match state.user_core.get_twilio_credentials(user.id) {
                 Ok((_, token)) => token,
-                Err(_) => env::var("TWILIO_AUTH_TOKEN")
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                Err(_) => return Err(StatusCode::UNAUTHORIZED)
             }
         } else {
             std::env::var("TWILIO_AUTH_TOKEN")
@@ -690,20 +496,8 @@ pub async fn delete_twilio_message_media(
             env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
                 .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
         )
-    } else if user.sub_tier == Some("tier 3".to_string()) {
-        let (account_sid, auth_token) = state.user_core.get_twilio_credentials(user.id)?;
-        (
-            account_sid,
-            auth_token,
-        )
-    } else if !user.phone_number.starts_with("+1") {
-        match state.user_core.get_twilio_credentials(user.id) {
-            Ok(credentials) => credentials,
-            Err(_) => (
-                env::var("TWILIO_ACCOUNT_SID")?,
-                env::var("TWILIO_AUTH_TOKEN")?,
-            ),
-        }
+    } else if user.sub_tier == Some("tier 3".to_string()) || !user.phone_number.starts_with("+1") {
+        state.user_core.get_twilio_credentials(user.id)?
     } else {
         (
             env::var("TWILIO_ACCOUNT_SID")?,
@@ -776,16 +570,8 @@ pub async fn delete_twilio_message(
             env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
                 .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
         )
-    } else if user.sub_tier == Some("tier 3".to_string()) || is_self_hosted {
+    } else if user.sub_tier == Some("tier 3".to_string()) || is_self_hosted || !user.phone_number.starts_with("+1") {
         state.user_core.get_twilio_credentials(user.id)?
-    } else if !user.phone_number.starts_with("+1") {
-        match state.user_core.get_twilio_credentials(user.id) {
-            Ok(credentials) => credentials,
-            Err(_) => (
-                env::var("TWILIO_ACCOUNT_SID")?,
-                env::var("TWILIO_AUTH_TOKEN")?,
-            ),
-        }
     } else {
         (
             env::var("TWILIO_ACCOUNT_SID")?,
@@ -852,27 +638,25 @@ pub async fn send_conversation_message(
     }
     let is_self_hosted = user.sub_tier == Some("self_hosted".to_string());
 
-    if is_self_hosted {
-        if let Ok((device_id, api_key)) = state.user_core.get_textbee_credentials(user.id) {
-            if media_sid.is_none() {
-                // Use TextBee for text-only messages
-                let recipient = "".to_string(); // TODO change this then to fetch the number
-                let body_clone = body.to_string();
-                let device_id_clone = device_id.clone();
-                let api_key_clone = api_key.clone();
+    if let Ok((device_id, api_key)) = state.user_core.get_textbee_credentials(user.id) {
+        if media_sid.is_none() {
+            // Use TextBee for text-only messages
+            let recipient = user.preferred_number.clone().unwrap();
+            let body_clone = body.to_string();
+            let device_id_clone = device_id.clone();
+            let api_key_clone = api_key.clone();
 
-                spawn(async move {
-                    if let Err(e) = send_textbee_sms(device_id_clone, api_key_clone, recipient, body_clone).await {
-                        tracing::error!("Failed to send TextBee SMS: {}", e);
-                    }
-                });
+            spawn(async move {
+                if let Err(e) = send_textbee_sms(device_id_clone, api_key_clone, recipient, body_clone).await {
+                    tracing::error!("Failed to send TextBee SMS: {}", e);
+                }
+            });
 
-                return Ok("".to_string());
-            }
-            // If media is present, fall back to Twilio
+            return Ok("".to_string());
         }
-        // If TextBee not set up or failed, fall back to Twilio
+        // If media is present, fall back to Twilio
     }
+    // If TextBee not set up or failed, fall back to Twilio
 
     if user.id == 1 {
         println!("user sub: {:#?}", user.sub_tier);
@@ -886,16 +670,8 @@ pub async fn send_conversation_message(
             env::var(format!("TWILIO_AUTH_TOKEN_{}", user.id))
                 .map_err(|_| format!("Missing TWILIO_AUTH_TOKEN_{}", user.id))?,
         )
-    } else if user.sub_tier == Some("tier 3".to_string()) || is_self_hosted {
+    } else if user.sub_tier == Some("tier 3".to_string()) || is_self_hosted || !user.phone_number.starts_with("+1") {
         state.user_core.get_twilio_credentials(user.id)?
-    } else if !user.phone_number.starts_with("+1") {
-        match state.user_core.get_twilio_credentials(user.id) {
-            Ok(credentials) => credentials,
-            Err(_) => (
-                env::var("TWILIO_ACCOUNT_SID")?,
-                env::var("TWILIO_AUTH_TOKEN")?,
-            ),
-        }
     } else {
         (
             env::var("TWILIO_ACCOUNT_SID")?,

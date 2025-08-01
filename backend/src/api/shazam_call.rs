@@ -346,20 +346,6 @@ pub async fn send_shazam_answer_to_user(
         .get_conversation(&user, sender_number.to_string())
         .await?;
 
-    // Verify the conversation is still active by fetching participants
-    let participants = crate::api::twilio_utils::fetch_conversation_participants(&user, &conversation.conversation_sid).await?;
-    
-    if participants.is_empty() {
-        tracing::error!("No active participants found in conversation {}", conversation.conversation_sid);
-        return Err("No active participants in conversation".into());
-    }
-
-    // Check if the user's number is still active in the conversation
-    let user_participant = participants.iter().find(|p| {
-        p.messaging_binding.as_ref()
-            .and_then(|b| b.address.as_ref())
-            .map_or(false, |addr| addr == &user.phone_number)
-    });
 
     if user_participant.is_none() {
         tracing::error!("User {} is no longer active in conversation {}", user.phone_number, conversation.conversation_sid);

@@ -6,42 +6,34 @@ use wasm_bindgen::JsCast;
 use crate::config;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::js_sys;
-
 #[derive(Deserialize, Clone, Debug)]
 struct TelegramStatus {
     connected: bool,
     status: String,
     created_at: i32,
 }
-
 #[derive(Deserialize)]
 struct TelegramConnectionResponse {
     login_url: String,
 }
-
 #[derive(Properties, PartialEq)]
 pub struct TelegramProps {
     pub user_id: i32,
     pub sub_tier: Option<String>,
     pub discount: bool,
 }
-
 #[function_component(TelegramConnect)]
 pub fn telegram_connect(props: &TelegramProps) -> Html {
     let connection_status = use_state(|| None::<TelegramStatus>);
     let login_link = use_state(|| None::<String>);
     let error = use_state(|| None::<String>);
     let is_connecting = use_state(|| false);
-
-    // Function to fetch Telegram status
     let fetch_status = {
         let connection_status = connection_status.clone();
         let error = error.clone();
-
         Callback::from(move |_| {
             let connection_status = connection_status.clone();
             let error = error.clone();
-
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
                 .flatten()
@@ -73,8 +65,6 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
             }
         })
     };
-
-    // Effect to fetch initial status
     {
         let fetch_status = fetch_status.clone();
         use_effect_with_deps(move |_| {
@@ -82,20 +72,16 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
             || ()
         }, ());
     }
-
-    // Function to start Telegram connection
     let start_connection = {
         let is_connecting = is_connecting.clone();
         let login_link = login_link.clone();
         let error = error.clone();
         let fetch_status = fetch_status.clone();
-
         Callback::from(move |_| {
             let is_connecting = is_connecting.clone();
             let login_link = login_link.clone();
             let error = error.clone();
             let fetch_status = fetch_status.clone();
-
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
                 .flatten()
@@ -114,12 +100,9 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                                 Ok(connection_response) => {
                                     login_link.set(Some(connection_response.login_url));
                                     error.set(None);
-
-                                    // Start polling for status
-                                    let poll_interval = 5000; // 5 seconds
-                                    let poll_duration = 300000; // 5 minutes
+                                    let poll_interval = 5000;
+                                    let poll_duration = 300000;
                                     let start_time = js_sys::Date::now();
-
                                     fn create_poll_fn(
                                         start_time: f64,
                                         poll_duration: i32,
@@ -136,14 +119,11 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                                                 error.set(Some("Connection attempt timed out".to_string()));
                                                 return;
                                             }
-
                                             fetch_status.emit(());
-
                                             let is_connecting = is_connecting.clone();
                                             let login_link = login_link.clone();
                                             let error = error.clone();
                                             let fetch_status = fetch_status.clone();
-
                                             let poll_fn = create_poll_fn(
                                                 start_time,
                                                 poll_duration,
@@ -160,7 +140,6 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                                             handle.forget();
                                         })
                                     }
-
                                     let poll_fn = create_poll_fn(
                                         start_time,
                                         poll_duration,
@@ -187,16 +166,12 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
             }
         })
     };
-
-    // Function to disconnect Telegram
     let disconnect = {
         let connection_status = connection_status.clone();
         let error = error.clone();
-
         Callback::from(move |_| {
             let connection_status = connection_status.clone();
             let error = error.clone();
-
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
                 .flatten()
@@ -225,7 +200,6 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
             }
         })
     };
-
     if props.user_id != 1 {
         return html! {
             <div class="telegram-connect">
@@ -239,7 +213,7 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                     <p>{"This feature is currently in beta testing and not yet available for general use."}</p>
                 </div>
                 <style>
-                    {".restricted-access { 
+                    {".restricted-access {
                         padding: 1rem;
                         color: #999;
                         text-align: center;
@@ -251,7 +225,6 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
             </div>
         };
     }
-
     html! {
         <div class="telegram-connect">
             <div class="service-header">
@@ -271,7 +244,6 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                     {
                         let display = element.get_attribute("style")
                             .unwrap_or_else(|| "display: none".to_string());
-                        
                         if display.contains("none") {
                             let _ = element.set_attribute("style", "display: block");
                         } else {
@@ -282,10 +254,8 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                     {"ⓘ"}
                 </button>
             </div>
-
             <div id="telegram-info" class="info-section" style="display: none">
                 <h4>{"How It Works"}</h4>
-
                 <div class="info-subsection">
                     <h5>{"SMS and Voice Call Tools"}</h5>
                     <ul>
@@ -295,7 +265,6 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         <li>{"Send Message: Send a Telegram message to a specific recipient (will ask for confirmation before sending)"}</li>
                     </ul>
                 </div>
-
                 <div class="info-subsection security-notice">
                     <h5>{"Security & Privacy"}</h5>
                     <p>{"Your security is our priority. Here's how we protect your messages:"}</p>
@@ -305,7 +274,6 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                     <p class="security-recommendation">{"Note: While we maintain high security standards, SMS and voice calls use standard cellular networks. For maximum privacy, use Telegram directly for sensitive communications."}</p>
                 </div>
             </div>
-
             if let Some(status) = (*connection_status).clone() {
                 <div class="connection-status">
                     if status.connected {
@@ -329,6 +297,44 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                                 <button onclick={disconnect} class="disconnect-button">
                                     {"Disconnect"}
                                 </button>
+                                {
+                                    if props.user_id == 1 {
+                                        html! {
+                                            <button onclick={{
+                                                let fetch_status = fetch_status.clone();
+                                                Callback::from(move |_| {
+                                                    let fetch_status = fetch_status.clone();
+                                                    if let Some(token) = window()
+                                                        .and_then(|w| w.local_storage().ok())
+                                                        .flatten()
+                                                        .and_then(|storage| storage.get_item("token").ok())
+                                                        .flatten()
+                                                    {
+                                                        spawn_local(async move {
+                                                            match Request::post(&format!("{}/api/auth/telegram/resync", config::get_backend_url()))
+                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                .send()
+                                                                .await
+                                                            {
+                                                                Ok(_) => {
+                                                                    web_sys::console::log_1(&"Telegram resync initiated".into());
+                                                                    fetch_status.emit(());
+                                                                }
+                                                                Err(e) => {
+                                                                    web_sys::console::error_1(&format!("Failed to resync Telegram: {}", e).into());
+                                                                }
+                                                            }
+                                                        });
+                                                    }
+                                                })
+                                            }} class="resync-button">
+                                                {"Resync Telegram"}
+                                            </button>
+                                        }
+                                    } else {
+                                        html! {}
+                                    }
+                                }
                             </div>
                             {
                                 if props.user_id == 1 {
@@ -390,7 +396,6 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                                                                 "chat_name": "Test User",
                                                                 "message": "Test message from Lightfriend"
                                                             });
-
                                                             match Request::post(&format!("{}/api/telegram/send", config::get_backend_url()))
                                                                 .header("Authorization", &format!("Bearer {}", token))
                                                                 .header("Content-Type", "application/json")
@@ -431,7 +436,6 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                                                             let request_body = serde_json::json!({
                                                                 "search_term": "Luukas"
                                                             });
-
                                                             match Request::post(&format!("{}/api/telegram/search-rooms", config::get_backend_url()))
                                                                 .header("Authorization", &format!("Bearer {}", token))
                                                                 .header("Content-Type", "application/json")
@@ -498,13 +502,11 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
             } else {
                 <p>{"Loading connection status..."}</p>
             }
-
             if let Some(error_msg) = (*error).clone() {
                 <div class="error-message">
                     {error_msg}
                 </div>
             }
-
             <style>
                 {r#"
                     .telegram-connect {
@@ -516,45 +518,37 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         margin: 1rem 0;
                         transition: all 0.3s ease;
                     }
-
                     .telegram-connect:hover {
                         transform: translateY(-2px);
                         border-color: rgba(0, 136, 204, 0.4);
                         box-shadow: 0 4px 20px rgba(0, 136, 204, 0.1);
                     }
-
                     .service-header {
                         display: flex;
                         align-items: center;
                         gap: 1rem;
                         flex-wrap: wrap;
                     }
-
                     .service-name {
                         flex: 1;
                         min-width: 150px;
                     }
-
                     .service-status {
                         white-space: nowrap;
                     }
-
                     .service-name {
                         display: flex;
                         align-items: center;
                         gap: 0.5rem;
                     }
-
                     .service-name img {
                         width: 24px !important;
                         height: 24px !important;
                     }
-
                     .service-status {
                         color: #4CAF50;
                         font-weight: 500;
                     }
-
                     .info-button {
                         background: none;
                         border: none;
@@ -571,17 +565,14 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         transition: all 0.3s ease;
                         margin-left: auto;
                     }
-
                     .info-button:hover {
                         background: rgba(0, 136, 204, 0.1);
                         transform: scale(1.1);
                     }
-
                     .login-link-container {
                         margin: 1.5rem 0;
                         text-align: center;
                     }
-
                     .telegram-login-button {
                         display: inline-block;
                         background: #0088cc;
@@ -593,24 +584,20 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         margin: 1rem 0;
                         transition: all 0.3s ease;
                     }
-
                     .telegram-login-button:hover {
                         background: #0077b3;
                         transform: translateY(-2px);
                         box-shadow: 0 4px 12px rgba(0, 136, 204, 0.3);
                     }
-
                     .instruction {
                         color: #999;
                         margin-top: 0.5rem;
                         font-size: 0.9rem;
                     }
-
                     .loading-container {
                         text-align: center;
                         margin: 2rem 0;
                     }
-
                     .loading-spinner {
                         display: inline-block;
                         width: 40px;
@@ -621,20 +608,31 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         animation: spin 1s ease-in-out infinite;
                         margin: 1rem auto;
                     }
-
                     .button-group {
                         display: flex;
                         flex-direction: column;
                         gap: 1rem;
                         margin-bottom: 1rem;
                     }
-
                     @media (min-width: 768px) {
                         .button-group {
                             flex-direction: row;
                         }
                     }
-
+                    .resync-button {
+                        background: linear-gradient(45deg, #0088cc, #0099dd);
+                        color: white;
+                        border: none;
+                        padding: 0.8rem 1.5rem;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        flex: 1;
+                    }
+                    .resync-button:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 20px rgba(0, 136, 204, 0.3);
+                    }
                     .connect-button, .disconnect-button {
                         background: #0088cc;
                         color: white;
@@ -645,25 +643,21 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         transition: all 0.3s ease;
                         margin-top: 1rem;
                     }
-
                     .disconnect-button {
                         background: transparent;
                         border: 1px solid rgba(255, 99, 71, 0.3);
                         color: #FF6347;
                     }
-
                     .disconnect-button:hover {
                         background: rgba(255, 99, 71, 0.1);
                         border-color: rgba(255, 99, 71, 0.5);
                         transform: translateY(-2px);
                     }
-
                     .connect-button:hover {
                         background: #0077b3;
                         transform: translateY(-2px);
                         box-shadow: 0 4px 12px rgba(0, 136, 204, 0.3);
                     }
-
                     .error-message {
                         color: #FF4B4B;
                         background: rgba(255, 75, 75, 0.1);
@@ -672,7 +666,6 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         padding: 1rem;
                         margin-top: 1rem;
                     }
-
                     .sync-indicator {
                         display: flex;
                         align-items: center;
@@ -682,7 +675,6 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         margin-bottom: 1rem;
                         color: #0088cc;
                     }
-
                     .sync-spinner {
                         display: inline-block;
                         width: 20px;
@@ -693,7 +685,6 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         animation: spin 1s ease-in-out infinite;
                         margin-right: 10px;
                     }
-
                     .test-button {
                         background: linear-gradient(45deg, #4CAF50, #45a049);
                         color: white;
@@ -706,30 +697,24 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         transition: all 0.3s ease;
                         margin-top: 1rem;
                     }
-
                     .test-button:hover {
                         transform: translateY(-2px);
                         box-shadow: 0 4px 20px rgba(76, 175, 80, 0.3);
                     }
-
                     .test-send-button {
                         background: linear-gradient(45deg, #FF8C00, #FFA500);
                         margin-top: 0.5rem;
                     }
-
                     .test-send-button:hover {
                         box-shadow: 0 4px 20px rgba(255, 140, 0, 0.3);
                     }
-
                     .test-search-button {
                         background: linear-gradient(45deg, #9C27B0, #BA68C8);
                         margin-top: 0.5rem;
                     }
-
                     .test-search-button:hover {
                         box-shadow: 0 4px 20px rgba(156, 39, 176, 0.3);
                     }
-
                     .upgrade-prompt {
                         background: rgba(0, 136, 204, 0.05);
                         border: 1px solid rgba(0, 136, 204, 0.1);
@@ -738,13 +723,11 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         text-align: center;
                         margin: 0.8rem 0;
                     }
-
                     .upgrade-content h3 {
                         color: #0088cc;
                         margin-bottom: 1rem;
                         font-size: 1.2rem;
                     }
-
                     .upgrade-button {
                         display: inline-block;
                         background: #0088cc;
@@ -756,29 +739,24 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         transition: all 0.3s ease;
                         margin-top: 1rem;
                     }
-
                     .upgrade-button:hover {
                         background: #0077b3;
                         transform: translateY(-2px);
                         box-shadow: 0 4px 12px rgba(0, 136, 204, 0.3);
                     }
-
                     @keyframes spin {
                         to { transform: rotate(360deg); }
                     }
-
                     .security-notice {
                         background: rgba(0, 136, 204, 0.1);
                         padding: 1.2rem;
                         border-radius: 8px;
                         border: 1px solid rgba(0, 136, 204, 0.2);
                     }
-
                     .security-notice p {
                         margin: 0 0 1rem 0;
                         color: #CCC;
                     }
-
                     .security-recommendation {
                         font-style: italic;
                         color: #999 !important;

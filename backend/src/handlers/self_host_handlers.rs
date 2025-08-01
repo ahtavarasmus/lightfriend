@@ -185,7 +185,6 @@ pub async fn update_textbee_creds(
     auth_user: AuthUser,
     Json(req): Json<UpdateTextBeeCredsRequest>,
 ) -> Result<StatusCode, (StatusCode, Json<serde_json::Value>)> {
-    println!("here: {}", &req.textbee_device_id);
     match state.user_core.update_textbee_credentials(auth_user.user_id, &req.textbee_device_id, &req.textbee_api_key) {
         Ok(_) => {
             println!("Successfully updated TextBee credentials for user: {}", auth_user.user_id);

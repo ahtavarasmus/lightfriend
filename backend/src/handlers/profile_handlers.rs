@@ -8,6 +8,16 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
+pub struct ProactiveAgentEnabledRequest {
+    enabled: bool,
+}
+
+#[derive(Serialize)]
+pub struct ProactiveAgentEnabledResponse {
+    enabled: bool,
+}
+
+#[derive(Deserialize)]
 pub struct CriticalEnabledRequest {
     enabled: Option<String>,
 }
@@ -168,7 +178,12 @@ pub async fn get_profile(
                     } else {
                         "...".to_string()
                     };
-                    (Some(id), Some(masked_key))
+                    let masked_id= if id.len() >= 4 {
+                        format!("...{}", &id[id.len() - 4..])
+                    } else {
+                        "...".to_string()
+                    };
+                    (Some(masked_id), Some(masked_key))
                 },
                 Err(_) => (None, None),
             };
@@ -476,26 +491,6 @@ pub struct UpdateDigestsRequest {
     evening_digest_time: Option<String>,
 }
 
-pub async fn get_critical_enabled(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-) -> Result<Json<CriticalEnabledResponse>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_core.get_critical_enabled(auth_user.user_id) {
-        Ok(enabled) => {
-            Ok(Json(CriticalEnabledResponse{
-                enabled,
-            }))
-        },
-        Err(e) => {
-            tracing::error!("Failed to get critical enabled setting: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to get critical enabled setting: {}", e)}))
-            ))
-        }
-    }
-}
-
 
 pub async fn get_digests(
     State(state): State<Arc<AppState>>,
@@ -791,6 +786,68 @@ pub async fn update_critical_enabled(
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Failed to update critical enabled setting: {}", e)}))
+            ))
+        }
+    }
+}
+
+pub async fn get_critical_enabled(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<CriticalEnabledResponse>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_core.get_critical_enabled(auth_user.user_id) {
+        Ok(enabled) => {
+            Ok(Json(CriticalEnabledResponse{
+                enabled,
+            }))
+        },
+        Err(e) => {
+            tracing::error!("Failed to get critical enabled setting: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to get critical enabled setting: {}", e)}))
+            ))
+        }
+    }
+}
+
+
+pub async fn update_proactive_agent_on(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(request): Json<ProactiveAgentEnabledRequest>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+
+    // Update critical enabled setting
+    match state.user_core.update_proactive_agent_on(auth_user.user_id, request.enabled) {
+        Ok(_) => Ok(Json(json!({
+            "message": "Proactive notifications setting updated successfully"
+        }))),
+        Err(e) => {
+            tracing::error!("Failed to update proactive notifications setting: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to update proactive notifications setting: {}", e)}))
+            ))
+        }
+    }
+}
+
+pub async fn get_proactive_agent_on(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+) -> Result<Json<ProactiveAgentEnabledResponse>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_core.get_proactive_agent_on(auth_user.user_id) {
+        Ok(enabled) => {
+            Ok(Json(ProactiveAgentEnabledResponse{
+                enabled,
+            }))
+        },
+        Err(e) => {
+            tracing::error!("Failed to get critical enabled setting: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to get critical enabled setting: {}", e)}))
             ))
         }
     }

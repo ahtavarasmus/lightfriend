@@ -77,6 +77,58 @@ pub struct TwilioResponse {
     pub message: String,
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct TextBeeWebhookPayload {
+    pub device_id: String,  // Required for verification
+    pub sender: String,     // Maps to 'from'
+    pub recipient: String,  // Maps to 'to' (your device's number)
+    pub body: String,
+}
+
+pub async fn handle_textbee_sms(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<TextBeeWebhookPayload>,
+) -> (StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<TwilioResponse>) {
+    tracing::debug!("Received TextBee SMS from: {} to: {} via device: {}", payload.sender, payload.recipient, payload.device_id);
+
+    // Step 1: Find user by sender phone (from)
+    let user = match state.user_core.find_by_phone_number(&payload.sender) {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            tracing::error!("No user found for phone: {}", payload.sender);
+            return (StatusCode::NOT_FOUND, [(axum::http::header::CONTENT_TYPE, "application/json")], axum::Json(TwilioResponse { message: "User not found".to_string() }));
+        }
+        Err(e) => {
+            tracing::error!("Error finding user: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, [(axum::http::header::CONTENT_TYPE, "application/json")], axum::Json(TwilioResponse { message: "Internal error".to_string() }));
+        }
+    };
+
+    // Step 2: Verify device_id matches user's stored TextBee credentials
+    if let Ok((stored_device_id, _api_key)) = state.user_core.get_textbee_credentials(user.id) {
+        if payload.device_id != stored_device_id {
+            tracing::warn!("Device ID mismatch for user {}: expected {}, got {}", user.id, stored_device_id, payload.device_id);
+            return (StatusCode::FORBIDDEN, [(axum::http::header::CONTENT_TYPE, "application/json")], axum::Json(TwilioResponse { message: "Invalid request source".to_string() }));
+        }
+    } else {
+        tracing::error!("No TextBee credentials found for user {}", user.id);
+        return (StatusCode::FORBIDDEN, [(axum::http::header::CONTENT_TYPE, "application/json")], axum::Json(TwilioResponse { message: "No credentials configured".to_string() }));
+    }
+
+    // Step 3: Map to Twilio payload and proceed
+    let twilio_payload = TwilioWebhookPayload {
+        from: payload.sender,
+        to: payload.recipient,
+        body: payload.body,
+        num_media: None, 
+        media_url0: None,
+        media_content_type0: None,
+        message_sid: format!("tb_{}", Utc::now().timestamp()),  // Fake SID
+    };
+
+    handle_incoming_sms(State(state), Form(twilio_payload)).await
+}
+
 
 // New wrapper handler for the regular SMS endpoint
 pub async fn handle_regular_sms(
@@ -164,7 +216,6 @@ pub async fn handle_incoming_sms(
     // Process SMS in the background
     tokio::spawn(async move {
         let result = process_sms(&state, payload.clone(), false).await;
-        
         if result.0 != StatusCode::OK {
             tracing::error!("Background SMS processing failed with status: {:?}", result.0);
             tracing::error!("Error response: {:?}", result.1);
@@ -470,6 +521,7 @@ pub async fn process_sms(
         crate::tool_call_utils::email::get_fetch_specific_email_tool(),
         crate::tool_call_utils::management::get_delete_sms_conversation_history_tool(),
         crate::tool_call_utils::management::get_create_waiting_check_tool(),
+        crate::tool_call_utils::management::get_update_monitoring_status_tool(),
         crate::tool_call_utils::internet::get_scan_qr_code_tool(),
         crate::tool_call_utils::internet::get_ask_perplexity_tool(),
         crate::tool_call_utils::internet::get_weather_tool(),
@@ -811,6 +863,17 @@ pub async fn process_sms(
                             tool_answers.insert(tool_call_id, "Sorry, I couldn't create a waiting check. (Contact rasmus@ahtava.com pls:D)".to_string());
                         }
                     }
+                } else if name == "update_monitoring_status" {
+                    tracing::debug!("Executing update_monitoring_status tool call");
+                    match crate::tool_call_utils::management::handle_set_proactive_agent(&state, user.id, arguments).await {
+                        Ok(answer) => {
+                            tool_answers.insert(tool_call_id, answer);
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to toggle monitoring status: {}", e);
+                            tool_answers.insert(tool_call_id, "Sorry, I failed to toggle monitoring status. (Contact rasmus@ahtava.com pls:D)".to_string());
+                        }
+                    }
                 } else if name == "create_calendar_event" {
                     tracing::debug!("Executing create_calendar_event tool call");
                     match crate::tool_call_utils::calendar::handle_create_calendar_event(
@@ -973,19 +1036,6 @@ pub async fn process_sms(
                     tracing::debug!("Executing scan_qr_code tool call with url: {:#?}", image_url);
                     let response = crate::tool_call_utils::internet::handle_qr_scan(image_url.as_deref()).await;
                     tool_answers.insert(tool_call_id, response);
-                } else if name == "delete_sms_conversation_history" {
-                    tracing::debug!("Executing delete_sms_conversation_history tool call");
-                    match crate::api::twilio_utils::delete_bot_conversations(&state, &user.phone_number, &user).await {
-                        Ok(_) => {
-                            tool_answers.insert(tool_call_id, "Successfully deleted all bot conversations.".to_string());
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to delete bot conversations: {}", e);
-                            tool_answers.insert(tool_call_id, 
-                                format!("Failed to delete conversations: {}", e)
-                            );
-                        }
-                    }
                 } else if name == "fetch_calendar_events" {
                     tracing::debug!("Executing fetch_calendar_events tool call");
                     let response = crate::tool_call_utils::calendar::handle_fetch_calendar_events(
