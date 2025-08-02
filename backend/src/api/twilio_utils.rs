@@ -622,6 +622,7 @@ pub async fn send_conversation_message(
         encrypted_content: body.clone().to_string(),
         tool_name: None,
         tool_call_id: None,
+        tool_calls_json: None,
         created_at: chrono::Utc::now().timestamp() as i32,
         conversation_id: "".to_string(),
     };

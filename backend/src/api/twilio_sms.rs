@@ -303,6 +303,7 @@ pub async fn process_sms(
         encrypted_content: payload.body.clone(),
         tool_name: None,
         tool_call_id: None,
+        tool_calls_json: None,
         created_at: current_time,
         conversation_id: "".to_string(),
     };
@@ -680,6 +681,7 @@ pub async fn process_sms(
                         .clone()
                         .unwrap_or_else(|| "_tool_call".to_string())),
                     tool_call_id: Some(tool_call.id.clone()),
+                    tool_calls_json: None,
                     created_at: tool_call_time,
                     conversation_id: "".to_string(),
                 };
@@ -888,7 +890,8 @@ pub async fn process_sms(
                                 role: "assistant".to_string(),
                                 encrypted_content: twilio_response.message.clone(),
                                 tool_name: Some("create_calendar_event".to_string()),
-                                tool_call_id: Some(tool_call.id.clone()),
+                                tool_call_id: Some(tool_call.id.clone()), 
+                                tool_calls_json: None,
                                 created_at: chrono::Utc::now().timestamp() as i32,
                                 conversation_id: "".to_string(),
                             };
@@ -935,6 +938,7 @@ pub async fn process_sms(
                                 encrypted_content: twilio_response.message.clone(),
                                 tool_name: Some("send_whatsapp_message".to_string()),
                                 tool_call_id: Some(tool_call.id.clone()),
+                                tool_calls_json: None,
                                 created_at: chrono::Utc::now().timestamp() as i32,
                                 conversation_id: "".to_string(),
                             };
@@ -964,6 +968,7 @@ pub async fn process_sms(
                                 encrypted_content: twilio_response.message.clone(),
                                 tool_name: Some("send_telegram_message".to_string()),
                                 tool_call_id: Some(tool_call.id.clone()),
+                                tool_calls_json: None,
                                 created_at: chrono::Utc::now().timestamp() as i32,
                                 conversation_id: "".to_string(),
                             };
@@ -1093,6 +1098,7 @@ pub async fn process_sms(
                     encrypted_content: tool_response.clone(),
                     tool_name: None, // We could store this if needed
                     tool_call_id: Some(tool_call_id.clone()),
+                    tool_calls_json: None,
                     created_at: current_time,
                     conversation_id: "".to_string(),
                 };
@@ -1213,6 +1219,7 @@ pub async fn process_sms(
         encrypted_content: final_response_with_notice.clone(),
         tool_name: None,
         tool_call_id: None,
+        tool_calls_json: None,
         created_at: current_time,
         conversation_id: "".to_string(),
     };

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use openai_api_rs::v1::{
     chat_completion,
     types,
+    common::GPT4_O,
 };
 use chrono::Timelike;
 use crate::tool_call_utils::utils::create_openai_client;
@@ -170,7 +171,9 @@ pub async fn check_waiting_check_match(
         },
     }];
 
-    let request = chat_completion::ChatCompletionRequest::new("openai/gpt-4o-mini".to_string(), messages)
+    let request = chat_completion::ChatCompletionRequest::new(
+        GPT4_O.to_string(),
+        messages)
         .tools(tools)
         .tool_choice(chat_completion::ToolChoiceType::Required)
         .temperature(0.2)
@@ -301,7 +304,9 @@ pub async fn check_message_importance(
         },
     }];
 
-    let request = chat_completion::ChatCompletionRequest::new("openai/gpt-4o".to_string(), messages)
+    let request = chat_completion::ChatCompletionRequest::new(
+        GPT4_O.to_string(),
+        messages)
         .tools(tools)
         .tool_choice(chat_completion::ToolChoiceType::Required)
         // Lower temperature for more deterministic classification
@@ -1091,7 +1096,7 @@ pub async fn generate_digest(
     }];
 
     let request = chat_completion::ChatCompletionRequest::new(
-        "openai/gpt-4o".to_string(),
+        GPT4_O.to_string(),
         messages,
     )
     .tools(tools)
@@ -1230,6 +1235,7 @@ pub async fn send_notification(
                         encrypted_content: first_msg,
                         tool_name: None,
                         tool_call_id: None,
+                        tool_calls_json: None,
                         created_at: current_time,
                         conversation_id: "".to_string(),
                     };
@@ -1240,6 +1246,7 @@ pub async fn send_notification(
                         encrypted_content: notification.to_string(),
                         tool_name: None,
                         tool_call_id: None,
+                        tool_calls_json: None,
                         created_at: current_time,
                         conversation_id: "".to_string(),
                     };
@@ -1309,6 +1316,7 @@ pub async fn send_notification(
                         encrypted_content: notification.to_string(),
                         tool_name: None,
                         tool_call_id: None,
+                        tool_calls_json: None,
                         created_at: current_time,
                         conversation_id: "".to_string(),
                     };

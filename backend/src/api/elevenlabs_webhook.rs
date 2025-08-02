@@ -314,6 +314,7 @@ pub async fn elevenlabs_webhook(
                 encrypted_content: format!("[CALL_START] {}", start_rfc3339),
                 tool_name: None,
                 tool_call_id: None,
+                tool_calls_json: None,
                 created_at: start_epoch,
             };
 
@@ -324,6 +325,7 @@ pub async fn elevenlabs_webhook(
                 encrypted_content: format!("[CALL_SUMMARY] {}", call_summary),
                 tool_name: None,
                 tool_call_id: None,
+                tool_calls_json: None,
                 created_at: end_epoch,
             };
 

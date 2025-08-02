@@ -446,6 +446,7 @@ pub struct EmailSelectResponse {
 
 pub async fn select_most_relevant_email(
     client: &OpenAIClient,
+    model: String,
     query: &str,
     emails: &str,
 ) -> Result<(String, Option<String>), Box<dyn std::error::Error>> {
@@ -489,7 +490,7 @@ pub async fn select_most_relevant_email(
     ];
 
     let select_req = chat_completion::ChatCompletionRequest::new(
-        "openai/gpt-4o-mini".to_string(),
+        model,
         select_messages,
     )
     .tools(select_tools)

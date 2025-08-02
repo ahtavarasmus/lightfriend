@@ -458,6 +458,7 @@ pub struct MessageHistory {
     pub tool_call_id: Option<String>,  // ID of the tool call if it's a tool response
     pub created_at: i32,  // Unix timestamp
     pub conversation_id: String,  // To group messages in the same conversation
+    pub tool_calls_json: Option<String>, 
 }
 
 #[derive(Insertable, Debug)]
@@ -470,4 +471,5 @@ pub struct NewMessageHistory {
     pub tool_call_id: Option<String>,
     pub created_at: i32,
     pub conversation_id: String,
+    pub tool_calls_json: Option<String>, 
 }

@@ -102,6 +102,10 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     for user in users {
                         match state.user_repository.has_valid_subscription_tier(user.id, "tier 2") {
                             Ok(true) => {
+                                if !state.user_core.get_proactive_agent_on(user.id).unwrap_or(true) {
+                                    tracing::debug!("User {} does not have monitoring enabled", user.id);
+                                    continue;
+                                }
                                 subscribed_users.push(user);
                             },
                             Ok(false) => {
@@ -523,6 +527,11 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     for user in users {
                         // Check if user has a tier 2 subscription
                         if let Ok(Some(tier)) = state.user_repository.get_subscription_tier(user.id) {
+
+                            if !state.user_core.get_proactive_agent_on(user.id).unwrap_or(true) {
+                                tracing::debug!("User {} does not have monitoring enabled", user.id);
+                                continue;
+                            }
                             if tier == "tier 2" {
                                 debug!("Checking morning digest for user {} with tier 2 subscription", user.id);
                                 if let Err(e) = crate::proactive::utils::check_morning_digest(&state, user.id).await {
@@ -577,7 +586,8 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                 Ok(users) => users.into_iter().filter(|user| {
                     // Check subscription and calendar status
                     matches!(state.user_repository.has_valid_subscription_tier(user.id, "tier 2"), Ok(true)) &&
-                    matches!(state.user_repository.has_active_google_calendar(user.id), Ok(true))
+                    matches!(state.user_repository.has_active_google_calendar(user.id), Ok(true)) &&
+                    matches!(state.user_core.get_proactive_agent_on(user.id), Ok(true))
                 }).collect::<Vec<_>>(),
                 Err(e) => {
                     error!("Failed to fetch users: {}", e);

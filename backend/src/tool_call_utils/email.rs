@@ -151,7 +151,9 @@ pub async fn handle_fetch_specific_email(state: &Arc<AppState>, user_id: i32, qu
             }
 
             // Use LLM to select the most relevant email
-            match crate::tool_call_utils::utils::select_most_relevant_email(&client, query, &formatted_emails).await {
+            match crate::tool_call_utils::utils::select_most_relevant_email(&client, 
+                openai_api_rs::v1::common::GPT4_O.to_string(),
+                query, &formatted_emails).await {
                 Ok((selected_email_id, _)) => selected_email_id,
                 Err(e) => {
                     eprintln!("Failed to select relevant email: {}", e);

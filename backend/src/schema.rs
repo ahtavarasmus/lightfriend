@@ -109,6 +109,7 @@ diesel::table! {
         tool_call_id -> Nullable<Text>,
         created_at -> Integer,
         conversation_id -> Text,
+        tool_calls_json -> Nullable<Text>,
     }
 }
 

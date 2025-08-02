@@ -118,6 +118,7 @@ impl UserRepository {
             encrypted_content,
             tool_name: new_message.tool_name.clone(),
             tool_call_id: new_message.tool_call_id.clone(),
+            tool_calls_json: new_message.tool_calls_json.clone(),
             created_at: new_message.created_at,
             conversation_id: new_message.conversation_id.clone(),
         };
