@@ -891,7 +891,7 @@ pub async fn handle_bridge_message(
            sender_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) {
             
             // Check if user has enough credits for notification
-            match crate::utils::usage::check_user_credits(&state, &user, "notification", None).await {
+            match crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await {
                 Ok(()) => {
                     // User has enough credits, proceed with notification
                     let state_clone = state.clone();
@@ -911,10 +911,6 @@ pub async fn handle_bridge_message(
                             Some(first_message),
                         ).await;
                         
-                        // Deduct credits after successful notification
-                        if let Err(e) = crate::utils::usage::deduct_user_credits(&state_clone, user_id, "notification", None) {
-                            tracing::error!("Failed to deduct notification credits for user {}: {}", user_id, e);
-                        }
                     });
                     return;
                 }

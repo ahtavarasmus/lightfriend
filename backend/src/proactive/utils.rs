@@ -214,7 +214,7 @@ pub struct MessageInfo {
     pub sender: String,
     pub content: String,
     pub timestamp_rfc: String,
-    pub platform: String, // e.g., "email", "whatsapp", etc.
+    pub platform: String, // e.g., "email", "whatsapp", "telegram", etc.
 }
 
 #[derive(Debug, Serialize)]
@@ -532,6 +532,38 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 }
             }
 
+            // Fetch Telegram messages
+            if let Some(bridge) = state.user_repository.get_bridge(user_id, "telegram")? {
+                match crate::utils::bridge::fetch_bridge_messages("telegram", state, user_id, start_timestamp, true).await {
+                    Ok(telegram_messages) => {
+                        // Convert TelegramMessage to MessageInfo and add to messages
+                        let telegram_infos: Vec<MessageInfo> = telegram_messages.into_iter()
+                            .map(|msg| MessageInfo {
+                                sender: msg.room_name,
+                                content: msg.content,
+                                timestamp_rfc: msg.formatted_timestamp,
+                                platform: "telegram".to_string(),
+                            })
+                            .collect();
+                        
+                        tracing::debug!(
+                            "Fetched {} Telegram messages from the last {} hours for digest",
+                            telegram_infos.len(),
+                            hours_since_prev
+                        );
+
+                        // Extend messages with Telegram messages
+                        messages.extend(telegram_infos);
+
+                        // Sort all messages by timestamp (most recent first)
+                        messages.sort_by(|a, b| b.timestamp_rfc.cmp(&a.timestamp_rfc));
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to fetch Telegram messages for digest: {}", e);
+                    }
+                }
+            }
+
             // Log total number of messages
             tracing::debug!(
                 "Total {} messages collected for digest",
@@ -730,6 +762,38 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                     }
                     Err(e) => {
                         tracing::error!("Failed to fetch WhatsApp messages for digest: {}", e);
+                    }
+                }
+            }
+
+            // Fetch Telegram messages
+            if let Some(bridge) = state.user_repository.get_bridge(user_id, "telegram")? {
+                match crate::utils::bridge::fetch_bridge_messages("telegram", state, user_id, start_timestamp, true).await {
+                    Ok(telegram_messages) => {
+                        // Convert TelegramMessage to MessageInfo and add to messages
+                        let telegram_infos: Vec<MessageInfo> = telegram_messages.into_iter()
+                            .map(|msg| MessageInfo {
+                                sender: msg.room_name,
+                                content: msg.content,
+                                timestamp_rfc: msg.formatted_timestamp,
+                                platform: "telegram".to_string(),
+                            })
+                            .collect();
+                        
+                        tracing::debug!(
+                            "Fetched {} Telegram messages from the last {} hours for digest",
+                            telegram_infos.len(),
+                            hours_since_prev
+                        );
+
+                        // Extend messages with Telegram messages
+                        messages.extend(telegram_infos);
+
+                        // Sort all messages by timestamp (most recent first)
+                        messages.sort_by(|a, b| b.timestamp_rfc.cmp(&a.timestamp_rfc));
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to fetch Telegram messages for digest: {}", e);
                     }
                 }
             }
@@ -951,6 +1015,38 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 }
             }
 
+            // Fetch Telegram messages
+            if let Some(bridge) = state.user_repository.get_bridge(user_id, "telegram")? {
+                match crate::utils::bridge::fetch_bridge_messages("telegram", state, user_id, start_timestamp, true).await {
+                    Ok(telegram_messages) => {
+                        // Convert Telegram to MessageInfo and add to messages
+                        let telegram_infos: Vec<MessageInfo> = telegram_messages.into_iter()
+                            .map(|msg| MessageInfo {
+                                sender: msg.room_name,
+                                content: msg.content,
+                                timestamp_rfc: msg.formatted_timestamp,
+                                platform: "telegram".to_string(),
+                            })
+                            .collect();
+                        
+                        tracing::debug!(
+                            "Fetched {} Telegram messages from the last {} hours for digest",
+                            telegram_infos.len(),
+                            hours_since_prev
+                        );
+
+                        // Extend messages with Telegram messages
+                        messages.extend(telegram_infos);
+
+                        // Sort all messages by timestamp (most recent first)
+                        messages.sort_by(|a, b| b.timestamp_rfc.cmp(&a.timestamp_rfc));
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to fetch Telegram messages for digest: {}", e);
+                    }
+                }
+            }
+
             // Log total number of messages
             tracing::debug!(
                 "Total {} messages collected for digest",
@@ -1004,7 +1100,7 @@ Rules
 • Plain text only.
 • Start each item on a new line; you may prefix items with a hyphen (“-”) if helpful, but keep the newline.
 • Put truly critical or actionable items first.
-• Mention the platform (EMAIL / WHATSAPP / CALENDAR) only when it adds essential context.
+• Mention the platform (EMAIL / WHATSAPP / TELEGRAM / CALENDAR) only when it adds essential context.
 • Add timestamp to messages when it makes sense.
 • For calendar, include only events starting in the next few hours; mention next-day events if relevant, with brief clues about what they involve.
 • Tease information to encourage follow-ups, e.g., "Email from boss re: project deadline" instead of full message body.
@@ -1180,19 +1276,6 @@ pub async fn send_notification(
         }
     };
 
-    // Get the user's preferred number or default
-    let sender_number = match user.preferred_number.clone() {
-        Some(number) => {
-            tracing::info!("Using user's preferred number: {}", number);
-            number
-        }
-        None => {
-            let number = std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set");
-            tracing::info!("Using default SHAZAM_PHONE_NUMBER: {}", number);
-            number
-        }
-    };
-
     // Check user's notification preference from settings
     let notification_type = if content_type.contains("critical") {
         user_settings.critical_enabled.as_deref().unwrap_or("sms")
@@ -1202,10 +1285,13 @@ pub async fn send_notification(
 
     match notification_type {
         "call" => {
-            // For calls, we need a brief intro and detailed message
+            if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "noti_call", None).await {
+                tracing::warn!("User {} has insufficient credits: {}", user.id, e);
+                return;
+            }
 
             // Create dynamic variables (optional, can be customized based on needs)
-            let mut dynamic_vars = std::collections::HashMap::new();
+            let dynamic_vars = std::collections::HashMap::new();
 
             match crate::api::elevenlabs::make_notification_call(
                 &state.clone(),
@@ -1214,7 +1300,7 @@ pub async fn send_notification(
                     .unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set")),
                 content_type.clone(), // Notification type
                 first_message.clone().unwrap_or("Hello, I have a critical notification to tell you about".to_string()),
-                notification.clone().to_string(),
+                notification.to_string(),
                 user.id.to_string(),
                 user_settings.timezone,
             ).await {
@@ -1274,6 +1360,11 @@ pub async fn send_notification(
                     ) {
                         tracing::error!("Failed to log call notification usage: {}", e);
                     }
+
+                    // Deduct credits after successful notification
+                    if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "noti_call", None) {
+                        tracing::error!("Failed to deduct credits for user {} after call notification: {}", user_id, e);
+                    }
                 }
                 Err((_, json_err)) => {
                     tracing::error!("Failed to initiate call notification: {:?}", json_err);
@@ -1298,7 +1389,12 @@ pub async fn send_notification(
             }
         }
         _ => {
+
             // Default to SMS notification
+            if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await {
+                tracing::warn!("User {} has insufficient credits: {}", user.id, e);
+                return;
+            }
             match crate::api::twilio_utils::send_conversation_message(
                 &state,
                 &notification,
@@ -1340,6 +1436,10 @@ pub async fn send_notification(
                         None,
                     ) {
                         tracing::error!("Failed to log SMS notification usage: {}", e);
+                    }
+                    // Deduct credits after successful notification
+                    if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "noti_msg", None) {
+                        tracing::error!("Failed to deduct credits for user {} after SMS notification: {}", user_id, e);
                     }
                 }
                 Err(e) => {

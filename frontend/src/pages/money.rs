@@ -55,12 +55,12 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
         let user_id = user_id.clone();
         let subscription_type = subscription_type.clone();
         let selected_country = selected_country.clone();
-       
+      
         Callback::from(move |e: MouseEvent| {
             e.prevent_default();
             let user_id = user_id.clone();
             let subscription_type = subscription_type.clone();
-           
+          
             if subscription_type != "basic" && subscription_type != "oracle" && selected_country == "Other" {
                 if let Some(window) = web_sys::window() {
                     if !window.confirm_with_message(
@@ -72,7 +72,7 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
                     }
                 }
             }
-           
+          
             wasm_bindgen_futures::spawn_local(async move {
                 if let Some(token) = window()
                     .and_then(|w| w.local_storage().ok())
@@ -571,16 +571,18 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                             let sub_items = feature.sub_items.iter().map(|sub| html! { <li class="sub-item">{sub}</li> }).collect::<Vec<_>>();
                             vec![main_item].into_iter().chain(sub_items.into_iter())
                         }) }
-                        { if (props.subscription_type == "hosted" || props.subscription_type == "digital_detox") && props.selected_country != "US" {
-                            html! { <li>{"Required: Bring your own Twilio number. Pay Twilio directly (zero markups from us) and unlock service in whatever country you're in. Grab local numbers easily where we can't."}</li> }
+                        { if (props.subscription_type == "hosted" || props.subscription_type == "digital_detox") && props.selected_country == "Other" {
+                            html! { <li>{"Required: Bring your own number and unlock service in whatever country you're in. Checkout the guide below."}</li> }
+                        } else if (props.subscription_type == "hosted" || props.subscription_type == "digital_detox") && ["FI", "UK", "AU"].contains(&props.selected_country.as_str()) {
+                            html! { <li>{"Messages not included - buy credits ahead of time. Credits are used for sending messages, voice calls, notifications, and more."}</li> }
                         } else { html! {} }}
                     </ul>
                 </div>
                 {
-                    if (props.subscription_type == "hosted" || props.subscription_type == "digital_detox") && props.selected_country != "US" {
+                    if (props.subscription_type == "hosted" || props.subscription_type == "digital_detox") && props.selected_country == "Other" {
                         html! {
                             <div class="learn-more-section">
-                                <a href="/bring-own-number" class="learn-more-link">{"How to bring your own Twilio"}</a>
+                                <a href="/bring-own-number" class="learn-more-link">{"How to bring your own number"}</a>
                             </div>
                             }
                     } else {
@@ -596,12 +598,13 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
 pub struct FeatureListProps {
     pub selected_country: String,
 }
+
 #[function_component(FeatureList)]
 pub fn feature_list(props: &FeatureListProps) -> Html {
-    let base_messages_text: String = if props.selected_country == "US" {
-        "500 Messages per month".to_string()
-    } else {
-        "Bring your own twilio for messages".to_string()
+    let base_messages_text: String = match props.selected_country.as_str() {
+        "US" => "500 Messages per month included".to_string(),
+        "FI" | "UK" | "AU" => "Messages via prepaid credits".to_string(),
+        _ => "Bring your own Twilio for messages (pay Twilio directly)".to_string(),
     };
     let feature_css = r#"
     .feature-list {
@@ -627,13 +630,14 @@ pub fn feature_list(props: &FeatureListProps) -> Html {
         color: #e0e0e0;
         padding: 0.5rem 0;
         font-size: 1.1rem;
-        position: relative;
-        padding-left: 2rem;
+        display: flex;
+        align-items: center;
     }
-    .feature-list li::before {
-        content: "✅";
-        position: absolute;
-        left: 0;
+    .feature-list li i {
+        margin-right: 1rem;
+        color: #7EB2FF;
+        width: 1.2em; /* Fixed width for alignment */
+        text-align: center;
     }
     @media (max-width: 968px) {
         .feature-list {
@@ -648,25 +652,116 @@ pub fn feature_list(props: &FeatureListProps) -> Html {
             <style>{feature_css}</style>
             <h2>{"Included in All Plans"}</h2>
             <ul>
-                <li>{"Voice calling and SMS interface"}</li>
-                <li>{base_messages_text}</li>
-                <li>{"Buy Additional Messages (via Lightfriend or Twilio)"}</li>
-                <li>{"Perplexity AI Web Search"}</li>
-                <li>{"Weather Search and forecast of the next 6 hours"}</li>
-                <li>{"Photo Analysis & Translation (US & AUS only)"}</li>
-                <li>{"QR Code Scanning (US & AUS only)"}</li>
-                <li>{"Send, Fetch and Monitor WhatsApp Messages"}</li>
-                <li>{"Fetch and Monitor Emails"}</li>
-                <li>{"Fetch, Create and Monitor Calendar events"}</li>
-                <li>{"Fetch and Create Tasks and Ideas"}</li>
-                <li>{"24/7 Critical Message Monitoring"}</li>
-                <li>{"Morning, Day and Evening Digests"}</li>
-                <li>{"Custom Waiting Checks"}</li>
-                <li>{"Priority Sender Notifications"}</li>
-                <li>{"All Future Features Included"}</li>
-                <li>{"Priority Support (for paid plans)"}</li>
+                <li><i class="fas fa-phone"></i>{"Voice calling and SMS interface"}</li>
+                <li><i class="fas fa-comments"></i>{base_messages_text}</li>
+                <li><i class="fas fa-search"></i>{"Perplexity AI Web Search"}</li>
+                <li><i class="fas fa-cloud-sun"></i>{"Weather Search and forecast of the next 6 hours"}</li>
+                <li><i class="fas fa-image"></i>{"Photo Analysis & Translation (US & AUS only)"}</li>
+                <li><i class="fas fa-qrcode"></i>{"QR Code Scanning (US & AUS only)"}</li>
+                <li><i class="fab fa-whatsapp"></i>{"Send, Fetch and Monitor WhatsApp Messages"}</li>
+                <li><i class="fab fa-telegram"></i>{"Send, Fetch and Monitor Telegram Messages"}</li>
+                <li><i class="fas fa-envelope"></i>{"Fetch and Monitor Emails"}</li>
+                <li><i class="fas fa-calendar-days"></i>{"Fetch, Create and Monitor Calendar events"}</li>
+                <li><i class="fas fa-list-check"></i>{"Fetch and Create Tasks and Ideas"}</li>
+                <li><i class="fas fa-eye"></i>{"24/7 Critical Message Monitoring"}</li>
+                <li><i class="fas fa-newspaper"></i>{"Morning, Day and Evening Digests"}</li>
+                <li><i class="fas fa-clock"></i>{"Custom Waiting Checks Specific Content"}</li>
+                <li><i class="fas fa-bell"></i>{"Priority Sender Notifications"}</li>
+                <li><i class="fas fa-rocket"></i>{"All Future Features Included"}</li>
+                <li><i class="fas fa-headset"></i>{"Priority Support"}</li>
             </ul>
         </div>
+    }
+}
+#[function_component(CreditPricing)]
+pub fn credit_pricing(props: &FeatureListProps) -> Html {
+    let country = &props.selected_country;
+    let credit_css = r#"
+    .credit-pricing {
+        max-width: 1000px;
+        margin: 4rem auto;
+        background: rgba(30, 30, 30, 0.8);
+        border: 1px solid rgba(30, 144, 255, 0.15);
+        border-radius: 24px;
+        padding: 2.5rem;
+        backdrop-filter: blur(10px);
+        text-align: center;
+    }
+    .credit-pricing h2 {
+        color: #7EB2FF;
+        font-size: 2rem;
+        margin-bottom: 1rem;
+    }
+    .credit-pricing p {
+        color: #e0e0e0;
+        font-size: 1.1rem;
+        margin-bottom: 1rem;
+    }
+    .credit-pricing ul {
+        list-style-type: none;
+        padding: 0;
+        margin: 1rem 0;
+    }
+    .credit-pricing li {
+        color: #e0e0e0;
+        padding: 0.5rem 0;
+        font-size: 1.1rem;
+    }
+    .credit-pricing a {
+        color: #1E90FF;
+        text-decoration: none;
+    }
+    .credit-pricing a:hover {
+        text-decoration: underline;
+    }
+    @media (max-width: 968px) {
+        .credit-pricing {
+            padding: 1.5rem;
+            margin: 2rem 1rem;
+            max-width: calc(100vw - 2rem);
+        }
+    }
+    "#;
+    if country == "Other" {
+        html! {
+            <div class="credit-pricing">
+                <style>{credit_css}</style>
+                <h2>{"Messaging Costs"}</h2>
+                <p>{"To see prices for your country and how to set up, check our guide page. It has info on rules too."}</p>
+                <a href="/bring-own-number">{"See Setup Guide and Prices"}</a>
+            </div>
+        }
+    } else {
+        let currency = if country == "US" { "$" } else { "€" };
+        let (msg_cost, voice_sec_cost, noti_msg_cost, noti_call_cost) = match country.as_str() {
+            "US" => (0.15, 0.0033, 0.075, 0.15),
+            "FI" => (0.30, 0.005, 0.15, 0.70),
+            "UK" => (0.30, 0.005, 0.15, 0.15),
+            "AU" => (0.30, 0.005, 0.15, 0.15),
+            _ => (0.0, 0.0, 0.0, 0.0),
+        };
+        let voice_min_cost = voice_sec_cost * 60.0;
+        if country != "US" {
+            html! {
+                <div class="credit-pricing">
+                    <style>{credit_css}</style>
+                    <h2>{"Message Costs (Credits)"}</h2>
+                    <p>{"Credits work like this: Buy them ahead with money. Use them for texts, calls, and notifications. Buy more when low."}</p>
+                    <p>{"It's easy. For example, add $10 in credits. Then send texts until used up."}</p>
+                    <p>{"You can set filters for what sends notifications. This way, no surprise costs."}</p>
+                    <p>{"Costs for each:"}</p>
+                    <ul>
+                        <li>{"Text message: "}{currency}{format!("{:.2}", msg_cost)}{" each"}</li>
+                        <li>{"Voice call per minute: "}{currency}{format!("{:.2}", voice_min_cost)}{" (or "}{currency}{format!("{:.4}", voice_sec_cost)}{" per second)"}</li>
+                        <li>{"Notification text: "}{currency}{format!("{:.2}", noti_msg_cost)}{" each"}</li>
+                        <li>{"Notification call: "}{currency}{format!("{:.2}", noti_call_cost)}{" each"}</li>
+                        <li>{"Daily summary: "}{currency}{format!("{:.2}", msg_cost)}</li>
+                    </ul>
+                </div>
+            }
+        } else {
+            html! {}
+        }
     }
 }
 #[function_component(Pricing)]
@@ -760,13 +855,6 @@ pub fn pricing(props: &PricingProps) -> Html {
         ("UK".to_string(), 9.00),
         ("AU".to_string(), 9.00),
         ("Other".to_string(), 9.00),
-    ]);
-    let credit_rates: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 0.15),
-        ("FI".to_string(), 0.30),
-        ("UK".to_string(), 0.30),
-        ("AU".to_string(), 0.30),
-        ("Other".to_string(), 0.30),
     ]);
     let on_country_change = {
         let selected_country = selected_country.clone();
@@ -1290,20 +1378,56 @@ pub fn pricing(props: &PricingProps) -> Html {
                 />
             </div>
             <FeatureList selected_country={(*selected_country).clone()} />
+            <CreditPricing selected_country={(*selected_country).clone()} />
             <div class="pricing-faq">
                 <h2>{"Common Questions"}</h2>
                 <div class="faq-grid">
-                    <details>
-                        <summary>{"How does billing work?"}</summary>
-                        <p>{"Plans bill monthly. Digital Detox Trial is billed for the first week, then transitioned to Hosted unless canceled. Extra messages cost via Lightfriend (US) or your Twilio (Intl). Credits carry over. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
-                    </details>
-                    <details>
-                        <summary>{"What counts as a Message?"}</summary>
-                        <p>{"Voice calls (1 min = 1 Message), text queries (1 query = 1 Message), daily digests (1 digest = 1 Message), priority sender notifications (1 notification = 1/2 Message). Critical monitoring and custom checks are free."}</p>
-                    </details>
+                    {
+                        if (*selected_country) == "US" {
+                            html! {
+                                <>
+                                <details>
+                                    <summary>{"How does billing work?"}</summary>
+                                    <p>{"Plans bill monthly. Digital Detox Trial is billed for the first week, then transitioned to Hosted unless canceled. Digital detox includes 100 Messages and Hosted Plan has 500 per month. If you run out and want to top up before monthly renew, you can buy overage credits. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                </details>
+                                <details>
+                                    <summary>{"What counts as a Message?"}</summary>
+                                    <p>{"Voice calls (1 min = 1 Message), text queries (1 query = 1 Message), daily digests (1 digest = 1 Message), priority sender notifications (1 notification = 1/2 Message). Critical monitoring and custom checks are included."}</p>
+                                </details>
+                                </>
+                            }
+                        } else if (*selected_country) == "FI" || (*selected_country) == "AU" || (*selected_country) == "UK" {
+                            html! {
+
+                                <>
+                                <details>
+                                    <summary>{"How does billing work?"}</summary>
+                                    <p>{"Plans bill monthly. Digital Detox Trial is billed for the first week, then transitioned to Hosted unless canceled. Digital detox and Hosted Plans include phone number for FI/AU/UK, but messages are bought separately before hand. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                </details>
+                                <details>
+                                    <summary>{"Can I setup automatic recharge for message credits?"}</summary>
+                                    <p>{"Yes! After you purchase them the first time, you can set it recharge the specified amount."}</p>
+                                </details>
+                                </>
+                            }
+                        } else {
+                            html! {
+                                <>
+                                <details>
+                                    <summary>{"How does billing work?"}</summary>
+                                    <p>{"Plans bill monthly. Digital Detox Trial is billed for the first week, then transitioned to Hosted unless canceled. Messages or phone number are not included. Checkout the guide on how to bring your own Number from the pricing card. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                </details>
+                                <details>
+                                    <summary>{"Can I setup automatic recharge for message credits?"}</summary>
+                                    <p>{"Yes! After you purchase them the first time, you can set it recharge the specified amount."}</p>
+                                </details>
+                                </>
+                            }
+                        }
+                    }
                     <details>
                         <summary>{"Is it available in my country?"}</summary>
-                        <p>{"Available globally; US includes Twilio, elsewhere bring your own (guided setup, SMS costs vary ~€0.05-0.30/message). Contact rasmus@ahtava.com for details."}</p>
+                        <p>{"Available globally. US everything is included. FI/UK/AU include a number but message are bought separately. Elsewhere bring your own number (guided setup, costs vary ~€0.05-0.50/text or free if you have extra android phone laying around with a another phone plan). Contact rasmus@ahtava.com for more details."}</p>
                     </details>
                 </div>
             </div>

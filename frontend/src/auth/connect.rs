@@ -41,12 +41,14 @@ pub fn connect(props: &ConnectProps) -> Html {
     let memory_connected = use_state(|| false);
     let email_connected = use_state(|| false);
     let whatsapp_connected = use_state(|| false);
+    let telegram_connected = use_state(|| false);
 
     {
         let calendar_connected = calendar_connected.clone();
         let memory_connected = memory_connected.clone();
         let email_connected = email_connected.clone();
         let whatsapp_connected = whatsapp_connected.clone();
+        let telegram_connected= telegram_connected.clone();
         use_effect_with_deps(
             move |_| {
                 if let Some(window) = web_sys::window() {
@@ -121,6 +123,24 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         if let Ok(data) = response.json::<serde_json::Value>().await {
                                             if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
                                                 whatsapp_connected.set(connected);
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                            // telegram status check
+                            spawn_local({
+                                let telegram_connected = telegram_connected.clone();
+                                let token = token.clone();
+                                async move {
+                                    if let Ok(response) = Request::get(&format!("{}/api/auth/telegram/status", config::get_backend_url()))
+                                        .header("Authorization", &format!("Bearer {}", token))
+                                        .send()
+                                        .await
+                                    {
+                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                            if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                                telegram_connected.set(connected);
                                             }
                                         }
                                     }
@@ -221,11 +241,12 @@ let group_states = use_state(|| {
                             {"Apps"}
                             <div class="group-summary">
                                 <span class="service-count">
-                                    {format!("{}/4 Connected", 
+                                    {format!("{}/5 Connected", 
                                         (if *calendar_connected { 1 } else { 0 }) +
                                         (if *memory_connected { 1 } else { 0 }) +
                                         (if *email_connected { 1 } else { 0 }) +
-                                        (if *whatsapp_connected { 1 } else { 0 })
+                                        (if *whatsapp_connected { 1 } else { 0 }) +
+                                        (if *telegram_connected { 1 } else { 0 })
                                     )}
                                 </span>
                                 <i class={if group_states.get("apps").map(|s| s.expanded).unwrap_or(false) {
@@ -299,8 +320,8 @@ let group_states = use_state(|| {
                             {"Monitoring"}
                             <div class="group-summary">
                                 <span class="service-count">
-                                    {format!("{}/4 Available", 
-                                        if *email_connected || *calendar_connected || *whatsapp_connected { 4 } else { 0 }
+                                    {format!("{}/5 Available", 
+                                        if *email_connected || *calendar_connected || *whatsapp_connected || *telegram_connected { 5 } else { 0 }
                                     )}
                                 </span>
                                 <i class={if group_states.get("proactive").map(|s| s.expanded).unwrap_or(false) {
@@ -321,10 +342,10 @@ let group_states = use_state(|| {
                         // Proactive Agent Section
                         <div class={classes!(
                             "service-item",
-                            if !(*email_connected || *calendar_connected || *whatsapp_connected) { "inactive" } else { "" }
+                            if !(*email_connected || *calendar_connected || *whatsapp_connected || *telegram_connected) { "inactive" } else { "" }
                         )}>
                             {
-                                if !(*email_connected || *calendar_connected || *whatsapp_connected) {
+                                if !(*email_connected || *calendar_connected || *whatsapp_connected || *telegram_connected) {
                                     html! {
                                         <div class="feature-overlay">
                                             <div class="overlay-content" style="color: #999;">
@@ -343,10 +364,10 @@ let group_states = use_state(|| {
                             // Critical Section
                             <div class={classes!(
                                 "service-item",
-                                if !(*email_connected || *calendar_connected || *whatsapp_connected) { "inactive" } else { "" }
+                                if !(*email_connected || *calendar_connected || *whatsapp_connected || *telegram_connected) { "inactive" } else { "" }
                             )}>
                                 {
-                                    if !(*email_connected || *calendar_connected || *whatsapp_connected) {
+                                    if !(*email_connected || *calendar_connected || *whatsapp_connected || *telegram_connected) {
                                         html! {
                                             <div class="feature-overlay">
                                                 <div class="overlay-content" style="color: #999;">
@@ -366,10 +387,10 @@ let group_states = use_state(|| {
                             // Digest Section
                             <div class={classes!(
                                 "service-item",
-                                if !(*email_connected || *calendar_connected || *whatsapp_connected) { "inactive" } else { "" }
+                                if !(*email_connected || *calendar_connected || *whatsapp_connected || *telegram_connected) { "inactive" } else { "" }
                             )}>
                                 {
-                                    if !(*email_connected || *calendar_connected || *whatsapp_connected) {
+                                    if !(*email_connected || *calendar_connected || *whatsapp_connected || *telegram_connected) {
                                         html! {
                                             <div class="feature-overlay">
                                                 <div class="overlay-content" style="color: #999;">
@@ -389,10 +410,10 @@ let group_states = use_state(|| {
                             // Waiting Checks Section
                             <div class={classes!(
                                 "service-item",
-                                if !(*email_connected || *whatsapp_connected) { "inactive" } else { "" }
+                                if !(*email_connected || *whatsapp_connected || *telegram_connected) { "inactive" } else { "" }
                             )}>
                                 {
-                                    if !(*email_connected || *whatsapp_connected) {
+                                    if !(*email_connected || *whatsapp_connected || *telegram_connected) {
                                         html! {
                                             <div class="feature-overlay">
                                                 <div class="overlay-content" style="color: #999;">
@@ -416,15 +437,15 @@ let group_states = use_state(|| {
                             // Monitored Contacts Section
                             <div class={classes!(
                                 "service-item",
-                                if !(*email_connected || *whatsapp_connected) { "inactive" } else { "" }
+                                if !(*email_connected || *whatsapp_connected || *telegram_connected) { "inactive" } else { "" }
                             )}>
                                 {
-                                    if !(*email_connected || *whatsapp_connected) {
+                                    if !(*email_connected || *whatsapp_connected || *telegram_connected) {
                                         html! {
                                             <div class="feature-overlay">
                                                 <div class="overlay-content" style="color: #999;">
                                                     <i class="fas fa-lock"></i>
-                                                    <p>{"Connect WhatsApp or Email to use Monitored Contacts"}</p>
+                                                    <p>{"Connect Some Messaging App or Email to use Monitored Contacts"}</p>
                                                 </div>
                                             </div>
                                         }

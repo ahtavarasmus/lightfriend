@@ -240,8 +240,6 @@ pub async fn get_priority_senders(
             )
         })?;
 
-    println!("senders found: {}", !senders.is_empty());
-
     let response: Vec<PrioritySenderResponse> = senders.into_iter().map(|sender| PrioritySenderResponse {
         user_id: sender.user_id,
         sender: sender.sender,
@@ -324,37 +322,3 @@ pub async fn delete_keyword(
         },
     }
 }
-pub async fn get_connected_services(
-    State(state): State<Arc<AppState>>,
-    auth_user: AuthUser,
-) -> Result<Json<Vec<ConnectedService>>, (StatusCode, Json<serde_json::Value>)> {
-    let mut services = Vec::new();
-
-    // Check Google Calendar
-    if let Ok(true) = state.user_repository.has_active_google_calendar(auth_user.user_id) {
-        services.push(ConnectedService {
-            service_type: "calendar".to_string(),
-            identifier: "(google)".to_string(),  // Using access token email as identifier
-        });
-    }
-
-    // Check Email
-    if let Ok(Some((email, _, _, _))) = state.user_repository.get_imap_credentials(auth_user.user_id) {
-        services.push(ConnectedService {
-            service_type: "imap".to_string(),
-            identifier: email,
-        });
-    }
-
-    // Check WhatsApp
-    if let Ok(Some(_)) = state.user_repository.get_active_whatsapp_connection(auth_user.user_id) {
-        services.push(ConnectedService {
-            service_type: "whatsapp".to_string(),
-            identifier: "".to_string(),  // Using bridge ID as identifier
-        });
-    }
-
-    Ok(Json(services))
-}
-
-

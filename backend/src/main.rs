@@ -420,8 +420,6 @@ async fn main() {
         .route("/api/filters/keyword/{service_type}", post(filter_handlers::create_keyword))
         .route("/api/filters/keyword/{service_type}/{keyword}", delete(filter_handlers::delete_keyword))
 
-        .route("/api/filters/connected-services", get(filter_handlers::get_connected_services))
-
         // WhatsApp filter toggle routes
         // Generic filter toggle routes
         .route("/api/profile/email-judgments", get(profile_handlers::get_email_judgments))

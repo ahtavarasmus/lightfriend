@@ -903,7 +903,7 @@ pub async fn stripe_webhook(
                         };
                         
                         if is_digital_detox {
-                            messages = 60.0;
+                            messages = 100.0;
                         } else if base_price == sentinel_us_id {
                             messages = 400.00 - (days_until_billing * amount_of_digests) as f32;
                         } else if is_sentinel_price_id {

@@ -205,8 +205,7 @@ pub async fn handle_send_telegram_message(
 
             // Get the best match (first result)
             let best_match = &rooms[0];
-            let exact_name = best_match.display_name.trim_end_matches(" (WA)").to_string();
-
+            let exact_name = best_match.display_name.trim_end_matches(" (WA)").trim_end_matches(" (Telegram)").to_string();
 
             // Set the temporary variable for Telegram message
             if let Err(e) = state.user_core.set_temp_variable(

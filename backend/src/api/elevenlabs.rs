@@ -2309,7 +2309,7 @@ pub async fn handle_email_response_tool_call(
     };
 
     // Verify user has sufficient credits for email response
-    if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "email", None).await {
+    if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "message", None).await {
         return Err((
             StatusCode::FORBIDDEN,
             Json(json!({
@@ -2435,44 +2435,37 @@ pub async fn make_notification_call(
             ));
         }
     };
-
-    // Check if user has a custom phone number ID
-    let phone_number_id = if user.discount_tier.is_some() {
-        let custom_env_key = format!("TWILIO_USER_PHONE_NUMBER_ID_{}", user.id);
-        match std::env::var(&custom_env_key) {
-            Ok(id) => {
-                tracing::debug!("Using custom phone number ID for user {}: {}", user.id, id);
-                id
-            },
-            Err(_) => {
-                // Fall back to regular phone number selection if custom ID not found
-                if preferred_from_number.contains("+358") {
-                    std::env::var("FIN_PHONE_NUMBER_ID")
-                } else if preferred_from_number.contains("+61") {
-                    std::env::var("AUS_PHONE_NUMBER_ID")
-                } else if preferred_from_number.contains("+44") {
-                    std::env::var("GB_PHONE_NUMBER_ID")
-                } else {
-                    std::env::var("USA_PHONE_NUMBER_ID")
-                }.map_err(|e| {
-                    error!("Failed to get phone number ID: {}", e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({
-                            "error": "Failed to get phone number ID",
-                            "details": e.to_string()
-                        }))
-                    )
-                })?
-            }
+    let user_settings = match state.user_core.get_user_settings(user.id) {
+        Ok(settings) => settings,
+        Err(e) => {
+            error!("Failed to get user settings: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to get user settings",
+                    "message": "Internal server error"
+                }))
+            ));
         }
-    } else {
-        // Regular phone number selection for non-discount users
-        if preferred_from_number.contains("+358") {
+    };
+    let phone_number = user.phone_number;
+
+    // Determine country based on phone_number
+    let is_fi = phone_number.starts_with("+358");
+    let is_au = phone_number.starts_with("+61");
+    let is_uk = phone_number.starts_with("+44");
+    let is_us = phone_number.starts_with("+1");
+
+    // Check if the user's phone number is from a supported country (US, FI, UK, AU)
+    let is_supported_country = is_fi || is_au || is_uk || is_us;
+
+    let phone_number_id = if is_supported_country {
+        // Regular phone number selection
+        if is_fi {
             std::env::var("FIN_PHONE_NUMBER_ID")
-        } else if preferred_from_number.contains("+61") {
+        } else if is_au {
             std::env::var("AUS_PHONE_NUMBER_ID")
-        } else if preferred_from_number.contains("+44") {
+        } else if is_uk {
             std::env::var("GB_PHONE_NUMBER_ID")
         } else {
             std::env::var("USA_PHONE_NUMBER_ID")
@@ -2486,8 +2479,22 @@ pub async fn make_notification_call(
                 }))
             )
         })?
+    } else {
+        // Unsupported country: Use user's ElevenLabs phone number ID if available
+        match user_settings.elevenlabs_phone_number_id {
+            Some(id) => id,
+            None => {
+                tracing::info!("No ElevenLabs phone number ID found for user {} in unsupported country", user.id);
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({
+                        "error": "Unsupported country",
+                        "message": "No phone number ID available for this country. Call cannot be sent."
+                    }))
+                ));
+            }
+        }
     };
-
 
     // Get voice ID based on the preferred number
     let voice_id = if preferred_from_number.contains("+358") {

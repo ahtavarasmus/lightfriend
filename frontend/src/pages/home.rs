@@ -11,7 +11,6 @@ use wasm_bindgen_futures::spawn_local;
 use crate::pages::landing::Landing;
 use crate::profile::settings::SettingsPage;
 use crate::profile::billing_models::UserProfile;
-
 fn render_notification_settings(profile: Option<&UserProfile>) -> Html {
     html! {
         <div style="margin-top: 2rem; padding: 1.5rem; background: rgba(30, 30, 30, 0.7); border: 1px solid rgba(30, 144, 255, 0.1); border-radius: 12px; margin-bottom: 2rem;">
@@ -22,15 +21,15 @@ fn render_notification_settings(profile: Option<&UserProfile>) -> Html {
                             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;">
                                 <span style="color: white;">{"Notifications"}</span>
                                     <label class="switch">
-                                        <input 
-                                            type="checkbox" 
+                                        <input
+                                            type="checkbox"
                                             checked={profile.notify}
                                             onchange={{
                                                 let user_id = profile.id;
                                                 Callback::from(move |e: Event| {
                                                     let input: HtmlInputElement = e.target_unchecked_into();
                                                     let notify = input.checked();
-                                                    
+                                                  
                                                     if let Some(token) = window()
                                                         .and_then(|w| w.local_storage().ok())
                                                         .flatten()
@@ -65,20 +64,17 @@ fn render_notification_settings(profile: Option<&UserProfile>) -> Html {
         </div>
     }
 }
-
 const PHONE_NUMBERS: &[(&str, &str, Option<&str>)] = &[
     ("us", "+18153684737", None),
     ("fin", "+358454901522", None),
     ("gb", "+447383240344", None),
     ("aus", "+61489260976", None),
 ];
-
 #[derive(Clone, PartialEq)]
 enum DashboardTab {
     Connections,
     Personal,
 }
-
 pub fn is_logged_in() -> bool {
     if let Some(window) = window() {
         if let Ok(Some(storage)) = window.local_storage() {
@@ -89,7 +85,6 @@ pub fn is_logged_in() -> bool {
     }
     false
 }
-
 #[function_component]
 pub fn HostInstructionsButton() -> Html {
     html! {
@@ -101,7 +96,6 @@ pub fn HostInstructionsButton() -> Html {
         </div>
     }
 }
-
 #[function_component]
 pub fn MonthlyCredits(props: &Props) -> Html {
     let profile = &props.profile;
@@ -143,27 +137,23 @@ pub fn MonthlyCredits(props: &Props) -> Html {
         </div>
     }
 }
-
 #[derive(Properties, PartialEq)]
 pub struct Props {
     pub profile: UserProfile,
 }
-
 #[derive(Properties, PartialEq)]
 pub struct PairingCodeProps {
     pub profile_data: UseStateHandle<Option<UserProfile>>,
     pub show_confirm_modal: UseStateHandle<bool>,
 }
-
 #[function_component]
 pub fn PairingCodeSection(props: &PairingCodeProps) -> Html {
     let profile_data = props.profile_data.clone();
     let show_confirm_modal = props.show_confirm_modal.clone();
-
     html! {
         <>
             <div class="pairing-code-section">
-                <button 
+                <button
                     class="generate-code-btn"
                     onclick={{
                         let show_confirm_modal = show_confirm_modal.clone();
@@ -174,7 +164,6 @@ pub fn PairingCodeSection(props: &PairingCodeProps) -> Html {
                 </button>
                 <p class="warning-note">{"Note: Generating a new code will disconnect any existing server instance."}</p>
             </div>
-
             if *show_confirm_modal {
                 <div class="modal-overlay" onclick={{
                     let show_confirm_modal = show_confirm_modal.clone();
@@ -188,7 +177,7 @@ pub fn PairingCodeSection(props: &PairingCodeProps) -> Html {
                         <h3>{"Confirm New Pairing Code"}</h3>
                         <p>{"Are you sure you want to generate a new pairing code? This will disconnect any existing server instance and it will stop working."}</p>
                         <div class="modal-buttons">
-                            <button 
+                            <button
                                 class="cancel-btn"
                                 onclick={{
                                     let show_confirm_modal = show_confirm_modal.clone();
@@ -197,7 +186,7 @@ pub fn PairingCodeSection(props: &PairingCodeProps) -> Html {
                             >
                                 {"Cancel"}
                             </button>
-                            <button 
+                            <button
                                 class="confirm-btn"
                                 onclick={{
                                     let profile_data = profile_data.clone();
@@ -215,7 +204,7 @@ pub fn PairingCodeSection(props: &PairingCodeProps) -> Html {
                                                     .header("Authorization", &format!("Bearer {}", token))
                                                     .send()
                                                     .await;
-                                                
+                                              
                                                 if let Ok(response) = response {
                                                     if let Ok(json) = response.json::<serde_json::Value>().await {
                                                         if let Some(new_code) = json.get("pairing_code").and_then(|v| v.as_str()) {
@@ -241,7 +230,6 @@ pub fn PairingCodeSection(props: &PairingCodeProps) -> Html {
         </>
     }
 }
-
 #[function_component]
 pub fn Home() -> Html {
     let logged_in = is_logged_in();
@@ -252,18 +240,16 @@ pub fn Home() -> Html {
     let active_tab = use_state(|| DashboardTab::Connections);
     let show_confirm_modal = use_state(|| false);
     let navigator = use_navigator().unwrap();
-
     // Single profile fetch effect
     {
         let profile_data = profile_data.clone();
         let user_verified = user_verified.clone();
         let error = error.clone();
-        
+      
         use_effect_with_deps(move |_| {
             let profile_data = profile_data.clone();
             let user_verified = user_verified.clone();
             let error = error.clone();
-
             wasm_bindgen_futures::spawn_local(async move {
                 if let Some(token) = window()
                     .and_then(|w| w.local_storage().ok())
@@ -286,7 +272,7 @@ pub fn Home() -> Html {
                                 }
                                 return;
                             }
-                            
+                          
                             match response.json::<UserProfile>().await {
                                 Ok(profile) => {
                                     user_verified.set(profile.verified);
@@ -304,11 +290,10 @@ pub fn Home() -> Html {
                     }
                 }
             });
-            
+          
             || ()
         }, ());
     }
-
     // If not logged in, show landing page
     if !logged_in {
         html! { <Landing /> }
@@ -325,7 +310,17 @@ pub fn Home() -> Html {
                         <div class="credits-info">
                         {
                             if let Some(profile) = (*profile_data).as_ref() {
-                                let is_us_number = profile.phone_number.starts_with("+1");
+                                let phone_prefix = if profile.phone_number.starts_with("+1") {
+                                    Some(("+1", "+18153684737"))
+                                } else if profile.phone_number.starts_with("+358") {
+                                    Some(("+358", "+358454901522"))
+                                } else if profile.phone_number.starts_with("+44") {
+                                    Some(("+44", "+447383240344"))
+                                } else if profile.phone_number.starts_with("+61") {
+                                    Some(("+61", "+61489260976"))
+                                } else {
+                                    None
+                                };
                                 html! {
                                     <div class="credits-grid">
                                         {
@@ -363,40 +358,75 @@ pub fn Home() -> Html {
                                                         </div>
                                                     },
                                                     _ => {
-                                                        let twilio_setup_complete = profile.twilio_sid.is_some() && profile.twilio_token.is_some();
                                                         html! {
                                                             <>
                                                                 {
-                                                                    if is_us_number {
-                                                                        html! {
-                                                                            <>
-                                                                                <MonthlyCredits profile={profile.clone()} />
-                                                                                {
-                                                                                    if profile.credits_left <= 0.0 {
-                                                                                        html! {
-                                                                                            <div class="credit-warning">
-                                                                                                {
-                                                                                                    if let Some(days) = profile.days_until_billing {
-                                                                                                        if days == 0 {
-                                                                                                            "Monthly quota used. Credits reset today!".to_string()
-                                                                                                        } else if days == 1 {
-                                                                                                            "Monthly quota used. Credits reset in 1 day.".to_string()
+                                                                    if let Some((prefix, _)) = phone_prefix {
+                                                                        if prefix == "+1" {
+                                                                            html! {
+                                                                                <>
+                                                                                    <MonthlyCredits profile={profile.clone()} />
+                                                                                    {
+                                                                                        if profile.credits_left <= 0.0 {
+                                                                                            html! {
+                                                                                                <div class="credit-warning">
+                                                                                                    {
+                                                                                                        if let Some(days) = profile.days_until_billing {
+                                                                                                            if days == 0 {
+                                                                                                                "Monthly quota used. Credits reset today!".to_string()
+                                                                                                            } else if days == 1 {
+                                                                                                                "Monthly quota used. Credits reset in 1 day.".to_string()
+                                                                                                            } else {
+                                                                                                                format!("Monthly quota used. Credits reset in {} days.", days)
+                                                                                                            }
                                                                                                         } else {
-                                                                                                            format!("Monthly quota used. Credits reset in {} days.", days)
+                                                                                                            "Monthly quota used. Wait for next month or buy overage credits.".to_string()
                                                                                                         }
-                                                                                                    } else {
-                                                                                                        "Monthly quota used. Wait for next month or buy overage credits.".to_string()
                                                                                                     }
-                                                                                                }
-                                                                                            </div>
+                                                                                                </div>
+                                                                                            }
+                                                                                        } else {
+                                                                                            html! {}
+                                                                                        }
+                                                                                    }
+                                                                                </>
+                                                                            }
+                                                                        } else if profile.credits == 0.00 {
+                                                                            html! {
+                                                                                <div class="subscription-promo">
+                                                                                    <Link<Route> to={Route::Billing} classes="promo-link">
+                                                                                        {"Purchase Credits →"}
+                                                                                    </Link<Route>>
+                                                                                </div>
+                                                                            }
+                                                                        } else {
+                                                                            html! {
+                                                                                <>
+                                                                                <div class="credit-item" tabindex="0">
+                                                                                    <span class="credit-label">{"Message Credits"}</span>
+                                                                                    <span class="credit-value">{format!("{:.2}€", profile.credits)}</span>
+                                                                                    <div class="credit-tooltip">
+                                                                                        {"Your message credits. Checkout how they are used in the pricing page under 'Message Costs (Credits)'."}
+                                                                                    </div>
+                                                                                </div>
+                                                                                {
+                                                                                    if profile.credits < 1.00 {
+                                                                                        html! {
+                                                                                        <div class="subscription-promo">
+                                                                                            <Link<Route> to={Route::Billing} classes="promo-link">
+                                                                                                {"Purchase Credits →"}
+                                                                                            </Link<Route>>
+                                                                                        </div>
                                                                                         }
                                                                                     } else {
                                                                                         html! {}
                                                                                     }
                                                                                 }
-                                                                            </>
+                                                                                </>
+                                                                            }
                                                                         }
                                                                     } else {
+                                                                        let twilio_setup_complete = profile.twilio_sid.is_some() && profile.twilio_token.is_some();
                                                                         html! {
                                                                             <div class="credit-item" tabindex="0">
                                                                                 <span class="credit-label">{"Twilio Setup"}</span>
@@ -433,8 +463,8 @@ pub fn Home() -> Html {
                                             } else {
                                                 html! {
                                                     <div class="subscription-promo">
-                                                        <Link<Route> to={Route::Pricing} classes="promo-link">
-                                                            {"View Pricing →"}
+                                                        <Link<Route> to={Route::Billing} classes="promo-link">
+                                                            {"Subscribe to start →"}
                                                         </Link<Route>>
                                                     </div>
                                                 }
@@ -459,55 +489,69 @@ pub fn Home() -> Html {
                     </div>
                     {
                         if let Some(profile) = (*profile_data).as_ref() {
-                            let is_us_number = profile.phone_number.starts_with("+1");
-                            let twilio_setup_complete = profile.twilio_sid.is_some() && profile.twilio_token.is_some();
-                            html! {
-                                <div class="phone-selector">
-                                    <div class="preferred-number-display">
-                                        {
-                                            if is_us_number {
-                                                html! {
-                                                    <span class="preferred-number-label configured">
-                                                        {format!("Your lightfriend's Number: {}", "+18153684737")}
-                                                    </span>
-                                                }
-                                            } else {
-                                                if twilio_setup_complete {
-                                                    if let Some(twilio_number) = &profile.preferred_number {
-                                                        html! {
-                                                            <span class="preferred-number-label configured">
-                                                                {format!("Your Twilio Number: {}", twilio_number)}
-                                                            </span>
+                            if profile.sub_tier.is_some() {
+                                let phone_prefix = if profile.phone_number.starts_with("+1") {
+                                    Some(("+1", "+18153684737"))
+                                } else if profile.phone_number.starts_with("+358") {
+                                    Some(("+358", "+358454901522"))
+                                } else if profile.phone_number.starts_with("+44") {
+                                    Some(("+44", "+447383240344"))
+                                } else if profile.phone_number.starts_with("+61") {
+                                    Some(("+61", "+61489260976"))
+                                } else {
+                                    None
+                                };
+                                let twilio_setup_complete = profile.twilio_sid.is_some() && profile.twilio_token.is_some();
+                                html! {
+                                    <div class="phone-selector">
+                                        <div class="preferred-number-display">
+                                            {
+                                                if let Some((_, hardcoded_number)) = phone_prefix {
+                                                    html! {
+                                                        <span class="preferred-number-label configured">
+                                                            {format!("Your lightfriend's Number: {}", hardcoded_number)}
+                                                        </span>
+                                                    }
+                                                } else {
+                                                    if twilio_setup_complete {
+                                                        if let Some(twilio_number) = &profile.preferred_number {
+                                                            html! {
+                                                                <span class="preferred-number-label configured">
+                                                                    {format!("Your Twilio Number: {}", twilio_number)}
+                                                                </span>
+                                                            }
+                                                        } else {
+                                                            html! {
+                                                                <span class="preferred-number-label not-configured">
+                                                                    {"No Twilio Number configured"}
+                                                                </span>
+                                                            }
                                                         }
                                                     } else {
                                                         html! {
                                                             <span class="preferred-number-label not-configured">
-                                                                {"No Twilio Number configured"}
+                                                                {"Twilio setup not complete"}
                                                             </span>
                                                         }
                                                     }
-                                                } else {
-                                                    html! {
-                                                        <span class="preferred-number-label not-configured">
-                                                            {"Twilio setup not complete"}
-                                                        </span>
-                                                    }
                                                 }
                                             }
-                                        }
+                                        </div>
                                     </div>
-                                </div>
+                                }
+                            } else {
+                                html! {}
                             }
                         } else {
                             html! {}
                         }
                     }
-                    
-                    
+                  
+                  
                     <br/>
                     <br/>
                     <div class="dashboard-tabs">
-                        <button 
+                        <button
                             class={classes!("tab-button", (*active_tab == DashboardTab::Connections).then(|| "active"))}
                             onclick={{
                                 let active_tab = active_tab.clone();
@@ -516,7 +560,7 @@ pub fn Home() -> Html {
                         >
                             {"Connections"}
                         </button>
-                        <button 
+                        <button
                             class={classes!("tab-button", (*active_tab == DashboardTab::Personal).then(|| "active"))}
                             onclick={{
                                 let active_tab = active_tab.clone();
@@ -564,7 +608,7 @@ pub fn Home() -> Html {
                                     {
                                         if let Some(profile) = (*profile_data).as_ref() {
                                             html! {
-                                                <SettingsPage 
+                                                <SettingsPage
                                                     user_profile={profile.clone()}
                                                     on_profile_update={{
                                                         let profile_data = profile_data.clone();
@@ -611,19 +655,16 @@ pub fn Home() -> Html {
                             justify-content: space-between;
                             margin-bottom: 1.5rem;
                         }
-
                         .credits-info {
                             width: 100%;
                             margin-bottom: 1rem;
                         }
-
                         .credits-grid {
                             display: grid;
                             grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
                             gap: 1rem;
                             width: 100%;
                         }
-
                         .credit-item {
                             background: rgba(30, 144, 255, 0.05);
                             border: 1px solid rgba(30, 144, 255, 0.1);
@@ -638,12 +679,10 @@ pub fn Home() -> Html {
                             transition: all 0.3s ease;
                             outline: none;
                         }
-
                         .host-instructions-container {
                             width: 100%;
                             margin-top: 1rem;
                         }
-
                         .host-instructions-button {
                             display: flex;
                             align-items: center;
@@ -660,33 +699,27 @@ pub fn Home() -> Html {
                             transition: all 0.3s ease;
                             box-shadow: 0 2px 8px rgba(30, 144, 255, 0.2);
                         }
-
                         .host-instructions-button:hover {
                             transform: translateY(-2px);
                             box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3);
                             background: linear-gradient(45deg, #4169E1, #1E90FF);
                         }
-
                         .button-text {
                             flex-grow: 1;
                             text-align: center;
                         }
-
                         .button-icon {
                             font-size: 1.2rem;
                             transition: transform 0.3s ease;
                         }
-
                         .host-instructions-button:hover .button-icon {
                             transform: translateX(4px);
                         }
-
                         .credit-item:hover,
                         .credit-item:focus {
                             background: rgba(30, 144, 255, 0.1);
                             border-color: rgba(30, 144, 255, 0.2);
                         }
-
                         .credit-tooltip {
                             position: absolute;
                             bottom: calc(100% + 10px);
@@ -707,7 +740,6 @@ pub fn Home() -> Html {
                             border: 1px solid rgba(30, 144, 255, 0.2);
                             text-align: center;
                         }
-
                         .credit-tooltip::after {
                             content: '';
                             position: absolute;
@@ -718,33 +750,28 @@ pub fn Home() -> Html {
                             border-style: solid;
                             border-color: rgba(0, 0, 0, 0.9) transparent transparent transparent;
                         }
-
                         .credit-item:hover .credit-tooltip,
                         .credit-item:focus .credit-tooltip {
                             opacity: 1;
                             visibility: visible;
                         }
-
                         .credit-label {
                             color: #999;
                             font-size: 0.8rem;
                             text-transform: uppercase;
                             letter-spacing: 0.5px;
                         }
-
                         .credit-value {
                             color: #7EB2FF;
                             font-size: 1.1rem;
                             font-weight: 500;
                         }
-
                         .reset-timer {
                             display: block;
                             color: #999;
                             font-size: 0.8rem;
                             margin-top: 0.3rem;
                         }
-
                         .credit-warning {
                             grid-column: 1 / -1;
                             color: #ff4444;
@@ -755,7 +782,6 @@ pub fn Home() -> Html {
                             border-radius: 6px;
                             margin-top: 0.5rem;
                         }
-
                         .subscription-promo {
                             background: linear-gradient(45deg, rgba(30, 144, 255, 0.1), rgba(65, 105, 225, 0.1));
                             border: 1px solid rgba(30, 144, 255, 0.2);
@@ -764,7 +790,6 @@ pub fn Home() -> Html {
                             margin-left: 1rem;
                             flex-shrink: 0;
                         }
-
                         .promo-link {
                             color: #1E90FF;
                             text-decoration: none;
@@ -773,19 +798,16 @@ pub fn Home() -> Html {
                             align-items: center;
                             transition: all 0.3s ease;
                         }
-
                         .promo-link:hover {
                             color: #7EB2FF;
                             transform: translateX(5px);
                         }
-
                         .small-button-container {
                             width: 100%;
                             margin-top: 0.5rem;
                             display: flex;
                             justify-content: center;
                         }
-
                         .small-promo-link {
                             color: #1E90FF;
                             text-decoration: none;
@@ -795,13 +817,11 @@ pub fn Home() -> Html {
                             border-radius: 6px;
                             transition: all 0.3s ease;
                         }
-
                         .small-promo-link:hover {
                             color: #7EB2FF;
                             background: rgba(30, 144, 255, 0.1);
                             transform: translateY(-2px);
                         }
-
                         .pairing-code-section {
                             margin-top: 1rem;
                             display: flex;
@@ -809,7 +829,6 @@ pub fn Home() -> Html {
                             align-items: center;
                             gap: 0.5rem;
                         }
-
                         .generate-code-btn {
                             background: linear-gradient(45deg, #1E90FF, #4169E1);
                             color: white;
@@ -821,13 +840,11 @@ pub fn Home() -> Html {
                             transition: all 0.3s ease;
                             box-shadow: 0 2px 8px rgba(30, 144, 255, 0.2);
                         }
-
                         .generate-code-btn:hover {
                             transform: translateY(-2px);
                             box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3);
                             background: linear-gradient(45deg, #4169E1, #1E90FF);
                         }
-
                         .warning-note {
                             color: #ff6b6b;
                             font-size: 0.8rem;
@@ -835,7 +852,6 @@ pub fn Home() -> Html {
                             max-width: 250px;
                             margin: 0.5rem 0;
                         }
-
                         .modal-overlay {
                             position: fixed;
                             top: 0;
@@ -849,7 +865,6 @@ pub fn Home() -> Html {
                             z-index: 1000;
                             backdrop-filter: blur(5px);
                         }
-
                         .modal-content {
                             background: #1a1a1a;
                             border: 1px solid rgba(30, 144, 255, 0.2);
@@ -860,7 +875,6 @@ pub fn Home() -> Html {
                             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
                             animation: modalFadeIn 0.3s ease;
                         }
-
                         @keyframes modalFadeIn {
                             from {
                                 opacity: 0;
@@ -871,25 +885,21 @@ pub fn Home() -> Html {
                                 transform: translateY(0);
                             }
                         }
-
                         .modal-content h3 {
                             color: #fff;
                             margin: 0 0 1rem 0;
                             font-size: 1.5rem;
                         }
-
                         .modal-content p {
                             color: #999;
                             margin: 0 0 1.5rem 0;
                             line-height: 1.5;
                         }
-
                         .modal-buttons {
                             display: flex;
                             gap: 1rem;
                             justify-content: flex-end;
                         }
-
                         .cancel-btn {
                             background: transparent;
                             border: 1px solid rgba(255, 255, 255, 0.2);
@@ -900,12 +910,10 @@ pub fn Home() -> Html {
                             font-size: 0.9rem;
                             transition: all 0.3s ease;
                         }
-
                         .cancel-btn:hover {
                             background: rgba(255, 255, 255, 0.1);
                             color: #fff;
                         }
-
                         .confirm-btn {
                             background: linear-gradient(45deg, #ff4444, #ff6b6b);
                             color: white;
@@ -917,17 +925,14 @@ pub fn Home() -> Html {
                             transition: all 0.3s ease;
                             box-shadow: 0 2px 8px rgba(255, 68, 68, 0.2);
                         }
-
                         .confirm-btn:hover {
                             transform: translateY(-2px);
                             box-shadow: 0 4px 12px rgba(255, 68, 68, 0.3);
                             background: linear-gradient(45deg, #ff6b6b, #ff4444);
                         }
-
                         .phone-selector {
                             margin: 1.5rem 0;
                         }
-
                         .preferred-number-display {
                             background: rgba(30, 30, 30, 0.7);
                             border: 1px solid rgba(30, 144, 255, 0.1);
@@ -936,25 +941,20 @@ pub fn Home() -> Html {
                             text-align: center;
                             margin-bottom: 1rem;
                         }
-
                         .preferred-number-label {
                             display: block;
                             font-size: 1.1rem;
                             font-weight: 500;
                         }
-
                         .preferred-number-label.configured {
                             color: #7EB2FF;
                         }
-
                         .preferred-number-label.not-configured {
                             color: #ff4444;
                         }
-
                         .phone-display {
                             margin: 2rem 0;
                         }
-
                         .dashboard-container {
                             min-height: 100vh;
                             border-radius: 12px;
@@ -964,7 +964,6 @@ pub fn Home() -> Html {
                             max-width: 800px;
                             margin: 4rem auto;
                         }
-
                         .panel-title {
                             font-size: 2.5rem;
                             background: linear-gradient(45deg, #fff, #7EB2FF);
@@ -973,7 +972,6 @@ pub fn Home() -> Html {
                             margin: 0 0 1.5rem 0;
                             text-align: center;
                         }
-
                         .dashboard-tabs {
                             display: flex;
                             gap: 1rem;
@@ -982,7 +980,6 @@ pub fn Home() -> Html {
                             padding-bottom: 1rem;
                             flex-wrap: wrap;
                         }
-
                         .tab-button {
                             background: transparent;
                             border: none;
@@ -996,7 +993,6 @@ pub fn Home() -> Html {
                             flex: 1;
                             min-width: fit-content;
                         }
-
                         .tab-button::after {
                             content: '';
                             position: absolute;
@@ -1007,19 +1003,15 @@ pub fn Home() -> Html {
                             background: transparent;
                             transition: background-color 0.3s ease;
                         }
-
                         .tab-button.active {
                             color: white;
                         }
-
                         .tab-button.active::after {
                             background: #1E90FF;
                         }
-
                         .tab-button:hover {
                             color: #7EB2FF;
                         }
-
                         .feature-status {
                             margin-top: 3rem;
                             text-align: left;
@@ -1029,19 +1021,16 @@ pub fn Home() -> Html {
                             border: 1px solid rgba(30, 144, 255, 0.1);
                             backdrop-filter: blur(10px);
                         }
-
                         .feature-status h4 {
                             color: #7EB2FF;
                             font-size: 0.9rem;
                             margin: 1rem 0 0.5rem 0;
                         }
-
                         .feature-status ul {
                             list-style: none;
                             padding: 0;
                             margin: 0 0 1.5rem 0;
                         }
-
                         .feature-status li {
                             color: #999;
                             font-size: 0.9rem;
@@ -1049,41 +1038,34 @@ pub fn Home() -> Html {
                             padding-left: 1.5rem;
                             position: relative;
                         }
-
                         .feature-status li::before {
                             content: '•';
                             position: absolute;
                             left: 0.5rem;
                             color: #1E90FF;
                         }
-
                         .feature-suggestion {
                             margin-top: 1rem;
                             color: #999;
                             font-size: 0.9rem;
                         }
-
                         .feature-suggestion a {
                             color: #1E90FF;
                             text-decoration: none;
                             transition: color 0.3s ease;
                         }
-
                         .feature-suggestion a:hover {
                             color: #7EB2FF;
                             text-decoration: underline;
                         }
-
                         .development-links {
                             margin-top: 2rem;
                             font-size: 0.9rem;
                             color: #666;
                         }
-
                         .development-links p {
                             margin: 0.5rem 0;
                         }
-
                         .development-links a {
                             color: #007bff;
                             text-decoration: none;
@@ -1091,7 +1073,6 @@ pub fn Home() -> Html {
                             padding: 0 2px;
                             transition: all 0.3s ease;
                         }
-
                         .development-links a::after {
                             content: '';
                             position: absolute;
@@ -1104,17 +1085,14 @@ pub fn Home() -> Html {
                             transform-origin: bottom right;
                             transition: transform 0.3s ease;
                         }
-
                         .development-links a:hover {
                             color: #7EB2FF;
                             text-shadow: 0 0 8px rgba(30, 144, 255, 0.3);
                         }
-
                         .development-links a:hover::after {
                             transform: scaleX(1);
                             transform-origin: bottom left;
                         }
-
                         .switch {
                             position: relative !important;
                             display: inline-block !important;
@@ -1122,13 +1100,11 @@ pub fn Home() -> Html {
                             height: 34px !important;
                             margin-left: 1rem !important;
                         }
-
                         .switch input {
                             opacity: 0 !important;
                             width: 0 !important;
                             height: 0 !important;
                         }
-
                         .slider {
                             position: absolute !important;
                             cursor: pointer !important;
@@ -1141,7 +1117,6 @@ pub fn Home() -> Html {
                             border-radius: 34px !important;
                             border: 1px solid rgba(255, 255, 255, 0.1) !important;
                         }
-
                         .slider:before {
                             position: absolute !important;
                             content: "" !important;
@@ -1154,42 +1129,33 @@ pub fn Home() -> Html {
                             border-radius: 50% !important;
                             box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2) !important;
                         }
-
                         input:checked + .slider {
                             background-color: #1E90FF !important;
                         }
-
                         input:checked + .slider:before {
                             transform: translateX(26px) !important;
                         }
-
                         input:focus + .slider {
                             box-shadow: 0 0 1px rgba(30, 144, 255, 0.5) !important;
                         }
-
                         .slider.round {
                             border-radius: 34px !important;
                         }
-
                         .slider.round:before {
                             border-radius: 50% !important;
                         }
-
                         @media (max-width: 768px) {
                             .status-section {
                                 flex-direction: column;
                                 align-items: flex-start;
                             }
-
                             .subscription-promo {
                                 margin: 1rem 0 0 0;
                                 width: 100%;
                             }
-
                             .credit-item {
                                 padding: 1rem;
                             }
-
                             .credit-tooltip {
                                 position: fixed;
                                 bottom: 20px;
@@ -1199,26 +1165,21 @@ pub fn Home() -> Html {
                                 max-width: 300px;
                                 z-index: 1001;
                             }
-
                             .credit-tooltip::after {
                                 display: none;
                             }
-
                             .dashboard-container {
                                 padding: 2rem;
                             }
-
                             .panel-title {
                                 font-size: 1.75rem;
                             }
                         }
-
                         @media (max-width: 480px) {
                             .dashboard-tabs {
                                 gap: 0.5rem;
                                 justify-content: center;
                             }
-
                             .tab-button {
                                 padding: 0.5rem 0.75rem;
                                 font-size: 0.9rem;

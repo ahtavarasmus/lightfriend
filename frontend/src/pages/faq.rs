@@ -443,17 +443,15 @@ pub fn faq() -> Html {
                 </FaqItem>
 
                 <h2>{"Privacy & Security"}</h2>
-
-                <FaqItem 
+                <FaqItem
                     question="How does LightFriend protect my data?"
                     id="data-protection"
-                >
+                    >
                     <p>{"Your data is kept minimal, secure, and private. As a solo developer behind this bootstrapped project, I am committed to protecting your privacy. Your data is never sold or shared with third parties."}</p>
                     <ul>
                         <li><strong>{"Calls:"}</strong>{" No recordings. Just anonymous metrics to improve service."}</li>
                         <li><strong>{"Messages:"}</strong>{" Users can optionally store up to 10 recent message exchanges (encrypted at rest) for better context and follow-up questions; older messages are automatically deleted as new ones are added. Users can also choose zero stored history, though this means the assistant starts each interaction with cleared memory, limiting follow-up capabilities. We have a strict no-logging policy for message content."}</li>
-                        <li><strong>{"Hosted Plan"}</strong>{" While your messages are private and not logged, the hosted version requires some trust in me as the developer, since zero access is impossible. Dumbphones can't handle decryption, so the server must decrypt and analyze messages before responding. All sensitive data is encrypted where possible, stored only as needed, and deleted upon user command or naturally when not needed."}</li>
-                        <li><strong>{"Easy Self-Hostin Plan:"}</strong>{" For ultimate privacy, this plan is fully zero access. You own everything on your own server with no reliance on ours (other than possible new feature updates). This eliminates the need to trust any third party, as it's impossible for anyone else to access your messages or data."}</li>
+                        <li><strong>{"Service Overview:"}</strong>{" As the developer hosting the service, I naturally have access to the server to keep things running smoothly. I guarantee I will never view or access your messages personally - only the AI handles them. It's not zero access, but your data stays secure and private. If you're not comfortable with this and are technical, the code is open source on GitHub for self-hosting from source."}</li>
                         <li><strong>{"Other data:"}</strong>{" All sensitive credentials and user data are encrypted, never shared or sold to anyone, stored only temporarily, and deleted upon user command or naturally when not needed."}</li>
                     </ul>
                 </FaqItem>

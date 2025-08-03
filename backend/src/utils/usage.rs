@@ -10,62 +10,42 @@ pub async fn check_user_credits(
     event_type: &str,
     amount: Option<i32>,
 ) -> Result<(), String> {
-    // Get country from user settings or phone number
-    let country = match state.user_core.get_user_settings(user.id) {
-        Ok(settings) => settings.sub_country,
-        Err(e) => {
-            eprintln!("Failed to get user settings: {}", e);
-            None
-        }
-    };
-
-    // Define costs for each country
-    let (message_cost, voice_second_cost, notification_cost) = match country.as_deref() {
-        Some("US") => (0.15, 0.0025, 0.075),  // US: $0.20/msg, $0.20/minute, $0.075/notification
-        Some("FI") => (0.30, 0.005, 0.15),  // Finland: €0.30/msg, €0.25/minute, €0.10/notification
-        Some("UK") => (0.30, 0.005, 0.15),  // UK: £0.30/msg, £0.25/minute, £0.10/notification
-        Some("AU") => (0.30, 0.005, 0.15),  // Australia: A$0.30/msg, A$0.25/minute, A$0.10/notification
-        Some(_) => (0.70, 0.005, 0.35),     // Default rate for unrecognized country codes
-        None => {
-            // Fallback to phone number based detection
-            if user.phone_number.starts_with("+1") {
-                (0.15, 0.0033, 0.075)  // US
-            } else if user.phone_number.starts_with("+358") {
-                (0.30, 0.005, 0.15)  // Finland
-            } else if user.phone_number.starts_with("+44") {
-                (0.30, 0.005, 0.15)  // UK
-            } else if user.phone_number.starts_with("+61") {
-                (0.30, 0.005, 0.15)  // Australia
-            } else {
-                (0.70, 0.005, 0.35)  // Default to higher rate for unknown regions
-            }
-        }
-    };
-
 
     // Check if the event type is free based on discount_tier
-    let mut is_free = match user.discount_tier.as_deref() {
-        Some("full") => true,
-        Some("msg") if event_type == "message" => true,
-        Some("voice") if event_type != "message" => true,
-        _ => false,
-    };
-    if !user.phone_number.starts_with("+1") {
-        tracing::debug!("user pays their own messages");
-        is_free = true;
+    let messages_are_included;
+    if user.phone_number.starts_with("+1") ||
+            user.phone_number.starts_with("+358") ||
+            user.phone_number.starts_with("+44") ||
+            user.phone_number.starts_with("+61") {
+        messages_are_included = false;
+    } else {
+        // true since they pay to twilio. won't cause bug since sending messages outside the range will require their own creds
+        messages_are_included = true; 
     }
 
-    let is_self_hosted= std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
-
-    if is_free || is_self_hosted {
+    if messages_are_included {
         return Ok(());
     }
+
+    // Define costs based on phone number
+    let (message_cost, voice_second_cost, noti_msg_cost, noti_call_cost) = if user.phone_number.starts_with("+1") {
+        (0.15, 0.0033, 0.075, 0.15) // US
+    } else if user.phone_number.starts_with("+358") {
+        (0.30, 0.005, 0.15, 0.70) // Finland
+    } else if user.phone_number.starts_with("+44") {
+        (0.30, 0.005, 0.15, 0.15) // UK
+    } else if user.phone_number.starts_with("+61") {
+        (0.30, 0.005, 0.15, 0.15) // Australia
+    } else {
+        (0.0, 0.0, 0.0, 0.0) 
+    };
 
     // Calculate cost based on event type
     let required_credits = match event_type {
         "message" => message_cost,
         "voice" => amount.unwrap_or(0) as f32 * voice_second_cost,
-        "notification" => notification_cost,
+        "noti_msg" => noti_msg_cost,
+        "noti_call" => noti_call_cost,
         "digest" => amount.unwrap_or(0) as f32 * message_cost,
         _ => return Err("Invalid event type".to_string()),
     };
@@ -73,7 +53,8 @@ pub async fn check_user_credits(
     let required_credits_left= match event_type {
         "message" => 1.00,
         "voice" => 0.00,
-        "notification" => 1.00 / 2.00,
+        "noti_call" => 1.00 / 2.00,
+        "noti_msg" => 1.00 / 2.00,
         "digest" => 1.00 * amount.unwrap_or(0) as f32,
         _ => return Err("Invalid event type".to_string()),
     };
@@ -154,72 +135,50 @@ pub fn deduct_user_credits(
         }
     };
 
-
-    // Check if the event type is free based on discount_tier
-    let mut is_free = match user.discount_tier.as_deref() {
-        Some("full") => true,
-        Some("msg") if event_type == "message" => true,
-        Some("voice") if event_type != "message" => true,
-        _ => false,
-    };
-
-    if !user.phone_number.starts_with("+1") {
-        tracing::debug!("user pays their own messages");
-        is_free = true;
+    let messages_are_included;
+    if user.phone_number.starts_with("+1") ||
+            user.phone_number.starts_with("+358") ||
+            user.phone_number.starts_with("+44") ||
+            user.phone_number.starts_with("+61") {
+        messages_are_included = false;
+    } else {
+        // true since they pay to twilio. won't cause bug since sending messages outside the range will require their own creds
+        messages_are_included = true; 
     }
 
-    let is_self_hosted= std::env::var("ENVIRONMENT") == Ok("self_hosted".to_string());
-
-    if is_free || is_self_hosted {
+    if messages_are_included {
         return Ok(());
     }
 
-    // Get country from user settings or phone number
-    let country = match state.user_core.get_user_settings(user_id) {
-        Ok(settings) => settings.sub_country,
-        Err(e) => {
-            eprintln!("Failed to get user settings: {}", e);
-            None
-        }
-    };
-
-    // Define costs for each country
-    let (message_cost, voice_second_cost, notification_cost) = match country.as_deref() {
-        Some("US") => (0.15, 0.0025, 0.075),  // US: $0.10/msg, $0.20/minute, $0.05/notification
-        Some("FI") => (0.30, 0.005, 0.15),  // Finland: €0.30/msg, €0.25/minute, €0.15/notification
-        Some("UK") => (0.30, 0.005, 0.15),  // UK: £0.30/msg, £0.25/minute, £0.15/notification
-        Some("AU") => (0.30, 0.005, 0.15),  // Australia: A$0.30/msg, A$0.25/minute, A$0.20/notification
-        Some(_) => (0.70, 0.005, 0.35),     // Default rate for unrecognized country codes
-        None => {
-            // Fallback to phone number based detection
-            if user.phone_number.starts_with("+1") {
-                (0.15, 0.0033, 0.075)  // US
-            } else if user.phone_number.starts_with("+358") {
-                (0.30, 0.005, 0.15)  // Finland
-            } else if user.phone_number.starts_with("+44") {
-                (0.30, 0.005, 0.15)  // UK
-            } else if user.phone_number.starts_with("+61") {
-                (0.30, 0.005, 0.15)  // Australia
-            } else {
-                (0.70, 0.005, 0.35)  // Default to Finland/UK rate
-            }
-        }
+    // Define costs based on phone number
+    let (message_cost, voice_second_cost, noti_msg_cost, noti_call_cost) = if user.phone_number.starts_with("+1") {
+        (0.15, 0.0033, 0.075, 0.15) // US
+    } else if user.phone_number.starts_with("+358") {
+        (0.30, 0.005, 0.15, 0.70) // Finland
+    } else if user.phone_number.starts_with("+44") {
+        (0.30, 0.005, 0.15, 0.15) // UK
+    } else if user.phone_number.starts_with("+61") {
+        (0.30, 0.005, 0.15, 0.15) // Australia
+    } else {
+        (0.0, 0.0, 0.0, 0.0) 
     };
 
     // Calculate cost based on event type
     let cost = match event_type {
         "message" => message_cost,
         "voice" => amount.unwrap_or(0) as f32 * voice_second_cost,
-        "notification" => notification_cost,
-        "digest" => amount.unwrap_or(0) as f32 * message_cost,
+        "noti_msg" => noti_msg_cost,
+        "noti_call" => noti_call_cost,
+        "digest" => message_cost,
         _ => return Err("Invalid event type".to_string()),
     };
 
-    let cost_credits_left = match event_type {
+    let cost_credits_left= match event_type {
         "message" => 1.00,
-        "voice" => amount.unwrap_or(0) as f32 / 60.00,
-        "notification" => 1.00 / 2.00,
-        "digest" => 1.00 * amount.unwrap_or(0) as f32,
+        "voice" => 0.00,
+        "noti_msg" => 1.00 / 2.00,
+        "noti_call" => 1.00 / 2.00,
+        "digest" => 1.00,
         _ => return Err("Invalid event type".to_string()),
     };
 
