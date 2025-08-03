@@ -64,9 +64,33 @@ endif
         telegram-> api_hash: <hash>
 
         for double_puppeting:
+        double_puppet_server_map:
+            localhost: http://localhost:8008
+
         bridge->login_shared_secret_map:
-            localhost: as_token:<as_token_from_double_puppet.yaml>
+            localhost: <openssl rand -hex 32>
+        sync_direct_chats: true
+        sync_direct_chat_list: true
+        (
+        Download shared_secret_authenticator.py from the repository: https://raw.githubusercontent.com/devture/matrix-synapse-shared-secret-auth/master/shared_secret_authenticator.py
+        Place it in your Python environment's site-packages directory. To find the exact path:
+
+            Run Python (in your Synapse venv if applicable): python
+            Then: import site; print(site.getsitepackages())
+            This will output paths like ['/Users/yourusername/synapse/env/lib/python3.12/site-packages'] (adjust for your Python version, e.g., 3.12).
+            Copy the file there.
+            (
+            in homeserver.yaml add the following: 
+            modules:
+              - module: shared_secret_authenticator.SharedSecretAuthProvider
+                config:
+                  shared_secret: "your_generated_secret_here_from_above_shared_secret_map"
+                  m_login_password_support_enabled: true  # Optional, but recommended for compatibility
+        )
+        reload synapse and bridge
+        
     )
+
 endin
 
 *in homeserver.yaml*:

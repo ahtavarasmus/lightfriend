@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use hmac::{Hmac, Mac};
 use reqwest::Client as HttpClient;
+use matrix_sdk::store::RoomLoadSettings;
 use crate::repositories::user_repository::UserRepository;
 use serde_json::json;
 use sha1::Sha1;
@@ -228,14 +229,11 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixCli
         .unwrap();
     tracing::debug!("✅ Matrix client built successfully");
     
-    // logged_in checks if client store has device_id and access token stored
-    tracing::debug!("🔑 Checking if client is logged in: {}", client.logged_in());
-
     // Attempt to restore session
     let mut session_restored = false;
     if let Some(stored_session) = client.matrix_auth().session() {
         tracing::debug!("🔄 Found session in store, attempting to restore");
-        if let Err(e) = client.matrix_auth().restore_session(stored_session.clone()).await {
+        if let Err(e) = client.matrix_auth().restore_session(stored_session.clone(), RoomLoadSettings::default()).await {
             tracing::debug!("⚠️ Failed to restore session from store: {}", e);
         } else {
             tracing::debug!("✅ Session restored from store");
@@ -269,12 +267,12 @@ pub async fn get_client(user_id: i32, state: &Arc<AppState>) -> Result<MatrixCli
                     user_id: OwnedUserId::try_from(full_user_id.clone()).unwrap(),
                     device_id: matrix_sdk::ruma::OwnedDeviceId::try_from(device_id.clone().unwrap()).unwrap(),
                 },
-                tokens: matrix_sdk::authentication::matrix::MatrixSessionTokens {
+                tokens: matrix_sdk::authentication::SessionTokens {
                     access_token: access_token.clone(),
                     refresh_token: None,
                 },
             };
-            if let Ok(_) = client.matrix_auth().restore_session(session.clone()).await {
+            if let Ok(_) = client.matrix_auth().restore_session(session.clone(), RoomLoadSettings::default()).await {
                 tracing::debug!("✅ Token-based session restored");
                 // Verify session
                 if let Ok(response) = client.whoami().await {

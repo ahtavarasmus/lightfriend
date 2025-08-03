@@ -393,8 +393,8 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                                                     {
                                                         spawn_local(async move {
                                                             let request_body = serde_json::json!({
-                                                                "chat_name": "Test User",
-                                                                "message": "Test message from Lightfriend"
+                                                                "chat_name": "test",
+                                                                "message": "testing"
                                                             });
                                                             match Request::post(&format!("{}/api/telegram/send", config::get_backend_url()))
                                                                 .header("Authorization", &format!("Bearer {}", token))
@@ -434,7 +434,7 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                                                     {
                                                         spawn_local(async move {
                                                             let request_body = serde_json::json!({
-                                                                "search_term": "Luukas"
+                                                                "search_term": "test"
                                                             });
                                                             match Request::post(&format!("{}/api/telegram/search-rooms", config::get_backend_url()))
                                                                 .header("Authorization", &format!("Bearer {}", token))
