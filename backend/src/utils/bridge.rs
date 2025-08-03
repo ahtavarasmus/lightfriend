@@ -79,7 +79,6 @@ fn get_room_suffix(service: &str) -> String {
 }
 
 fn infer_service(room_name: &str, sender_localpart: &str) -> Option<String> {
-    println!("room_name: {:?}, sender_localpart: {:?}", room_name, sender_localpart);
     let sender_localpart = sender_localpart.trim().to_lowercase();
     let room_name = room_name.to_lowercase();
 
@@ -1020,8 +1019,6 @@ pub async fn search_bridge_rooms(
         format!("{} Bridge", service_cap),
         format!("{} bridge bot", service_cap),
     ];
-    println!("search_term: {}", search_term);
-    println!("room_suffix: {}", room_suffix);
     // Process rooms in parallel
     let room_futures = joined_rooms.into_iter().map(|room| {
         let room_suffix = room_suffix.clone();
@@ -1033,7 +1030,6 @@ pub async fn search_bridge_rooms(
                 Ok(name) => name.to_string(),
                 Err(_) => return None,
             };
-            println!("room_name: {}", room_name);
             // NEW: Skip control/admin rooms based on name terms
             if skip_terms.iter().any(|t| room_name.contains(t)) {
                 return None;

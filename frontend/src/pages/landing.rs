@@ -118,7 +118,7 @@ pub fn landing() -> Html {
                         </div>
                         <div class="faq-item">
                             <h3>{"How private is Lightfriend?"}</h3>
-                            <p>{"It depends on the plan. I host the service on a secure server for user convenience (Hosted Plan) with a zero logging policy, but this means you need to trust me since I must have access to this server for obvious reasons. The Easy Self-Hosting plan on the other hand offers completely private service with zero access from anyone except you. It requires more upfront investment to setup, but once running it's supposed to be a hands-free experience with automatic updates and security."}</p>
+                            <p>{"Lightfriend is hosted on a secure EU server with a strict zero-logging policy - nothing is stored beyond what's necessary. As a bootstrapped solo dev, I prioritize transparency: the code is open source for anyone to audit. The hosted setup requires some trust (zero access isn't feasible), but your data remains yours and can be deleted anytime."}</p>
                         </div>
                     </div>
                 </div>

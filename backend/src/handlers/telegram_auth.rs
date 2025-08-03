@@ -428,8 +428,6 @@ async fn monitor_telegram_connection(
                                 _ => continue,
                             };
 
-                            println!("CONTENT: {}", content);
-
                             // Check for successful login or already logged in
                             if content.contains("Logged in") || content.contains("You are already logged in") {
                                 tracing::debug!("🎉 Telegram successfully connected for user {}", user_id);
