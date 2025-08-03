@@ -32,6 +32,7 @@ pub fn landing() -> Html {
                         <p class="hero-subtitle">
                             {"Switch to a dumbphone without feeling isolated, even if your life depends on "}
                             <span class="highlight-icon"><i class="fab fa-whatsapp"></i></span>
+                            <span class="highlight-icon"><i class="fab fa-telegram"></i></span>
                             <span class="highlight-icon"><i class="fas fa-envelope"></i></span>
                             <span class="highlight-icon"><i class="fas fa-calendar"></i></span>
                             <span class="highlight-icon"><i class="fas fa-globe"></i></span>
