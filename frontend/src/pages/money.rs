@@ -193,7 +193,7 @@ pub struct PricingCardProps {
 }
 #[function_component(PricingCard)]
 pub fn pricing_card(props: &PricingCardProps) -> Html {
-    let price_text = if props.subscription_type == "hosted" || props.subscription_type == "digital_detox" {
+    let price_text = if props.subscription_type == "hosted" {
         format!("{}{:.2}", props.currency, props.price / 30.00) // Normal pricing for other plans
     } else {
         format!("{}{:.2}", props.currency, props.price)
@@ -548,10 +548,16 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                 <div class="price">
                     <span class="amount">{price_text}</span>
                     <span class="period">{props.period.clone()}</span>
-                    { if props.subscription_type == "hosted" || props.subscription_type == "digital_detox" {
+                    { if props.subscription_type == "hosted" {
                         html! {
                             <p class="billing-note">
                                 {format!("Billed monthly at {}{:.2}", props.currency, props.price)}
+                            </p>
+                        }
+                    } else if props.subscription_type == "digital_detox" {
+                        html! {
+                            <p class="billing-note">
+                                {format!("Billed monthly at {}{:.2} after the trial", props.currency, 19.00)}
                             </p>
                         }
                     } else {
