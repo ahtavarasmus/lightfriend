@@ -785,6 +785,9 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                             telegram_infos.len(),
                             hours_since_prev
                         );
+                        if user_id == 1 {
+                            println!("telegram_infos: {:#?}", telegram_infos);
+                        }
 
                         // Extend messages with Telegram messages
                         messages.extend(telegram_infos);

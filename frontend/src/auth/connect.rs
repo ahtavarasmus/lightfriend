@@ -156,13 +156,13 @@ pub fn connect(props: &ConnectProps) -> Html {
     }
     
 
-let group_states = use_state(|| {
-    let mut map = std::collections::HashMap::new();
-    map.insert("tools", ServiceGroupState { expanded: false, service_count: 4, connected_count: 2 });
-    map.insert("apps", ServiceGroupState { expanded: false, service_count: 4, connected_count: 0 });
-    map.insert("proactive", ServiceGroupState { expanded: false, service_count: 4, connected_count: 0 });
-    map
-});
+    let group_states = use_state(|| {
+        let mut map = std::collections::HashMap::new();
+        map.insert("tools", ServiceGroupState { expanded: false, service_count: 4, connected_count: 2 });
+        map.insert("apps", ServiceGroupState { expanded: false, service_count: 4, connected_count: 0 });
+        map.insert("proactive", ServiceGroupState { expanded: false, service_count: 4, connected_count: 0 });
+        map
+    });
 
 
     // Predefined providers (you can expand this list)
@@ -704,7 +704,6 @@ let group_states = use_state(|| {
                             </div>
                         </div>
                     </div>
-
 
                     if let Some(err) = (*error).as_ref() {
                         <div class="error-message">
