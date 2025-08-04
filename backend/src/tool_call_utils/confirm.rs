@@ -279,7 +279,7 @@ pub async fn handle_confirmation(
                     StatusCode::OK,
                     [(axum::http::header::CONTENT_TYPE, "application/json")],
                     Json(TwilioResponse {
-                        message: "Failed to send WhatsApp message due to internal error.".to_string(),
+                        message: "Failed to send Telegram message due to internal error.".to_string(),
                     })
                 ));
                 // Clear the confirmation state
@@ -302,9 +302,9 @@ pub async fn handle_confirmation(
 
         match user_response.as_str() {
             "yes" => {
-                // Send the WhatsApp message
+                // Send the Telegram message
                 match crate::utils::bridge::send_bridge_message(
-                    "whatsapp",
+                    "telegram",
                     state,
                     user.id,
                     &recipient,
@@ -334,7 +334,7 @@ pub async fn handle_confirmation(
                     }
                     Err(e) => {
                         // Send error message via Twilio
-                        tracing::debug!("sending failed to send the message to whatsapp sms");
+                        tracing::debug!("sending failed to send the message to telegram sms");
                         let error_msg = format!("Failed to send message: {} (not charged)", e);
                         if let Err(send_err) = crate::api::twilio_utils::send_conversation_message(
                             &state,
@@ -356,7 +356,7 @@ pub async fn handle_confirmation(
                 }
             }
             "no" => {
-                let cancel_msg = "WhatsApp message cancelled.";
+                let cancel_msg = "Telegram message cancelled.";
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
                     cancel_msg,
