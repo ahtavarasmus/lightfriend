@@ -223,6 +223,17 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                         }));
                     }
                 };
+                let user_info = match state.user_core.get_user_info(user.id) {
+                    Ok(settings) => settings,
+                    Err(e) => {
+
+                        return Json(json!({
+                            "status": "error",
+                            "message": "Failed to get user settings",
+                            "error": e.to_string()
+                        }));
+                    }
+                };
                 
                 if user.verified {
                     let nickname = user.nickname.unwrap_or_else(|| "".to_string());
@@ -250,7 +261,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                                 "assistantOverrides": {
                                     "variableValues": {
                                         "name": nickname,
-                                        "user_info": user_settings.info,
+                                        "user_info": user_info.info,
                                     },
                                     "maxDurationSeconds": (user.credits / voice_second_cost) as i32,
                                 }
@@ -281,7 +292,7 @@ pub async fn handle_assistant_request(event: &MessageResponse, state: &Arc<AppSt
                                         "firstMessage": format!("Welcome {}! Your account has been verified! Anyways, how can I help?", nickname),
                                         "variableValues": {
                                             "name": nickname,
-                                            "user_info": user_settings.info,
+                                            "user_info": user_info.info,
                                         },
                                         "maxDurationSeconds": std::cmp::max((user.credits / voice_second_cost) as i32, 10),
                                     }

@@ -357,6 +357,52 @@ pub fn admin_dashboard() -> Html {
                     </button>
                 </div>
 
+                <div class="test-section">
+                <h2>{"Test Backend"}</h2>
+                <button
+                    onclick={{
+                        let error = error.clone();
+                        Callback::from(move |_| {
+                            let error = error.clone();
+                            wasm_bindgen_futures::spawn_local(async move {
+                                if let Some(token) = window()
+                                    .and_then(|w| w.local_storage().ok())
+                                    .flatten()
+                                    .and_then(|storage| storage.get_item("token").ok())
+                                    .flatten()
+                                {
+                                    let params = json!({
+                                        "param1": "test_value1",
+                                        "param2": "test_value2"
+                                    });
+                                    match Request::post(&format!("{}/testing", config::get_backend_url()))
+                                        .header("Authorization", &format!("Bearer {}", token))
+                                        .json(&params)
+                                        .unwrap()
+                                        .send()
+                                        .await
+                                    {
+                                        Ok(response) => {
+                                            if response.ok() {
+                                                error.set(Some("Test request sent successfully".to_string()));
+                                            } else {
+                                                error.set(Some("Failed to send test request".to_string()));
+                                            }
+                                        }
+                                        Err(_) => {
+                                            error.set(Some("Failed to send test request".to_string()));
+                                        }
+                                    }
+                                }
+                            });
+                        })
+                    }}
+                    class="broadcast-button"
+                >
+                    {"Test Backend"}
+                </button>
+            </div>
+
                 // Test SMS Chat Section
                 <div class="test-chat-section">
                     <h2>{"Test SMS Processing (User ID: 1)"}</h2>

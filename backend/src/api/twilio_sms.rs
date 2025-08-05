@@ -346,12 +346,26 @@ pub async fn process_sms(
         }
     };
 
-    let user_info = match user_settings.clone().info {
+    let user_info= match state.user_core.get_user_info(user.id) {
+        Ok(settings) => settings,
+        Err(e) => {
+            tracing::error!("Failed to get user settings: {}", e);
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                axum::Json(TwilioResponse {
+                    message: "Failed to process user settings".to_string(),
+                })
+            );
+        }
+    };
+
+    let user_given_info = match user_info.clone().info {
         Some(info) => info,
         None => "".to_string()
     };
 
-    let timezone_str = match user_settings.timezone {
+    let timezone_str = match user_info.timezone {
         Some(ref tz) => tz.as_str(),
         None => "UTC",
     };
@@ -387,7 +401,7 @@ pub async fn process_sms(
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes. Always use all tools immidiately that you think will be needed to complete the user's query and base your response to those responses. IMPORTANT: For calendar events, you must return the exact output from the calendar tool without any modifications, additional text, or formatting. Never add bullet points, markdown formatting (like **, -, #), or any other special characters.\n\n### Tool Usage Guidelines:\n- Provide all relevant details in the response immediately. \n- Tools that involve sending or creating something(eg. send_whatsapp_message), you can call them straight away using the available information without confirming with the user. These tools will send extra confirmation message to user anyways before doing anything.\n\n### Date and Time Handling:\n- Always work with times in the user's timezone: {} with offset {}.\n- When user mentions times without dates, assume they mean the nearest future occurrence.\n- For time inputs to tools, convert to RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z').\n- For displaying times to users:\n  - Use 12-hour format with AM/PM (e.g., '2:30 PM')\n  - Include timezone-adjusted dates in a friendly format (e.g., 'today', 'tomorrow', or 'Jun 15')\n  - Show full date only when it's not today/tomorrow\n- If no specific time is mentioned:\n  - For calendar queries: Show today's events (and tomorrow's if after 6 PM)\n  - For other time ranges: Use current time to 24 hours ahead\n- For queries about:\n  - 'Today': Use 00:00 to 23:59 of the current day in user's timezone\n  - 'Tomorrow': Use 00:00 to 23:59 of tomorrow in user's timezone\n  - 'This week': Use remaining days of current week\n  - 'Next week': Use Monday to Sunday of next week\n\n### Additional Guidelines:\n- Weather Queries: If no location is specified, assume the user's home location from user info.\n- Email Queries: For fetch_specific_email, provide the whole message body or a summary if too long—never just the subject.\n- WhatsApp/Telegram Fetching: Use the room name directly from the user's message/context without searching rooms.\n\nNever use markdown, HTML, or any special formatting characters in responses. Return all information in plain text only. User information: {}. Always use tools to fetch the latest information before answering.", formatted_time, timezone_str, offset, user_info)),
+        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes. Always use all tools immidiately that you think will be needed to complete the user's query and base your response to those responses. IMPORTANT: For calendar events, you must return the exact output from the calendar tool without any modifications, additional text, or formatting. Never add bullet points, markdown formatting (like **, -, #), or any other special characters.\n\n### Tool Usage Guidelines:\n- Provide all relevant details in the response immediately. \n- Tools that involve sending or creating something(eg. send_whatsapp_message), you can call them straight away using the available information without confirming with the user. These tools will send extra confirmation message to user anyways before doing anything.\n\n### Date and Time Handling:\n- Always work with times in the user's timezone: {} with offset {}.\n- When user mentions times without dates, assume they mean the nearest future occurrence.\n- For time inputs to tools, convert to RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z').\n- For displaying times to users:\n  - Use 12-hour format with AM/PM (e.g., '2:30 PM')\n  - Include timezone-adjusted dates in a friendly format (e.g., 'today', 'tomorrow', or 'Jun 15')\n  - Show full date only when it's not today/tomorrow\n- If no specific time is mentioned:\n  - For calendar queries: Show today's events (and tomorrow's if after 6 PM)\n  - For other time ranges: Use current time to 24 hours ahead\n- For queries about:\n  - 'Today': Use 00:00 to 23:59 of the current day in user's timezone\n  - 'Tomorrow': Use 00:00 to 23:59 of tomorrow in user's timezone\n  - 'This week': Use remaining days of current week\n  - 'Next week': Use Monday to Sunday of next week\n\n### Additional Guidelines:\n- Weather Queries: If no location is specified, assume the user's home location from user info.\n- Email Queries: For fetch_specific_email, provide the whole message body or a summary if too long—never just the subject.\n- WhatsApp/Telegram Fetching: Use the room name directly from the user's message/context without searching rooms.\n\nNever use markdown, HTML, or any special formatting characters in responses. Return all information in plain text only. User information: {}. Always use tools to fetch the latest information before answering.", formatted_time, timezone_str, offset, user_given_info)),
     }];
     
     // Process the message body to remove "forget" if it exists at the start
@@ -714,9 +728,9 @@ pub async fn process_sms(
                             continue;
                         }
                     };
-                    let query = format!("User info: {}. Query: {}", user_info, c.query);
+                    let query = format!("User info: {}. Query: {}", user_given_info, c.query);
 
-                    let sys_prompt = format!("You are assisting an AI text messaging service. The questions you receive are from text messaging conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. When listing multiple points, use simple numbering (1, 2, 3) 5. Focus on the most relevant information that addresses the user's immediate needs. This is what you should know about the user who this information is going to in their own words: {}", user_info);
+                    let sys_prompt = format!("You are assisting an AI text messaging service. The questions you receive are from text messaging conversations where users are seeking information or help. Please note: 1. Provide clear, conversational responses that can be easily read from a small screen 2. Avoid using any markdown, HTML, or other markup languages 3. Keep responses concise but informative 4. When listing multiple points, use simple numbering (1, 2, 3) 5. Focus on the most relevant information that addresses the user's immediate needs. This is what you should know about the user who this information is going to in their own words: {}", user_given_info);
                     match crate::utils::tool_exec::ask_perplexity(&state, &query, &sys_prompt).await {
                         Ok(answer) => {
                             tracing::debug!("Successfully received Perplexity answer");

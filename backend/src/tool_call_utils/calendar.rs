@@ -233,7 +233,8 @@ pub async fn handle_create_calendar_event(
 
     // Get user settings to check confirmation preference
     let user_settings = state.user_core.get_user_settings(user_id)?;
-    let timezone = user_settings.timezone.unwrap_or_else(|| String::from("UTC"));
+    let user_info= state.user_core.get_user_info(user_id)?;
+    let timezone = user_info.timezone.unwrap_or_else(|| String::from("UTC"));
     
     // Parse the start time
     let start_time = chrono::DateTime::parse_from_rfc3339(&args.start_time)

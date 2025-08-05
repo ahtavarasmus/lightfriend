@@ -16,6 +16,7 @@ use crate::schema::calendar_notifications;
 use crate::schema::user_settings;
 use crate::schema::temp_variables;
 use crate::schema::message_history;
+use crate::schema::user_info;
 
 
 
@@ -51,6 +52,28 @@ pub struct User {
     pub confirm_send_event: Option<String>, // flag for if sending event needs confirmation. can be "whatsapp", "email" or "calendar"
     pub waiting_checks_count: i32, // how many waiting checks the user currently has(max 5 is possible)
     pub next_billing_date_timestamp: Option<i32>, // when is user next billed for their subscription
+}
+
+#[derive(Queryable, Selectable, Insertable, Clone)]
+#[diesel(table_name = user_info)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct UserInfo {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub location: Option<String>,
+    pub dictionary: Option<String>,
+    pub info: Option<String>,
+    pub timezone: Option<String>,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = user_info)]
+pub struct NewUserInfo {
+    pub user_id: i32,
+    pub location: Option<String>,
+    pub dictionary: Option<String>,
+    pub info: Option<String>,
+    pub timezone: Option<String>,
 }
 
 #[derive(Queryable, Selectable, Insertable)]
@@ -401,12 +424,10 @@ pub struct UserSettings {
     pub user_id: i32,
     pub notify: bool, // if user wants to be notified about new features to lightfriend (not related to notifications)
     pub notification_type: Option<String>, // "call" or "sms"(sms is default when none) // "call" also sends notification as sms
-    pub timezone: Option<String>,
     pub timezone_auto: Option<bool>,
     pub agent_language: String, // language the agent will use to answer, default 'en'. 
     pub sub_country: Option<String>, // "US", "FI", "UK", "AU"
     pub save_context: Option<i32>, // how many messages to save in context or None if nothing is saved
-    pub info: Option<String>, // extra info about the user for the ai
     pub morning_digest: Option<String>, // whether and when to send user morning digest noti, time is in UTC as rfc
     pub day_digest: Option<String>, // whether and when to send day digest, time is in UTC as rfc
     pub evening_digest: Option<String>, // whether and when to send user evening digest noti, time is in UTC rfc
@@ -434,12 +455,10 @@ pub struct NewUserSettings {
     pub user_id: i32,
     pub notify: bool,
     pub notification_type: Option<String>,
-    pub timezone: Option<String>,
     pub timezone_auto: Option<bool>,
     pub agent_language: String,
     pub sub_country: Option<String>,
     pub save_context: Option<i32>,
-    pub info: Option<String>,
     pub number_of_digests_locked: i32,
     pub critical_enabled: Option<String>,
     pub proactive_agent_on: bool,

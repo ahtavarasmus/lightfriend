@@ -3,8 +3,8 @@ use diesel::sql_types::Text;
 use diesel::result::Error as DieselError;
 use std::error::Error;
 use crate::{
-    models::user_models::{User, UserSettings, NewUserSettings, TempVariable, NewTempVariable},
-    schema::{users, user_settings, temp_variables},
+    models::user_models::{User, UserSettings, UserInfo, NewUserInfo, NewUserSettings, TempVariable, NewTempVariable},
+    schema::{users, user_settings, temp_variables, user_info},
     DbPool,
 };
 
@@ -92,6 +92,46 @@ impl UserCore {
         Ok(())
     }
 
+    // Helper function to ensure user_info exists
+    pub fn ensure_user_info_exists(&self, user_id: i32) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let exists = user_info::table
+            .filter(user_info::user_id.eq(user_id))
+            .first::<UserInfo>(&mut conn)
+            .optional()?
+            .is_some();
+
+        if !exists {
+            let new_user_info = NewUserInfo {
+                user_id,
+                location: None,
+                dictionary: None,
+                info: None,
+                timezone: None,
+            };
+
+            diesel::insert_into(user_info::table)
+                .values(&new_user_info)
+                .execute(&mut conn)?;
+        }
+
+        Ok(())
+    }
+
+    // Get user_info, ensuring it exists first
+    pub fn get_user_info(&self, user_id: i32) -> Result<UserInfo, DieselError> {
+        self.ensure_user_info_exists(user_id)?;
+
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let user_info = user_info::table
+            .filter(user_info::user_id.eq(user_id))
+            .first::<UserInfo>(&mut conn)?;
+
+        Ok(user_info)
+    }
+
 
     // User settings operations
     pub fn get_user_settings(&self, user_id: i32) -> Result<UserSettings, DieselError> {
@@ -109,11 +149,9 @@ impl UserCore {
                     user_id,
                     notify: true,
                     notification_type: None,
-                    timezone: None,
                     timezone_auto: None,
                     agent_language: "en".to_string(),
                     sub_country: None,
-                    info: None,
                     save_context: Some(5),
                     number_of_digests_locked: 0,
                     critical_enabled: Some("sms".to_string()),
@@ -149,11 +187,9 @@ impl UserCore {
                 user_id,
                 notify: true,
                 notification_type: None,
-                timezone: None,
                 timezone_auto: None,
                 agent_language: "en".to_string(),
                 sub_country: None,
-                info: None,
                 save_context: Some(5),
                 number_of_digests_locked: 0,
                 critical_enabled: Some("sms".to_string()),
@@ -239,10 +275,10 @@ impl UserCore {
 
     // Update user's profile
     pub fn update_profile(&self, user_id: i32, email: &str, phone_number: &str, nickname: &str, info: &str, timezone: &str, timezone_auto: &bool, notification_type: Option<&str>, save_context: Option<i32>, require_confirmation: bool) -> Result<(), DieselError> {
-        use crate::schema::user_settings;
+        use crate::schema::users;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         println!("Repository: Updating user {} with notification type: {:?}", user_id, notification_type);
-        
+       
         // Start a transaction
         conn.transaction(|conn| {
             // Check if phone number exists for a different user
@@ -251,30 +287,26 @@ impl UserCore {
                 .filter(users::id.ne(user_id))
                 .first::<User>(conn)
                 .optional()?;
-                
+               
             if existing_phone.is_some() {
                 return Err(DieselError::RollbackTransaction);
             }
-
             // Check if email exists for a different user
             let existing_email = users::table
                 .filter(users::email.eq(email.to_lowercase()))
                 .filter(users::id.ne(user_id))
                 .first::<User>(conn)
                 .optional()?;
-                
+               
             if existing_email.is_some() {
                 return Err(DieselError::NotFound);
             }
-
             // Get current user to check if phone number is changing
             let current_user = users::table
                 .find(user_id)
                 .first::<User>(conn)?;
-
             // If phone number is changing, set verified to false
             let should_unverify = current_user.phone_number != phone_number;
-
             // Update user table
             diesel::update(users::table.find(user_id))
                 .set((
@@ -284,22 +316,26 @@ impl UserCore {
                     users::verified.eq(!should_unverify && current_user.verified), // Only keep verified true if phone number hasn't changed
                 ))
                 .execute(conn)?;
-
             // Ensure user settings exist
             self.ensure_user_settings_exist(user_id)?;
-
+            // Ensure user info exists
+            self.ensure_user_info_exists(user_id)?;
             // Update the settings
             diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
                 .set((
-                    user_settings::timezone.eq(timezone.to_string()),
                     user_settings::timezone_auto.eq(timezone_auto),
                     user_settings::notification_type.eq(notification_type.map(|s| s.to_string())),
-                    user_settings::info.eq(info),
                     user_settings::save_context.eq(save_context),
                     user_settings::require_confirmation.eq(require_confirmation),
                 ))
                 .execute(conn)?;
-
+            // Update user info
+            diesel::update(user_info::table.filter(user_info::user_id.eq(user_id)))
+                .set((
+                    user_info::timezone.eq(timezone),
+                    user_info::info.eq(info),
+                ))
+                .execute(conn)?;
             Ok(())
         })
     }
@@ -322,16 +358,16 @@ impl UserCore {
     }
 
     pub fn update_timezone(&self, user_id: i32, timezone: &str) -> Result<(), DieselError> {
-        use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // First fetch the user settings to check timezone_auto
-        let user_settings = self.get_user_settings(user_id)?;
+        let user_info= self.get_user_info(user_id)?;
+        let user_settings= self.get_user_settings(user_id)?;
         // Only update if timezone_auto is false (manual timezone setting)
         if !user_settings.timezone_auto.unwrap_or(false) {
-            diesel::update(user_settings::table)
-                .filter(user_settings::user_id.eq(user_id))
-                .set(user_settings::timezone.eq(timezone.to_string()))
+            diesel::update(user_info::table)
+                .filter(user_info::user_id.eq(user_id))
+                .set(user_info::timezone.eq(timezone.to_string()))
                 .execute(&mut conn)?;
         }
         

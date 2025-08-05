@@ -452,7 +452,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                     } else {
                                         html! {
                                             <crate::proactive::constant_monitoring::MonitoredContactsSection
-                                                service_type={"whatsapp".to_string()}
+                                                service_type={"email".to_string()}
                                                 contacts={Vec::new()}
                                                 on_change={Callback::from(|_| ())}
                                             />

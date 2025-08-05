@@ -117,6 +117,10 @@ pub async fn get_profile(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)}))
             ))?;
+            let user_info = state.user_core.get_user_info(auth_user.user_id).map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)}))
+            ))?;
             let current_time = std::time::SystemTime::now()
                                                     .duration_since(std::time::UNIX_EPOCH)
                                                     .unwrap()
@@ -210,12 +214,12 @@ pub async fn get_profile(
                 time_to_delete: time_to_delete,
                 credits: user.credits,
                 notify: user_settings.notify,
-                info: user_settings.info,
+                info: user_info.info,
                 preferred_number: user.preferred_number,
                 charge_when_under: user.charge_when_under,
                 charge_back_to: user.charge_back_to,
                 stripe_payment_method_id: user.stripe_payment_method_id,
-                timezone: user_settings.timezone,
+                timezone: user_info.timezone,
                 timezone_auto: user_settings.timezone_auto,
                 sub_tier: user.sub_tier,
                 credits_left: user.credits_left,

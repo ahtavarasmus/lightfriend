@@ -184,6 +184,20 @@ pub async fn fetch_assistant(
                 }
             };
 
+            let user_info= match state.user_core.get_user_info(user.id) {
+                Ok(settings) => settings,
+                Err(e) => {
+                    error!("Failed to get user settings: {}", e);
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "Failed to get conversation",
+                            "message": "Internal server error"
+                        }))
+                    ));
+                }
+            };
+
             // If user is not verified, verify them
             if !user.verified {
                 if let Err(e) = state.user_core.verify_user(user.id) {
@@ -235,20 +249,46 @@ pub async fn fetch_assistant(
                 Some(nickname) => nickname,
                 None => "".to_string()
             };
-            let user_info = match user_settings.info {
+            let user_own_info= match user_info.info.clone() {
                 Some(info) => info,
                 None => "".to_string()
             };
 
+            let nearby_places_str = if let Some(ref info) = user_info.info.clone() {
+                if !info.trim().is_empty() {
+                    // Extract location from user_own_info (assuming it starts with "I'm from [location]. ..." or similar; adjust parsing as needed)
+                    let location_start = info.find("I'm from ").map(|i| i + 9).unwrap_or(0);
+                    let location_end = info[location_start..].find('.').map(|i| location_start + i).unwrap_or(info.len());
+                    let user_location = &info[location_start..location_end].trim();
+                    
+                    if !user_location.is_empty() {
+                        match crate::utils::tool_exec::get_nearby_towns(user_location).await {
+                            Ok(places) => places.join(", "),
+                            Err(e) => {
+                                tracing::error!("Failed to get nearby places: {}", e);
+                                "".to_string()
+                            }
+                        }
+                    } else {
+                        "".to_string()
+                    }
+                } else {
+                    "".to_string()
+                }
+            } else {
+                "".to_string()
+            };
+
             dynamic_variables.insert("name".to_string(), json!(nickname));
-            dynamic_variables.insert("user_info".to_string(), json!(user_info));
+            dynamic_variables.insert("user_info".to_string(), json!(user_own_info));
+            dynamic_variables.insert("nearby_places".to_string(), json!(nearby_places_str));
             dynamic_variables.insert("user_id".to_string(), json!(user.id));
             dynamic_variables.insert("email_id".to_string(), json!("-1".to_string()));
             dynamic_variables.insert("content_type".to_string(), json!("".to_string()));
             dynamic_variables.insert("notification_message".to_string(), json!("".to_string()));
 
             // Get timezone from user info or default to UTC
-            let timezone_str = match user_settings.timezone {
+            let timezone_str = match user_info.timezone {
                 Some(ref tz) => tz.as_str(),
                 None => "UTC",
             };

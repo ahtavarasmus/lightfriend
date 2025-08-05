@@ -38,7 +38,8 @@ pub async fn get_weather(
     
     // Get user settings
     let settings = state.user_core.get_user_settings(user_id).map_err(|e| format!("Failed to get user settings: {}", e))?;
-    let user_timezone = settings.timezone;
+    let user_info= state.user_core.get_user_info(user_id).map_err(|e| format!("Failed to get user settings: {}", e))?;
+    let user_timezone = user_info.timezone;
     
     // First, get coordinates using Geoapify
     let geocoding_url = format!(
@@ -195,4 +196,102 @@ pub async fn ask_perplexity(
     let content = response.choices[0].message.content.clone().unwrap_or_default();
 
     Ok(content)
+}
+
+use std::collections::HashSet;
+use reqwest;
+use serde_json;
+use urlencoding;
+
+pub async fn get_nearby_towns(
+    location: &str,
+) -> Result<Vec<String>, Box<dyn Error>> {
+   
+    let client = reqwest::Client::new();
+    let geoapify_key = std::env::var("GEOAPIFY_API_KEY").expect("GEOAPIFY_API_KEY must be set");
+   
+    // Get coordinates using Geoapify Geocoding
+    let geocoding_url = format!(
+        "https://api.geoapify.com/v1/geocode/search?text={}&format=json&apiKey={}",
+        urlencoding::encode(location),
+        geoapify_key
+    );
+    let geocoding_response: serde_json::Value = client
+        .get(&geocoding_url)
+        .send()
+        .await?
+        .json()
+        .await?;
+    let results = geocoding_response["results"].as_array()
+        .ok_or("No results found")?;
+    if results.is_empty() {
+        return Err("Location not found".into());
+    }
+    let result = &results[0];
+    let lat = result["lat"].as_f64()
+        .ok_or("Latitude not found")?;
+    let lon = result["lon"].as_f64()
+        .ok_or("Longitude not found")?;
+    let location_name = result["formatted"].as_str()
+        .unwrap_or(location);
+    println!("Found coordinates for {}: lat={}, lon={}", location_name, lat, lon);
+   
+    // Get nearby populated places (focus on suburb and neighbourhood for close places)
+    let categories = "populated_place.suburb,populated_place.neighbourhood";
+    let places_url = format!(
+        "https://api.geoapify.com/v2/places?categories={}&filter=circle:{},{},8000&bias=proximity:{},{}&limit=50&apiKey={}",
+        categories,
+        lon,
+        lat,
+        lon,
+        lat,
+        geoapify_key
+    );
+    println!("Places API URL: {}", places_url);
+    let response = client.get(&places_url).send().await?;
+    println!("Places API status: {}", response.status());
+    let places_response: serde_json::Value = response.json().await?;
+   
+    let features = places_response["features"].as_array()
+        .ok_or("No features found")?;
+   
+    let mut nearby_places: Vec<(String, f64)> = Vec::new(); // (name, distance)
+    let mut seen = HashSet::new();
+   
+    // Extract suburb part from location_name for accurate skipping (e.g., "Vuores" from full address)
+    let input_suburb = location_name.split(',').next().unwrap_or(location).trim().to_lowercase();
+   
+    for feature in features {
+        if let Some(properties) = feature["properties"].as_object() {
+            let place_name = properties.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
+           
+            if let Some(name) = place_name {
+                let lower_name = name.to_lowercase();
+                if lower_name == input_suburb {
+                    continue;
+                }
+                // Get distance if available, default to MAX if not
+                let distance = properties.get("distance").and_then(|v| v.as_f64()).unwrap_or(f64::MAX);
+                if seen.insert(name.clone()) {
+                    nearby_places.push((name, distance));
+                }
+            }
+        }
+    }
+   
+    // Sort by distance ascending (closest first)
+    nearby_places.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+   
+    // Take top 20
+    let top_places: Vec<(String, f64)> = nearby_places.into_iter().take(15).collect();
+   
+    println!("Found {} nearby places (top 20 by proximity ascending) for {}", top_places.len(), location_name);
+    for (name, dist) in &top_places {
+        println!("- {} (distance: {} meters)", name, dist.round() as i64); // Round distance to integer
+    }
+   
+    // Return just names for the result
+    let place_names: Vec<String> = top_places.into_iter().map(|(name, _)| name).collect();
+   
+    Ok(place_names)
 }

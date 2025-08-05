@@ -174,17 +174,26 @@ diesel::table! {
 }
 
 diesel::table! {
+    user_info (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        location -> Nullable<Text>,
+        dictionary -> Nullable<Text>,
+        info -> Nullable<Text>,
+        timezone -> Nullable<Text>,
+    }
+}
+
+diesel::table! {
     user_settings (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
         notify -> Bool,
         notification_type -> Nullable<Text>,
-        timezone -> Nullable<Text>,
         timezone_auto -> Nullable<Bool>,
         agent_language -> Text,
         sub_country -> Nullable<Text>,
         save_context -> Nullable<Integer>,
-        info -> Nullable<Text>,
         morning_digest -> Nullable<Text>,
         day_digest -> Nullable<Text>,
         evening_digest -> Nullable<Text>,
@@ -258,6 +267,7 @@ diesel::joinable!(message_history -> users (user_id));
 diesel::joinable!(priority_senders -> users (user_id));
 diesel::joinable!(processed_emails -> users (user_id));
 diesel::joinable!(temp_variables -> users (user_id));
+diesel::joinable!(user_info -> users (user_id));
 diesel::joinable!(user_settings -> users (user_id));
 diesel::joinable!(waiting_checks -> users (user_id));
 
@@ -276,6 +286,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     task_notifications,
     temp_variables,
     usage_logs,
+    user_info,
     user_settings,
     users,
     waiting_checks,

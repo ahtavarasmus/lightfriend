@@ -2,10 +2,12 @@ use yew::prelude::*;
 use crate::Route;
 use yew_router::components::Link;
 use crate::components::notification::AnimationComponent;
+use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsCast;
-
 #[function_component(Landing)]
 pub fn landing() -> Html {
+    let dim_opacity = use_state(|| 0.0);
+
     // Scroll to top only on initial mount
     {
         use_effect_with_deps(
@@ -19,6 +21,47 @@ pub fn landing() -> Html {
         );
     }
 
+    // Add scroll listener for dimming
+    {
+        let dim_opacity = dim_opacity.clone();
+        use_effect_with_deps(
+            move |_| {
+                let destructor: Box<dyn FnOnce()> = if let Some(window) = web_sys::window() {
+                    let callback = Closure::<dyn Fn()>::new({
+                        let dim_opacity = dim_opacity.clone();
+                        move || {
+                            if let Some(win) = web_sys::window() {
+                                if let Ok(scroll_y) = win.scroll_y() {
+                                    let factor = (scroll_y / 500.0).min(1.0);
+                                    dim_opacity.set(factor * 0.6);
+                                }
+                            }
+                        }
+                    });
+                    window
+                        .add_event_listener_with_callback("scroll", callback.as_ref().unchecked_ref())
+                        .unwrap();
+
+                    // Initial call
+                    if let Ok(scroll_y) = window.scroll_y() {
+                        let factor = (scroll_y / 500.0).min(1.0);
+                        dim_opacity.set(factor * 0.6);
+                    }
+
+                    Box::new(move || {
+                        if let Some(win) = web_sys::window() {
+                            win.remove_event_listener_with_callback("scroll", callback.as_ref().unchecked_ref()).unwrap();
+                        }
+                    })
+                } else {
+                    Box::new(|| ())
+                };
+                move || { destructor(); }
+            },
+            (),
+        );
+    }
+
     html! {
         <div class="landing-page">
             <head>
@@ -26,6 +69,7 @@ pub fn landing() -> Html {
             </head>
             <header class="hero">
                 <div class="hero-background"></div>
+                <div class="hero-overlay" style={format!("opacity: {};", *dim_opacity)}></div>
                 <div class="hero-content">
                     <div class="hero-header">
                         <h1 class="hero-title">{"Break Your Phone Addiction Without Willpower"}</h1>
@@ -151,6 +195,16 @@ pub fn landing() -> Html {
             </footer>
             <style>
                 {r#"
+    .hero-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100vh;
+        background: rgba(0, 0, 0, 0.7);
+        z-index: -1;
+        pointer-events: none;
+    }
     .cta-image-container {
         max-width: 300px;
         margin: 0 auto;
@@ -249,8 +303,8 @@ pub fn landing() -> Html {
     }
     .faq-item {
         margin-bottom: 1.5rem;
-        background: rgba(30, 30, 30, 0.8);
-        border: 1px solid rgba(30, 144, 255, 0.15);
+        background: transparent;
+        border: none;
         border-radius: 12px;
         padding: 1.5rem;
     }
@@ -299,8 +353,8 @@ pub fn landing() -> Html {
         display: flex;
         align-items: center;
         gap: 4rem;
-        background: rgba(30, 30, 30, 0.8);
-        border: 1px solid rgba(30, 144, 255, 0.15);
+        background: transparent;
+        border: none;
         border-radius: 24px;
         padding: 3rem;
         transition: transform 0.3s ease, box-shadow 0.3s ease;
@@ -388,8 +442,8 @@ pub fn landing() -> Html {
         display: flex;
         align-items: center;
         gap: 4rem;
-        background: rgba(30, 30, 30, 0.8);
-        border: 1px solid rgba(30, 144, 255, 0.15);
+        background: transparent;
+        border: none;
         border-radius: 24px;
         padding: 3rem;
         z-index: 3;
@@ -404,7 +458,6 @@ pub fn landing() -> Html {
     .feature-block:hover {
         transform: translateY(-5px) scale(1.02);
         box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
-        border-color: rgba(30, 144, 255, 0.3);
     }
     .feature-image {
         flex: 1;
@@ -536,11 +589,11 @@ pub fn landing() -> Html {
         margin-top: 4rem;
     }
     .step {
-        background: rgba(255, 255, 255, 0.03);
+        background: transparent;
         border-radius: 16px;
         padding: 2.5rem;
-        border: 1px solid rgba(30, 144, 255, 0.2);
-        backdrop-filter: blur(5px);
+        border: none;
+        backdrop-filter: none;
         transition: all 0.3s ease;
         position: relative;
         overflow: hidden;
@@ -562,7 +615,6 @@ pub fn landing() -> Html {
     .step:hover {
         transform: translateY(-5px);
         box-shadow: 0 4px 20px rgba(30, 144, 255, 0.15);
-        border-color: rgba(30, 144, 255, 0.4);
     }
     .step h3 {
         color: #1E90FF;
@@ -601,33 +653,16 @@ pub fn landing() -> Html {
     }
     .footer-cta {
         padding: 6rem 0;
-        background: linear-gradient(
-            to bottom,
-            transparent,
-            rgba(30, 144, 255, 0.05)
-        );
+        background: transparent;
         border-top: 1px solid rgba(30, 144, 255, 0.1);
         text-align: left;
         position: relative;
         z-index: 1;
         margin-top: 0;
-        background: rgba(26, 26, 26, 0.9);
         pointer-events: auto;
     }
     .footer-cta::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background: linear-gradient(
-            to bottom,
-            rgba(26, 26, 26, 0.9),
-            rgba(26, 26, 26, 0.95)
-        );
-        z-index: -1;
-        pointer-events: none;
+        content: none;
     }
     .footer-content {
         max-width: 800px;
@@ -974,8 +1009,8 @@ pub fn landing() -> Html {
         gap: 2rem;
     }
     .story-item {
-        background: rgba(30, 30, 30, 0.8);
-        border: 1px solid rgba(30, 144, 255, 0.15);
+        background: transparent;
+        border: none;
         border-radius: 24px;
         padding: 1.5rem;
         display: flex;

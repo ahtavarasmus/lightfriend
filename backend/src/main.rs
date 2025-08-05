@@ -322,6 +322,7 @@ async fn main() {
 
     // Admin routes that need admin authentication
     let admin_routes = Router::new()
+        .route("/testing", post(auth_handlers::testing_handler))
         .route("/api/admin/users", get(auth_handlers::get_users))
         .route("/api/admin/verify/{user_id}", post(admin_handlers::verify_user))
         .route("/api/admin/preferred-number/{user_id}", post(admin_handlers::update_preferred_number_admin))

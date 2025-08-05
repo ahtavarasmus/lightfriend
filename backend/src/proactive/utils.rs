@@ -373,9 +373,10 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
     // Get the user's digest settings and timezone
     let (morning_digest, day_digest, evening_digest) = state.user_core.get_digests(user_id)?;
     let user_settings = state.user_core.get_user_settings(user_id)?;
+    let user_info = state.user_core.get_user_info(user_id)?;
     
     // If morning digest is enabled (Some value) and we have a timezone, check the time
-    if let (Some(digest_hour_str), Some(timezone)) = (morning_digest.clone(), user_settings.timezone) {
+    if let (Some(digest_hour_str), Some(timezone)) = (morning_digest.clone(), user_info.timezone) {
         // Parse the timezone
         let tz: chrono_tz::Tz = timezone.parse()
             .map_err(|e| format!("Invalid timezone: {}", e))?;
@@ -610,10 +611,10 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
 pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(), Box<dyn std::error::Error>> {
     // Get the user's digest settings and timezone
     let (morning_digest, day_digest, evening_digest) = state.user_core.get_digests(user_id)?;
-    let user_settings = state.user_core.get_user_settings(user_id)?;
+    let user_info = state.user_core.get_user_info(user_id)?;
     
     // If day digest is enabled (Some value) and we have a timezone, check the time
-    if let (Some(digest_hour_str), Some(timezone)) = (day_digest.clone(), user_settings.timezone) {
+    if let (Some(digest_hour_str), Some(timezone)) = (day_digest.clone(), user_info.timezone) {
         // Parse the timezone
         let tz: chrono_tz::Tz = timezone.parse()
             .map_err(|e| format!("Invalid timezone: {}", e))?;
@@ -847,10 +848,10 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
 pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result<(), Box<dyn std::error::Error>> {
     // Get the user's digest settings and timezone
     let (morning_digest, day_digest, evening_digest) = state.user_core.get_digests(user_id)?;
-    let user_settings = state.user_core.get_user_settings(user_id)?;
+    let user_info = state.user_core.get_user_info(user_id)?;
     
     // If morning digest is enabled (Some value) and we have a timezone, check the time
-    if let (Some(digest_hour_str), Some(timezone)) = (evening_digest.clone(), user_settings.timezone) {
+    if let (Some(digest_hour_str), Some(timezone)) = (evening_digest.clone(), user_info.timezone) {
         // Parse the timezone
         let tz: chrono_tz::Tz = timezone.parse()
             .map_err(|e| format!("Invalid timezone: {}", e))?;
@@ -1279,6 +1280,14 @@ pub async fn send_notification(
         }
     };
 
+    let user_info = match state.user_core.get_user_info(user_id) {
+        Ok(info) => info,
+        Err(e) => {
+            tracing::error!("Failed to get info for user {}: {}", user_id, e);
+            return;
+        }
+    };
+
     // Check user's notification preference from settings
     let notification_type = if content_type.contains("critical") {
         user_settings.critical_enabled.as_deref().unwrap_or("sms")
@@ -1305,7 +1314,7 @@ pub async fn send_notification(
                 first_message.clone().unwrap_or("Hello, I have a critical notification to tell you about".to_string()),
                 notification.to_string(),
                 user.id.to_string(),
-                user_settings.timezone,
+                user_info.timezone,
             ).await {
                 Ok(mut response) => {
                     // Add dynamic variables to the client data

@@ -108,6 +108,7 @@ pub async fn fetch_bridge_messages(
     let user = state.user_core.find_by_id(user_id)?
         .ok_or_else(|| anyhow!("User not found"))?;
     let user_settings = state.user_core.get_user_settings(user_id)?;
+    let user_info= state.user_core.get_user_info(user_id)?;
 
     // Get Matrix client and check bridge status (use cached version for better performance)
     let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
@@ -216,7 +217,7 @@ pub async fn fetch_bridge_messages(
     let recent_rooms = room_infos.into_iter().take(10).collect::<Vec<_>>();
     
     // Fetch latest message from each room
-    let user_timezone = user_settings.timezone.clone();
+    let user_timezone = user_info.timezone.clone();
     
     // Process rooms in parallel
     let mut futures = Vec::new();
@@ -478,6 +479,7 @@ pub async fn send_bridge_message(
     tracing::debug!("Message sent!");
 
     let user_settings = state.user_core.get_user_settings(user_id)?;
+    let user_info= state.user_core.get_user_info(user_id)?;
     let current_timestamp = chrono::Utc::now().timestamp();
     // Return the sent message details
     Ok(BridgeMessage {
@@ -485,7 +487,7 @@ pub async fn send_bridge_message(
         sender_display_name: "You".to_string(),
         content: message.to_string(),
         timestamp: current_timestamp,
-        formatted_timestamp: format_timestamp(current_timestamp, user_settings.timezone),
+        formatted_timestamp: format_timestamp(current_timestamp, user_info.timezone),
         message_type: "text".to_string(),
         room_name: room.display_name().await?.to_string(),
         media_url: None,
@@ -637,8 +639,9 @@ pub async fn fetch_bridge_room_messages(
     };
 
     let user_settings = state.user_core.get_user_settings(user_id)?;
+    let user_info = state.user_core.get_user_info(user_id)?;
     match matching_room {
-        Some(room) => fetch_messages_from_room(service, room.room.clone(), limit, user_settings.timezone).await,
+        Some(room) => fetch_messages_from_room(service, room.room.clone(), limit, user_info.timezone).await,
         None => Err(anyhow!("No matching {} room found for '{}'", capitalize(&service), chat_name))
     }
 }
@@ -717,7 +720,6 @@ async fn fetch_messages_from_room(
 }
 
 use std::time::{SystemTime, UNIX_EPOCH};
-use matrix_sdk::ruma::MilliSecondsSinceUnixEpoch;
 
 pub async fn handle_bridge_message(
     event: OriginalSyncRoomMessageEvent,
@@ -732,7 +734,6 @@ pub async fn handle_bridge_message(
     tracing::debug!("Entering bridge message handler");
 
     // Check message age
-    /*
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -749,7 +750,6 @@ pub async fn handle_bridge_message(
         );
         return;
     }
-    */
 
 
     // Get room name
@@ -762,6 +762,7 @@ pub async fn handle_bridge_message(
     };
 
     let sender_localpart = event.sender.localpart().to_string();
+
 
     let service = match infer_service(&room_name, &sender_localpart) {
         Some(s) => s,

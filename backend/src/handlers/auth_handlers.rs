@@ -622,4 +622,28 @@ pub async fn register(
     Ok(response)
 }
 
+pub async fn testing_handler(
+    State(state): State<Arc<AppState>>,
+    auth_user: AuthUser,
+    Json(params): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    println!("Testing route called by user ID: {}", auth_user.user_id);
+    println!("Received params: {:?}", params);
 
+    let location = "Vuores, Tampere, Finland";
+
+    match crate::utils::tool_exec::get_nearby_towns(location).await {
+        Ok(towns) => {
+            println!("Nearby towns: {:?}", towns);
+            println!("Location: {}", location);
+            Ok(Json(json!({"message": "Test successful"})))
+        }
+        Err(e) => {
+            println!("Error in get_nearby_towns: {:?}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to get nearby towns: {}", e)}))
+            ))
+        }
+    }
+}

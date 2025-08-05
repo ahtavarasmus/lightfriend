@@ -417,9 +417,9 @@ pub async fn handle_calendar_fetching(
     end: &str,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     // Get user's timezone from settings
-    let user_timezone = match state.user_core.get_user_settings(user_id) {
-        Ok(settings) => {
-            match settings.timezone {
+    let user_timezone = match state.user_core.get_user_info(user_id) {
+        Ok(info) => {
+            match info.timezone {
                 Some(tz) => match tz.parse::<Tz>() {
                     Ok(parsed_tz) => Some(parsed_tz),
                     Err(_) => {
@@ -431,7 +431,7 @@ pub async fn handle_calendar_fetching(
             }
         },
         Err(e) => {
-            tracing::error!("Failed to get user settings: {}", e);
+            tracing::error!("Failed to get user info: {}", e);
             None
         }
     };
