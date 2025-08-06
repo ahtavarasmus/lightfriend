@@ -751,7 +751,6 @@ pub async fn handle_bridge_message(
         return;
     }
 
-
     // Get room name
     let room_name = match room.display_name().await {
         Ok(name) => name.to_string(),
@@ -827,6 +826,10 @@ pub async fn handle_bridge_message(
         MessageType::Emote(t) => t.body,
         _ => return,
     };
+
+    if user_id == 1 { // if admin for debugging
+        println!("message: {}", content);
+    }
 
     // Skip error messages
     if content.contains("Failed to bridge media") ||

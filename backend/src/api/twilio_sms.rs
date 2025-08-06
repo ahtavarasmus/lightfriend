@@ -330,7 +330,6 @@ pub async fn process_sms(
         }
     }
     
-        // Get timezone from user info or default to UTC
     // Get user settings to access timezone
     let user_settings = match state.user_core.get_user_settings(user.id) {
         Ok(settings) => settings,
@@ -370,7 +369,6 @@ pub async fn process_sms(
         None => "UTC",
     };
 
-    let require_confirmation = user_settings.require_confirmation;
 
     // Get timezone offset using jiff
     let (hours, minutes) = match crate::api::elevenlabs::get_offset_with_jiff(timezone_str) {
@@ -524,14 +522,14 @@ pub async fn process_sms(
 
     // Define tools
     let tools = vec![
-        crate::tool_call_utils::whatsapp::get_send_whatsapp_message_tool(),
-        crate::tool_call_utils::whatsapp::get_fetch_whatsapp_messages_tool(),
-        crate::tool_call_utils::whatsapp::get_fetch_whatsapp_room_messages_tool(),
-        crate::tool_call_utils::whatsapp::get_search_whatsapp_rooms_tool(),
-        crate::tool_call_utils::telegram::get_send_telegram_message_tool(),
-        crate::tool_call_utils::telegram::get_fetch_telegram_messages_tool(),
-        crate::tool_call_utils::telegram::get_fetch_telegram_room_messages_tool(),
-        crate::tool_call_utils::telegram::get_search_telegram_rooms_tool(),
+        crate::tool_call_utils::bridge::get_send_bridge_message_tool("whatsapp"),
+        crate::tool_call_utils::bridge::get_send_bridge_message_tool("telegram"),
+        crate::tool_call_utils::bridge::get_fetch_bridge_messages_tool("whatsapp"),
+        crate::tool_call_utils::bridge::get_fetch_bridge_messages_tool("telegram"),
+        crate::tool_call_utils::bridge::get_fetch_bridge_room_messages_tool("whatsapp"),
+        crate::tool_call_utils::bridge::get_fetch_bridge_room_messages_tool("telegram"),
+        crate::tool_call_utils::bridge::get_search_bridge_rooms_tool("whatsapp"),
+        crate::tool_call_utils::bridge::get_search_bridge_rooms_tool("telegram"),
         crate::tool_call_utils::email::get_fetch_emails_tool(),
         crate::tool_call_utils::email::get_fetch_specific_email_tool(),
         crate::tool_call_utils::management::get_delete_sms_conversation_history_tool(),
@@ -937,8 +935,9 @@ pub async fn process_sms(
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "send_whatsapp_message" {
                     tracing::debug!("Executing send_whatsapp_message tool call");
-                    match crate::tool_call_utils::whatsapp::handle_send_whatsapp_message(
+                    match crate::tool_call_utils::bridge::handle_send_bridge_message(
                         &state,
+                        "whatsapp",
                         user.id,
                         arguments,
                         &user,
@@ -968,8 +967,9 @@ pub async fn process_sms(
 
                 } else if name == "send_telegram_message" {
                     tracing::debug!("Executing send_telegram_message tool call");
-                    match crate::tool_call_utils::telegram::handle_send_telegram_message(
+                    match crate::tool_call_utils::bridge::handle_send_bridge_message(
                         &state,
+                        "telegram",
                         user.id,
                         arguments,
                         &user,
@@ -1005,48 +1005,54 @@ pub async fn process_sms(
                     }
                 } else if name == "search_whatsapp_rooms" {
                     tracing::debug!("Executing search_whatsapp_rooms tool call");
-                    let response = crate::tool_call_utils::whatsapp::handle_search_whatsapp_rooms(
+                    let response = crate::tool_call_utils::bridge::handle_search_bridge_rooms(
                         &state,
+                        "whatsapp",
                         user.id,
                         arguments,
                     ).await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "search_telegram_rooms" {
                     tracing::debug!("Executing search_telegram_rooms tool call");
-                    let response = crate::tool_call_utils::telegram::handle_search_telegram_rooms(
+                    let response = crate::tool_call_utils::bridge::handle_search_bridge_rooms(
                         &state,
+                        "telegram",
                         user.id,
                         arguments,
                     ).await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_whatsapp_room_messages" {
                     tracing::debug!("Executing fetch_whatsapp_room_messages tool call");
-                    let response = crate::tool_call_utils::whatsapp::handle_fetch_whatsapp_room_messages(
+                    let response = crate::tool_call_utils::bridge::handle_fetch_bridge_room_messages(
                         &state,
+                        "whatsapp",
                         user.id,
                         arguments,
                     ).await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_telegram_room_messages" {
                     tracing::debug!("Executing fetch_telegram_room_messages tool call");
-                    let response = crate::tool_call_utils::telegram::handle_fetch_telegram_room_messages(
+                    let response = crate::tool_call_utils::bridge::handle_fetch_bridge_room_messages(
                         &state,
+                        "telegram",
                         user.id,
                         arguments,
                     ).await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_whatsapp_messages" {
                     tracing::debug!("Executing fetch_whatsapp_messages tool call");
-                    let response = crate::tool_call_utils::whatsapp::handle_fetch_whatsapp_messages(
+                    let response = crate::tool_call_utils::bridge::handle_fetch_bridge_messages(
                         &state,
+                        "whatsapp",
                         user.id,
                         arguments,
                     ).await;
                     tool_answers.insert(tool_call_id, response);
                 } else if name == "fetch_telegram_messages" {
                     tracing::debug!("Executing fetch_telegram_messages tool call");
-                    let response = crate::tool_call_utils::telegram::handle_fetch_telegram_messages(
+                    let response = crate::tool_call_utils::bridge::handle_fetch_bridge_messages(
                         &state,
+                        "telegram",
                         user.id,
                         arguments,
                     ).await;

@@ -67,8 +67,6 @@ mod proactive {
 }
 
 mod tool_call_utils {
-    pub mod whatsapp;
-    pub mod telegram;
     pub mod email;
     pub mod calendar;
     pub mod tasks;
@@ -76,6 +74,7 @@ mod tool_call_utils {
     pub mod internet;
     pub mod management;
     pub mod confirm;
+    pub mod bridge;
 }
 
 mod api {

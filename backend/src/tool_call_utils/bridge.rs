@@ -3,24 +3,18 @@ use std::sync::Arc;
 use serde::Deserialize;
 use axum::Json;
 
-pub fn get_send_whatsapp_message_tool() -> openai_api_rs::v1::chat_completion::Tool {
+pub fn get_search_bridge_rooms_tool(
+    service_type: &str,
+) -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
     use std::collections::HashMap;
 
-    let mut whatsapp_send_properties = HashMap::new();
-    whatsapp_send_properties.insert(
-        "chat_name".to_string(),
+    let mut bridge_search_properties = HashMap::new();
+    bridge_search_properties.insert(
+        "search_term".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The chat name or room name to send the message to. Doesn't have to be exact since fuzzy search is used.".to_string()),
-            ..Default::default()
-        }),
-    );
-    whatsapp_send_properties.insert(
-        "message".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The message content to send".to_string()),
+            description: Some(format!("Search term to find {} rooms/contacts", capitalize(service_type))),
             ..Default::default()
         }),
     );
@@ -28,58 +22,33 @@ pub fn get_send_whatsapp_message_tool() -> openai_api_rs::v1::chat_completion::T
     chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
-            name: String::from("send_whatsapp_message"),
-            description: Some(String::from("Sends a WhatsApp message to a specific chat. This tool will first make a confirmation message for the user, which they can then confirm or not. The chat_name will be used to fuzzy search for the actual chat name and then confirmed with the user.")),
+            name: String::from(format!("search_{}_rooms", service_type)),
+            description: Some(String::from(format!("Searches for {} rooms/contacts by name.", capitalize(service_type)))),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
-                properties: Some(whatsapp_send_properties),
-                required: Some(vec![String::from("chat_name"), String::from("message")]),
-            },
-        },
-    }
-}
-pub fn get_fetch_whatsapp_messages_tool() -> openai_api_rs::v1::chat_completion::Tool {
-    use openai_api_rs::v1::{chat_completion, types};
-    use std::collections::HashMap;
-
-    let mut whatsapp_messages_properties = HashMap::new();
-    whatsapp_messages_properties.insert(
-        "start".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Start time in RFC3339 format in UTC (e.g., '2024-03-16T00:00:00Z')".to_string()),
-            ..Default::default()
-        }),
-    );
-
-    chat_completion::Tool {
-        r#type: chat_completion::ToolType::Function,
-        function: types::Function {
-            name: String::from("fetch_whatsapp_messages"),
-            description: Some(String::from("Fetches recent WhatsApp messages. Use this when user asks about their WhatsApp messages or conversations.")),
-            parameters: types::FunctionParameters {
-                schema_type: types::JSONSchemaType::Object,
-                properties: Some(whatsapp_messages_properties),
-                required: Some(vec![String::from("start")]),
+                properties: Some(bridge_search_properties),
+                required: Some(vec![String::from("search_term")]),
             },
         },
     }
 }
 
-pub fn get_fetch_whatsapp_room_messages_tool() -> openai_api_rs::v1::chat_completion::Tool {
+pub fn get_fetch_bridge_room_messages_tool(
+    service_type: &str,
+) -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
     use std::collections::HashMap;
 
-    let mut whatsapp_room_messages_properties = HashMap::new();
-    whatsapp_room_messages_properties.insert(
+    let mut bridge_room_messages_properties = HashMap::new();
+    bridge_room_messages_properties.insert(
         "chat_name".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The name of the WhatsApp chat/room to fetch messages from".to_string()),
+            description: Some(format!("The name of the {} chat/room to fetch messages from", capitalize(service_type))),
             ..Default::default()
         }),
     );
-    whatsapp_room_messages_properties.insert(
+    bridge_room_messages_properties.insert(
         "limit".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::Number),
@@ -92,27 +61,29 @@ pub fn get_fetch_whatsapp_room_messages_tool() -> openai_api_rs::v1::chat_comple
     chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
-            name: String::from("fetch_whatsapp_room_messages"),
-            description: Some(String::from("Fetches messages from a specific WhatsApp chat/room. Use this when user asks about messages from a specific WhatsApp contact or group. You should return the latest messages that person or chat has sent to the user.")),
+            name: String::from(format!("fetch_{}_room_messages", service_type).as_str()),
+            description: Some(String::from(format!("Fetches messages from a specific {} chat/room. Use this when user asks about messages from a specific {} contact or group. You should return the latest messages that person or chat has sent to the user.", capitalize(service_type), capitalize(service_type)).as_str())),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
-                properties: Some(whatsapp_room_messages_properties),
+                properties: Some(bridge_room_messages_properties),
                 required: Some(vec![String::from("chat_name")]),
             },
         },
     }
 }
 
-pub fn get_search_whatsapp_rooms_tool() -> openai_api_rs::v1::chat_completion::Tool {
+pub fn get_fetch_bridge_messages_tool(
+    service_type: &str,
+) -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
     use std::collections::HashMap;
 
-    let mut whatsapp_search_properties = HashMap::new();
-    whatsapp_search_properties.insert(
-        "search_term".to_string(),
+    let mut bridge_messages_properties = HashMap::new();
+    bridge_messages_properties.insert(
+        "start".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Search term to find WhatsApp rooms/contacts".to_string()),
+            description: Some("Start time in RFC3339 format in UTC (e.g., '2024-03-16T00:00:00Z')".to_string()),
             ..Default::default()
         }),
     );
@@ -120,70 +91,106 @@ pub fn get_search_whatsapp_rooms_tool() -> openai_api_rs::v1::chat_completion::T
     chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
-            name: String::from("search_whatsapp_rooms"),
-            description: Some(String::from("Searches for WhatsApp rooms/contacts by name.")),
+            name: String::from(format!("fetch_{}_messages", service_type).as_str()),
+            description: Some(String::from(format!("Fetches recent {} messages. Use this when user asks about their {} messages or conversations.", capitalize(service_type), capitalize(service_type)).as_str())),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
-                properties: Some(whatsapp_search_properties),
-                required: Some(vec![String::from("search_term")]),
+                properties: Some(bridge_messages_properties),
+                required: Some(vec![String::from("start")]),
             },
         },
     }
 }
 
+pub fn get_send_bridge_message_tool(
+    service_type: &str,
+) -> openai_api_rs::v1::chat_completion::Tool {
+    use openai_api_rs::v1::{chat_completion, types};
+    use std::collections::HashMap;
 
+    let mut bridge_send_properties = HashMap::new();
+    bridge_send_properties.insert(
+        "chat_name".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("The chat name or room name to send the message to. Doesn't have to be exact since fuzzy search is used.".to_string()),
+            ..Default::default()
+        }),
+    );
+    bridge_send_properties.insert(
+        "message".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("The message content to send".to_string()),
+            ..Default::default()
+        }),
+    );
 
+    chat_completion::Tool {
+        r#type: chat_completion::ToolType::Function,
+        function: types::Function {
+            name: String::from(format!("send_{}_message", service_type).as_str()),
+            description: Some(String::from(format!("Sends a {} message to a specific chat. This tool will first make a confirmation message for the user, which they can then confirm or not. The chat_name will be used to fuzzy search for the actual chat name and then confirmed with the user.", capitalize(service_type)).as_str())),
+            parameters: types::FunctionParameters {
+                schema_type: types::JSONSchemaType::Object,
+                properties: Some(bridge_send_properties),
+                required: Some(vec![String::from("chat_name"), String::from("message")]),
+            },
+        },
+    }
+}
 
 #[derive(Deserialize)]
-pub struct WhatsAppSendArgs {
+pub struct BridgeSendArgs {
     pub chat_name: String,
     pub message: String,
 }
 
 #[derive(Deserialize)]
-pub struct WhatsAppSearchArgs {
+pub struct BridgeSearchArgs {
     pub search_term: String,
 }
 
 #[derive(Deserialize)]
-pub struct WhatsAppRoomArgs {
+pub struct BridgeRoomArgs {
     pub chat_name: String,
     pub limit: Option<u64>,
 }
 
 #[derive(Deserialize)]
-pub struct WhatsAppTimeFrame {
+pub struct BridgeTimeFrame {
     pub start: String,
 }
 
-pub async fn handle_send_whatsapp_message(
+use crate::utils::bridge::capitalize;
+
+
+pub async fn handle_send_bridge_message(
     state: &Arc<AppState>,
+    service_type: &str,
     user_id: i32,
     args: &str,
     user: &crate::models::user_models::User,
     image_url: Option<&str>
 ) -> Result<(axum::http::StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<crate::api::twilio_sms::TwilioResponse>), Box<dyn std::error::Error>> {
-    let args: WhatsAppSendArgs = serde_json::from_str(args)?;
+    let args: BridgeSendArgs = serde_json::from_str(args)?;
     
     // Get user settings to check confirmation preference
     let user_settings = state.user_core.get_user_settings(user_id)?;
 
-    tracing::info!("IN HANDLE_SEND_WHATSAPP_MESSAGE");
-
     // First search for the chat room
     let rooms = match crate::utils::bridge::search_bridge_rooms(
-        "whatsapp", 
+        service_type,
         &state,
         user_id,
         &args.chat_name,
     ).await {
         Ok(rooms) => rooms,
         Err(e) => {
-            eprintln!("Failed to search WhatsApp rooms: {}", e);
-            let error_msg = "Failed to find WhatsApp contact. Please make sure you're connected to WhatsApp bridge.";
+            let error_msg = format!("Failed to find contact. Please make sure you're connected to {} bridge.", capitalize(service_type));
             if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                 &state,
-                error_msg,
+                error_msg.as_str(),
                 None,
                 user,
             ).await {
@@ -200,7 +207,7 @@ pub async fn handle_send_whatsapp_message(
     };
 
     if rooms.is_empty() {
-        let error_msg = format!("No WhatsApp contacts found matching '{}'.", args.chat_name);
+        let error_msg = format!("No {} contacts found matching '{}'.", capitalize(service_type), args.chat_name.as_str());
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
             &state,
             &error_msg,
@@ -220,13 +227,14 @@ pub async fn handle_send_whatsapp_message(
 
     // Get the best match (first result)
     let best_match = &rooms[0];
-    let exact_name = best_match.display_name.trim_end_matches(" (WA)").to_string();
+    let exact_name = best_match.display_name.trim_end_matches(" (WA)").to_string().trim_end_matches(" (Telegram)").to_string();
 
+    println!("confirmation: {}", user_settings.require_confirmation);
     // If confirmation is not required, send the message directly
     if !user_settings.require_confirmation {
         let message = args.message;
         match crate::utils::bridge::send_bridge_message(
-            "whatsapp",
+            service_type,
             &state,
             user_id,
             &exact_name,
@@ -234,7 +242,7 @@ pub async fn handle_send_whatsapp_message(
             image_url.map(|url| url.to_string()),
         ).await {
             Ok(_) => {
-                let success_msg = format!("WhatsApp message: '{}' sent to '{}'", message ,exact_name);
+                let success_msg = format!("{} message: '{}' sent to '{}'", capitalize(service_type), message ,exact_name);
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
                     &success_msg,
@@ -252,7 +260,7 @@ pub async fn handle_send_whatsapp_message(
                 ));
             }
             Err(e) => {
-                let error_msg = format!("Failed to send WhatsApp message: {}", e);
+                let error_msg = format!("Failed to send {} message: {}", capitalize(service_type), e);
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
                     &error_msg,
@@ -276,7 +284,7 @@ pub async fn handle_send_whatsapp_message(
     // Set the temporary variable for WhatsApp message
     if let Err(e) = state.user_core.set_temp_variable(
         user_id,
-        Some("whatsapp"),
+        Some(service_type),
         Some(&exact_name),
         None,
         Some(&args.message),
@@ -288,7 +296,7 @@ pub async fn handle_send_whatsapp_message(
         tracing::error!("Failed to set temporary variable: {}", e);
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
             &state,
-            "Failed to prepare WhatsApp message sending. (not charged, contact rasmus@ahtava.com)",
+            format!("Failed to prepare {} message sending. (contact rasmus@ahtava.com)", capitalize(service_type)).as_str(),
             None,
             user,
         ).await {
@@ -298,23 +306,23 @@ pub async fn handle_send_whatsapp_message(
             axum::http::StatusCode::OK,
             [(axum::http::header::CONTENT_TYPE, "application/json")],
             axum::Json(crate::api::twilio_sms::TwilioResponse {
-                message: "Failed to prepare WhatsApp message sending".to_string(),
+                message: "Failed to prepare message sending".to_string(),
             })
         ));
     }
 
-    tracing::info!("Successfully set temporary variable for WhatsApp message");
+    tracing::info!("Successfully set temporary variable");
 
     // Format the confirmation message with the found contact name and image if present
     let confirmation_msg = if image_url.is_some() {
         format!(
-            "Send WhatsApp to '{}' with the above image and a caption '{}' (yes-> send, no -> discard) (free reply)",
-            exact_name, args.message
+            "Send {} to '{}' with the above image and a caption '{}' (reply 'Yes' to confirm, otherwise it will be discarded)",
+            capitalize(service_type), exact_name, args.message
         )
     } else {
         format!(
-            "Send WhatsApp to '{}' with content: '{}' (yes-> send, no -> discard) (free reply)",
-            exact_name, args.message
+            "Send {} to '{}' with content: '{}' (reply 'Yes' to confirm, otherwise it will be discarded)",
+            capitalize(service_type), exact_name, args.message
         )
     };
 
@@ -334,7 +342,7 @@ pub async fn handle_send_whatsapp_message(
                 axum::http::StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
-                    message: "WhatsApp message confirmation sent".to_string(),
+                    message: "Message confirmation sent".to_string(),
                 })
             ))
         }
@@ -344,35 +352,36 @@ pub async fn handle_send_whatsapp_message(
                 axum::http::StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
-                    message: "Failed to send WhatsApp confirmation".to_string(),
+                    message: "Failed to send message confirmation".to_string(),
                 })
             ))
         }
     }
 }
 
-pub async fn handle_search_whatsapp_rooms(
+pub async fn handle_search_bridge_rooms(
     state: &Arc<AppState>,
+    service_type: &str,
     user_id: i32,
     args: &str,
 ) -> String {
-    let args: WhatsAppSearchArgs = match serde_json::from_str(args) {
+    let args: BridgeSearchArgs = match serde_json::from_str(args) {
         Ok(args) => args,
         Err(e) => {
-            eprintln!("Failed to parse WhatsApp search arguments: {}", e);
+            eprintln!("Failed to parse message search arguments: {}", e);
             return "Failed to parse search request.".to_string();
         }
     };
 
     match crate::utils::bridge::search_bridge_rooms(
-        "whatsapp", 
+        service_type,
         &state,
         user_id,
         &args.search_term,
     ).await {
         Ok(rooms) => {
             if rooms.is_empty() {
-                format!("No WhatsApp contacts found matching '{}'.", args.search_term)
+                format!("No {} contacts found matching '{}'.", capitalize(service_type), args.search_term)
             } else {
                 let mut response = String::new();
                 for (i, room) in rooms.iter().take(5).enumerate() {
@@ -399,27 +408,28 @@ pub async fn handle_search_whatsapp_rooms(
             }
         }
         Err(e) => {
-            eprintln!("Failed to search WhatsApp rooms: {}", e);
-            "Failed to search WhatsApp contacts. Please make sure you're connected to WhatsApp bridge.".to_string()
+            eprintln!("Failed to search rooms: {}", e);
+            format!("Failed to search contacts. Please make sure you're connected to {} bridge.", capitalize(service_type))
         }
     }
 }
 
-pub async fn handle_fetch_whatsapp_room_messages(
+pub async fn handle_fetch_bridge_room_messages(
     state: &Arc<AppState>,
+    service_type: &str,
     user_id: i32,
     args: &str,
 ) -> String {
-    let args: WhatsAppRoomArgs = match serde_json::from_str(args) {
+    let args: BridgeRoomArgs = match serde_json::from_str(args) {
         Ok(args) => args,
         Err(e) => {
-            eprintln!("Failed to parse WhatsApp room arguments: {}", e);
+            eprintln!("Failed to parse room arguments: {}", e);
             return "Failed to parse room message request.".to_string();
         }
     };
 
     match crate::utils::bridge::fetch_bridge_room_messages(
-        "whatsapp", 
+        service_type,
         &state,
         user_id,
         &args.chat_name,
@@ -427,9 +437,9 @@ pub async fn handle_fetch_whatsapp_room_messages(
     ).await {
         Ok((messages, room_name)) => {
             if messages.is_empty() {
-                format!("No messages found in chat '{}'.", room_name.trim_end_matches(" (WA)"))
+                format!("No messages found in chat '{}'.", room_name.trim_end_matches(" (WA)").trim_end_matches(" (Telegram)"))
             } else {
-                let mut response = format!("Messages from '{}':\n\n", room_name.trim_end_matches(" (WA)"));
+                let mut response = format!("Messages from '{}':\n\n", room_name.trim_end_matches(" (WA)").trim_end_matches(" (Telegram)"));
                 for (i, msg) in messages.iter().take(10).enumerate() {
                     let content = if msg.content.chars().count() > 100 {
                         let truncated: String = msg.content.chars().take(97).collect();
@@ -463,22 +473,23 @@ pub async fn handle_fetch_whatsapp_room_messages(
             }
         }
         Err(e) => {
-            eprintln!("Failed to fetch WhatsApp room messages: {}", e);
-            format!("Failed to fetch messages from '{}'. Please make sure you're connected to WhatsApp bridge and the chat exists.", args.chat_name)
+            eprintln!("Failed to fetch room messages: {}", e);
+            format!("Failed to fetch messages from '{}'. Please make sure you're connected to {} bridge and the chat exists.", args.chat_name, capitalize(service_type))
         }
     }
 }
 
-pub async fn handle_fetch_whatsapp_messages(
+pub async fn handle_fetch_bridge_messages(
     state: &Arc<AppState>,
+    service_type: &str,
     user_id: i32,
     args: &str,
 ) -> String {
-    let time_frame: WhatsAppTimeFrame = match serde_json::from_str(args) {
+    let time_frame: BridgeTimeFrame = match serde_json::from_str(args) {
         Ok(tf) => tf,
         Err(e) => {
-            eprintln!("Failed to parse WhatsApp time frame: {}", e);
-            return "Failed to parse time frame for WhatsApp messages.".to_string();
+            eprintln!("Failed to parse time frame: {}", e);
+            return format!("Failed to parse time frame for {} messages.", capitalize(service_type));
         }
     };
 
@@ -492,7 +503,7 @@ pub async fn handle_fetch_whatsapp_messages(
     };
 
     match crate::utils::bridge::fetch_bridge_messages(
-        "whatsapp", 
+        service_type,
         &state,
         user_id,
         start_time,
@@ -500,7 +511,7 @@ pub async fn handle_fetch_whatsapp_messages(
     ).await {
         Ok(messages) => {
             if messages.is_empty() {
-                "No WhatsApp messages found for this time period.".to_string()
+                format!("No {} messages found for this time period.", capitalize(service_type))
             } else {
                 let mut response = String::new();
                 for (i, msg) in messages.iter().take(15).enumerate() {
@@ -535,9 +546,8 @@ pub async fn handle_fetch_whatsapp_messages(
             }
         }
         Err(e) => {
-            eprintln!("Failed to fetch WhatsApp messages: {}", e);
-            "Failed to fetch WhatsApp messages. Please make sure you're connected to WhatsApp bridge.".to_string()
+            eprintln!("Failed to fetch messages: {}", e);
+            format!("Failed to fetch messages. Please make sure you're connected to {} bridge.", capitalize(service_type))
         }
     }
 }
-
