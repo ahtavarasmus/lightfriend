@@ -89,36 +89,6 @@ pub fn get_create_waiting_check_tool() -> openai_api_rs::v1::chat_completion::To
     }
 }
 
-
-pub fn get_delete_sms_conversation_history_tool() -> openai_api_rs::v1::chat_completion::Tool {
-    use openai_api_rs::v1::{chat_completion, types};
-    use std::collections::HashMap;
-
-    let mut placeholder_properties = HashMap::new();
-    placeholder_properties.insert(
-        "param".to_string(),
-        Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::String),
-            description: Some("put nothing here".to_string()),
-            ..Default::default()
-        }),
-    );
-
-
-    chat_completion::Tool {
-        r#type: chat_completion::ToolType::Function,
-        function: types::Function {
-            name: String::from("delete_sms_conversation_history"),
-            description: Some(String::from("Deletes all sms conversation history for a specific user. Use this when user asks to delete their chat history or conversations. It won't delete the history from their phone obviously.")),
-            parameters: types::FunctionParameters {
-                schema_type: types::JSONSchemaType::Object,
-                properties: Some(placeholder_properties.clone()),
-                required: None,
-            },
-        },
-    }
-}
-
 use serde::Deserialize;
 use std::sync::Arc;
 use crate::AppState;

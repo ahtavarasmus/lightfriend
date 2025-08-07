@@ -399,7 +399,7 @@ pub async fn process_sms(
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes. Always use all tools immidiately that you think will be needed to complete the user's query and base your response to those responses. IMPORTANT: For calendar events, you must return the exact output from the calendar tool without any modifications, additional text, or formatting. Never add bullet points, markdown formatting (like **, -, #), or any other special characters.\n\n### Tool Usage Guidelines:\n- Provide all relevant details in the response immediately. \n- Tools that involve sending or creating something(eg. send_whatsapp_message), you can call them straight away using the available information without confirming with the user. These tools will send extra confirmation message to user anyways before doing anything.\n\n### Date and Time Handling:\n- Always work with times in the user's timezone: {} with offset {}.\n- When user mentions times without dates, assume they mean the nearest future occurrence.\n- For time inputs to tools, convert to RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z').\n- For displaying times to users:\n  - Use 12-hour format with AM/PM (e.g., '2:30 PM')\n  - Include timezone-adjusted dates in a friendly format (e.g., 'today', 'tomorrow', or 'Jun 15')\n  - Show full date only when it's not today/tomorrow\n- If no specific time is mentioned:\n  - For calendar queries: Show today's events (and tomorrow's if after 6 PM)\n  - For other time ranges: Use current time to 24 hours ahead\n- For queries about:\n  - 'Today': Use 00:00 to 23:59 of the current day in user's timezone\n  - 'Tomorrow': Use 00:00 to 23:59 of tomorrow in user's timezone\n  - 'This week': Use remaining days of current week\n  - 'Next week': Use Monday to Sunday of next week\n\n### Additional Guidelines:\n- Weather Queries: If no location is specified, assume the user's home location from user info.\n- Email Queries: For fetch_specific_email, provide the whole message body or a summary if too long—never just the subject.\n- WhatsApp/Telegram Fetching: Use the room name directly from the user's message/context without searching rooms.\n\nNever use markdown, HTML, or any special formatting characters in responses. Return all information in plain text only. User information: {}. Always use tools to fetch the latest information before answering.", formatted_time, timezone_str, offset, user_given_info)),
+        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes. Always use all tools immidiately that you think will be needed to complete the user's query and base your response to those responses. IMPORTANT: For calendar events, you must return the exact output from the calendar tool without any modifications, additional text, or formatting. Never add bullet points, markdown formatting (like **, -, #), or any other special characters.\n\n### Tool Usage Guidelines:\n- Provide all relevant details in the response immediately. \n- Tools that involve sending or creating something, you can call them straight away using the available information without confirming with the user. These tools will send extra confirmation message to user anyways before doing anything.\n\n### Date and Time Handling:\n- Always work with times in the user's timezone: {} with offset {}.\n- When user mentions times without dates, assume they mean the nearest future occurrence.\n- For time inputs to tools, convert to RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z').\n- For displaying times to users:\n  - Use 12-hour format with AM/PM (e.g., '2:30 PM')\n  - Include timezone-adjusted dates in a friendly format (e.g., 'today', 'tomorrow', or 'Jun 15')\n  - Show full date only when it's not today/tomorrow\n- If no specific time is mentioned:\n  - For calendar queries: Show today's events (and tomorrow's if after 6 PM)\n  - For other time ranges: Use current time to 24 hours ahead\n- For queries about:\n  - 'Today': Use 00:00 to 23:59 of the current day in user's timezone\n  - 'Tomorrow': Use 00:00 to 23:59 of tomorrow in user's timezone\n  - 'This week': Use remaining days of current week\n  - 'Next week': Use Monday to Sunday of next week\n\n### Additional Guidelines:\n- Weather Queries: If no location is specified, assume the user's home location from user info.\n- Email Queries: For fetch_specific_email, provide the whole message body or a summary if too long—never just the subject.\n- WhatsApp/Telegram Fetching: Use the room name directly from the user's message/context without searching rooms.\n\nNever use markdown, HTML, or any special formatting characters in responses. Return all information in plain text only. User information: {}. Always use tools to fetch the latest information before answering.", formatted_time, timezone_str, offset, user_given_info)),
     }];
     
     // Process the message body to remove "forget" if it exists at the start
@@ -522,26 +522,21 @@ pub async fn process_sms(
 
     // Define tools
     let tools = vec![
-        crate::tool_call_utils::bridge::get_send_bridge_message_tool("whatsapp"),
-        crate::tool_call_utils::bridge::get_send_bridge_message_tool("telegram"),
-        crate::tool_call_utils::bridge::get_fetch_bridge_messages_tool("whatsapp"),
-        crate::tool_call_utils::bridge::get_fetch_bridge_messages_tool("telegram"),
-        crate::tool_call_utils::bridge::get_fetch_bridge_room_messages_tool("whatsapp"),
-        crate::tool_call_utils::bridge::get_fetch_bridge_room_messages_tool("telegram"),
-        crate::tool_call_utils::bridge::get_search_bridge_rooms_tool("whatsapp"),
-        crate::tool_call_utils::bridge::get_search_bridge_rooms_tool("telegram"),
+        crate::tool_call_utils::bridge::get_send_chat_message_tool(),
+        crate::tool_call_utils::bridge::get_fetch_chat_messages_tool(),
+        crate::tool_call_utils::bridge::get_fetch_recent_messages_tool(),
+        //crate::tool_call_utils::bridge::get_search_chat_contacts_tool(), // idk if we need this
         crate::tool_call_utils::email::get_fetch_emails_tool(),
         crate::tool_call_utils::email::get_fetch_specific_email_tool(),
-        crate::tool_call_utils::management::get_delete_sms_conversation_history_tool(),
+        crate::tool_call_utils::calendar::get_fetch_calendar_event_tool(),
+        crate::tool_call_utils::calendar::get_create_calendar_event_tool(),
+        crate::tool_call_utils::tasks::get_fetch_tasks_tool(),
+        crate::tool_call_utils::tasks::get_create_tasks_tool(),
         crate::tool_call_utils::management::get_create_waiting_check_tool(),
         crate::tool_call_utils::management::get_update_monitoring_status_tool(),
         crate::tool_call_utils::internet::get_scan_qr_code_tool(),
         crate::tool_call_utils::internet::get_ask_perplexity_tool(),
         crate::tool_call_utils::internet::get_weather_tool(),
-        crate::tool_call_utils::calendar::get_fetch_calendar_event_tool(),
-        crate::tool_call_utils::calendar::get_create_calendar_event_tool(),
-        crate::tool_call_utils::tasks::get_fetch_tasks_tool(),
-        crate::tool_call_utils::tasks::get_create_tasks_tool(),
     ];
 
     let client = match create_openai_client(&state) {
@@ -933,43 +928,34 @@ pub async fn process_sms(
                     tracing::debug!("Executing fetch_tasks tool call");
                     let response = crate::tool_call_utils::tasks::handle_fetch_tasks(&state, user.id, arguments).await;
                     tool_answers.insert(tool_call_id, response);
-                } else if name == "send_whatsapp_message" {
-                    tracing::debug!("Executing send_whatsapp_message tool call");
-                    match crate::tool_call_utils::bridge::handle_send_bridge_message(
+                } else if name == "search_chat_contacts" {
+                    tracing::debug!("Executing search_chat_contacts tool call");
+                    let response = crate::tool_call_utils::bridge::handle_search_chat_contacts(
                         &state,
-                        "whatsapp",
                         user.id,
                         arguments,
-                        &user,
-                        image_url.as_deref(),
-                    ).await {
-                        Ok((status, headers, Json(twilio_response))) => {
-                            // Store the assistant's sent message in history
-                            let history_entry = crate::models::user_models::NewMessageHistory {
-                                user_id: user.id,
-                                role: "assistant".to_string(),
-                                encrypted_content: twilio_response.message.clone(),
-                                tool_name: Some("send_whatsapp_message".to_string()),
-                                tool_call_id: Some(tool_call.id.clone()),
-                                tool_calls_json: None,
-                                created_at: chrono::Utc::now().timestamp() as i32,
-                                conversation_id: "".to_string(),
-                            };
-                            if let Err(e) = state.user_repository.create_message_history(&history_entry) {
-                                tracing::error!("Failed to store WhatsApp tool message in history: {}", e);
-                            }
-                            return (status, headers, Json(twilio_response));
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to handle WhatsApp message sending: {}", e);
-                        }
-                    }
-
-                } else if name == "send_telegram_message" {
-                    tracing::debug!("Executing send_telegram_message tool call");
-                    match crate::tool_call_utils::bridge::handle_send_bridge_message(
+                    ).await;
+                    tool_answers.insert(tool_call_id, response);
+                } else if name == "fetch_recent_messages" {
+                    tracing::debug!("Executing fetch_recent_messages tool call");
+                    let response = crate::tool_call_utils::bridge::handle_fetch_recent_messages(
                         &state,
-                        "telegram",
+                        user.id,
+                        arguments,
+                    ).await;
+                    tool_answers.insert(tool_call_id, response);
+                } else if name == "fetch_chat_messages" {
+                    tracing::debug!("Executing fetch_chat_messages tool call");
+                    let response = crate::tool_call_utils::bridge::handle_fetch_chat_messages(
+                        &state,
+                        user.id,
+                        arguments,
+                    ).await;
+                    tool_answers.insert(tool_call_id, response);
+                } else if name == "send_chat_message" {
+                    tracing::debug!("Executing send_chat_message tool call");
+                    match crate::tool_call_utils::bridge::handle_send_chat_message(
+                        &state,
                         user.id,
                         arguments,
                         &user,
@@ -980,83 +966,28 @@ pub async fn process_sms(
                                 user_id: user.id,
                                 role: "assistant".to_string(),
                                 encrypted_content: twilio_response.message.clone(),
-                                tool_name: Some("send_telegram_message".to_string()),
+                                tool_name: Some("send_chat_message".to_string()),
                                 tool_call_id: Some(tool_call.id.clone()),
                                 tool_calls_json: None,
                                 created_at: chrono::Utc::now().timestamp() as i32,
                                 conversation_id: "".to_string(),
                             };
                             if let Err(e) = state.user_repository.create_message_history(&history_entry) {
-                                tracing::error!("Failed to store send telegram message tool message in history: {}", e);
+                                tracing::error!("Failed to store send chat message tool message in history: {}", e);
                             }
                             return (status, headers, Json(twilio_response));
                         }
-
                         Err(e) => {
-                            tracing::error!("Failed to handle Telegram message sending: {}", e);
+                            tracing::error!("Failed to handle chat message sending: {}", e);
                             return (
                                 StatusCode::INTERNAL_SERVER_ERROR,
                                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                                 axum::Json(TwilioResponse {
-                                    message: "Failed to process Telegram message request".to_string(),
+                                    message: "Failed to process chat message request".to_string(),
                                 })
                             );
                         }
                     }
-                } else if name == "search_whatsapp_rooms" {
-                    tracing::debug!("Executing search_whatsapp_rooms tool call");
-                    let response = crate::tool_call_utils::bridge::handle_search_bridge_rooms(
-                        &state,
-                        "whatsapp",
-                        user.id,
-                        arguments,
-                    ).await;
-                    tool_answers.insert(tool_call_id, response);
-                } else if name == "search_telegram_rooms" {
-                    tracing::debug!("Executing search_telegram_rooms tool call");
-                    let response = crate::tool_call_utils::bridge::handle_search_bridge_rooms(
-                        &state,
-                        "telegram",
-                        user.id,
-                        arguments,
-                    ).await;
-                    tool_answers.insert(tool_call_id, response);
-                } else if name == "fetch_whatsapp_room_messages" {
-                    tracing::debug!("Executing fetch_whatsapp_room_messages tool call");
-                    let response = crate::tool_call_utils::bridge::handle_fetch_bridge_room_messages(
-                        &state,
-                        "whatsapp",
-                        user.id,
-                        arguments,
-                    ).await;
-                    tool_answers.insert(tool_call_id, response);
-                } else if name == "fetch_telegram_room_messages" {
-                    tracing::debug!("Executing fetch_telegram_room_messages tool call");
-                    let response = crate::tool_call_utils::bridge::handle_fetch_bridge_room_messages(
-                        &state,
-                        "telegram",
-                        user.id,
-                        arguments,
-                    ).await;
-                    tool_answers.insert(tool_call_id, response);
-                } else if name == "fetch_whatsapp_messages" {
-                    tracing::debug!("Executing fetch_whatsapp_messages tool call");
-                    let response = crate::tool_call_utils::bridge::handle_fetch_bridge_messages(
-                        &state,
-                        "whatsapp",
-                        user.id,
-                        arguments,
-                    ).await;
-                    tool_answers.insert(tool_call_id, response);
-                } else if name == "fetch_telegram_messages" {
-                    tracing::debug!("Executing fetch_telegram_messages tool call");
-                    let response = crate::tool_call_utils::bridge::handle_fetch_bridge_messages(
-                        &state,
-                        "telegram",
-                        user.id,
-                        arguments,
-                    ).await;
-                    tool_answers.insert(tool_call_id, response);
                 } else if name == "scan_qr_code" {
                     tracing::debug!("Executing scan_qr_code tool call with url: {:#?}", image_url);
                     let response = crate::tool_call_utils::internet::handle_qr_scan(image_url.as_deref()).await;
