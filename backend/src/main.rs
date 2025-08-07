@@ -284,14 +284,10 @@ async fn main() {
         .route("/api/call/email/respond-confirm", post(elevenlabs::handle_email_response_tool_call))
         .route("/api/call/tasks", get(elevenlabs::handle_tasks_fetching_tool_call))
         .route("/api/call/tasks/create", post(elevenlabs::handle_tasks_creation_tool_call))
-        .route("/api/call/whatsapp", get(elevenlabs::handle_whatsapp_fetch_tool_call))
-        .route("/api/call/whatsapp/specific-room", get(elevenlabs::handle_whatsapp_fetch_specific_room_tool_call))
-        .route("/api/call/whatsapp/search", post(elevenlabs::handle_whatsapp_search_tool_call))
-        .route("/api/call/whatsapp/confirm", post(elevenlabs::handle_whatsapp_confirm_send))
-        .route("/api/call/telegram", get(elevenlabs::handle_telegram_fetch_tool_call))
-        .route("/api/call/telegram/specific-room", get(elevenlabs::handle_telegram_fetch_specific_room_tool_call))
-        .route("/api/call/telegram/search", post(elevenlabs::handle_telegram_search_tool_call))
-        .route("/api/call/telegram/confirm", post(elevenlabs::handle_telegram_confirm_send))
+        .route("/api/call/fetch-recent-messages", get(elevenlabs::handle_fetch_recent_messages_tool_call))
+        .route("/api/call/fetch-chat-messages", get(elevenlabs::handle_fetch_specific_chat_messages_tool_call))
+        .route("/api/call/search-chat-contacts", post(elevenlabs::handle_search_chat_contacts_tool_call))
+        .route("/api/call/send-chat-message", post(elevenlabs::handle_confirm_send_chat_message))
         .layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::check_subscription_access))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 

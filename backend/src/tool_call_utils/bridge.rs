@@ -11,7 +11,7 @@ pub fn get_search_chat_contacts_tool() -> openai_api_rs::v1::chat_completion::To
         "platform".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The platform to search on. Must be one of the supported values in enum_values.".to_string()),
+            description: Some("The platform to fetch messages from. Must be 'telegram' or 'whatsapp'.".to_string()),
             enum_values: Some(vec!["telegram".to_string(), "whatsapp".to_string()]),
             ..Default::default()
         }),
@@ -137,7 +137,7 @@ pub fn get_send_chat_message_tool() -> openai_api_rs::v1::chat_completion::Tool 
         "platform".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The platform to send the message on. Must be one of the supported values in enum_values.".to_string()),
+            description: Some("The platform to fetch recent messages from. Must be 'telegram' or 'whatsapp'.".to_string()),
             enum_values: Some(vec!["telegram".to_string(), "whatsapp".to_string()]),
             ..Default::default()
         }),
