@@ -84,7 +84,7 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
                     let request_body = json!({
                         "subscription_type": match subscription_type.as_str() {
                             "hosted" => "Hosted",
-                            "digital_detox" => "DigitalDetox",
+                            "guaranteed" => "Guaranteed",
                             _ => "Hosted" // Default to Hosted if unknown
                         },
                     });
@@ -198,7 +198,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
     } else {
         format!("{}{:.2}", props.currency, props.price)
     };
-    let effective_tier = if props.subscription_type == "hosted" || props.subscription_type == "digital_detox" {
+    let effective_tier = if props.subscription_type == "hosted" {
         "tier 2".to_string()
     } else {
         props.subscription_type.clone()
@@ -532,9 +532,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                 if props.is_popular {
                     html! { <div class="popular-tag">{"Most Popular"}</div> }
                 } else if props.is_premium {
-                    html! { <div class="popular-tag">{"Simplest"}</div> }
-                } else if props.is_trial {
-                    html! { <div class="premium-tag">{"Take a Challenge!"}</div> }
+                    html! { <div class="premium-tag">{"Money Back Guarantee"}</div> }
                 } else {
                     html! {}
                 }
@@ -554,32 +552,32 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                                 {format!("Billed monthly at {}{:.2}", props.currency, props.price)}
                             </p>
                         }
-                    } else if props.subscription_type == "digital_detox" {
+                    } else if props.subscription_type == "guaranteed" {
                         html! {
                             <p class="billing-note">
-                                {format!("Billed monthly at {}{:.2} after the trial", props.currency, 19.00)}
+                                {format!("Billed monthly at {}{:.2}", props.currency, props.price)}
                             </p>
                         }
                     } else {
                         html! {}
                     }}
                 </div>
-                <div class="includes">
+                        <div class="includes">
                     <ul class="quota-list">
                         { for props.features.iter().flat_map(|feature| {
                             let main_item = html! { <li>{feature.text.clone()}</li> };
                             let sub_items = feature.sub_items.iter().map(|sub| html! { <li class="sub-item">{sub}</li> }).collect::<Vec<_>>();
                             vec![main_item].into_iter().chain(sub_items.into_iter())
                         }) }
-                        { if (props.subscription_type == "hosted" || props.subscription_type == "digital_detox") && props.selected_country == "Other" {
+                        { if (props.subscription_type == "hosted" || props.subscription_type == "guaranteed") && props.selected_country == "Other" {
                             html! { <li>{"Required: Bring your own number and unlock service in whatever country you're in. Checkout the guide below."}</li> }
-                        } else if (props.subscription_type == "hosted" || props.subscription_type == "digital_detox") && ["FI", "UK", "AU"].contains(&props.selected_country.as_str()) {
+                        } else if (props.subscription_type == "hosted" || props.subscription_type == "guaranteed") && ["FI", "UK", "AU"].contains(&props.selected_country.as_str()) {
                             html! { <li>{"Messages not included - buy credits ahead of time. Credits are used for sending messages, voice calls, notifications, and more."}</li> }
                         } else { html! {} }}
                     </ul>
                 </div>
                 {
-                    if (props.subscription_type == "hosted" || props.subscription_type == "digital_detox") && props.selected_country == "Other" {
+                    if (props.subscription_type == "hosted" || props.subscription_type == "guaranteed") && props.selected_country == "Other" {
                         html! {
                             <div class="learn-more-section">
                                 <a href="/bring-own-number" class="learn-more-link">{"How to bring your own number"}</a>
@@ -849,12 +847,12 @@ pub fn pricing(props: &PricingProps) -> Html {
         ("AU".to_string(), 19.00),
         ("Other".to_string(), 19.00),
     ]);
-    let digital_detox_prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 9.00),
-        ("FI".to_string(), 9.00),
-        ("UK".to_string(), 9.00),
-        ("AU".to_string(), 9.00),
-        ("Other".to_string(), 9.00),
+    let guaranteed_prices: HashMap<String, f64> = HashMap::from([
+        ("US".to_string(), 59.00),
+        ("FI".to_string(), 59.00),
+        ("UK".to_string(), 59.00),
+        ("AU".to_string(), 59.00),
+        ("Other".to_string(), 59.00),
     ]);
     let on_country_change = {
         let selected_country = selected_country.clone();
@@ -865,7 +863,7 @@ pub fn pricing(props: &PricingProps) -> Html {
         })
     };
     let hosted_total_price = hosted_prices.get(&*selected_country).unwrap_or(&0.0);
-    let digital_detox_total_price = digital_detox_prices.get(&*selected_country).unwrap_or(&0.0);
+    let guaranteed_total_price = guaranteed_prices.get(&*selected_country).unwrap_or(&0.0);
     let hosted_features = vec![
         Feature {
             text: "Fully managed service hosted in EU".to_string(),
@@ -884,10 +882,25 @@ pub fn pricing(props: &PricingProps) -> Html {
             sub_items: vec![],
         },
     ];
-    let digital_detox_features = vec![
+    let guaranteed_features = vec![
         Feature {
-            text: "Full Hosted Plan for a one-week trial".to_string(),
+            text: "Full Hosted Plan".to_string(),
             sub_items: vec![],
+        },
+        Feature {
+            text: "Password Vault & Cheating Checker".to_string(),
+            sub_items: vec!["Lightfriend password vault for app blockers and physical lock boxes, 60-min relock window or permanent downgrade.".to_string()],
+        },
+        Feature {
+            text: "Free Cold Turkey Blocker Pro".to_string(),
+            sub_items: vec!["Block computer temptations with no escape hatch.".to_string()],
+        },
+        Feature {
+            text: "Optional Signup Bonuses".to_string(),
+            sub_items: vec![
+                "If needed: $20 for $40 Amazon gift card (for a dumbphone if you don't have one).".to_string(),
+                "For smartphone locking: $10 for $20 Amazon gift card (for a smartphone lock box you can close with a password).".to_string(),
+            ],
         },
     ];
     let currency_symbol = if *selected_country == "US" { "$" } else { "€" };
@@ -1337,16 +1350,16 @@ pub fn pricing(props: &PricingProps) -> Html {
             <h2 class="section-title">{"Plans"}</h2>
             <div class="pricing-grid">
                 <PricingCard
-                    plan_name={"Digital Detox Trial"}
-                    best_for={"Try our full-featured cloud service for a week."}
-                    price={*digital_detox_total_price}
+                    plan_name={"Hosted Plan"}
+                    best_for={"Full-featured cloud service ready to go."}
+                    price={*hosted_total_price}
                     currency={if *selected_country == "US" { "$" } else { "€" }}
-                    period={"/week"}
-                    features={digital_detox_features.clone()}
-                    subscription_type={"digital_detox"}
-                    is_popular={false}
+                    period={"/day"}
+                    features={hosted_features.clone()}
+                    subscription_type={"hosted"}
+                    is_popular={true}
                     is_premium={false}
-                    is_trial={true}
+                    is_trial={false}
                     user_id={props.user_id}
                     user_email={props.user_email.clone()}
                     is_logged_in={props.is_logged_in}
@@ -1356,15 +1369,16 @@ pub fn pricing(props: &PricingProps) -> Html {
                     coming_soon={false}
                     hosted_prices={hosted_prices.clone()}
                 />
+                /*
                 <PricingCard
-                    plan_name={"Hosted Plan"}
-                    best_for={"Full-featured cloud service ready to go."}
-                    price={*hosted_total_price}
+                    plan_name={"Guaranteed Plan"}
+                    best_for={"Hosted Plan with zero loop holes. Full refund for the first month if not satisfied."}
+                    price={*guaranteed_total_price}
                     currency={if *selected_country == "US" { "$" } else { "€" }}
-                    period={"/day"}
-                    features={hosted_features.clone()}
-                    subscription_type={"hosted"}
-                    is_popular={true}
+                    period={"/month"}
+                    features={guaranteed_features.clone()}
+                    subscription_type={"guaranteed"}
+                    is_popular={false}
                     is_premium={true}
                     is_trial={false}
                     user_id={props.user_id}
@@ -1377,6 +1391,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     hosted_prices={hosted_prices.clone()}
                 />
             </div>
+            */
             <FeatureList selected_country={(*selected_country).clone()} />
             <CreditPricing selected_country={(*selected_country).clone()} />
             <div class="pricing-faq">
@@ -1388,7 +1403,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Digital Detox Trial is billed for the first week, then transitioned to Hosted unless canceled. Digital detox includes 100 Messages and Hosted Plan has 500 per month. If you run out and want to top up before monthly renew, you can buy overage credits. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                    <p>{"Plans bill monthly. The Hosted Plan includes 500 Messages per month. The Guaranteed Plan includes the same plus hardware. If you run out of messages and want to top up before monthly renew, you can buy overage credits. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What counts as a Message?"}</summary>
@@ -1402,12 +1417,12 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Digital Detox Trial is billed for the first week, then transitioned to Hosted unless canceled. Digital detox and Hosted Plans include phone number for FI/AU/UK, but messages are bought separately before hand. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                    <p>{"Plans bill monthly. Hosted and Guaranteed Plans include phone number for FI/AU/UK, but messages are bought separately before hand. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
                                 </details>
                                 <details>
                                     <summary>{"Can I setup automatic recharge for message credits?"}</summary>
                                     <p>{"Yes! After you purchase them the first time, you can set it recharge the specified amount."}</p>
-                                </details>
+                               </details>
                                 </>
                             }
                         } else {
@@ -1415,7 +1430,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Digital Detox Trial is billed for the first week, then transitioned to Hosted unless canceled. Messages or phone number are not included. Checkout the guide on how to bring your own Number from the pricing card. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                    <p>{"Plans bill monthly. Messages or phone number are not included. Checkout the guide on how to bring your own Number from the pricing card. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
                                 </details>
                                 <details>
                                     <summary>{"Can I setup automatic recharge for message credits?"}</summary>
@@ -1433,7 +1448,7 @@ pub fn pricing(props: &PricingProps) -> Html {
             </div>
             <div class="footnotes">
                 <p class="footnote">{"* Gen Z spends 4-7 hours daily on phones, often regretting 60% of social media time. "}<a href="https://explodingtopics.com/blog/smartphone-usage-stats" target="_blank" rel="noopener noreferrer">{"Read the study"}</a><grok-card data-id="badfd9" data-type="citation_card"></grok-card></p>
-                <p class="footnote">{"The dumbphone is sold separately and is not included in any plan."}</p>
+                <p class="footnote">{"The dumbphone is sold separately and is not included in the Hosted Plan. It is included in the Guaranteed Plan."}</p>
                 <p class="footnote">{"For developers: Check out the open-source repo on GitHub if you'd like to self-host from source (requires technical setup)."}</p>
                 <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer" class="github-link">{"View GitHub Repo"}</a>
             </div>
