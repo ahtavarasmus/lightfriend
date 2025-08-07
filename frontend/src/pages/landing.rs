@@ -4,6 +4,7 @@ use yew_router::components::Link;
 use crate::components::notification::AnimationComponent;
 use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsCast;
+
 #[function_component(Landing)]
 pub fn landing() -> Html {
     let dim_opacity = use_state(|| 0.0);
@@ -62,6 +63,52 @@ pub fn landing() -> Html {
         );
     }
 
+    let feature_css = r#"
+        .feature-list {
+            padding: 4rem 2rem;
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: left;
+            position: relative;
+            z-index: 2;
+        }
+        .feature-list h2 {
+            font-size: 2.5rem;
+            margin-bottom: 1.5rem;
+            background: linear-gradient(45deg, #fff, #7EB2FF);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            text-align: center;
+        }
+        .feature-list ul {
+            list-style: none;
+            padding: 0;
+        }
+        .feature-list li {
+            font-size: 1.2rem;
+            color: #ddd;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        .feature-list i {
+            color: #7EB2FF;
+            font-size: 1.5rem;
+        }
+        @media (max-width: 768px) {
+            .feature-list {
+                padding: 2rem 1rem;
+            }
+            .feature-list h2 {
+                font-size: 2rem;
+            }
+            .feature-list li {
+                font-size: 1.1rem;
+            }
+        }
+    "#;
+
     html! {
         <div class="landing-page">
             <head>
@@ -87,9 +134,6 @@ pub fn landing() -> Html {
                         <Link<Route> to={Route::Pricing} classes="forward-link">
                             <button class="hero-cta">{"Get Started"}</button>
                         </Link<Route>>
-                        <a href="/faq#try-service" class="faq-link">
-                            {"Try demo first"}
-                        </a>
                     </div>
                 </div>
             </header>
@@ -135,10 +179,34 @@ pub fn landing() -> Html {
                     </div>
                 </div>
             </div>
+            <section class="features-section">
+                <div class="feature-list">
+                    <style>{feature_css}</style>
+                    <h2>{"Current Capabilities"}</h2>
+                    <ul>
+                        <li><i class="fas fa-phone"></i>{"Voice calling and SMS interface"}</li>
+                        <li><i class="fas fa-search"></i>{"Perplexity AI Web Search"}</li>
+                        <li><i class="fas fa-cloud-sun"></i>{"Weather Search and forecast of the next 6 hours"}</li>
+                        <li><i class="fas fa-image"></i>{"Photo Analysis & Translation (US & AUS only)"}</li>
+                        <li><i class="fas fa-qrcode"></i>{"QR Code Scanning (US & AUS only)"}</li>
+                        <li><i class="fab fa-whatsapp"></i>{"Send, Fetch and Monitor WhatsApp Messages"}</li>
+                        <li><i class="fab fa-telegram"></i>{"Send, Fetch and Monitor Telegram Messages"}</li>
+                        <li><i class="fas fa-envelope"></i>{"Fetch and Monitor Emails"}</li>
+                        <li><i class="fas fa-calendar-days"></i>{"Fetch, Create and Monitor Calendar events"}</li>
+                        <li><i class="fas fa-list-check"></i>{"Fetch and Create Tasks and Ideas"}</li>
+                        <li><i class="fas fa-eye"></i>{"24/7 Critical Message Monitoring"}</li>
+                        <li><i class="fas fa-newspaper"></i>{"Morning, Day and Evening Digests"}</li>
+                        <li><i class="fas fa-clock"></i>{"Temporary Monitoring for Specific Content"}</li>
+                        <li><i class="fas fa-bell"></i>{"Priority Sender Notifications"}</li>
+                        <li><i class="fas fa-rocket"></i>{"All Future Features Included"}</li>
+                        <li><i class="fas fa-headset"></i>{"Priority Support"}</li>
+                    </ul>
+                </div>
+            </section>
             <section class="trust-proof">
                 <div class="section-intro">
                     <h2>{"Why I'm Building Lightfriend"}</h2>
-                    <p>{"I'm a solo developer, and honestly, I have very low willpower. I work in bursts of inspiration, but that’s not always enough when things have deadlines. Smartphones were stealing my time and focus. I knew I needed to engineer my environment to work for me, not against me. Tried blockers, detox apps, everything. But I always found a way around them."}</p>
+                    <p>{"Hi, I'm Rasmus, a solo developer behind this project and honestly, I have very low willpower. I work in bursts of inspiration, but that’s not always enough when things have deadlines. Smartphones were stealing my time and focus. I knew I needed to engineer my environment to work for me, not against me. Tried blockers, detox apps, everything. But I always found a way around them."}</p>
                     <p>{"Before all this, I was a full-time athlete who had just started studying Computer Science. My first semester was brutal. I had to be sharp in every short study session I had between training. But scrolling wrecked my focus and stole what little time I had."}</p>
                     <p>{"That’s when I switched to a dumbphone. Everything changed. I could finally focus. I wasn’t always behind anymore. I stopped saying no to friends because I actually got my school work done. I had time and energy again, and the freedom to say yes to things I actually wanted to do."}</p>
                     <p>{"Now I’m juggling a CS master's, high-level sports, part-time work, and building Lightfriend every day. And I never feel rushed. I can direct my attention where I want it."}</p>
@@ -173,8 +241,11 @@ pub fn landing() -> Html {
                     <h2>{"Ready for Digital Peace?"}</h2>
                     <p class="subtitle">{"Join the other 100+ early adopters! You will have more impact on the direction of the service and permanently cheaper prices."}</p>
                     <Link<Route> to={Route::Pricing} classes="forward-link">
-                        <button class="hero-cta">{"Start Today - Live Without the Phone, Not the FOMO"}</button>
+                        <button class="hero-cta">{"Start Today"}</button>
                     </Link<Route>>
+                    <a href="/faq#try-service" class="faq-link">
+                        {"Try demo first"}
+                    </a>
                     <p class="disclaimer">{"Works with smartphones and basic phones. Customize to your needs."}</p>
                     <div class="development-links">
                         <p>{"Source code on "}
@@ -361,7 +432,6 @@ pub fn landing() -> Html {
     }
     .difference-content:hover {
         transform: translateY(-5px);
-        box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
     }
     .difference-text {
         flex: 1;
@@ -702,7 +772,6 @@ pub fn landing() -> Html {
         height: 100%;
         display: flex;
         justify-content: space-around;
-        padding: 40px;
         pointer-events: auto;
     }
     .hero-header {
@@ -744,7 +813,7 @@ pub fn landing() -> Html {
     .hero-title {
         font-size: 3rem;
         font-weight: 700;
-        background: linear-gradient(45deg, #fff, #7EB2FF);
+        background: linear-gradient(45deg, #fff, #F5F0E1);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
@@ -777,7 +846,6 @@ pub fn landing() -> Html {
     }
     @media (max-width: 768px) {
         .hero-content {
-            padding: 20px;
             flex-direction: column;
             justify-content: flex-end;
         }
@@ -1020,7 +1088,6 @@ pub fn landing() -> Html {
     }
     .story-item:hover {
         transform: translateY(-5px);
-        box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
     }
     .story-item img {
         max-width: 100%;

@@ -17,6 +17,7 @@ pub async fn handle_confirmation(
     user: &User,
     event_type: &str,
     user_message: &str,
+    is_test: bool,
 ) -> ConfirmationResult {
     // Default values
     let mut should_continue = false;
@@ -97,13 +98,15 @@ pub async fn handle_confirmation(
                 ).await {
                     Ok(_) => {
                         let confirmation_msg = "Calendar event created successfully!";
-                        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                            &state,
-                            confirmation_msg,
-                            None,
-                            user,
-                        ).await {
-                            tracing::error!("Failed to send confirmation message: {}", e);
+                        if !is_test {
+                            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                                &state,
+                                confirmation_msg,
+                                None,
+                                user,
+                            ).await {
+                                tracing::error!("Failed to send confirmation message: {}", e);
+                            }
                         }
 
                         response = Some((
@@ -116,13 +119,15 @@ pub async fn handle_confirmation(
                     }
                     Err((status, Json(error))) => {
                         let error_msg = format!("Failed to create calendar event: {} (not charged)", error["error"].as_str().unwrap_or("Unknown error"));
-                        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                            &state,
-                            &error_msg,
-                            None,
-                            user,
-                        ).await {
-                            tracing::error!("Failed to send error message: {}", e);
+                        if !is_test {
+                            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                                &state,
+                                &error_msg,
+                                None,
+                                user,
+                            ).await {
+                                tracing::error!("Failed to send error message: {}", e);
+                            }
                         }
                         response = Some((
                             StatusCode::OK,
@@ -184,13 +189,15 @@ pub async fn handle_confirmation(
                     Ok(_) => {
                         // Send confirmation via Twilio
                         let confirmation_msg = format!("Message sent successfully to {}", recipient);
-                        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                            &state,
-                            &confirmation_msg,
-                            None,
-                            user,
-                        ).await {
-                            tracing::error!("Failed to send confirmation message: {}", e);
+                        if !is_test {
+                            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                                &state,
+                                &confirmation_msg,
+                                None,
+                                user,
+                            ).await {
+                                tracing::error!("Failed to send confirmation message: {}", e);
+                            }
                         }
 
                         response = Some((
@@ -204,13 +211,15 @@ pub async fn handle_confirmation(
                     Err(e) => {
                         tracing::debug!("sending failed to send the message");
                         let error_msg = format!("Failed to send message: {}", e);
-                        if let Err(send_err) = crate::api::twilio_utils::send_conversation_message(
-                            &state,
-                            &error_msg,
-                            None,
-                            user,
-                        ).await {
-                            tracing::error!("Failed to send error message: {}", send_err);
+                        if !is_test {
+                            if let Err(send_err) = crate::api::twilio_utils::send_conversation_message(
+                                &state,
+                                &error_msg,
+                                None,
+                                user,
+                            ).await {
+                                tracing::error!("Failed to send error message: {}", send_err);
+                            }
                         }
 
                         response = Some((
@@ -280,13 +289,15 @@ pub async fn handle_confirmation(
                 ).await {
                     Ok(_) => {
                         let confirmation_msg = format!("Email response sent successfully to {} regarding '{}'", recipient, subject);
-                        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                            &state,
-                            &confirmation_msg,
-                            None,
-                            user,
-                        ).await {
-                            tracing::error!("Failed to send confirmation message: {}", e);
+                        if !is_test {
+                            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                                &state,
+                                &confirmation_msg,
+                                None,
+                                user,
+                            ).await {
+                                tracing::error!("Failed to send confirmation message: {}", e);
+                            }
                         }
 
                         response = Some((
@@ -299,13 +310,15 @@ pub async fn handle_confirmation(
                     }
                     Err((status, Json(error))) => {
                         let error_msg = format!("Failed to send email response: {} (not charged)", error["error"].as_str().unwrap_or("Unknown error"));
-                        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                            &state,
-                            &error_msg,
-                            None,
-                            user,
-                        ).await {
-                            tracing::error!("Failed to send error message: {}", e);
+                        if !is_test {
+                            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                                &state,
+                                &error_msg,
+                                None,
+                                user,
+                            ).await {
+                                tracing::error!("Failed to send error message: {}", e);
+                            }
                         }
                         response = Some((
                             StatusCode::OK,

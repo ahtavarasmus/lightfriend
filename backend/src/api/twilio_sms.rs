@@ -319,6 +319,7 @@ pub async fn process_sms(
             &user.clone(),
             &user.clone().confirm_send_event.unwrap(),
             &payload.body,
+            is_test.clone(),
         ).await;
 
         tracing::info!("Came back from handle_confirmation with should_continue as: {}", confirmation_result.should_continue);
@@ -1182,7 +1183,6 @@ pub async fn process_sms(
 
     // If in test mode, skip sending the actual message and return the response directly
     if is_test {
-
         // Log the test usage without actually sending the message
         if let Err(e) = state.user_repository.log_usage(
             user.id,
