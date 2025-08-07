@@ -321,10 +321,7 @@ pub async fn send_bridge_message(
     media_url: Option<String>,
 ) -> Result<BridgeMessage> {
     // Get user for timezone info
-    let user = state.user_core.find_by_id(user_id)?
-        .ok_or_else(|| anyhow!("User not found"))?;
-    let bridge_bot_username = get_bridge_bot_username(service);
-    tracing::info!("Sending {} message for user {}", service, user_id);
+    tracing::info!("Sending {} message", service);
     
     let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
 
@@ -473,12 +470,8 @@ pub async fn send_bridge_message(
         // plain text
         room.send(RoomMessageEventContent::text_plain(message)).await?;
     }
-    // Send the message with transaction ID
-    let txn_id = matrix_sdk::ruma::TransactionId::new();
-    room.send(content.clone()).with_transaction_id(txn_id).await?;
     tracing::debug!("Message sent!");
 
-    let user_settings = state.user_core.get_user_settings(user_id)?;
     let user_info= state.user_core.get_user_info(user_id)?;
     let current_timestamp = chrono::Utc::now().timestamp();
     // Return the sent message details

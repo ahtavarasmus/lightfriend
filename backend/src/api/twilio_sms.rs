@@ -678,7 +678,7 @@ pub async fn process_sms(
 
                 let history_entry = crate::models::user_models::NewMessageHistory {
                     user_id: user.id,
-                    role: "assistant".to_string(),
+                    role: "tool".to_string(),
                     // Store the entire tool-call JSON so it can be replayed later
                     encrypted_content: serde_json::to_string(tool_call)
                         .unwrap_or_else(|_| "{}".to_string()),
