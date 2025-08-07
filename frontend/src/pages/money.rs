@@ -1390,8 +1390,8 @@ pub fn pricing(props: &PricingProps) -> Html {
                     coming_soon={false}
                     hosted_prices={hosted_prices.clone()}
                 />
-            </div>
             */
+            </div>
             <FeatureList selected_country={(*selected_country).clone()} />
             <CreditPricing selected_country={(*selected_country).clone()} />
             <div class="pricing-faq">
@@ -1403,7 +1403,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. The Hosted Plan includes 500 Messages per month. The Guaranteed Plan includes the same plus hardware. If you run out of messages and want to top up before monthly renew, you can buy overage credits. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                    <p>{"Plans bill monthly. Hosted Plan includes phone number for FI/AU/UK, but messages are bought separately before hand. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What counts as a Message?"}</summary>
@@ -1417,7 +1417,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Hosted and Guaranteed Plans include phone number for FI/AU/UK, but messages are bought separately before hand. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                    <p>{"Plans bill monthly. Hosted Plan includes phone number for FI/AU/UK, but messages are bought separately before hand. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
                                 </details>
                                 <details>
                                     <summary>{"Can I setup automatic recharge for message credits?"}</summary>
@@ -1448,7 +1448,7 @@ pub fn pricing(props: &PricingProps) -> Html {
             </div>
             <div class="footnotes">
                 <p class="footnote">{"* Gen Z spends 4-7 hours daily on phones, often regretting 60% of social media time. "}<a href="https://explodingtopics.com/blog/smartphone-usage-stats" target="_blank" rel="noopener noreferrer">{"Read the study"}</a><grok-card data-id="badfd9" data-type="citation_card"></grok-card></p>
-                <p class="footnote">{"The dumbphone is sold separately and is not included in the Hosted Plan. It is included in the Guaranteed Plan."}</p>
+                <p class="footnote">{"The dumbphone is sold separately and is not included in the Hosted Plan."}</p>
                 <p class="footnote">{"For developers: Check out the open-source repo on GitHub if you'd like to self-host from source (requires technical setup)."}</p>
                 <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer" class="github-link">{"View GitHub Repo"}</a>
             </div>
