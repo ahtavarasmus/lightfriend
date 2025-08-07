@@ -1011,7 +1011,6 @@ pub struct EmailSearchPayload {
 
 #[derive(Debug, Deserialize)]
 pub struct ChatSearchPayload {
-    platform: String,
     search_term: String,
 }
 
