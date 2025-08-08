@@ -181,6 +181,10 @@ diesel::table! {
         dictionary -> Nullable<Text>,
         info -> Nullable<Text>,
         timezone -> Nullable<Text>,
+        nearby_places -> Nullable<Text>,
+        recent_contacts -> Nullable<Text>,
+        blocker_password_vault -> Nullable<Text>,
+        lockbox_password_vault -> Nullable<Text>,
     }
 }
 

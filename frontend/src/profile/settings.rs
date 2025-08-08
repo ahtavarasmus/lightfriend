@@ -9,10 +9,9 @@ use gloo_net::http::Request;
 use serde::Serialize;
 use wasm_bindgen_futures::spawn_local;
 use crate::profile::billing_models::UserProfile;
-
+use web_sys::js_sys::encode_uri_component;
 const MAX_NICKNAME_LENGTH: usize = 30;
 const MAX_INFO_LENGTH: usize = 500;
-
 #[derive(Serialize)]
 struct UpdateProfileRequest {
     email: String,
@@ -25,15 +24,14 @@ struct UpdateProfileRequest {
     notification_type: Option<String>,
     save_context: Option<i32>,
     require_confirmation: bool,
+    location: String,
+    nearby_places: String,
 }
-
 #[derive(Properties, PartialEq, Clone)]
 pub struct SettingsPageProps {
     pub user_profile: UserProfile,
     pub on_profile_update: Callback<UserProfile>,
 }
-
-
 #[function_component]
 pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     let user_profile = use_state(|| props.user_profile.clone());
@@ -51,11 +49,12 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
     };
     let save_context = use_state(|| (*user_profile).save_context.unwrap_or(0));
     let require_confirmation = use_state(|| (*user_profile).require_confirmation);
+    let location = use_state(|| (*user_profile).location.clone().unwrap_or_default());
+    let nearby_places = use_state(|| (*user_profile).nearby_places.clone().unwrap_or_default());
     let error = use_state(|| None::<String>);
     let success = use_state(|| None::<String>);
     let is_editing = use_state(|| false);
     let navigator = use_navigator().unwrap();
-
     // Update local state when props change
     {
         let email = email.clone();
@@ -68,7 +67,8 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let user_profile_state = user_profile.clone();
         let notification_type = notification_type.clone();
         let save_context = save_context.clone();
-
+        let location = location.clone();
+        let nearby_places = nearby_places.clone();
         use_effect_with_deps(move |props_profile| {
             info!("{}", &format!("Props notification type: {:?}", props_profile.notification_type));
             email.set(props_profile.email.clone());
@@ -78,11 +78,61 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             timezone.set(props_profile.timezone.clone().unwrap_or_else(|| String::from("UTC")));
             agent_language.set(props_profile.agent_language.clone());
             notification_type.set(props_profile.notification_type.clone());
+            location.set(props_profile.location.clone().unwrap_or_default());
+            nearby_places.set(props_profile.nearby_places.clone().unwrap_or_default());
             user_profile_state.set(props_profile.clone());
             || ()
         }, props.user_profile.clone());
     }
-    
+    let is_editing_clone = is_editing.clone();
+    let nearby_places_clone = nearby_places.clone();
+    let error_clone = error.clone();
+    use_effect_with_deps(
+        move |location_handle| {
+            let loc = (*location_handle).clone();
+            let is_editing = *is_editing_clone;
+            let nearby_places = nearby_places_clone.clone();
+            let error = error_clone.clone();
+            if !is_editing || loc.is_empty() {
+                Box::new(|| ()) as Box<dyn FnOnce()>
+            } else {
+                let timer = gloo_timers::callback::Timeout::new(1000, move || {
+                    spawn_local(async move {
+                        if let Some(token) = window()
+                            .and_then(|w| w.local_storage().ok())
+                            .flatten()
+                            .and_then(|storage| storage.get_item("token").ok())
+                            .flatten()
+                        {
+                            let encoded_loc = encode_uri_component(&loc).to_string();
+                            let url = format!("{}/api/get_nearby_places?location={}", config::get_backend_url(), encoded_loc);
+                            match Request::get(&url)
+                                .header("Authorization", &format!("Bearer {}", token))
+                                .send()
+                                .await
+                            {
+                                Ok(response) if response.ok() => {
+                                    if let Ok(json) = response.json::<Vec<String>>().await {
+                                        nearby_places.set(json.join(", "));
+                                    } else {
+                                        error.set(Some("Failed to parse nearby places".to_string()));
+                                    }
+                                }
+                                _ => {
+                                    error.set(Some("Failed to fetch nearby places".to_string()));
+                                }
+                            }
+                        } else {
+                            error.set(Some("No authentication token found".to_string()));
+                        }
+                    });
+                });
+                Box::new(move || { timer.cancel(); }) as Box<dyn FnOnce()>
+            }
+        },
+        location.clone(),
+    );
+ 
     let on_edit = {
         let email = email.clone();
         let phone_number = phone_number.clone();
@@ -100,14 +150,15 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let save_context = save_context.clone();
         let props = props.clone();
         let require_confirmation = require_confirmation.clone();
-
+        let location = location.clone();
+        let nearby_places = nearby_places.clone();
         Callback::from(move |_e: MouseEvent| {
             let email = email.clone();
             let phone_number = phone_number.clone();
             let nickname = nickname.clone();
             let info = info.clone();
             let timezone = timezone.clone();
-            let timezone_auto = timezone_auto.clone();  // Clone the UseState handle instead of dereferencing
+            let timezone_auto = timezone_auto.clone(); // Clone the UseState handle instead of dereferencing
             let agent_language = agent_language.clone();
             let error = error.clone();
             let success = success.clone();
@@ -117,7 +168,8 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             let notification_type = notification_type.clone();
             let save_context = save_context.clone();
             let require_confirmation = require_confirmation.clone();
-
+            let location = location.clone();
+            let nearby_places = nearby_places.clone();
             // Check authentication first
             let is_authenticated = window()
                 .and_then(|w| w.local_storage().ok())
@@ -125,15 +177,12 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 .and_then(|storage| storage.get_item("token").ok())
                 .flatten()
                 .is_some();
-
             if !is_authenticated {
                 navigator.push(&Route::Home);
                 return;
             }
             let props = props.clone();
-
             spawn_local(async move {
-
                 if let Some(token) = window()
                     .and_then(|w| w.local_storage().ok())
                     .flatten()
@@ -142,7 +191,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                 {
                     match Request::post(&format!("{}/api/profile/update", config::get_backend_url()))
                         .header("Authorization", &format!("Bearer {}", token))
-                        .json(&UpdateProfileRequest { 
+                        .json(&UpdateProfileRequest {
                             email: (*email).clone(),
                             phone_number: (*phone_number).clone(),
                             nickname: (*nickname).clone(),
@@ -153,10 +202,12 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                             notification_type: (*notification_type).clone(),
                             save_context: Some(*save_context),
                             require_confirmation: *require_confirmation,
+                            location: (*location).clone(),
+                            nearby_places: (*nearby_places).clone(),
                         })
                         .expect("Failed to build request")
                         .send()
-                        .await 
+                        .await
                     {
                         Ok(response) => {
                             if response.status() == 401 {
@@ -194,9 +245,9 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     notify: (*user_profile).notify,
                                     sub_country: (*user_profile).sub_country.clone(),
                                     save_context: Some(*save_context),
-                                    require_confirmation: (*user_profile).require_confirmation.clone(),
+                                    require_confirmation: (*user_profile).require_confirmation,
                                     days_until_billing: (*user_profile).days_until_billing.clone(),
-                                    digests_reserved: (*user_profile).digests_reserved.clone(),
+                                    digests_reserved: (*user_profile).digests_reserved,
                                     pairing_code: (*user_profile).pairing_code.clone(),
                                     server_ip: (*user_profile).server_ip.clone(),
                                     twilio_sid: (*user_profile).twilio_sid.clone(),
@@ -204,16 +255,15 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     openrouter_api_key: (*user_profile).openrouter_api_key.clone(),
                                     textbee_device_id: (*user_profile).textbee_device_id.clone(),
                                     textbee_api_key: (*user_profile).textbee_api_key.clone(),
-                                    estimated_monitoring_cost: (*user_profile).estimated_monitoring_cost.clone(),
+                                    estimated_monitoring_cost: (*user_profile).estimated_monitoring_cost,
+                                    location: Some((*location).clone()),
+                                    nearby_places: Some((*nearby_places).clone()),
                                 };
-
                                 // Notify parent component
                                 props.on_profile_update.emit(updated_profile.clone());
-
-
                                 // Check if phone number was changed
                                 let phone_changed = (*user_profile).phone_number != (*phone_number).clone();
-                                
+                             
                                 if phone_changed {
                                     // If phone number changed, redirect to home for verification
                                     navigator.push(&Route::Home);
@@ -221,7 +271,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     success.set(Some("Profile updated successfully".to_string()));
                                     error.set(None);
                                     is_editing.set(false);
-                                    
+                                 
                                     // Clear success message after 3 seconds
                                     let success_clone = success.clone();
                                     spawn_local(async move {
@@ -241,31 +291,28 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             });
         })
     };
-
-
 let on_timezone_update = {
     let timezone = timezone.clone();
     let user_profile = user_profile.clone();
     let props = props.clone();
     let timezone_auto = timezone_auto.clone();
-    
+ 
     Callback::from(move |new_timezone: String| {
         // Only update if automatic timezone is enabled
         if *timezone_auto {
             timezone.set(new_timezone.clone());
-            
+         
             // Update the user_profile state with the new timezone
             let mut updated_profile = (*user_profile).clone();
             updated_profile.timezone = Some(new_timezone.clone());
             updated_profile.timezone_auto = Some(*timezone_auto);
             user_profile.set(updated_profile.clone());
-            
+         
             // Notify parent component
             props.on_profile_update.emit(updated_profile);
         }
     })
 };
-
     html! {
         <>
         <div class="profile-info">
@@ -283,8 +330,8 @@ let on_timezone_update = {
                     html! {}
                 }
             }
-            
-            { 
+         
+            {
                 if (*user_profile).sub_tier != Some("self_hosted".to_string()) {
                     html! {
                         <div class="profile-field">
@@ -295,12 +342,12 @@ let on_timezone_update = {
                                         <input
                                             type="email"
                                             class="profile-input"
-                            value={(*email).to_string()}
+                                            value={(*email).to_string()}
                                             placeholder="your@email.com"
-                            onchange={let email = email.clone(); move |e: Event| {
-                                let input: HtmlInputElement = e.target_unchecked_into();
-                                email.set(input.value());
-                            }}
+                                            onchange={let email = email.clone(); move |e: Event| {
+                                                let input: HtmlInputElement = e.target_unchecked_into();
+                                                email.set(input.value());
+                                            }}
                                         />
                                     }
                                 } else {
@@ -315,7 +362,7 @@ let on_timezone_update = {
                     html! {}
                 }
             }
-            
+         
             <div class="profile-field">
                 <span class="field-label">{"Phone"}</span>
                 {
@@ -341,7 +388,6 @@ let on_timezone_update = {
                     }
                 }
             </div>
-
             <div class="profile-field">
                 <div class="field-label-group">
                     <span class="field-label">{"Nickname"}</span>
@@ -383,7 +429,6 @@ let on_timezone_update = {
                     }
                 }
             </div>
-
             <div class="profile-field">
                 <div class="field-label-group">
                     <span class="field-label">{"Info"}</span>
@@ -425,7 +470,122 @@ let on_timezone_update = {
                     }
                 }
             </div>
-
+            <div class="profile-field">
+                <div class="field-label-group">
+                    <span class="field-label">{"Location"}</span>
+                    <div class="tooltip">
+                        <span class="tooltip-icon">{"?"}</span>
+                        <span class="tooltip-text">
+                            {"Enter your location as District, City, Country to help the AI with context and transcription."}
+                        </span>
+                    </div>
+                </div>
+                {
+                    if *is_editing {
+                        html! {
+                            <input
+                                type="text"
+                                class="profile-input"
+                                value={(*location).clone()}
+                                placeholder="District, City, Country"
+                                onchange={let location = location.clone(); move |e: Event| {
+                                    let input: HtmlInputElement = e.target_unchecked_into();
+                                    location.set(input.value());
+                                }}
+                            />
+                        }
+                    } else {
+                        html! {
+                            <span class="field-value">
+                                {(*user_profile).location.clone().unwrap_or_default()}
+                            </span>
+                        }
+                    }
+                }
+            </div>
+            <div class="profile-field">
+                <div class="field-label-group">
+                    <span class="field-label">{"Nearby Places"}</span>
+                    <div class="tooltip">
+                        <span class="tooltip-icon">{"?"}</span>
+                        <span class="tooltip-text">
+                            {"Comma-separated list of nearby places to improve voice AI transcription accuracy. Automatically updated based on location, but you can add or remove places."}
+                        </span>
+                    </div>
+                </div>
+                {
+                    if *is_editing {
+                        let on_fill_click = {
+                            let location = location.clone();
+                            let nearby_places = nearby_places.clone();
+                            let error = error.clone();
+                            Callback::from(move |_e: MouseEvent| {
+                                let loc = (*location).clone();
+                                let nearby_places = nearby_places.clone();
+                                let error = error.clone();
+                                if loc.is_empty() {
+                                    error.set(Some("Location is empty".to_string()));
+                                    return;
+                                }
+                                spawn_local(async move {
+                                    if let Some(token) = window()
+                                        .and_then(|w| w.local_storage().ok())
+                                        .flatten()
+                                        .and_then(|storage| storage.get_item("token").ok())
+                                        .flatten()
+                                    {
+                                        let encoded_loc = encode_uri_component(&loc).to_string();
+                                        let url = format!("{}/api/profile/get_nearby_places?location={}", config::get_backend_url(), encoded_loc);
+                                        match Request::get(&url)
+                                            .header("Authorization", &format!("Bearer {}", token))
+                                            .send()
+                                            .await
+                                        {
+                                            Ok(response) if response.ok() => {
+                                                if let Ok(json) = response.json::<Vec<String>>().await {
+                                                    nearby_places.set(json.join(", "));
+                                                } else {
+                                                    error.set(Some("Failed to parse nearby places".to_string()));
+                                                }
+                                            }
+                                            _ => {
+                                                error.set(Some("Failed to fetch nearby places".to_string()));
+                                            }
+                                        }
+                                    } else {
+                                        error.set(Some("No authentication token found".to_string()));
+                                    }
+                                });
+                            })
+                        };
+                        html! {
+                            <div class="nearby-places-container">
+                                <textarea
+                                    class="profile-input"
+                                    value={(*nearby_places).clone()}
+                                    placeholder="Comma-separated places"
+                                    onchange={let nearby_places = nearby_places.clone(); move |e: Event| {
+                                        let input: HtmlInputElement = e.target_unchecked_into();
+                                        nearby_places.set(input.value());
+                                    }}
+                                />
+                                <button
+                                    class="fill-button"
+                                    onclick={on_fill_click}
+                                >
+                                    {"Fill from Location"}
+                                </button>
+                            </div>
+                        }
+                    } else {
+                        html! {
+                            <span class="field-value">
+                                {(*user_profile).nearby_places.clone().unwrap_or_default()}
+                            </span>
+                        }
+                    }
+                }
+            </div>
             <div class="profile-field">
                 <div class="field-label-group">
                     <span class="field-label">{"Timezone"}</span>
@@ -457,8 +617,6 @@ let on_timezone_update = {
                                         {"Automatically detect timezone"}
                                     </label>
                                 </div>
-
-
                                 <select
                                     class="profile-input"
                                     value={(*timezone).clone()}
@@ -501,7 +659,6 @@ let on_timezone_update = {
                     }
                 </div>
             </div>
-
             <div class="profile-field">
                 <div class="field-label-group">
                     <span class="field-label">{"Agent Language"}</span>
@@ -540,7 +697,7 @@ let on_timezone_update = {
                                 {
                                     match (*user_profile).agent_language.as_str() {
                                         "en" => "English",
-                                        "fi" => "Finnish", 
+                                        "fi" => "Finnish",
                                         "de" => "German",
                                         _ => "English"
                                     }
@@ -592,7 +749,7 @@ let on_timezone_update = {
                                             web_sys::console::log_1(&format!("Unexpected notification type: {:?}", other).into());
                                             other
                                         },
-                                        None => "SMS"  // Default to SMS if no preference is set
+                                        None => "SMS" // Default to SMS if no preference is set
                                     }
                                 }
                             </span>
@@ -600,8 +757,6 @@ let on_timezone_update = {
                     }
                 }
             </div>
-
-
             <div class="profile-field">
                 <div class="field-label-group">
                     <span class="field-label">{"Conversation History"}</span>
@@ -651,7 +806,6 @@ let on_timezone_update = {
                     }
                 }
             </div>
-
             <div class="profile-field">
                 <div class="field-label-group">
                     <span class="field-label">{"Require Confirmation"}</span>
@@ -689,8 +843,7 @@ let on_timezone_update = {
                     }
                 }
             </div>
-
-            <button 
+            <button
                 onclick={
                     let is_editing = is_editing.clone();
                     if *is_editing {
@@ -706,8 +859,6 @@ let on_timezone_update = {
         </div>
         <style>
                 {r#"
-
-
 .profile-input {
     background: rgba(0, 0, 0, 0.2);
     border: 1px solid rgba(30, 144, 255, 0.2);
@@ -718,13 +869,18 @@ let on_timezone_update = {
     transition: all 0.3s ease;
     width: 100%;
 }
-
 .profile-input:focus {
     outline: none;
     border-color: rgba(30, 144, 255, 0.5);
     box-shadow: 0 0 0 2px rgba(30, 144, 255, 0.1);
 }
-
+.profile-input[ type="text" ], .profile-input[ type="email" ], .profile-input[ type="tel" ] {
+    height: auto;
+}
+textarea.profile-input {
+    height: 100px;
+    resize: vertical;
+}
 .edit-button {
     background: linear-gradient(45deg, #1E90FF, #4169E1);
     color: white;
@@ -736,27 +892,22 @@ let on_timezone_update = {
     transition: all 0.3s ease;
     margin-top: 1rem;
 }
-
 .edit-button:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
 }
-
 .edit-button.confirming {
     background: linear-gradient(45deg, #4CAF50, #45a049);
 }
-
 .field-label-group {
     display: flex;
     align-items: center;
     gap: 8px;
 }
-
 .tooltip {
     position: relative;
     display: inline-block;
 }
-
 .tooltip-icon {
     display: inline-flex;
     align-items: center;
@@ -769,7 +920,6 @@ let on_timezone_update = {
     cursor: help;
     color: #666;
 }
-
 .tooltip-text {
     visibility: hidden;
     position: absolute;
@@ -788,12 +938,10 @@ let on_timezone_update = {
     opacity: 0;
     transition: opacity 0.3s;
 }
-
 .tooltip:hover .tooltip-text {
     visibility: visible;
     opacity: 1;
 }
-
 /* Add a small arrow at the bottom of the tooltip */
 .tooltip-text::after {
     content: "";
@@ -805,7 +953,6 @@ let on_timezone_update = {
     border-style: solid;
     border-color: #333 transparent transparent transparent;
 }
-
 /* Timezone section styling */
 .timezone-section {
     display: flex;
@@ -813,11 +960,9 @@ let on_timezone_update = {
     gap: 12px;
     width: 100%;
 }
-
 .timezone-auto-checkbox {
     margin-bottom: 8px;
 }
-
 .custom-checkbox {
     display: flex;
     align-items: center;
@@ -830,11 +975,9 @@ let on_timezone_update = {
     opacity: 0.9;
     transition: opacity 0.3s ease;
 }
-
 .custom-checkbox:hover {
     opacity: 1;
 }
-
 .custom-checkbox input {
     position: absolute;
     opacity: 0;
@@ -842,7 +985,6 @@ let on_timezone_update = {
     height: 0;
     width: 0;
 }
-
 .checkmark {
     position: absolute;
     left: 0;
@@ -853,17 +995,14 @@ let on_timezone_update = {
     border-radius: 4px;
     transition: all 0.3s ease;
 }
-
 .custom-checkbox:hover .checkmark {
     border-color: rgba(30, 144, 255, 0.5);
     box-shadow: 0 0 0 2px rgba(30, 144, 255, 0.1);
 }
-
 .custom-checkbox input:checked ~ .checkmark {
     background: linear-gradient(45deg, #1E90FF, #4169E1);
     border-color: transparent;
 }
-
 .checkmark:after {
     content: "";
     position: absolute;
@@ -876,27 +1015,22 @@ let on_timezone_update = {
     border-width: 0 2px 2px 0;
     transform: rotate(45deg);
 }
-
 .custom-checkbox input:checked ~ .checkmark:after {
     display: block;
 }
-
 .custom-checkbox input:disabled ~ .checkmark {
     opacity: 0.5;
     cursor: not-allowed;
 }
-
 .custom-checkbox input:disabled ~ .checkmark:hover {
     border-color: rgba(30, 144, 255, 0.3);
     box-shadow: none;
 }
-
 .timezone-display {
     display: flex;
     align-items: center;
     gap: 8px;
 }
-
 .auto-tag {
     font-size: 0.85rem;
     color: #1E90FF;
@@ -905,14 +1039,32 @@ let on_timezone_update = {
     border-radius: 12px;
     border: 1px solid rgba(30, 144, 255, 0.2);
 }
-
 /* Disabled select styling */
 .profile-input:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 }
-
-
+.nearby-places-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+}
+.fill-button {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    align-self: flex-start;
+}
+.fill-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
+}
                 "#}
         </style>
         </>

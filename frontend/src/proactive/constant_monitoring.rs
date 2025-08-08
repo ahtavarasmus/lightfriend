@@ -751,7 +751,6 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                             <li>{"For WhatsApp, enter the contact's name or phone number"}</li>
                             <li>{"For Telegram, enter the contact's name or phone number"}</li>
                             <li>{"For Email, enter the contact's email address"}</li>
-                            <li>{"Note: Priority sender notifications will use Messages with rate 1 Message = 3 notifications. If Messages are depleted for the month you can continue with overage credits."}</li>
                         </ul>
                     </div>
                 </div>

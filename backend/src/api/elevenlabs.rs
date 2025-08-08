@@ -138,7 +138,6 @@ pub fn get_offset_with_jiff(timezone_str: &str) -> Result<(i32, i32), jiff::Erro
     Ok((hours, minutes))
 }
 
-
 pub async fn fetch_assistant(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<AssistantPayload>,
@@ -149,12 +148,9 @@ pub async fn fetch_assistant(
     let called_number = payload.called_number;
     let caller_number = payload.caller_id;
     println!("caller_number: {}", caller_number);
-
-
     let us_voice_id = std::env::var("US_VOICE_ID").expect("US_VOICE_ID not set");
     let fi_voice_id = std::env::var("FI_VOICE_ID").expect("FI_VOICE_ID not set");
     let de_voice_id = std::env::var("DE_VOICE_ID").expect("DE_VOICE_ID not set");
-
     let mut dynamic_variables = HashMap::new();
     let mut conversation_config_override = ConversationConfig {
         agent: AgentConfig {
@@ -164,12 +160,10 @@ pub async fn fetch_assistant(
             voice_id: us_voice_id.clone(),
         },
     };
-
-
     match state.user_core.find_by_phone_number(&caller_number) {
         Ok(Some(user)) => {
             tracing::debug!("Found user by their phone number");
-            
+          
             let user_settings = match state.user_core.get_user_settings(user.id) {
                 Ok(settings) => settings,
                 Err(e) => {
@@ -183,7 +177,6 @@ pub async fn fetch_assistant(
                     ));
                 }
             };
-
             let user_info= match state.user_core.get_user_info(user.id) {
                 Ok(settings) => settings,
                 Err(e) => {
@@ -197,7 +190,6 @@ pub async fn fetch_assistant(
                     ));
                 }
             };
-
             // If user is not verified, verify them
             if !user.verified {
                 if let Err(e) = state.user_core.verify_user(user.id) {
@@ -205,18 +197,17 @@ pub async fn fetch_assistant(
                     // Continue even if verification fails
                 } else {
                     if user_settings.agent_language == "fi" {
-                        conversation_config_override.agent.first_message = "Tervetuloa! Numerosi on nyt vahvistettu. Miten voin auttaa?".to_string(); 
+                        conversation_config_override.agent.first_message = "Tervetuloa! Numerosi on nyt vahvistettu. Miten voin auttaa?".to_string();
                         conversation_config_override.tts.voice_id = fi_voice_id.clone();
                     } else if user_settings.agent_language == "de" {
-                        conversation_config_override.agent.first_message = "Willkommen! Ihre Nummer ist jetzt verifiziert. Wie kann ich Ihnen helfen?".to_string(); 
+                        conversation_config_override.agent.first_message = "Willkommen! Ihre Nummer ist jetzt verifiziert. Wie kann ich Ihnen helfen?".to_string();
                         conversation_config_override.tts.voice_id = de_voice_id.clone();
                     } else {
-                        conversation_config_override.agent.first_message = "Welcome! Your number is now verified. Anyways, how can I help?".to_string(); 
+                        conversation_config_override.agent.first_message = "Welcome! Your number is now verified. Anyways, how can I help?".to_string();
                         conversation_config_override.tts.voice_id = us_voice_id.clone();
                     }
                 }
             } else if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "voice", None).await {
-
                 // Send insufficient credits message
                 let error_message = "Insufficient credits to make a voice call".to_string();
                 if let Err(e) = crate::api::twilio_utils::send_conversation_message(
@@ -227,7 +218,6 @@ pub async fn fetch_assistant(
                 ).await {
                     error!("Failed to send insufficient credits message: {}", e);
                 }
-
                 return Err((
                     StatusCode::FORBIDDEN,
                     Json(json!({
@@ -236,15 +226,13 @@ pub async fn fetch_assistant(
                     }))
                 ));
             }
-
             if user_settings.agent_language == "fi" {
-                conversation_config_override.agent.first_message = "Moi {{name}}!".to_string(); 
+                conversation_config_override.agent.first_message = "Moi {{name}}!".to_string();
                 conversation_config_override.tts.voice_id = fi_voice_id.clone();
             } else if user_settings.agent_language == "de" {
-                conversation_config_override.agent.first_message = "Hallo {{name}}!".to_string(); 
+                conversation_config_override.agent.first_message = "Hallo {{name}}!".to_string();
                 conversation_config_override.tts.voice_id = de_voice_id.clone();
             }
-
             let nickname = match user.nickname {
                 Some(nickname) => nickname,
                 None => "".to_string()
@@ -253,46 +241,21 @@ pub async fn fetch_assistant(
                 Some(info) => info,
                 None => "".to_string()
             };
-
-            let nearby_places_str = if let Some(ref info) = user_info.info.clone() {
-                if !info.trim().is_empty() {
-                    // Extract location from user_own_info (assuming it starts with "I'm from [location]. ..." or similar; adjust parsing as needed)
-                    let location_start = info.find("I'm from ").map(|i| i + 9).unwrap_or(0);
-                    let location_end = info[location_start..].find('.').map(|i| location_start + i).unwrap_or(info.len());
-                    let user_location = &info[location_start..location_end].trim();
-                    
-                    if !user_location.is_empty() {
-                        match crate::utils::tool_exec::get_nearby_towns(user_location).await {
-                            Ok(places) => places.join(", "),
-                            Err(e) => {
-                                tracing::error!("Failed to get nearby places: {}", e);
-                                "".to_string()
-                            }
-                        }
-                    } else {
-                        "".to_string()
-                    }
-                } else {
-                    "".to_string()
-                }
-            } else {
-                "".to_string()
-            };
-
+            let user_location = user_info.location.clone().unwrap_or("".to_string());
+            let nearby_places_str = user_info.nearby_places.clone().unwrap_or("".to_string());
             dynamic_variables.insert("name".to_string(), json!(nickname));
             dynamic_variables.insert("user_info".to_string(), json!(user_own_info));
             dynamic_variables.insert("nearby_places".to_string(), json!(nearby_places_str));
+            dynamic_variables.insert("location".to_string(), json!(user_location));
             dynamic_variables.insert("user_id".to_string(), json!(user.id));
             dynamic_variables.insert("email_id".to_string(), json!("-1".to_string()));
             dynamic_variables.insert("content_type".to_string(), json!("".to_string()));
             dynamic_variables.insert("notification_message".to_string(), json!("".to_string()));
-
             // Get timezone from user info or default to UTC
             let timezone_str = match user_info.timezone {
                 Some(ref tz) => tz.as_str(),
                 None => "UTC",
             };
-
             // Get timezone offset using jiff
             let (hours, minutes) = match get_offset_with_jiff(timezone_str) {
                 Ok((h, m)) => (h, m),
@@ -301,23 +264,20 @@ pub async fn fetch_assistant(
                     (0, 0) // UTC default
                 }
             };
-
             // Format offset string (e.g., "+02:00" or "-05:30")
-            let offset = format!("{}{:02}:{:02}", 
+            let offset = format!("{}{:02}:{:02}",
                 if hours >= 0 { "+" } else { "-" },
                 hours.abs(),
                 minutes.abs()
             );
-
             dynamic_variables.insert("timezone".to_string(), json!(timezone_str));
             dynamic_variables.insert("timezone_offset_from_utc".to_string(), json!(offset));
-
             // Pick a small, even number of messages – 4‒8 is plenty
             let history_limit = 6;
             let history: Vec<crate::models::user_models::MessageHistory> = match state.user_repository
                 .get_conversation_history(user.id, history_limit, /*include_tools=*/false)
             {
-                Ok(h)  => h,
+                Ok(h) => h,
                 Err(e) => {
                     tracing::error!("Failed to fetch history: {:?}", e);
                     Vec::new()
@@ -325,14 +285,11 @@ pub async fn fetch_assistant(
             };
             let history_string = history
                 .iter()
-                .rev()                       // oldest → newest
+                .rev() // oldest → newest
                 .map(|m| format!("{}: {}", m.role, m.encrypted_content))
                 .collect::<Vec<_>>()
                 .join("\n");
-
             //dynamic_variables.insert("conversation_history".to_string(), json!(history_string));
-
-
             let charge_back_threshold= std::env::var("CHARGE_BACK_THRESHOLD")
                 .expect("CHARGE_BACK_THRESHOLD not set")
                 .parse::<f32>()
@@ -341,15 +298,12 @@ pub async fn fetch_assistant(
                 .expect("VOICE_SECOND_COST not set")
                 .parse::<f32>()
                 .unwrap_or(0.0033);
-
             let user_current_credits_to_threshold = user.credits - charge_back_threshold;
             let seconds_to_threshold = (user_current_credits_to_threshold / voice_second_cost) as i32;
             // following just so it doesn't go negative although i don't think it matters
             let recharge_threshold_timestamp: i32 = (chrono::Utc::now().timestamp() as i32) + seconds_to_threshold;
-
             let seconds_to_zero_credits= (user.credits / voice_second_cost) as i32;
             let zero_credits_timestamp: i32 = (chrono::Utc::now().timestamp() as i32) + seconds_to_zero_credits as i32;
-
             // log usage and start call
             if let Err(e) = state.user_repository.log_usage(
                 user.id,
@@ -366,7 +320,23 @@ pub async fn fetch_assistant(
                 tracing::error!("Failed to log call usage: {}", e);
                 // Continue execution even if logging fails
             }
+            // Fetch recent contacts for whatsapp
+            let whatsapp_contacts = crate::utils::bridge::fetch_recent_bridge_contacts("whatsapp", &state, user.id).await.unwrap_or_else(|e| {
+                tracing::error!("Failed to fetch whatsapp contacts: {}", e);
+                Vec::new()
+            });
+            let whatsapp_names: Vec<String> = whatsapp_contacts.iter().map(|r| r.display_name.clone()).collect();
+            let whatsapp_str = whatsapp_names.join(", ");
+            dynamic_variables.insert("recent_whatsapp_contacts".to_string(), json!(whatsapp_str));
 
+            // Fetch recent contacts for telegram
+            let telegram_contacts = crate::utils::bridge::fetch_recent_bridge_contacts("telegram", &state, user.id).await.unwrap_or_else(|e| {
+                tracing::error!("Failed to fetch telegram contacts: {}", e);
+                Vec::new()
+            });
+            let telegram_names: Vec<String> = telegram_contacts.iter().map(|r| r.display_name.clone()).collect();
+            let telegram_str = telegram_names.join(", ");
+            dynamic_variables.insert("recent_telegram_contacts".to_string(), json!(telegram_str));
         },
         Ok(None) => {
             tracing::debug!("No user found for number: {}", caller_number);
@@ -381,18 +351,14 @@ pub async fn fetch_assistant(
             }));
         }
     }
-
     dynamic_variables.insert("now".to_string(), json!(format!("{}", chrono::Utc::now())));
-
     let payload = ConversationInitiationClientData {
         r#type: "conversation_initiation_client_data".to_string(),
         conversation_config_override,
         dynamic_variables,
     };
-
     Ok(Json(payload))
 }
-
 
 #[derive(Deserialize)]
 pub struct WaitingCheckPayload {

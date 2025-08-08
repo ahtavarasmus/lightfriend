@@ -351,6 +351,7 @@ async fn main() {
         .route("/api/profile/critical", get(profile_handlers::get_critical_enabled))
         .route("/api/profile/proactive-agent", post(profile_handlers::update_proactive_agent_on))
         .route("/api/profile/proactive-agent", get(profile_handlers::get_proactive_agent_on))
+        .route("/api/profile/get_nearby_places", get(profile_handlers::get_nearby_places))
 
         .route("/api/billing/increase-credits/{user_id}", post(billing_handlers::increase_credits))
         .route("/api/billing/usage", post(billing_handlers::get_usage_data))

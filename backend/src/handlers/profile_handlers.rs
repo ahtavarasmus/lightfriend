@@ -50,6 +50,8 @@ pub struct UpdateProfileRequest {
     notification_type: Option<String>,
     save_context: Option<i32>,
     require_confirmation: bool,
+    location: String,
+    nearby_places: String,
 }
 
 #[derive(Serialize)]
@@ -97,11 +99,10 @@ pub struct ProfileResponse {
     textbee_device_id: Option<String>,
     textbee_api_key: Option<String>,
     estimated_monitoring_cost: f32,
+    location: Option<String>,
+    nearby_places: Option<String>,
 }
-
 use crate::handlers::auth_middleware::AuthUser;
-
-
 pub async fn get_profile(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -233,8 +234,6 @@ pub async fn get_profile(
             } else {
                 0.0
             };
-            println!("digest est: {}, count: {}", estimated_digest_monthly, current_count);
-            println!("critical est: {}", estimated_critical_monthly);
             // Calculate total estimated monitoring cost
             let estimated_monitoring_cost = estimated_critical_monthly + estimated_priority_monthly + estimated_digest_monthly;
             Ok(Json(ProfileResponse {
@@ -272,6 +271,8 @@ pub async fn get_profile(
                 textbee_device_id: textbee_device_id,
                 textbee_api_key: textbee_api_key,
                 estimated_monitoring_cost,
+                location: user_info.location,
+                nearby_places: user_info.nearby_places,
             }))
         }
         None => Err((
@@ -395,13 +396,13 @@ pub async fn update_timezone(
     }
 }
 
+
 pub async fn update_profile(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Json(update_req): Json<UpdateProfileRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     println!("Updating profile with notification type: {:?}", update_req.notification_type);
- 
     use regex::Regex;
     let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
     if !email_regex.is_match(&update_req.email) {
@@ -411,7 +412,7 @@ pub async fn update_profile(
             Json(json!({"error": "Invalid email format"}))
         ));
     }
-    
+   
     let phone_regex = Regex::new(r"^\+[1-9]\d{1,14}$").unwrap();
     if !phone_regex.is_match(&update_req.phone_number) {
         println!("Invalid phone number format: {}", update_req.phone_number);
@@ -420,7 +421,6 @@ pub async fn update_profile(
             Json(json!({"error": "Phone number must be in E.164 format (e.g., +1234567890)"}))
         ));
     }
-
     // Validate agent language
     let allowed_languages = vec!["en", "fi", "de"];
     if !allowed_languages.contains(&update_req.agent_language.as_str()) {
@@ -429,7 +429,6 @@ pub async fn update_profile(
             Json(json!({"error": "Invalid agent language. Must be 'en', 'fi', or 'de'"}))
         ));
     }
-
     match state.user_core.update_profile(
         auth_user.user_id,
         &update_req.email,
@@ -441,16 +440,17 @@ pub async fn update_profile(
         update_req.notification_type.as_deref(),
         update_req.save_context,
         update_req.require_confirmation,
+        &update_req.location,
+        &update_req.nearby_places,
     ) {
         Ok(_) => {
-            // Update agent language separately // TODO put to same down the line
             if let Err(e) = state.user_core.update_agent_language(auth_user.user_id, &update_req.agent_language) {
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({"error": format!("Failed to update agent language: {}", e)}))
                 ));
             }
-        },        Err(DieselError::NotFound) => {
+        }, Err(DieselError::NotFound) => {
             return Err((
                 StatusCode::CONFLICT,
                 Json(json!({"error": "Email already exists"}))
@@ -463,13 +463,31 @@ pub async fn update_profile(
             ));
         }
     }
-
     Ok(Json(json!({
         "message": "Profile updated successfully"
     })))
 }
 
+use axum::extract::Query;
+use crate::utils::tool_exec::get_nearby_towns;
 
+#[derive(Deserialize)]
+pub struct GetNearbyPlacesQuery {
+    pub location: String,
+}
+
+pub async fn get_nearby_places(
+    State(_state): State<Arc<AppState>>,
+    _auth_user: AuthUser,
+    Query(query): Query<GetNearbyPlacesQuery>,
+) -> Result<Json<Vec<String>>, (StatusCode, Json<serde_json::Value>)> {
+    match get_nearby_towns(&query.location).await {
+        Ok(places) => {
+            Ok(Json(places))
+        },
+        Err(e) => Err((StatusCode::BAD_REQUEST, Json(json!({"error": e.to_string()})))),
+    }
+}
 
 #[derive(Serialize)]
 pub struct EmailJudgmentResponse {

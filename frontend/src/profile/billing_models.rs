@@ -54,6 +54,8 @@ pub struct UserProfile {
     pub textbee_device_id: Option<String>,
     pub textbee_api_key: Option<String>,
     pub estimated_monitoring_cost: f32,
+    pub location: Option<String>,
+    pub nearby_places: Option<String>,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]

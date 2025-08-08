@@ -113,6 +113,8 @@ impl UserCore {
                 dictionary: None,
                 info: None,
                 timezone: None,
+                nearby_places: None,
+                recent_contacts: None,
             };
 
             diesel::insert_into(user_info::table)
@@ -234,6 +236,34 @@ impl UserCore {
         Ok(user.email == "rasmus@ahtava.com" && user.id == 1)
     }
 
+    pub fn update_blocker_password(&self, user_id: i32, new_password: Option<&str>) -> Result<(), DieselError> {
+        use crate::schema::user_info;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Ensure user settings exist
+        self.ensure_user_info_exists(user_id)?;
+
+        // Update  
+        diesel::update(user_info::table.filter(user_info::user_id.eq(user_id)))
+            .set(user_info::blocker_password_vault.eq(new_password))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_lockbox_password(&self, user_id: i32, new_password: Option<&str>) -> Result<(), DieselError> {
+        use crate::schema::user_info;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        // Ensure user settings exist
+        self.ensure_user_info_exists(user_id)?;
+
+        // Update  
+        diesel::update(user_info::table.filter(user_info::user_id.eq(user_id)))
+            .set(user_info::lockbox_password_vault.eq(new_password))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
     pub fn update_sub_country(&self, user_id: i32, country: Option<&str>) -> Result<(), DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -278,7 +308,7 @@ impl UserCore {
     }
 
     // Update user's profile
-    pub fn update_profile(&self, user_id: i32, email: &str, phone_number: &str, nickname: &str, info: &str, timezone: &str, timezone_auto: &bool, notification_type: Option<&str>, save_context: Option<i32>, require_confirmation: bool) -> Result<(), DieselError> {
+    pub fn update_profile(&self, user_id: i32, email: &str, phone_number: &str, nickname: &str, info: &str, timezone: &str, timezone_auto: &bool, notification_type: Option<&str>, save_context: Option<i32>, require_confirmation: bool, location: &str, nearby_places: &str) -> Result<(), DieselError> {
         use crate::schema::users;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         println!("Repository: Updating user {} with notification type: {:?}", user_id, notification_type);
@@ -338,6 +368,8 @@ impl UserCore {
                 .set((
                     user_info::timezone.eq(timezone),
                     user_info::info.eq(info),
+                    user_info::location.eq(location),
+                    user_info::nearby_places.eq(nearby_places),
                 ))
                 .execute(conn)?;
             Ok(())
@@ -365,7 +397,6 @@ impl UserCore {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // First fetch the user settings to check timezone_auto
-        let user_info= self.get_user_info(user_id)?;
         let user_settings= self.get_user_settings(user_id)?;
         // Only update if timezone_auto is false (manual timezone setting)
         if !user_settings.timezone_auto.unwrap_or(false) {

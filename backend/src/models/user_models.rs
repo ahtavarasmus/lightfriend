@@ -64,6 +64,10 @@ pub struct UserInfo {
     pub dictionary: Option<String>,
     pub info: Option<String>,
     pub timezone: Option<String>,
+    pub nearby_places: Option<String>,
+    pub recent_contacts: Option<String>,
+    pub blocker_password_vault: Option<String>,
+    pub lockbox_password_vault: Option<String>,
 }
 
 #[derive(Insertable)]
@@ -74,6 +78,8 @@ pub struct NewUserInfo {
     pub dictionary: Option<String>,
     pub info: Option<String>,
     pub timezone: Option<String>,
+    pub nearby_places: Option<String>,
+    pub recent_contacts: Option<String>,
 }
 
 #[derive(Queryable, Selectable, Insertable)]

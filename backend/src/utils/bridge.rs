@@ -1105,6 +1105,92 @@ pub async fn search_bridge_rooms(
     Ok(matching_rooms.into_iter().map(|(_, room)| room).collect())
 }
 
+pub async fn fetch_recent_bridge_contacts(
+    service: &str,
+    state: &Arc<AppState>,
+    user_id: i32,
+) -> Result<Vec<BridgeRoom>> {
+    // Validate bridge connection first
+    let bridge = state.user_repository.get_bridge(user_id, service)?;
+    if bridge.map(|b| b.status != "connected").unwrap_or(true) {
+        return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(service)));
+    }
+
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
+    let joined_rooms = client.joined_rooms();
+
+    let room_suffix = get_room_suffix(service);
+    let sender_prefix = get_sender_prefix(service);
+    let service_cap = capitalize(service);
+    let skip_terms = vec![
+        format!("{}bot", service),
+        format!("{}-bridge", service),
+        format!("{} Bridge", service_cap),
+        format!("{} bridge bot", service_cap),
+    ];
+
+    // Process rooms in parallel
+    let room_futures = joined_rooms.into_iter().map(|room| {
+        let sender_prefix = sender_prefix.clone();
+        let skip_terms = skip_terms.clone();
+        async move {
+            // Quick check for room name
+            let display_name = match room.display_name().await {
+                Ok(name) => name.to_string(),
+                Err(_) => return None,
+            };
+
+            // Skip control/admin rooms based on name terms
+            if skip_terms.iter().any(|t| display_name.contains(t)) {
+                return None;
+            }
+
+            // Confirm bridge room via membership
+            let members = match room.members(RoomMemberships::JOIN).await {
+                Ok(m) => m,
+                Err(_) => return None,
+            };
+            let has_service_member = members.iter().any(|member| member.user_id().localpart().starts_with(&sender_prefix));
+            if !has_service_member {
+                return None;
+            }
+
+            // Get last activity timestamp efficiently (most recent message, sent or received)
+            let mut options = matrix_sdk::room::MessagesOptions::backward();
+            options.limit = matrix_sdk::ruma::UInt::new(1).unwrap();
+
+            let last_activity = match room.messages(options).await {
+                Ok(response) => response.chunk.first()
+                    .and_then(|event| event.raw().deserialize().ok())
+                    .map(|e: AnySyncTimelineEvent| i64::from(e.origin_server_ts().0) / 1000)
+                    .unwrap_or(0),
+                Err(_) => 0,
+            };
+
+            Some(BridgeRoom {
+                room_id: room.room_id().to_string(),
+                display_name,
+                last_activity,
+                last_activity_formatted: format_timestamp(last_activity, None),
+            })
+        }
+    });
+
+    // Collect results from parallel processing
+    let mut recent_rooms: Vec<BridgeRoom> = join_all(room_futures)
+        .await
+        .into_iter()
+        .flatten()
+        .collect();
+
+    // Sort by last activity (most recent first) and take top 10
+    recent_rooms.sort_unstable_by_key(|r| std::cmp::Reverse(r.last_activity));
+    recent_rooms.truncate(10);
+
+    tracing::info!("Retrieved {} most recent {} contacts", recent_rooms.len(), capitalize(service));
+
+    Ok(recent_rooms)
+}
 
 pub fn capitalize(s: &str) -> String {
     let mut c = s.chars();
