@@ -37,8 +37,6 @@ mod components {
 }
 
 mod proactive {
-    pub mod email;
-    pub mod calendar;
     pub mod common;
     pub mod waiting_checks;
     pub mod constant_monitoring;

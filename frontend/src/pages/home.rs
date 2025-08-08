@@ -463,7 +463,7 @@ pub fn Home() -> Html {
                                             } else {
                                                 html! {
                                                     <div class="subscription-promo">
-                                                        <Link<Route> to={Route::Billing} classes="promo-link">
+                                                        <Link<Route> to={Route::Pricing} classes="promo-link">
                                                             {"Subscribe to start →"}
                                                         </Link<Route>>
                                                     </div>

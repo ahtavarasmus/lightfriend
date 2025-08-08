@@ -4,7 +4,6 @@ use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{MouseEvent, Event, HtmlInputElement};
 use crate::config;
-
 #[derive(Properties, PartialEq)]
 pub struct CalendarProps {
     pub user_id: i32,
@@ -13,14 +12,12 @@ pub struct CalendarProps {
     #[prop_or_default]
     pub on_connection_change: Option<Callback<bool>>,
 }
-
 #[function_component(CalendarConnect)]
 pub fn calendar_connect(props: &CalendarProps) -> Html {
     let error = use_state(|| None::<String>);
     let connecting = use_state(|| false);
     let calendar_connected = use_state(|| false);
     let all_calendars = use_state(|| false);
-
     // Check connection status on component mount
     {
         let calendar_connected = calendar_connected.clone();
@@ -38,7 +35,6 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                                     .header("Authorization", &format!("Bearer {}", token))
                                     .send()
                                     .await;
-
                                 if let Ok(response) = request {
                                     if response.ok() {
                                         if let Ok(data) = response.json::<serde_json::Value>().await {
@@ -62,7 +58,6 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
             (),
         );
     }
-
     let onclick_calendar = {
         let connecting = connecting.clone();
         let error = error.clone();
@@ -71,21 +66,18 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
             let connecting = connecting.clone();
             let error = error.clone();
             let calendar_access_type = if *all_calendars { "all" } else { "primary" };
-
             connecting.set(true);
             error.set(None);
-
             if let Some(window) = web_sys::window() {
                 if let Ok(Some(storage)) = window.local_storage() {
                     if let Ok(Some(token)) = storage.get_item("token") {
                         web_sys::console::log_1(&format!("Initiating OAuth flow with token: {}", token).into());
                         spawn_local(async move {
-                            let request = Request::get(&format!("{}/api/auth/google/calendar/login?calendar_access_type={}", 
-                                config::get_backend_url(), 
+                            let request = Request::get(&format!("{}/api/auth/google/calendar/login?calendar_access_type={}",
+                                config::get_backend_url(),
                                 calendar_access_type))
                                 .header("Authorization", &format!("Bearer {}", token))
                                 .header("Content-Type", "application/json");
-
                             match request.send().await {
                                 Ok(response) => {
                                     if (200..300).contains(&response.status()) {
@@ -140,7 +132,6 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
             }
         })
     };
-
     let onclick_delete_calendar = {
         let calendar_connected = calendar_connected.clone();
         let error = error.clone();
@@ -149,7 +140,6 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
             let calendar_connected = calendar_connected.clone();
             let error = error.clone();
             let on_connection_change = on_connection_change.clone();
-
             if let Some(window) = web_sys::window() {
                 if let Ok(Some(storage)) = window.local_storage() {
                     if let Ok(Some(token)) = storage.get_item("token") {
@@ -158,7 +148,6 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                                 .header("Authorization", &format!("Bearer {}", token))
                                 .send()
                                 .await;
-
                             match request {
                                 Ok(response) => {
                                     if response.ok() {
@@ -186,12 +175,11 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
             }
         })
     };
-
     html! {
         <div class="service-item">
             <div class="service-header">
                 <div class="service-name">
-                    <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg" alt="Google Calendar"  width="24" height="24"/>
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg" alt="Google Calendar" width="24" height="24"/>
                     {"Google Calendar"}
                 </div>
                 <button class="info-button" onclick={Callback::from(|_| {
@@ -201,7 +189,7 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                     {
                         let display = element.get_attribute("style")
                             .unwrap_or_else(|| "display: none".to_string());
-                        
+                       
                         if display.contains("none") {
                             let _ = element.set_attribute("style", "display: block");
                         } else {
@@ -220,7 +208,6 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
             </p>
             <div id="calendar-info" class="info-section" style="display: none">
                 <h4>{"How It Works"}</h4>
-
                 <div class="info-subsection">
                     <h5>{"SMS and Voice Call Tools"}</h5>
                     <ul>
@@ -235,7 +222,6 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                         <li>{"All Calendars: Optional access to all your calendars, including shared ones"}</li>
                     </ul>
                 </div>
-
                 <div class="info-subsection security-notice">
                     <h5>{"Security & Privacy"}</h5>
                     <p>{"Your calendar data is protected through:"}</p>
@@ -249,7 +235,7 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
             </div>
                 if *calendar_connected {
                     <div class="calendar-controls">
-                        <button 
+                        <button
                             onclick={onclick_delete_calendar}
                             class="disconnect-button"
                         >
@@ -267,7 +253,7 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                                                 // Get current time for the test event
                                                 let now = web_sys::js_sys::Date::new_0();
                                                 let start_time = now.to_iso_string().as_string().unwrap();
-                                                
+                                               
                                                 let test_event = json!({
                                                     "start_time": start_time,
                                                     "duration_minutes": 30,
@@ -275,7 +261,6 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                                                     "description": "This is a test event created by the test button",
                                                     "add_notification": true
                                                 });
-
                                                 spawn_local(async move {
                                                     match Request::post(&format!("{}/api/calendar/create", config::get_backend_url()))
                                                         .header("Authorization", &format!("Bearer {}", token))
@@ -301,7 +286,7 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                                 })
                             };
                             html! {
-                                <button 
+                                <button
                                     onclick={onclick_test}
                                     class="test-button"
                                 >
@@ -329,23 +314,23 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                                                 today_start.set_minutes(0);
                                                 today_start.set_seconds(0);
                                                 today_start.set_milliseconds(0);
-                                                
+                                               
                                                 today_end.set_hours(23);
                                                 today_end.set_minutes(59);
                                                 today_end.set_seconds(59);
                                                 today_end.set_milliseconds(999);
-                                                
+                                               
                                                 let start_time = today_start.to_iso_string().as_string().unwrap();
                                                 let end_time = today_end.to_iso_string().as_string().unwrap();
-                                                
+                                               
                                                 spawn_local(async move {
                                                     let url = format!(
-                                                        "{}/api/calendar/events?start={}&end={}", 
+                                                        "{}/api/calendar/events?start={}&end={}",
                                                         config::get_backend_url(),
                                                         start_time,
                                                         end_time
                                                     );
-                                                    
+                                                   
                                                     match Request::get(&url)
                                                         .header("Authorization", &format!("Bearer {}", token))
                                                         .send()
@@ -370,7 +355,7 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                                 })
                             };
                             html! {
-                                <button 
+                                <button
                                     onclick={onclick_test}
                                     class="test-button"
                                 >
@@ -386,7 +371,7 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                     if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
                         <div class="calendar-connect-options">
                             <label class="calendar-checkbox">
-                                <input 
+                                <input
                                     type="checkbox"
                                     checked={*all_calendars}
                                     onchange={
@@ -399,7 +384,7 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                                 />
                                 {"Access all calendars (including shared)"}
                             </label>
-                            <button 
+                            <button
                                 onclick={onclick_calendar}
                                 class="connect-button"
                             >
@@ -422,7 +407,6 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                         </div>
                     }
                 }
-
             if let Some(err) = (*error).as_ref() {
                 <div class="error-message">
                     {err}
@@ -441,7 +425,6 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                         font-size: 14px;
                         transition: background-color 0.3s;
                     }
-
                     .test-button:hover {
                         background-color: #45a049;
                     }
@@ -461,19 +444,16 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                         transition: all 0.3s ease;
                         margin-left: auto;
                     }
-
                     .info-button:hover {
                         background: rgba(30, 144, 255, 0.1);
                         transform: scale(1.1);
                     }
-
                     .info-section {
                         border-radius: 12px;
                         margin-top: 1rem;
                         font-size: 0.95rem;
                         line-height: 1.6;
                     }
-
                     .info-section h4 {
                         color: #1E90FF;
                         margin: 0 0 1.5rem 0;
@@ -490,79 +470,64 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                         font-size: 0.95rem;
                         line-height: 1.6;
                     }
-
                     #calendar-info::-webkit-scrollbar {
                         width: 8px;
                     }
-
                     #calendar-info::-webkit-scrollbar-track {
                         background: rgba(30, 144, 255, 0.1);
                         border-radius: 4px;
                     }
-
                     #calendar-info::-webkit-scrollbar-thumb {
                         background: rgba(30, 144, 255, 0.5);
                         border-radius: 4px;
                     }
-
                     #calendar-info::-webkit-scrollbar-thumb:hover {
                         background: rgba(30, 144, 255, 0.7);
                     }
-
                     .info-subsection {
                         margin-bottom: 2rem;
                         border-radius: 8px;
                     }
-
                     .info-subsection:last-child {
                         margin-bottom: 0;
                     }
-
                     .info-subsection h5 {
                         color: #1E90FF;
                         margin: 0 0 1rem 0;
                         font-size: 1.1rem;
                         font-weight: 500;
                     }
-
                     .info-subsection ul {
                         margin: 0;
                         list-style-type: none;
                     }
-
                     .info-subsection li {
                         margin-bottom: 0.8rem;
                         color: #CCC;
                         position: relative;
                     }
-
                     .info-subsection li:before {
                         content: "•";
                         color: #1E90FF;
                         position: absolute;
                         left: -1.2rem;
                     }
-
                     .info-subsection li:last-child {
                         margin-bottom: 0;
                     }
-
                     .security-notice {
                         background: rgba(30, 144, 255, 0.1);
                         padding: 1.2rem;
                         border-radius: 8px;
                         border: 1px solid rgba(30, 144, 255, 0.2);
                     }
-
                     .security-notice p {
                         margin: 0 0 1rem 0;
                         color: #CCC;
                     }
-
                     .security-notice p:last-child {
                         margin-bottom: 0;
                     }
-
                     .security-recommendation {
                         font-style: italic;
                         color: #999 !important;
@@ -571,7 +536,6 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                         padding-top: 1rem;
                         border-top: 1px solid rgba(30, 144, 255, 0.1);
                     }
-
                     .upgrade-prompt {
                         background: rgba(30, 144, 255, 0.1);
                         padding: 1.5rem;
@@ -579,19 +543,16 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                         text-align: center;
                         margin-top: 1rem;
                     }
-
                     .upgrade-content h3 {
                         color: #1E90FF;
                         margin: 0 0 1rem 0;
                         font-size: 1.2rem;
                     }
-
                     .upgrade-content p {
                         color: #CCC;
                         margin-bottom: 1.5rem;
                         line-height: 1.5;
                     }
-
                     .upgrade-button {
                         display: inline-block;
                         background-color: #1E90FF;
@@ -601,13 +562,76 @@ pub fn calendar_connect(props: &CalendarProps) -> Html {
                         text-decoration: none;
                         transition: background-color 0.3s;
                     }
-
                     .upgrade-button:hover {
                         background-color: #1873CC;
+                    }
+                    .calendar-connect-options {
+                        display: flex;
+                        align-items: center;
+                        justify-content: space-between;
+                        margin-top: 1rem;
+                    }
+                    .calendar-checkbox {
+                        display: flex;
+                        align-items: center;
+                        color: #FFFFFF;
+                        font-size: 0.9rem;
+                        cursor: pointer;
+                        user-select: none;
+                    }
+                    .calendar-checkbox input {
+                        width: 16px;
+                        height: 16px;
+                        margin-right: 0.5rem;
+                        accent-color: #1E90FF;
+                        cursor: pointer;
+                    }
+                    .connect-button {
+                        background-color: #1E90FF;
+                        color: white;
+                        padding: 0.5rem 1rem;
+                        border: none;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        font-size: 0.9rem;
+                        transition: background-color 0.3s;
+                        min-width: 80px;
+                        text-align: center;
+                    }
+                    .connect-button:hover {
+                        background-color: #1873CC;
+                    }
+                    .calendar-controls {
+                        display: flex;
+                        align-items: center;
+                        margin-top: 1rem;
+                    }
+                    .disconnect-button {
+                        background-color: #f44336;
+                        color: white;
+                        padding: 0.5rem 1rem;
+                        border: none;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        font-size: 0.9rem;
+                        transition: background-color 0.3s;
+                    }
+                    .disconnect-button:hover {
+                        background-color: #d32f2f;
+                    }
+                    .service-status {
+                        color: #4CAF50;
+                        font-weight: 500;
+                        margin-left: auto;
+                        padding-left: 1rem;
+                    }
+                    .error-message {
+                        color: #f44336;
+                        margin-top: 1rem;
+                        font-size: 0.9rem;
                     }
                 "#}
             </style>
         </div>
     }
 }
-

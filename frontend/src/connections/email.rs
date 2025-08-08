@@ -20,7 +20,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
     let imap_password = use_state(|| String::new());
     let imap_provider = use_state(|| "gmail".to_string()); // Default to Gmail
     let imap_server = use_state(|| String::new()); // For custom provider
-    let imap_port = use_state(|| String::new());   // For custom provider
+    let imap_port = use_state(|| String::new()); // For custom provider
     let connected_email = use_state(|| None::<String>);
 
     // Predefined providers
@@ -47,7 +47,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                     .header("Authorization", &format!("Bearer {}", token))
                                     .send()
                                     .await;
-
                                 if let Ok(response) = request {
                                     if response.ok() {
                                         if let Ok(data) = response.json::<serde_json::Value>().await {
@@ -136,7 +135,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
         let imap_email_setter = imap_email.clone();
         let imap_password_setter = imap_password.clone();
         let connected_email = connected_email.clone();
-
         Callback::from(move |_: MouseEvent| {
             let email = (*imap_email_value).clone();
             let password = (*imap_password_value).clone();
@@ -148,7 +146,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
             let imap_email_setter = imap_email_setter.clone();
             let imap_password_setter = imap_password_setter.clone();
             let connected_email = connected_email.clone();
-
             if let Some(window) = web_sys::window() {
                 if let Ok(Some(storage)) = window.local_storage() {
                     if let Ok(Some(token)) = storage.get_item("token") {
@@ -157,19 +154,16 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                 "email": email,
                                 "password": password,
                             });
-
                             // Include server and port only for custom provider or if overridden
                             if provider == "custom" || (!server.is_empty() && !port.is_empty()) {
                                 payload["imap_server"] = json!(server);
                                 payload["imap_port"] = json!(port.parse::<u16>().unwrap_or(993));
                             }
-
                             let request = Request::post(&format!("{}/api/auth/imap/login", config::get_backend_url()))
                                 .header("Authorization", &format!("Bearer {}", token))
                                 .header("Content-Type", "application/json")
                                 .json(&payload)
                                 .unwrap();
-
                             match request.send().await {
                                 Ok(response) => {
                                     if response.ok() {
@@ -207,7 +201,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
             let imap_connected = imap_connected.clone();
             let error = error.clone();
             let connected_email = connected_email.clone();
-
             if let Some(window) = web_sys::window() {
                 if let Ok(Some(storage)) = window.local_storage() {
                     if let Ok(Some(token)) = storage.get_item("token") {
@@ -216,7 +209,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                 .header("Authorization", &format!("Bearer {}", token))
                                 .send()
                                 .await;
-
                             match request {
                                 Ok(response) => {
                                     if response.ok() {
@@ -248,7 +240,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
         <div class="service-item">
             <div class="service-header">
                 <div class="service-name">
-                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%234285f4' d='M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48H48zM0 176V384c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V176L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z'/%3E%3C/svg%3E" alt="IMAP"  width="24" height="24"/>
+                    <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%234285f4' d='M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48H48zM0 176V384c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V176L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z'/%3E%3C/svg%3E" alt="IMAP" width="24" height="24"/>
                     {"IMAP Email"}
                 </div>
                 <button class="info-button" onclick={Callback::from(|_| {
@@ -258,7 +250,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
                     {
                         let display = element.get_attribute("style")
                             .unwrap_or_else(|| "display: none".to_string());
-                        
+                       
                         if display.contains("none") {
                             let _ = element.set_attribute("style", "display: block");
                         } else {
@@ -285,16 +277,13 @@ pub fn email_connect(props: &EmailProps) -> Html {
             </div>
             <div id="email-info" class="info-section" style="display: none">
                 <h4>{"How It Works"}</h4>
-
                 <div class="info-subsection">
                     <h5>{"SMS and Voice Call Tools"}</h5>
                     <ul>
                         <li>{"Fetch specific number of Email Previews: Fetches a given number of latest emails previews from your inbox."}</li>
                         <li>{"Search specific Email: Searches for specific email based on a given query(sender, subject, content, time, etc)."}</li>
-
                     </ul>
                 </div>
-
                 <div class="info-subsection">
                     <h5>{"Provider Support"}</h5>
                     <ul>
@@ -304,11 +293,10 @@ pub fn email_connect(props: &EmailProps) -> Html {
                         <li>{"Custom: Support for any IMAP-enabled email provider"}</li>
                     </ul>
                 </div>
-
                 <div class="info-subsection security-notice">
                     <h5>{"Security & Privacy"}</h5>
                     <p>{"Your email security is our top priority. Here's how we protect your data:"}</p>
-    <ul>
+                    <ul>
                         <li>{"Secure IMAP Connection: All email communications use TLS-encrypted IMAP connections (port 993)"}</li>
                         <li>{"Credentials Protection: Your email credentials are encrypted and stored securely"}</li>
                         <li>{"Limited Access: We only access emails when you specifically request them"}</li>
@@ -316,18 +304,16 @@ pub fn email_connect(props: &EmailProps) -> Html {
                     </ul>
                     <p class="security-recommendation">{"Note: For Gmail users, we recommend using App Passwords instead of your main account password. This provides an extra layer of security and control over access."}</p>
                 </div>
-
             </div>
             <p class="service-description">
                 {"Connect your email account using IMAP access your emails through SMS or voice calls. For Gmail, create an app password "}
                 <a class="nice-link" href="https://myaccount.google.com/apppasswords" target="_blank">{"here"}</a>
                 {" (requires 2FA)."}
             </p>
-
             if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
                 if *imap_connected {
                     <div class="imap-controls">
-                        <button 
+                        <button
                             onclick={onclick_imap_disconnect}
                             class="disconnect-button"
                         >
@@ -349,7 +335,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                                                 .header("Authorization", &format!("Bearer {}", token))
                                                                 .send()
                                                                 .await;
-
                                                             match request {
                                                                 Ok(response) => {
                                                                     if response.status() == 200 {
@@ -387,7 +372,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                                                 .header("Authorization", &format!("Bearer {}", token))
                                                                 .send()
                                                                 .await;
-
                                                             match request {
                                                                 Ok(response) => {
                                                                     if response.status() == 200 {
@@ -425,7 +409,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                                                 .header("Authorization", &format!("Bearer {}", token))
                                                                 .send()
                                                                 .await;
-
                                                             match previews_request {
                                                                 Ok(response) => {
                                                                     if response.status() == 200 {
@@ -437,7 +420,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                                                                             .header("Authorization", &format!("Bearer {}", token))
                                                                                             .send()
                                                                                             .await;
-
                                                                                         match message_request {
                                                                                             Ok(msg_response) => {
                                                                                                 if msg_response.status() == 200 {
@@ -486,7 +468,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                                                 .header("Authorization", &format!("Bearer {}", token))
                                                                 .send()
                                                                 .await;
-
                                                             match previews_request {
                                                                 Ok(response) => {
                                                                     if response.status() == 200 {
@@ -499,7 +480,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                                                                             "email_id": id,
                                                                                             "response_text": "This is a test reply from LightFriend!"
                                                                                         });
-
                                                                                         let reply_request = Request::post(&format!("{}/api/imap/reply", config::get_backend_url()))
                                                                                             .header("Authorization", &format!("Bearer {}", token))
                                                                                             .header("Content-Type", "application/json")
@@ -507,14 +487,13 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                                                                             .unwrap()
                                                                                             .send()
                                                                                             .await;
-
                                                                                         match reply_request {
                                                                                             Ok(reply_response) => {
                                                                                                 if reply_response.status() == 200 {
                                                                                                     web_sys::console::log_1(&"Successfully sent test reply".into());
                                                                                                 } else {
                                                                                                     if let Ok(error_data) = reply_response.json::<serde_json::Value>().await {
-                                                                                                        error.set(Some(format!("Failed to send reply: {}", 
+                                                                                                        error.set(Some(format!("Failed to send reply: {}",
                                                                                                             error_data.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error"))));
                                                                                                     }
                                                                                                 }
@@ -549,8 +528,11 @@ pub fn email_connect(props: &EmailProps) -> Html {
                         }
                     </div>
                 } else {
-                    <div class="imap-form">
-                        <select onchange={onchange_imap_provider}>
+                    <div class="imap-form" style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center;">
+                        <select
+                            onchange={onchange_imap_provider}
+                            style="flex: 1 1 100px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444; appearance: none;"
+                        >
                             { for providers.iter().map(|(id, name, _, _)| {
                                 html! {
                                     <option value={id.to_string()} selected={*imap_provider == *id}>
@@ -564,12 +546,14 @@ pub fn email_connect(props: &EmailProps) -> Html {
                             placeholder="Email address"
                             value={(*imap_email).clone()}
                             onchange={onchange_imap_email}
+                            style="flex: 2 1 200px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
                         />
                         <input
                             type="password"
                             placeholder="Password or App Password"
                             value={(*imap_password).clone()}
                             onchange={onchange_imap_password}
+                            style="flex: 2 1 200px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
                         />
                         if *imap_provider == "custom" {
                             <>
@@ -578,24 +562,26 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                     placeholder="IMAP Server (e.g., mail.privateemail.com)"
                                     value={(*imap_server).clone()}
                                     onchange={onchange_imap_server}
+                                    style="flex: 2 1 200px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
                                 />
                                 <input
                                     type="number"
                                     placeholder="IMAP Port (e.g., 993)"
                                     value={(*imap_port).clone()}
                                     onchange={onchange_imap_port}
+                                    style="flex: 1 1 100px; padding: 8px; border-radius: 4px; background-color: #2a2a2a; color: #ccc; border: 1px solid #444;"
                                 />
                             </>
                         }
-                        <button 
-                            onclick={onclick_imap_connect}
-                            class="connect-button"
-                        >
-                            {"Connect"}
-                        </button>
                     </div>
+                    <button
+                        onclick={onclick_imap_connect}
+                        class="connect-button"
+                        style="margin-top: 10px; padding: 8px 16px; background-color: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;"
+                    >
+                        {"Connect"}
+                    </button>
                 }
-
             if let Some(err) = (*error).as_ref() {
                 <div class="error-message">
                     {err}
@@ -615,7 +601,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
                 if *imap_connected {
                     html! {
                     <div class="imap-controls">
-                        <button 
+                        <button
                             onclick={onclick_imap_disconnect}
                             class="disconnect-button"
                         >
@@ -631,4 +617,3 @@ pub fn email_connect(props: &EmailProps) -> Html {
         </div>
     }
 }
-

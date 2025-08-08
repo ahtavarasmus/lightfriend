@@ -445,9 +445,9 @@ pub fn BillingPage(props: &BillingPageProps) -> Html {
                                                             "Basic Plan gives your lightfriend access to Perplexity Search and Weather tool with 40 monthly Message quota."
                                                         } else if sub_tier == "tier 1.5" {
 
-                                                            "Oracle Plan gives full integrations capability to your lightfriend and 70 monthly Message quota."
+                                                            "Oracle Plan gives full integrations capability to your lightfriend."
                                                         } else if sub_tier == "tier 2" {
-                                                            "Hosted Plan gives full integrations and monitoring capability to your lightfriend and 120 monthly Message quota."
+                                                            "Hosted Plan gives full integrations and monitoring capability to your lightfriend."
                                                         } else if sub_tier == "tier 3" {
                                                             "Easy Self-Hosting Plan gives you ability to host your own lightfriend on your own server with easy setup and automatic updates."
                                                         } else {

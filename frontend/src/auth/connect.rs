@@ -1144,26 +1144,6 @@ pub fn connect(props: &ConnectProps) -> Html {
     border-color: rgba(255, 99, 71, 0.5);
 }
 
-.imap-form {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-}
-
-.imap-form input, .imap-form select {
-    padding: 0.75rem;
-    border-radius: 8px;
-    border: 1px solid rgba(30, 144, 255, 0.2);
-    background: rgba(0, 0, 0, 0.2);
-    color: #fff;
-    font-size: 0.95rem;
-}
-
-.imap-form input:focus, .imap-form select:focus {
-    border-color: rgba(30, 144, 255, 0.4);
-    outline: none;
-}
-
 .error-message {
     color: #FF6347;
     background: rgba(255, 99, 71, 0.1);
