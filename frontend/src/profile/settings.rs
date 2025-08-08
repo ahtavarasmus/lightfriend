@@ -435,7 +435,7 @@ let on_timezone_update = {
                     <div class="tooltip">
                         <span class="tooltip-icon">{"?"}</span>
                         <span class="tooltip-text">
-                            {"What would you like the AI assistant to know about you? For example, your location, preferred units (metric/imperial), language preferences, or any specific way you'd like the assistant to respond to you."}
+                            {"What would you like the AI assistant to know about you? For example, preferred units (metric/imperial), language preferences, or any specific way you'd like the assistant to respond to you."}
                         </span>
                     </div>
                 </div>

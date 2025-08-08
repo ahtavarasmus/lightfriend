@@ -272,8 +272,7 @@ pub async fn fetch_assistant(
             );
             dynamic_variables.insert("timezone".to_string(), json!(timezone_str));
             dynamic_variables.insert("timezone_offset_from_utc".to_string(), json!(offset));
-            // Pick a small, even number of messages – 4‒8 is plenty
-            let history_limit = 6;
+            let history_limit = 1;
             let history: Vec<crate::models::user_models::MessageHistory> = match state.user_repository
                 .get_conversation_history(user.id, history_limit, /*include_tools=*/false)
             {
@@ -289,6 +288,7 @@ pub async fn fetch_assistant(
                 .map(|m| format!("{}: {}", m.role, m.encrypted_content))
                 .collect::<Vec<_>>()
                 .join("\n");
+            dynamic_variables.insert("recent_conversation".to_string(), json!(history_string));
             //dynamic_variables.insert("conversation_history".to_string(), json!(history_string));
             let charge_back_threshold= std::env::var("CHARGE_BACK_THRESHOLD")
                 .expect("CHARGE_BACK_THRESHOLD not set")
