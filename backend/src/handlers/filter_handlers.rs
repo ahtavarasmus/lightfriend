@@ -225,12 +225,18 @@ pub async fn delete_priority_sender(
     }
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct PriorityNotificationInfo {
+    pub average_per_day: f32,
+    pub estimated_monthly_price: f32,
+}
+
+
 pub async fn get_priority_senders(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser
-) -> Result<Json<Vec<PrioritySenderResponse>>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     println!("Fetching priority senders for user {}", auth_user.user_id);
-
     let senders = state.user_repository.get_priority_senders_all(auth_user.user_id)
         .map_err(|e| {
             tracing::error!("Failed to fetch priority senders for user {}: {}", auth_user.user_id, e);
@@ -239,15 +245,27 @@ pub async fn get_priority_senders(
                 Json(json!({"error": format!("Database error: {}", e)}))
             )
         })?;
-
+    let info = state.user_core.get_priority_notification_info(auth_user.user_id)
+        .map_err(|e| {
+            tracing::error!("Failed to fetch priority info for user {}: {}", auth_user.user_id, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)}))
+            )
+        })?;
     let response: Vec<PrioritySenderResponse> = senders.into_iter().map(|sender| PrioritySenderResponse {
         user_id: sender.user_id,
         sender: sender.sender,
         service_type: sender.service_type,
     }).collect();
-
-    Ok(Json(response))
+    let full_response = json!({
+        "contacts": response,
+        "average_per_day": info.average_per_day,
+        "estimated_monthly_price": info.estimated_monthly_price
+    });
+    Ok(Json(full_response))
 }
+
 
 // Keywords handlers
 pub async fn create_keyword(

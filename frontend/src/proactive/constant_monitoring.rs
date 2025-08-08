@@ -28,6 +28,7 @@ pub struct MonitoredContactsProps {
     pub service_type: String,
     pub contacts: Vec<MonitoredContact>,
     pub on_change: Callback<Vec<MonitoredContact>>,
+    pub phone_number: String,
 }
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct PrioritySender {
@@ -50,18 +51,54 @@ pub struct FilterSettings {
     pub monitored_contacts: Vec<MonitoredContact>,
     pub importance_priority: Option<ImportancePriority>,
 }
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MonitoredContactsResponse {
+    contacts: Vec<MonitoredContact>,
+    average_per_day: f32,
+    estimated_monthly_price: f32,
+}
 #[function_component(MonitoredContactsSection)]
 pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
     let all_contacts = props.contacts.clone();
     let all_empty = all_contacts.is_empty();
     let new_contact = use_state(|| String::new());
-    let selected_service = use_state(|| props.service_type.clone());
+    let selected_service = use_state(|| String::new());
     let contacts_local = use_state(|| props.contacts.clone());
     let error_message = use_state(|| None::<String>);
     let show_info = use_state(|| false);
     let search_results = use_state(|| Vec::<Room>::new());
     let show_suggestions = use_state(|| false);
     let is_searching = use_state(|| false);
+    let average_per_day = use_state(|| 0.0);
+    let estimated_monthly_price = use_state(|| 0.0);
+    // Load selected service from local storage on mount
+    {
+        let selected_service = selected_service.clone();
+        use_effect_with_deps(
+            move |_| {
+                if let Some(storage) = window().and_then(|w| w.local_storage().ok()).flatten() {
+                    if let Ok(Some(value)) = storage.get_item("monitored_selected_service") {
+                        selected_service.set(value);
+                    }
+                }
+                || ()
+            },
+            (),
+        );
+    }
+    // Save selected service to local storage when it changes
+    {
+        let selected_service = selected_service.clone();
+        use_effect_with_deps(
+            move |selected_service| {
+                if let Some(storage) = window().and_then(|w| w.local_storage().ok()).flatten() {
+                    let _ = storage.set_item("monitored_selected_service", &**selected_service);
+                }
+                || ()
+            },
+            (*selected_service).clone(),
+        );
+    }
     let hide_suggestions = {
         let show_suggestions = show_suggestions.clone();
         Callback::from(move |_| {
@@ -130,6 +167,8 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
     };
     let refresh_from_server = {
         let contacts_local = contacts_local.clone();
+        let average_per_day = average_per_day.clone();
+        let estimated_monthly_price = estimated_monthly_price.clone();
         let on_change = props.on_change.clone();
         Callback::from(move |_| {
             if let Some(token) = window()
@@ -139,6 +178,8 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                 .flatten()
             {
                 let contacts_local = contacts_local.clone();
+                let average_per_day = average_per_day.clone();
+                let estimated_monthly_price = estimated_monthly_price.clone();
                 let on_change = on_change.clone();
                 spawn_local(async move {
                     if let Ok(resp) = Request::get(&format!(
@@ -150,10 +191,12 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     .await
                     {
                         info!("Response status: {}", resp.status());
-                        if let Ok(list) = resp.json::<Vec<MonitoredContact>>().await {
-                            info!("Received contacts: {:?}", list);
-                            contacts_local.set(list.clone());
-                            on_change.emit(list);
+                        if let Ok(response) = resp.json::<MonitoredContactsResponse>().await {
+                            info!("Received contacts: {:?}", response.contacts);
+                            contacts_local.set(response.contacts.clone());
+                            average_per_day.set(response.average_per_day);
+                            estimated_monthly_price.set(response.estimated_monthly_price);
+                            on_change.emit(response.contacts);
                         } else {
                             info!("Failed to parse contacts response as JSON");
                         }
@@ -181,11 +224,12 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
         let selected_service = selected_service.clone();
         let contacts_local = contacts_local.clone();
         let error_message = error_message.clone();
-       
+   
         Callback::from(move |_| {
             let identifier = (*new_contact).trim().to_string();
             if identifier.is_empty() { return; }
             let service_type = (*selected_service).clone();
+            if service_type.is_empty() { return; }
             let error_message = error_message.clone();
             // Check if we've reached the maximum number of monitored contacts
             if (*contacts_local).len() >= 10 {
@@ -197,7 +241,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                 error_message.set(Some("Please enter a valid email address".to_string()));
                 return;
             }
-           
+       
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
                 .flatten()
@@ -230,7 +274,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
     };
     let delete_monitored_contact = {
         let refresh = refresh_from_server.clone();
-       
+   
         Callback::from(move |(identifier, service_type): (String, String)| {
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
@@ -239,7 +283,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                 .flatten()
             {
                 let refresh = refresh.clone();
-               
+           
                 spawn_local(async move {
                     let _ = Request::delete(&format!(
                         "{}/api/filters/monitored-contact/{}/{}",
@@ -250,11 +294,27 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     .header("Authorization", &format!("Bearer {}", token))
                     .send()
                     .await;
-                   
+               
                     refresh.emit(());
                 });
             }
         })
+    };
+    let phone_number = props.phone_number.clone();
+    let country = if phone_number.starts_with("+1") {
+        "US"
+    } else if phone_number.starts_with("+358") {
+        "FI"
+    } else if phone_number.starts_with("+44") {
+        "UK"
+    } else if phone_number.starts_with("+61") {
+        "AU"
+    } else {
+        "Other"
+    };
+    let currency = match country {
+        "US" => "",
+        _ => "€",
     };
     html! {
         <>
@@ -643,6 +703,11 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                         align-items: center;
                         gap: 0.5rem;
                     }
+                    .notification-cost {
+                        color: #999;
+                        font-size: 0.8rem;
+                        margin-top: 1rem;
+                    }
                 "#}
             </style>
             <div class="filter-header">
@@ -660,9 +725,23 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     </button>
                 </div>
                 <div class="flow-description">
-                    {
-                        "Get notified about messages from your monitored contacts. Note: Check info for notification quotas."
-                    }
+                    {"Get notified about messages from your monitored contacts"}
+                    {". Note: Check info for notification quotas."}
+                </div>
+                <div class="notification-cost">
+                    {if *estimated_monthly_price == 0.0 {
+                        "Not enough data to estimate cost yet".to_string()
+                    } else if country == "US" {
+                        format!(
+                            "Estimated monthly cost: {:.2} Messages (based on {:.1} notifications per day)",
+                            *estimated_monthly_price / 0.15, *average_per_day
+                        )
+                    } else {
+                        format!(
+                            "Estimated monthly cost: {}{:.2} (based on {:.1} notifications per day)",
+                            currency, *estimated_monthly_price, *average_per_day
+                        )
+                    }}
                 </div>
                 <div class="info-section" style={if *show_info { "display: block" } else { "display: none" }}>
                     <h4>{"How It Works"}</h4>
@@ -696,9 +775,14 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                             value={(*selected_service).clone()}
                             onchange={Callback::from({
                                 let selected_service = selected_service.clone();
+                                let new_contact = new_contact.clone();
                                 move |e: Event| {
                                     let input: HtmlInputElement = e.target_unchecked_into();
-                                    selected_service.set(input.value());
+                                    let val = input.value();
+                                    selected_service.set(val.clone());
+                                    if val.is_empty() {
+                                        new_contact.set(String::new());
+                                    }
                                 }
                             })}
                         >
@@ -706,99 +790,114 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                             <option value="whatsapp">{"WhatsApp"}</option>
                             <option value="telegram">{"Telegram"}</option>
                         </select>
-                        <div class="input-with-suggestions">
-                            <input
-                                type={if *selected_service == "imap" { "email" } else { "text" }}
-                                autocomplete={if *selected_service == "imap" { "email" } else { "off" }}
-                                placeholder={match (*selected_service).as_str() {
-                                    "imap" => "Enter email address",
-                                    "whatsapp" => "Search WhatsApp chats or add manually",
-                                    "telegram" => "Search Telegram chats or add manually",
-                                    _ => "Enter contact identifier",
-                                }}
-                                value={(*new_contact).clone()}
-                                oninput={Callback::from({
-                                    let new_contact = new_contact.clone();
-                                    let search_rooms = search_rooms.clone();
-                                    let selected_service = selected_service.clone();
-                                    move |e: InputEvent| {
-                                        let input: HtmlInputElement = e.target_unchecked_into();
-                                        let value = input.value();
-                                        new_contact.set(value.clone());
-                                        if *selected_service != "imap" {
-                                            search_rooms.emit(value);
-                                        }
-                                    }
-                                })}
-                                onkeypress={Callback::from({
-                                    let add_monitored_contact = add_monitored_contact.clone();
-                                    move |e: KeyboardEvent| {
-                                        if e.key() == "Enter" {
-                                            add_monitored_contact.emit(());
-                                        }
-                                    }
-                                })}
-                                onblur={Callback::from({
-                                    let hide_suggestions = hide_suggestions.clone();
-                                    move |_| {
-                                        // Delay hiding to allow click on suggestions
-                                        let hide_suggestions = hide_suggestions.clone();
-                                        spawn_local(async move {
-                                            TimeoutFuture::new(200).await;
-                                            hide_suggestions.emit(());
-                                        });
-                                    }
-                                })}
-                            />
-                            {
-                                if *is_searching {
-                                    html! {
-                                        <div class="search-loading">
-                                            <span>{"🔍 Searching..."}</span>
-                                        </div>
-                                    }
-                                } else {
-                                    html! {}
-                                }
-                            }
-                            {
-                                if *show_suggestions && !(*search_results).is_empty() {
-                                    html! {
-                                        <div class="suggestions-dropdown">
-                                            {
-                                                (*search_results).iter().map(|room| {
-                                                    let room_name = room.display_name.clone();
-                                                    let clean_name = if *selected_service == "whatsapp" {
-                                                        room_name.split(" (WA)").next().unwrap_or(&room_name).trim().to_string()
-                                                    } else if *selected_service == "telegram" {
-                                                        room_name.split(" (TG)").next().unwrap_or(&room_name).trim().to_string()
-                                                    } else {
-                                                        room_name.clone()
-                                                    };
-                                                    html! {
-                                                        <div
-                                                            class="suggestion-item"
-                                                            onmousedown={Callback::from({
-                                                                let select_suggestion = select_suggestion.clone();
-                                                                let room_name = room_name.clone();
-                                                                move |_| select_suggestion.emit(room_name.clone())
-                                                            })}
-                                                        >
-                                                            <div class="suggestion-name">{clean_name}</div>
-                                                            <div class="suggestion-activity">{&room.last_activity_formatted}</div>
-                                                        </div>
+                        {
+                            if !(*selected_service).is_empty() {
+                                html! {
+                                    <div class="input-with-suggestions">
+                                        <input
+                                            type={if *selected_service == "imap" { "email" } else { "text" }}
+                                            autocomplete={if *selected_service == "imap" { "email" } else { "off" }}
+                                            placeholder={match (*selected_service).as_str() {
+                                                "imap" => "Enter email address",
+                                                "whatsapp" => "Search WhatsApp chats or add manually",
+                                                "telegram" => "Search Telegram chats or add manually",
+                                                _ => "Select app first from the left",
+                                            }}
+                                            value={(*new_contact).clone()}
+                                            oninput={Callback::from({
+                                                let new_contact = new_contact.clone();
+                                                let search_rooms = search_rooms.clone();
+                                                let selected_service = selected_service.clone();
+                                                move |e: InputEvent| {
+                                                    let input: HtmlInputElement = e.target_unchecked_into();
+                                                    let value = input.value();
+                                                    new_contact.set(value.clone());
+                                                    if *selected_service != "imap" {
+                                                        search_rooms.emit(value);
                                                     }
-                                                }).collect::<Html>()
+                                                }
+                                            })}
+                                            onkeypress={Callback::from({
+                                                let add_monitored_contact = add_monitored_contact.clone();
+                                                move |e: KeyboardEvent| {
+                                                    if e.key() == "Enter" {
+                                                        add_monitored_contact.emit(());
+                                                    }
+                                                }
+                                            })}
+                                            onblur={Callback::from({
+                                                let hide_suggestions = hide_suggestions.clone();
+                                                move |_| {
+                                                    // Delay hiding to allow click on suggestions
+                                                    let hide_suggestions = hide_suggestions.clone();
+                                                    spawn_local(async move {
+                                                        TimeoutFuture::new(200).await;
+                                                        hide_suggestions.emit(());
+                                                    });
+                                                }
+                                            })}
+                                        />
+                                        {
+                                            if *is_searching {
+                                                html! {
+                                                    <div class="search-loading">
+                                                        <span>{"🔍 Searching..."}</span>
+                                                    </div>
+                                                }
+                                            } else {
+                                                html! {}
                                             }
-                                        </div>
-                                    }
-                                } else {
-                                    html! {}
+                                        }
+                                        {
+                                            if *show_suggestions && !(*search_results).is_empty() {
+                                                html! {
+                                                    <div class="suggestions-dropdown">
+                                                        {
+                                                            (*search_results).iter().map(|room| {
+                                                                let room_name = room.display_name.clone();
+                                                                let clean_name = if *selected_service == "whatsapp" {
+                                                                    room_name.split(" (WA)").next().unwrap_or(&room_name).trim().to_string()
+                                                                } else if *selected_service == "telegram" {
+                                                                    room_name.split(" (TG)").next().unwrap_or(&room_name).trim().to_string()
+                                                                } else {
+                                                                    room_name.clone()
+                                                                };
+                                                                html! {
+                                                                    <div
+                                                                        class="suggestion-item"
+                                                                        onmousedown={Callback::from({
+                                                                            let select_suggestion = select_suggestion.clone();
+                                                                            let room_name = room_name.clone();
+                                                                            move |_| select_suggestion.emit(room_name.clone())
+                                                                        })}
+                                                                    >
+                                                                        <div class="suggestion-name">{clean_name}</div>
+                                                                        <div class="suggestion-activity">{&room.last_activity_formatted}</div>
+                                                                    </div>
+                                                                }
+                                                            }).collect::<Html>()
+                                                        }
+                                                    </div>
+                                                }
+                                            } else {
+                                                html! {}
+                                            }
+                                        }
+                                    </div>
                                 }
+                            } else {
+                                html! {}
                             }
-                        </div>
+                        }
+                    </div>
+                    {
+                        if !(*selected_service).is_empty() {
+                            html! { <button onclick={Callback::from(move |_| add_monitored_contact.emit(()))}>{"Add"}</button> }
+                        } else {
+                            html! {}
+                        }
+                    }
                 </div>
-                <button onclick={Callback::from(move |_| add_monitored_contact.emit(()))}>{"Add"}</button>
             </div>
             <ul class="filter-list">
             {
@@ -832,7 +931,6 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                 }).collect::<Html>()
             }
             </ul>
-        </div>
         </>
     }
 }

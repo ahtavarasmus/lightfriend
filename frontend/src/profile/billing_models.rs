@@ -53,6 +53,7 @@ pub struct UserProfile {
     pub openrouter_api_key: Option<String>,
     pub textbee_device_id: Option<String>,
     pub textbee_api_key: Option<String>,
+    pub estimated_monitoring_cost: f32,
 }
 
 #[derive(Deserialize, Clone, PartialEq)]

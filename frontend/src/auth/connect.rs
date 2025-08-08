@@ -18,6 +18,8 @@ pub struct ConnectProps {
     pub user_id: i32,
     pub sub_tier: Option<String>,
     pub discount: bool,
+    pub phone_number: String,
+    pub estimated_monitoring_cost: f32,
 }
 /*
 pub struct Connect {
@@ -215,6 +217,14 @@ pub fn connect(props: &ConnectProps) -> Html {
         },
         (),
     );
+
+    let currency = if props.phone_number.starts_with("+1") || props.phone_number.starts_with("+61") {
+        "$"
+    } else if props.phone_number.starts_with("+358") || props.phone_number.starts_with("+44") {
+        "€"
+    } else {
+        "$"
+    };
             html! {
                 <div class="connect-section">
 
@@ -305,32 +315,47 @@ pub fn connect(props: &ConnectProps) -> Html {
                     <div class={classes!("service-group", 
                         if props.sub_tier.as_deref() != Some("tier 2") && props.sub_tier.as_deref() != Some("self_hosted") { "monitoring-disabled" } else { "" }
                     )}>
-                        <h3 class="service-group-title"
-                            onclick={let group_states = group_states.clone();
-                                Callback::from(move |_| {
-                                    let mut new_states = (*group_states).clone();
-                                    if let Some(state) = new_states.get_mut("proactive") {
-                                        state.expanded = !state.expanded;
+                    <h3 class="service-group-title"
+                        onclick={let group_states = group_states.clone();
+                            Callback::from(move |_| {
+                                let mut new_states = (*group_states).clone();
+                                if let Some(state) = new_states.get_mut("proactive") {
+                                    state.expanded = !state.expanded;
+                                }
+                                group_states.set(new_states);
+                            })
+                        }
+                    >
+                        <i class="fa-solid fa-robot"></i>
+                        {"Monitoring"}
+                        <div class="group-summary">
+                            <span class="service-count">
+                                {format!("{}/5 Available",
+                                    if *email_connected || *calendar_connected || *whatsapp_connected || *telegram_connected { 5 } else { 0 }
+                                )}
+                            </span>
+                            <span class="monitoring-cost">
+                                {
+                                    if props.phone_number.starts_with("+1") {
+                                        html! {
+                                            format!("Est. {:.2} Messages/mo", props.estimated_monitoring_cost)
+                                        }
+                                    } else if props.phone_number.starts_with("+358") || props.phone_number.starts_with("+44") || props.phone_number.starts_with("+61") {
+                                        html! {
+                                            format!("Est. {}{:.2}/mo", currency, props.estimated_monitoring_cost)
+                                        }
+                                    } else {
+                                        html! {}
                                     }
-                                    group_states.set(new_states);
-                                })
-                            }
-                        >
-                            <i class="fa-solid fa-robot"></i>
-                            {"Monitoring"}
-                            <div class="group-summary">
-                                <span class="service-count">
-                                    {format!("{}/5 Available", 
-                                        if *email_connected || *calendar_connected || *whatsapp_connected || *telegram_connected { 5 } else { 0 }
-                                    )}
-                                </span>
-                                <i class={if group_states.get("proactive").map(|s| s.expanded).unwrap_or(false) {
-                                    "fas fa-chevron-up"
-                                } else {
-                                    "fas fa-chevron-down"
-                                }}></i>
-                            </div>
-                        </h3>
+                                }
+                            </span>
+                            <i class={if group_states.get("proactive").map(|s| s.expanded).unwrap_or(false) {
+                                "fas fa-chevron-up"
+                            } else {
+                                "fas fa-chevron-down"
+                            }}></i>
+                        </div>
+                    </h3>
                         <div class={classes!(
                             "service-list",
                             if group_states.get("proactive").map(|s| s.expanded).unwrap_or(false) {
@@ -378,7 +403,9 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         }
                                     } else {
                                         html! {
-                                            <crate::proactive::critical::CriticalSection/>
+                                            <crate::proactive::critical::CriticalSection
+                                                phone_number={props.phone_number.clone()}
+                                                />
                                         }
                                     }
                                 }
@@ -401,7 +428,9 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         }
                                     } else {
                                         html! {
-                                            <crate::proactive::digest::DigestSection/>
+                                            <crate::proactive::digest::DigestSection
+                                                phone_number={props.phone_number.clone()}
+                                                />
                                         }
                                     }
                                 }
@@ -428,6 +457,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                                 service_type={"messaging".to_string()}
                                                 checks={Vec::new()}
                                                 on_change={Callback::from(|_| ())}
+                                                phone_number={props.phone_number.clone()}
                                             />
                                         }
                                     }
@@ -455,6 +485,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                                 service_type={"email".to_string()}
                                                 contacts={Vec::new()}
                                                 on_change={Callback::from(|_| ())}
+                                                phone_number={props.phone_number.clone()}
                                             />
                                         }
                                     }
@@ -744,6 +775,14 @@ pub fn connect(props: &ConnectProps) -> Html {
 .service-group:nth-child(3) .service-count {
     background: rgba(169, 169, 169, 0.1);
     color: #A9A9A9;
+}
+
+.monitoring-cost {
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    background: rgba(52, 211, 153, 0.1);
+    color: #34D399;
 }
 
 

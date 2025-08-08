@@ -577,7 +577,7 @@ pub fn Home() -> Html {
                                     {
                                         if let Some(profile) = (*profile_data).as_ref() {
                                             html! {
-                                                <Connect user_id={profile.id} sub_tier={profile.sub_tier.clone()} discount={profile.discount}/>
+                                                <Connect user_id={profile.id} sub_tier={profile.sub_tier.clone()} discount={profile.discount} phone_number={profile.phone_number.clone()} estimated_monitoring_cost={profile.estimated_monitoring_cost.clone()}/>
                                             }
                                         } else {
                                             html! {}

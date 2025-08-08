@@ -204,6 +204,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     openrouter_api_key: (*user_profile).openrouter_api_key.clone(),
                                     textbee_device_id: (*user_profile).textbee_device_id.clone(),
                                     textbee_api_key: (*user_profile).textbee_api_key.clone(),
+                                    estimated_monitoring_cost: (*user_profile).estimated_monitoring_cost.clone(),
                                 };
 
                                 // Notify parent component

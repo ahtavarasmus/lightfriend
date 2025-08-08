@@ -25,6 +25,7 @@ pub struct WaitingChecksProps {
     pub service_type: String,
     pub checks: Vec<WaitingCheck>,
     pub on_change: Callback<Vec<WaitingCheck>>,
+    pub phone_number: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -166,6 +167,27 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
                 });
             }
         })
+    };
+
+    let phone_number = props.phone_number.clone();
+    let country = if phone_number.starts_with("+1") {
+        "US"
+    } else if phone_number.starts_with("+358") {
+        "FI"
+    } else if phone_number.starts_with("+44") {
+        "UK"
+    } else if phone_number.starts_with("+61") {
+        "AU"
+    } else {
+        "Other"
+    };
+    let sms_extra: Html = match country {
+        "US" => html! { <span class="price-note">{" (1/2 Message per notification)"}</span> },
+        "FI" => html! { <span class="price-note">{format!(" (€{:.2} per notification)", 0.15)}</span> },
+        "UK" => html! { <span class="price-note">{format!(" (£{:.2} per notification)", 0.15)}</span> },
+        "AU" => html! { <span class="price-note">{format!(" (${:.2} per notification)", 0.15)}</span> },
+        "Other" => html! { <span class="price-note">{" ("}<a href="/bring-own-number">{"see pricing"}</a>{" per notification)"}</span> },
+        _ => html! {},
     };
 
     html! {
@@ -511,6 +533,12 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
                     .info-subsection li:last-child {
                         margin-bottom: 0;
                     }
+
+                    .price-note {
+                        color: #999;
+                        font-size: 0.8rem;
+                        white-space: nowrap;
+                    }
                 "#}
             </style>
             <div class="filter-header">
@@ -535,6 +563,7 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
                     <div class="info-subsection">
                         <ul>
                             <li>{"Lightfriend will notify you when it notices anything related to your waiting checks in messages or emails"}</li>
+                            <li>{"Notifications are sent via SMS"}{sms_extra.clone()}</li>
                             <li>{"Checks are automatically removed once a match is found"}</li>
                             <li>{"You can set up to 5 waiting checks at a time"}</li>
                             <li>{"Waiting checks can also be set through SMS or voice calls with lightfriend"}</li>
@@ -606,6 +635,7 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
                         <li>
                             <span>{&check.content}</span>
                             <span class={classes!("service-type-badge", service_type_class)}>{service_type_display}</span>
+                            {sms_extra.clone()}
                             <button class="delete-btn"
                                 onclick={Callback::from({
                                     let content = content.clone();

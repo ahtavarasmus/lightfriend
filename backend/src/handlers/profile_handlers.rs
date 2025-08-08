@@ -22,9 +22,11 @@ pub struct CriticalEnabledRequest {
     enabled: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct CriticalEnabledResponse {
     enabled: Option<String>,
+    average_critical_per_day: f32,
+    estimated_monthly_price: f32,
 }
 
 #[derive(Deserialize)]
@@ -94,6 +96,7 @@ pub struct ProfileResponse {
     openrouter_api_key: Option<String>,
     textbee_device_id: Option<String>,
     textbee_api_key: Option<String>,
+    estimated_monitoring_cost: f32,
 }
 
 use crate::handlers::auth_middleware::AuthUser;
@@ -103,16 +106,13 @@ pub async fn get_profile(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<ProfileResponse>, (StatusCode, Json<serde_json::Value>)> {
-
     // Get user profile and settings from database
     let user = state.user_core.find_by_id(auth_user.user_id).map_err(|e| (
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": format!("Database error: {}", e)}))
     ))?;
-
     match user {
         Some(user) => {
-
             let user_settings = state.user_core.get_user_settings(auth_user.user_id).map_err(|e| (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Database error: {}", e)}))
@@ -125,7 +125,6 @@ pub async fn get_profile(
                                                     .duration_since(std::time::UNIX_EPOCH)
                                                     .unwrap()
                                                     .as_secs() as i32;
-
             // Get current digest settings
             let (morning_digest_time, day_digest_time, evening_digest_time) = state.user_core.get_digests(auth_user.user_id)
                 .map_err(|e| {
@@ -135,27 +134,21 @@ pub async fn get_profile(
                         Json(json!({"error": format!("Failed to get digest settings: {}", e)}))
                     )
                 })?;
-
             // Count current active digests
             let current_count: i32 = [morning_digest_time.as_ref(), day_digest_time.as_ref(), evening_digest_time.as_ref()]
                 .iter()
                 .filter(|&&x| x.is_some())
                 .count() as i32;
-
             let ttl = user.time_to_live.unwrap_or(0);
             let time_to_delete = current_time > ttl;
-
             let days_until_billing: Option<i32> = user.next_billing_date_timestamp.map(|date| {
                 let current_time = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap()
                     .as_secs() as i32;
                 (date - current_time) / (24 * 60 * 60)
-
             });
-
             let digests_reserved = current_count * days_until_billing.unwrap_or(30);
-
             // Fetch Twilio credentials and mask them
             let (twilio_sid, twilio_token) = match state.user_core.get_twilio_credentials(auth_user.user_id) {
                 Ok((sid, token)) => {
@@ -173,7 +166,6 @@ pub async fn get_profile(
                 },
                 Err(_) => (None, None),
             };
-
             // Fetch Textbee credentials and mask them
             let (textbee_device_id, textbee_api_key) = match state.user_core.get_textbee_credentials(auth_user.user_id) {
                 Ok((id, key)) => {
@@ -191,7 +183,6 @@ pub async fn get_profile(
                 },
                 Err(_) => (None, None),
             };
-
             let openrouter_api_key = match state.user_core.get_openrouter_api_key(auth_user.user_id) {
                 Ok(key) => {
                     let masked_key= if key.len() >= 4 {
@@ -203,7 +194,49 @@ pub async fn get_profile(
                 },
                 Err(_) => None,
             };
-
+            // Determine country based on phone number
+            let phone_number = user.phone_number.clone();
+            let country = if phone_number.starts_with("+1") {
+                "US".to_string()
+            } else if phone_number.starts_with("+358") {
+                "FI".to_string()
+            } else if phone_number.starts_with("+44") {
+                "UK".to_string()
+            } else if phone_number.starts_with("+61") {
+                "AU".to_string()
+            } else {
+                "Other".to_string()
+            };
+            // Get critical notification info
+            let critical_info = state.user_core.get_critical_notification_info(auth_user.user_id).map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)}))
+            ))?;
+            let estimated_critical_monthly = critical_info.estimated_monthly_price;
+            // Get priority notification info
+            let priority_info = state.user_core.get_priority_notification_info(auth_user.user_id).map_err(|e| (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Database error: {}", e)}))
+            ))?;
+            let estimated_priority_monthly = priority_info.estimated_monthly_price;
+            // Calculate digest estimated monthly cost
+            let estimated_digest_monthly = if current_count > 0 {
+                let active_count_f = current_count as f32;
+                let cost_per_digest = if country == "US" {
+                    0.5
+                } else if country == "Other" {
+                    0.0
+                } else {
+                    0.30
+                };
+                active_count_f * 30.0 * cost_per_digest
+            } else {
+                0.0
+            };
+            println!("digest est: {}, count: {}", estimated_digest_monthly, current_count);
+            println!("critical est: {}", estimated_critical_monthly);
+            // Calculate total estimated monitoring cost
+            let estimated_monitoring_cost = estimated_critical_monthly + estimated_priority_monthly + estimated_digest_monthly;
             Ok(Json(ProfileResponse {
                 id: user.id,
                 email: user.email,
@@ -238,6 +271,7 @@ pub async fn get_profile(
                 openrouter_api_key: openrouter_api_key,
                 textbee_device_id: textbee_device_id,
                 textbee_api_key: textbee_api_key,
+                estimated_monitoring_cost,
             }))
         }
         None => Err((
@@ -611,135 +645,16 @@ pub async fn update_digests(
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to get current digest settings: {}", e)}))
         ))?;
-
     // Count current active digests
     let current_count = [current_morning.as_ref(), current_day.as_ref(), current_evening.as_ref()]
         .iter()
         .filter(|&&x| x.is_some())
         .count();
-
     // Count new active digests
     let new_count = [request.morning_digest_time.as_ref(), request.day_digest_time.as_ref(), request.evening_digest_time.as_ref()]
         .iter()
         .filter(|&&x| x.is_some())
         .count();
-
-    // First check if we have the next billing date
-    let mut next_billing_date = state.user_core.get_next_billing_date(auth_user.user_id)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to get next billing date: {}", e)}))
-        ))?;
-
-    // If no next billing date found, fetch it from Stripe
-    if next_billing_date.is_none() {
-        // Call fetch_next_billing_date to get and update the billing date
-        match crate::handlers::stripe_handlers::fetch_next_billing_date(
-            State(state.clone()),
-            auth_user.clone(),
-            Path(auth_user.user_id)
-        ).await {
-            Ok(Json(response)) => {
-                if let Some(date) = response.get("next_billing_date").and_then(|v| v.as_i64()) {
-                    next_billing_date = Some(date as i32);
-                    tracing::info!("Successfully fetched and updated next billing date from Stripe: {}", date);
-                }
-            },
-            Err(e) => {
-                tracing::warn!("Failed to fetch next billing date from Stripe: {:?}", e.clone());
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({"error": format!("Failed to fetch next billing date from Stripe: {:?}", e)}))
-                ))
-            }
-        }
-    }
-
-    // Calculate days until next billing
-    let days_until_billing = next_billing_date.map(|date| {
-        let current_time = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i32;
-        (date - current_time) / (24 * 60 * 60)
-    }).unwrap_or(30); // Default to 30 days if we can't calculate
-
-    // If we're increasing the number of digests, check if user has sufficient credits
-    if new_count > current_count {
-        // Get user for credit check
-        let user = state.user_core.find_by_id(auth_user.user_id)
-            .map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to get user: {}", e)}))
-            ))?
-            .ok_or_else(|| (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "User not found"}))
-            ))?;
-
-        // Calculate increased digest count
-        let increased_digest_count = (new_count - current_count) as i32;
-        let credits_amount = (increased_digest_count * days_until_billing) as i32;
-
-        // Check if user has sufficient credits for the increased digests
-        if let Err(e) = crate::utils::usage::check_user_credits(
-            &state,
-            &user,
-            "digest",
-            Some(credits_amount.clone())
-        ).await {
-            return Err((
-                StatusCode::PAYMENT_REQUIRED,
-                Json(json!({
-                    "error": format!("Insufficient Messages: You need {} Messages or more overage credits to add {} new digest(s). You get more Messages in {} days. If you can't wait, you can buy overage credits immediately to receive these digests until Messages reset.", credits_amount, increased_digest_count, days_until_billing),
-                    "credits_needed": credits_amount,
-                    "digests_requested": increased_digest_count
-                }))
-            ));
-        }
-
-        // Deduct the credits for the increased digests
-        if let Err(e) = crate::utils::usage::deduct_user_credits(
-            &state,
-            auth_user.user_id,
-            "digest",
-            Some(credits_amount.clone())
-        ) {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": format!("Failed to reserve credits: {}", e),
-                }))
-            ));
-        }
-        tracing::info!("Decreased users Messages by {}", credits_amount);
-    } else if new_count < current_count {
-        // Get user's current credits
-        let user = state.user_core.find_by_id(auth_user.user_id)
-            .map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to get user: {}", e)}))
-            ))?
-            .ok_or_else(|| (
-                StatusCode::NOT_FOUND,
-                Json(json!({"error": "User not found"}))
-            ))?;
-
-        // Calculate credit refund based on reduced digest count and remaining days
-        let reduced_digest_count = (current_count - new_count) as f32;
-        let credit_refund = reduced_digest_count * days_until_billing as f32;
-        let new_credits = user.credits_left + credit_refund;
-
-        // Update user's credits with the refund
-        state.user_repository.update_sub_credits(auth_user.user_id, new_credits)
-            .map_err(|e| (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to update user Messages: {}", e)}))
-            ))?;
-        tracing::info!("Gave user {} Messages back", credit_refund);
-    }
-
-    println!("updating: {:#?}, {:#?}, {:#?}", &request.morning_digest_time, &request.day_digest_time, &request.evening_digest_time);
     match state.user_core.update_digests(
         auth_user.user_id,
         request.morning_digest_time.as_deref(),
@@ -747,24 +662,13 @@ pub async fn update_digests(
         request.evening_digest_time.as_deref(),
     ) {
         Ok(_) => {
-            let mut message = String::from("Digest settings updated successfully");
-            if new_count > current_count {
-                let increased_digest_count = (new_count - current_count) as i32;
-                let credits_deducted = (increased_digest_count * days_until_billing) as i32;
-                message.push_str(&format!(". {} Messages reserved for digests", credits_deducted));
-            } else if new_count < current_count {
-                let reduced_digest_count = (current_count - new_count) as f32;
-                let credit_refund = reduced_digest_count * days_until_billing as f32;
-                message.push_str(&format!(". {} Messages released from digests", credit_refund));
-            }
-
+            let message = String::from("Digest settings updated successfully");
             let response = json!({
                 "message": message,
                 "digests_changed": new_count != current_count,
                 "previous_digest_count": current_count,
                 "new_digest_count": new_count,
             });
-
             Ok(Json(response))
         },
         Err(e) => Err((
@@ -795,21 +699,24 @@ pub async fn update_critical_enabled(
     }
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct CriticalNotificationInfo {
+    pub enabled: Option<String>,
+    pub average_critical_per_day: f32,
+    pub estimated_monthly_price: f32,
+}
+
 pub async fn get_critical_enabled(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
-) -> Result<Json<CriticalEnabledResponse>, (StatusCode, Json<serde_json::Value>)> {
-    match state.user_core.get_critical_enabled(auth_user.user_id) {
-        Ok(enabled) => {
-            Ok(Json(CriticalEnabledResponse{
-                enabled,
-            }))
-        },
+) -> Result<Json<CriticalNotificationInfo>, (StatusCode, Json<serde_json::Value>)> {
+    match state.user_core.get_critical_notification_info(auth_user.user_id) {
+        Ok(info) => Ok(Json(info)),
         Err(e) => {
-            tracing::error!("Failed to get critical enabled setting: {}", e);
+            tracing::error!("Failed to get critical notification info: {}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": format!("Failed to get critical enabled setting: {}", e)}))
+                Json(json!({"error": format!("Failed to get critical notification info: {}", e)})),
             ))
         }
     }

@@ -732,7 +732,7 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
     } else {
         let currency = if country == "US" { "$" } else { "€" };
         let (msg_cost, voice_sec_cost, noti_msg_cost, noti_call_cost) = match country.as_str() {
-            "US" => (0.15, 0.0033, 0.075, 0.15),
+            "US" => (0.075, 0.0033, 0.075, 0.15),
             "FI" => (0.30, 0.005, 0.15, 0.70),
             "UK" => (0.30, 0.005, 0.15, 0.15),
             "AU" => (0.30, 0.005, 0.15, 0.15),

@@ -5,26 +5,25 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::window;
 use serde::{Deserialize, Serialize};
 use crate::config;
-use chrono::{DateTime, NaiveTime, Utc, TimeZone, Local};
-use chrono_tz::Tz;
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DigestsResponse {
-    morning_digest_time: Option<String>,  // RFC3339 time string or None
-    day_digest_time: Option<String>,      // RFC3339 time string or None
-    evening_digest_time: Option<String>,  // RFC3339 time string or None
+    morning_digest_time: Option<String>, // RFC3339 time string or None
+    day_digest_time: Option<String>, // RFC3339 time string or None
+    evening_digest_time: Option<String>, // RFC3339 time string or None
     amount_affordable_with_messages: i32,
 }
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UpdateDigestsRequest {
-    morning_digest_time: Option<String>,  // RFC3339 time string or None
-    day_digest_time: Option<String>,      // RFC3339 time string or None
-    evening_digest_time: Option<String>,  // RFC3339 time string or None
+    morning_digest_time: Option<String>, // RFC3339 time string or None
+    day_digest_time: Option<String>, // RFC3339 time string or None
+    evening_digest_time: Option<String>, // RFC3339 time string or None
 }
-
+#[derive(Properties, PartialEq)]
+pub struct DigestSectionProps {
+    pub phone_number: String,
+}
 #[function_component(DigestSection)]
-pub fn digest_section() -> Html {
+pub fn digest_section(props: &DigestSectionProps) -> Html {
     let morning_digest_time = use_state(|| None::<String>);
     let day_digest_time = use_state(|| None::<String>);
     let evening_digest_time = use_state(|| None::<String>);
@@ -33,16 +32,11 @@ pub fn digest_section() -> Html {
     let has_unsaved_changes = use_state(|| false);
     let success_message = use_state(|| None::<String>);
     let error_message = use_state(|| None::<String>);
-    let show_warning = use_state(|| false);
-    let amount_affordable = use_state(|| 0i32);
-
     // Load digest settings when component mounts
     {
         let morning_digest_time = morning_digest_time.clone();
         let day_digest_time = day_digest_time.clone();
         let evening_digest_time = evening_digest_time.clone();
-        let amount_affordable = amount_affordable.clone();
-
         use_effect_with_deps(
             move |_| {
                 if let Some(token) = window()
@@ -65,7 +59,6 @@ pub fn digest_section() -> Html {
                                 morning_digest_time.set(digests.morning_digest_time);
                                 day_digest_time.set(digests.day_digest_time);
                                 evening_digest_time.set(digests.evening_digest_time);
-                                amount_affordable.set(digests.amount_affordable_with_messages);
                             }
                         }
                     });
@@ -75,7 +68,6 @@ pub fn digest_section() -> Html {
             (),
         );
     }
-
     let update_digests = {
         let morning_digest_time = morning_digest_time.clone();
         let day_digest_time = day_digest_time.clone();
@@ -84,21 +76,17 @@ pub fn digest_section() -> Html {
         let has_unsaved_changes = has_unsaved_changes.clone();
         let success_message = success_message.clone();
         let error_message = error_message.clone();
-
         Callback::from(move |_| {
             let morning = (*morning_digest_time).clone();
             let day = (*day_digest_time).clone();
             let evening = (*evening_digest_time).clone();
-
             let is_saving = is_saving.clone();
             let has_unsaved_changes = has_unsaved_changes.clone();
             let success_message = success_message.clone();
             let error_message = error_message.clone();
-
             // Clear any existing messages
             success_message.set(None);
             error_message.set(None);
-
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
                 .flatten()
@@ -112,7 +100,6 @@ pub fn digest_section() -> Html {
                         day_digest_time: day,
                         evening_digest_time: evening,
                     };
-
                     let result = Request::post(&format!(
                         "{}/api/profile/digests",
                         config::get_backend_url(),
@@ -122,9 +109,7 @@ pub fn digest_section() -> Html {
                     .unwrap()
                     .send()
                     .await;
-
                     is_saving.set(false);
-
                     match result {
                         Ok(response) => {
                             if response.status() == 200 {
@@ -164,34 +149,49 @@ pub fn digest_section() -> Html {
             }
         })
     };
-
     let handle_time_change = {
         let has_unsaved_changes = has_unsaved_changes.clone();
-        let morning_digest_time = morning_digest_time.clone();
-        let day_digest_time = day_digest_time.clone();
-        let evening_digest_time = evening_digest_time.clone();
-        let amount_affordable = amount_affordable.clone();
-        let show_warning = show_warning.clone();
-        
         Callback::from(move |_| {
             has_unsaved_changes.set(true);
-            
-            // Count active digests
-            let active_count = [
-                morning_digest_time.as_ref(),
-                day_digest_time.as_ref(),
-                evening_digest_time.as_ref(),
-            ].iter()
-            .filter(|time| time.is_some())
-            .count() as i32;
-
-            // Show warning if active digests exceed affordable messages
-            if active_count > *amount_affordable {
-                show_warning.set(true);
-            }
         })
     };
-
+    let phone_number = props.phone_number.clone();
+    let country = if phone_number.starts_with("+1") {
+        "US"
+    } else if phone_number.starts_with("+358") {
+        "FI"
+    } else if phone_number.starts_with("+44") {
+        "UK"
+    } else if phone_number.starts_with("+61") {
+        "AU"
+    } else {
+        "Other"
+    };
+    let digest_extra: Html = {
+        let active_count = [
+            (*morning_digest_time).clone(),
+            (*day_digest_time).clone(),
+            (*evening_digest_time).clone(),
+        ].iter().filter(|time| time.is_some()).count() as f32;
+        if active_count > 0.0 {
+            if country == "US" {
+                let messages_per_month = active_count * 30.0 * 0.5;
+                html! { <span>{format!(" (Uses {:.1} Messages per month)", messages_per_month)}</span> }
+            } else if country == "Other" {
+                html! { <span>{" ("}<a href="/bring-own-number">{"see pricing"}</a>{" per month)"}</span> }
+            } else {
+                let currency = match country {
+                    "FI" => "€",
+                    "AU" => "€",
+                    _ => "€",
+                };
+                let cost_per_month = active_count * 30.0 * 0.30;
+                html! { <span>{format!(" (Current setup uses {};{:.2} per month)", currency, cost_per_month)}</span> }
+            }
+        } else {
+            html! {}
+        }
+    };
     html! {
         <>
         <style>
@@ -202,19 +202,16 @@ pub fn digest_section() -> Html {
                     gap: 0.5rem;
                     margin-bottom: 1.5rem;
                 }
-
                 .filter-title {
                     display: flex;
                     align-items: center;
                     gap: 1rem;
                 }
-
                 .filter-title h3 {
                     margin: 0;
                     color: #F59E0B;
                     font-size: 1.2rem;
                 }
-
                 .info-button {
                     background: none;
                     border: none;
@@ -230,17 +227,18 @@ pub fn digest_section() -> Html {
                     justify-content: center;
                     transition: all 0.3s ease;
                 }
-
                 .info-button:hover {
                     background: rgba(245, 158, 11, 0.1);
                     transform: scale(1.1);
                 }
-
                 .flow-description {
                     color: #999;
                     font-size: 0.9rem;
                 }
-
+                .cost-description {
+                    color: #999;
+                    font-size: 0.9rem;
+                }
                 .info-section {
                     background: rgba(0, 0, 0, 0.2);
                     border: 1px solid rgba(245, 158, 11, 0.1);
@@ -248,34 +246,28 @@ pub fn digest_section() -> Html {
                     padding: 1.5rem;
                     margin-top: 1rem;
                 }
-
                 .info-section h4 {
                     color: #F59E0B;
                     margin: 0 0 1rem 0;
                     font-size: 1rem;
                 }
-
                 .info-subsection {
                     color: #999;
                     font-size: 0.9rem;
                 }
-
                 .info-subsection ul {
                     margin: 0;
                     padding-left: 1.5rem;
                 }
-
                 .info-subsection li {
                     margin-bottom: 0.5rem;
                 }
-
                 .digest-options {
                     display: flex;
                     flex-direction: column;
                     gap: 1rem;
                     margin-top: 1rem;
                 }
-
                 .digest-option {
                     display: flex;
                     align-items: center;
@@ -285,78 +277,63 @@ pub fn digest_section() -> Html {
                     border: 1px solid rgba(245, 158, 11, 0.1);
                     border-radius: 12px;
                 }
-
                 .digest-label {
                     color: #fff;
                     font-size: 0.9rem;
                 }
-
                 /* Mobile responsiveness */
                 @media (max-width: 480px) {
                     .filter-header {
                         margin-bottom: 1rem;
                     }
-
                     .filter-title h3 {
                         font-size: 1.1rem;
                     }
-
                     .flow-description {
                         font-size: 0.85rem;
                     }
-
                     .digest-option {
                         flex-direction: column;
                         align-items: flex-start;
                         gap: 0.75rem;
                         padding: 0.75rem;
                     }
-
                     .digest-time {
                         width: 100%;
                         justify-content: space-between;
                     }
-
                     .time-input {
                         width: 150px;
                         padding: 0.4rem;
                         font-size: 0.9rem;
                     }
-
                     .info-section {
                         padding: 1rem;
                     }
-
                     .info-section h4 {
                         font-size: 0.95rem;
                     }
-
                     .info-subsection {
                         font-size: 0.85rem;
                     }
-
                     .info-subsection ul {
                         padding-left: 1.2rem;
                     }
-
                     .status-text {
                         font-size: 0.75rem;
                     }
                 }
-
                 .switch {
                     position: relative;
                     display: inline-block;
                     width: 48px;
                     height: 24px;
                 }
-
                 .switch input {
                     opacity: 0;
                     width: 0;
                     height: 0;
                 }
-
                 .slider {
                     position: absolute;
                     cursor: pointer;
@@ -369,7 +346,6 @@ pub fn digest_section() -> Html {
                     transition: .4s;
                     border-radius: 24px;
                 }
-
                 .slider:before {
                     position: absolute;
                     content: "";
@@ -381,22 +357,18 @@ pub fn digest_section() -> Html {
                     transition: .4s;
                     border-radius: 50%;
                 }
-
                 input:checked + .slider {
                     background: #F59E0B;
                     border-color: #F59E0B;
                 }
-
                 input:checked + .slider:before {
                     transform: translateX(24px);
                 }
-
                 .digest-time {
                     display: flex;
                     align-items: center;
                     gap: 1rem;
                 }
-
                 .time-input {
                     background: rgba(30, 30, 30, 0.9);
                     color: #fff;
@@ -409,7 +381,6 @@ pub fn digest_section() -> Html {
                     appearance: none;
                     -webkit-appearance: none;
                 }
-
                 /* Improve visibility of the time picker */
                 .time-input::-webkit-calendar-picker-indicator {
                     background-color: rgba(245, 158, 11, 0.8);
@@ -417,49 +388,40 @@ pub fn digest_section() -> Html {
                     cursor: pointer;
                     border-radius: 4px;
                 }
-
                 .time-input:hover {
                     border-color: #F59E0B;
                 }
-
                 .time-input:focus {
                     outline: none;
                     border-color: #F59E0B;
                     box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
                 }
-
                 /* Force 24-hour format */
                 .time-input::-webkit-datetime-edit-ampm-field {
                     display: none;
                 }
-                
+               
                 .time-input::-moz-time-select {
                     -moz-appearance: textfield;
                 }
-
                 .digest-option.active {
                     border-color: rgba(34, 197, 94, 0.4);
                     background: rgba(34, 197, 94, 0.1);
                 }
-
                 .digest-option.inactive {
                     border-color: rgba(245, 158, 11, 0.1);
                     background: rgba(0, 0, 0, 0.2);
                 }
-
                 .status-text {
                     font-size: 0.8rem;
                     margin-left: 1rem;
                 }
-
                 .status-text.active {
                     color: #22C55E;
                 }
-
                 .status-text.inactive {
                     color: #999;
                 }
-
                 .save-button {
                     background: #F59E0B;
                     color: #000;
@@ -476,26 +438,21 @@ pub fn digest_section() -> Html {
                     justify-content: center;
                     gap: 0.5rem;
                 }
-
                 .save-button:hover {
                     background: #D97706;
                 }
-
                 .save-button:disabled {
                     background: #666;
                     cursor: not-allowed;
                 }
-
                 .save-button.saving {
                     opacity: 0.7;
                     cursor: wait;
                 }
-
                 @keyframes spin {
                     0% { transform: rotate(0deg); }
                     100% { transform: rotate(360deg); }
                 }
-
                 .spinner {
                     border: 2px solid #000;
                     border-top: 2px solid transparent;
@@ -504,7 +461,6 @@ pub fn digest_section() -> Html {
                     height: 16px;
                     animation: spin 1s linear infinite;
                 }
-
                 .message {
                     margin-top: 1rem;
                     padding: 0.75rem;
@@ -512,19 +468,16 @@ pub fn digest_section() -> Html {
                     font-size: 0.9rem;
                     text-align: center;
                 }
-
                 .success-message {
                     background: rgba(34, 197, 94, 0.1);
                     color: #22C55E;
                     border: 1px solid rgba(34, 197, 94, 0.2);
                 }
-
                 .error-message {
                     background: rgba(239, 68, 68, 0.1);
                     color: #EF4444;
                     border: 1px solid rgba(239, 68, 68, 0.2);
                 }
-
                 .warning-modal {
                     position: fixed;
                     top: 0;
@@ -537,7 +490,6 @@ pub fn digest_section() -> Html {
                     align-items: center;
                     z-index: 1000;
                 }
-
                 .warning-content {
                     background: #1A1A1A;
                     border: 1px solid rgba(245, 158, 11, 0.2);
@@ -546,26 +498,22 @@ pub fn digest_section() -> Html {
                     max-width: 90%;
                     width: 400px;
                 }
-
                 .warning-header {
                     color: #F59E0B;
                     font-size: 1.1rem;
                     margin-bottom: 1rem;
                 }
-
                 .warning-message {
                     color: #999;
                     font-size: 0.9rem;
                     margin-bottom: 1.5rem;
                     line-height: 1.5;
                 }
-
                 .warning-buttons {
                     display: flex;
                     gap: 1rem;
                     justify-content: flex-end;
                 }
-
                 .warning-button {
                     padding: 0.5rem 1rem;
                     border-radius: 6px;
@@ -573,23 +521,19 @@ pub fn digest_section() -> Html {
                     cursor: pointer;
                     transition: all 0.3s ease;
                 }
-
                 .warning-button.confirm {
                     background: #F59E0B;
                     color: #000;
                     border: none;
                 }
-
                 .warning-button.confirm:hover {
                     background: #D97706;
                 }
-
                 .warning-button.cancel {
                     background: transparent;
                     color: #999;
                     border: 1px solid #666;
                 }
-
                 .warning-button.cancel:hover {
                     border-color: #999;
                     color: #fff;
@@ -600,8 +544,8 @@ pub fn digest_section() -> Html {
             <div class="filter-title">
                 <i class="fas fa-newspaper" style="color: #4ECDC4;"></i>
                 <h3>{"Daily Digests"}</h3>
-                <button 
-                    class="info-button" 
+                <button
+                    class="info-button"
                     onclick={Callback::from({
                         let show_info = show_info.clone();
                         move |_| show_info.set(!*show_info)
@@ -612,6 +556,9 @@ pub fn digest_section() -> Html {
             </div>
             <div class="flow-description">
                 {"Get summarized updates about messages you might have missed and upcoming events at specific times of the day"}
+            </div>
+            <div class="cost-description">
+                {digest_extra}
             </div>
             <div class="info-section" style={if *show_info { "display: block" } else { "display: none" }}>
                 <h4>{"How It Works"}</h4>
@@ -624,7 +571,6 @@ pub fn digest_section() -> Html {
                 </div>
             </div>
         </div>
-
         <div class="digest-options">
             <div class={classes!("digest-option", if morning_digest_time.is_some() { "active" } else { "inactive" })}>
                 <span class="digest-label">{"Morning Digest"}</span>
@@ -671,7 +617,6 @@ pub fn digest_section() -> Html {
                     </select>
                 </div>
             </div>
-
             <div class={classes!("digest-option", if day_digest_time.is_some() { "active" } else { "inactive" })}>
                 <span class="digest-label">{"Day Digest"}</span>
                 <div class="digest-time">
@@ -717,7 +662,6 @@ pub fn digest_section() -> Html {
                     </select>
                 </div>
             </div>
-
             <div class={classes!("digest-option", if evening_digest_time.is_some() { "active" } else { "inactive" })}>
                 <span class="digest-label">{"Evening Digest"}</span>
                 <div class="digest-time">
@@ -764,7 +708,6 @@ pub fn digest_section() -> Html {
                 </div>
             </div>
         </div>
-
         {if let Some(message) = (*success_message).clone() {
             html! {
                 <div class="message success-message">
@@ -780,7 +723,6 @@ pub fn digest_section() -> Html {
         } else {
             html! {}
         }}
-
         <button
             class={classes!("save-button", if *is_saving { "saving" } else { "" })}
             onclick={update_digests}
@@ -799,56 +741,6 @@ pub fn digest_section() -> Html {
                 }
             }}
         </button>
-
-        // Warning Modal
-        {if *show_warning {
-            html! {
-                <div class="warning-modal">
-                    <div class="warning-content">
-                        <div class="warning-header">
-                            {"Message Quota Warning"}
-                        </div>
-                        <div class="warning-message">
-                            {"Your message quota is not enough to fulfill this reservation. If you proceed, overage credits will be used when needed. Note that if you later reduce the number of digests, you will be compensated with monthly Messages instead of overage credits."}
-                        </div>
-                        <div class="warning-buttons">
-                            <button 
-                                class="warning-button cancel"
-                                onclick={Callback::from({
-                                    let show_warning = show_warning.clone();
-                                    let morning_digest_time = morning_digest_time.clone();
-                                    let day_digest_time = day_digest_time.clone();
-                                    let evening_digest_time = evening_digest_time.clone();
-                                    move |_| {
-                                        // Reset to previous state
-                                        morning_digest_time.set(None);
-                                        day_digest_time.set(None);
-                                        evening_digest_time.set(None);
-                                        show_warning.set(false);
-                                    }
-                                })}
-                            >
-                                {"Cancel"}
-                            </button>
-                            <button 
-                                class="warning-button confirm"
-                                onclick={Callback::from({
-                                    let show_warning = show_warning.clone();
-                                    move |_| {
-                                        show_warning.set(false);
-                                    }
-                                })}
-                            >
-                                {"Proceed Anyway"}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            }
-        } else {
-            html! {}
-        }}
         </>
     }
 }
-

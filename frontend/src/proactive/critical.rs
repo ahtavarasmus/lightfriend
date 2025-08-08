@@ -9,6 +9,8 @@ use crate::config;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CriticalResponse {
     enabled: Option<String>,
+    average_critical_per_day: f32,
+    estimated_monthly_price: f32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -16,15 +18,24 @@ pub struct UpdateCriticalRequest {
     enabled: Option<String>,
 }
 
+#[derive(Properties, PartialEq)]
+pub struct CriticalSectionProps {
+    pub phone_number: String,
+}
+
 #[function_component(CriticalSection)]
-pub fn critical_section() -> Html {
+pub fn critical_section(props: &CriticalSectionProps) -> Html {
     let critical_enabled = use_state(|| None::<String>);
+    let average_critical = use_state(|| 0.0);
+    let estimated_price = use_state(|| 0.0);
     let show_info = use_state(|| false);
     let is_saving = use_state(|| false);
 
     // Load critical notification settings when component mounts
     {
         let critical_enabled = critical_enabled.clone();
+        let average_critical = average_critical.clone();
+        let estimated_price = estimated_price.clone();
         use_effect_with_deps(
             move |_| {
                 if let Some(token) = window()
@@ -45,6 +56,8 @@ pub fn critical_section() -> Html {
                             if let Ok(critical) = resp.json::<CriticalResponse>().await {
                                 info!("Received critical settings from backend: {:?}", critical);
                                 critical_enabled.set(critical.enabled);
+                                average_critical.set(critical.average_critical_per_day);
+                                estimated_price.set(critical.estimated_monthly_price);
                             }
                         }
                     });
@@ -58,11 +71,9 @@ pub fn critical_section() -> Html {
     let handle_option_change = {
         let critical_enabled = critical_enabled.clone();
         let is_saving = is_saving.clone();
-       
         Callback::from(move |new_value: Option<String>| {
             let is_saving = is_saving.clone();
             critical_enabled.set(new_value.clone());
-           
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
                 .flatten()
@@ -87,6 +98,45 @@ pub fn critical_section() -> Html {
                 });
             }
         })
+    };
+
+    let phone_number = props.phone_number.clone();
+    let country = if phone_number.starts_with("+1") {
+        "US"
+    } else if phone_number.starts_with("+358") {
+        "FI"
+    } else if phone_number.starts_with("+44") {
+        "UK"
+    } else if phone_number.starts_with("+61") {
+        "AU"
+    } else {
+        "Other"
+    };
+
+    let currency = match country {
+        "US" => "", // No currency symbol for US (Messages will be used)
+        "FI" => "€",
+        "UK" => "£",
+        "AU" => "$",
+        _ => "$",
+    };
+
+    let sms_extra: Html = match country {
+        "US" => html! { <span>{" (1/2 Message)"}</span> },
+        "FI" => html! { <span>{format!(" (€{:.2} per message)", 0.15)}</span> },
+        "UK" => html! { <span>{format!(" (£{:.2} per message)", 0.15)}</span> },
+        "AU" => html! { <span>{format!(" (${:.2} per message)", 0.15)}</span> },
+        "Other" => html! { <>{" ("}<a href="/bring-own-number">{"see pricing"}</a>{")"}</> },
+        _ => html! {},
+    };
+
+    let call_extra: Html = match country {
+        "US" => html! { <span>{" (1/2 Message)"}</span> },
+        "FI" => html! { <span>{format!(" (€{:.2} per call)", 0.70)}</span> },
+        "UK" => html! { <span>{format!(" (£{:.2} per call)", 0.15)}</span> },
+        "AU" => html! { <span>{format!(" (${:.2} per call)", 0.15)}</span> },
+        "Other" => html! { <>{" ("}<a href="/bring-own-number">{"see pricing"}</a>{")"}</> },
+        _ => html! {},
     };
 
     html! {
@@ -176,7 +226,11 @@ pub fn critical_section() -> Html {
                         color: #fff;
                         font-size: 0.9rem;
                     }
-                    /* Mobile responsiveness */
+                    .estimated-price {
+                        color: #F59E0B;
+                        font-size: 0.9rem;
+                        margin-top: 0.5rem;
+                    }
                     @media (max-width: 480px) {
                         .filter-header {
                             margin-bottom: 1rem;
@@ -204,6 +258,9 @@ pub fn critical_section() -> Html {
                         }
                         .info-subsection ul {
                             padding-left: 1.2rem;
+                        }
+                        .estimated-price {
+                            font-size: 0.85rem;
                         }
                     }
                     .radio-group {
@@ -276,7 +333,17 @@ pub fn critical_section() -> Html {
                     </button>
                 </div>
                 <div class="flow-description">
-                    {"Get instant notifications for critical messages."}
+                    {if country == "US" {
+                        format!(
+                            "Get instant notifications for critical messages. Based on your usage (~{:.1} critical notifications/day), estimated cost: {:.2} Messages/month",
+                            *average_critical, *estimated_price / 0.5
+                        )
+                    } else {
+                        format!(
+                            "Get instant notifications for critical messages. Based on your usage (~{:.1} critical notifications/day), estimated cost: {}{:.2}/month",
+                            *average_critical, currency, *estimated_price
+                        )
+                    }}
                 </div>
                 <div class="info-section" style={if *show_info { "display: block" } else { "display: none" }}>
                     <h4>{"How It Works"}</h4>
@@ -318,7 +385,6 @@ pub fn critical_section() -> Html {
                             <div class="radio-description">{"No critical notifications"}</div>
                         </div>
                     </label>
-                   
                     <label class="radio-option" onclick={
                         let handle_option_change = handle_option_change.clone();
                         Callback::from(move |_| handle_option_change.emit(Some("sms".to_string())))
@@ -330,10 +396,12 @@ pub fn critical_section() -> Html {
                         />
                         <div class="radio-label">
                             {"SMS Notifications"}
-                            <div class="radio-description">{"Receive critical alerts via SMS"}</div>
+                            <div class="radio-description">
+                                {"Receive critical alerts via SMS"}
+                                {sms_extra}
+                            </div>
                         </div>
                     </label>
-                   
                     <label class="radio-option" onclick={
                         let handle_option_change = handle_option_change.clone();
                         Callback::from(move |_| handle_option_change.emit(Some("call".to_string())))
@@ -345,7 +413,10 @@ pub fn critical_section() -> Html {
                         />
                         <div class="radio-label">
                             {"Phone Call Notifications"}
-                            <div class="radio-description">{"Receive critical alerts via phone call"}</div>
+                            <div class="radio-description">
+                                {"Receive critical alerts via phone call"}
+                                {call_extra}
+                            </div>
                         </div>
                     </label>
                 </div>
