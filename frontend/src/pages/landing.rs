@@ -184,22 +184,142 @@ pub fn landing() -> Html {
                     <style>{feature_css}</style>
                     <h2>{"Current Capabilities"}</h2>
                     <ul>
-                        <li><i class="fas fa-phone"></i>{"Voice calling and SMS interface"}</li>
-                        <li><i class="fas fa-search"></i>{"Perplexity AI Web Search"}</li>
-                        <li><i class="fas fa-cloud-sun"></i>{"Weather Search and forecast of the next 6 hours"}</li>
-                        <li><i class="fas fa-image"></i>{"Photo Analysis & Translation (US & AUS only)"}</li>
-                        <li><i class="fas fa-qrcode"></i>{"QR Code Scanning (US & AUS only)"}</li>
-                        <li><i class="fab fa-whatsapp"></i>{"Send, Fetch and Monitor WhatsApp Messages"}</li>
-                        <li><i class="fab fa-telegram"></i>{"Send, Fetch and Monitor Telegram Messages"}</li>
-                        <li><i class="fas fa-envelope"></i>{"Fetch and Monitor Emails"}</li>
-                        <li><i class="fas fa-calendar-days"></i>{"Fetch, Create and Monitor Calendar events"}</li>
-                        <li><i class="fas fa-list-check"></i>{"Fetch and Create Tasks and Ideas"}</li>
-                        <li><i class="fas fa-eye"></i>{"24/7 Critical Message Monitoring"}</li>
-                        <li><i class="fas fa-newspaper"></i>{"Morning, Day and Evening Digests"}</li>
-                        <li><i class="fas fa-clock"></i>{"Temporary Monitoring for Specific Content"}</li>
-                        <li><i class="fas fa-bell"></i>{"Priority Sender Notifications"}</li>
-                        <li><i class="fas fa-rocket"></i>{"All Future Features Included"}</li>
-                        <li><i class="fas fa-headset"></i>{"Priority Support"}</li>
+                        <li>
+                            <details>
+                                <summary><i class="fas fa-phone"></i>{"Voice calling interface"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Access all of Lightfriend's features through natural voice calls. Simply dial and have a conversation with your AI assistant. No smartphone or internet connection needed - works with any basic phone that can make calls."}</p>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fa-solid fa-comment-sms"></i>{"SMS chat interface"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Use all of Lightfriend's capabilities through simple text messages. Your optional conversation context is remembered between SMS and voice calls, allowing for seamless continuity across both interfaces. Conversation history can be saved from zero up to 10 back and forths. Works with any basic phone that can send texts."}</p>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fas fa-search"></i>{"Perplexity AI Web Search"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Query anything you'd search on Google - from local restaurant reviews to stock prices, store hours to landmark info - via voice call or SMS. Powered by Perplexity AI, it provides accurate, real-time answers with sources, just like ChatGPT but with up-to-date information. Example: Text or say 'What's the latest news on AI advancements?' or 'Is the coffee shop on Main Street open now?' to get instant, reliable answers."}</p>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fas fa-cloud-sun"></i>{"Weather Search and forecast of the next 6 hours"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Request weather information for any location via SMS or voice. Receive current conditions, temperature, and a detailed 6-hour forecast. Example: 'Weather in London' returns instant updates."}</p>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fas fa-image"></i>{"Photo Analysis & Translation (US & AUS only)"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Send a photo via MMS to Lightfriend; the AI analyzes the image content (e.g., describes objects or scenes) or translates any visible text. Limited to US and Australia due to carrier MMS support. Example: Send a picture of a menu for translation."}</p>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fas fa-qrcode"></i>{"QR Code Scanning (US & AUS only)"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Take a photo of a QR code and send it via MMS; Lightfriend decodes it and sends back the embedded information, such as links or text. Available only in US and Australia. Example: Scan a product QR for details on the go."}</p>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fab fa-whatsapp"></i>{"Send, Fetch and Monitor WhatsApp Messages"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Link your WhatsApp account in the web dashboard. Then, send messages (e.g., 'Send whatsapp message to Alice saying 'Hi!'), fetch recent messages ('Check whatsapp') or from specific chat ('see if Luukas has sent me anything on whatsapp') and monitor for new messages with automatic SMS or call notifications for important updates."}</p>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fab fa-telegram"></i>{"Send, Fetch and Monitor Telegram Messages"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Link your Telegram account in the web dashboard. Then, send messages (e.g., 'send telegram to Bob saying I'm outside right now'), fetch recent messages ('fetch telegram pls') or from specific chat ('Check telegram for mom') and monitor for new messages with automatic SMS or call notifications for important updates."}</p>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fas fa-envelope"></i>{"Fetch and Monitor Emails"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Integrate your email (Gmail, Outlook, etc.) in the settings. Fetch recent emails (e.g., 'Check email'), find specific email ('Can you find the Delta Airlines reservation number from email?') and monitor for important ones with AI-filtered notifications sent to your phone via SMS or make it call you."}</p>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fas fa-calendar-days"></i>{"Fetch, Create and Monitor Calendar events"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Sync with Google Calendar. View events (e.g., 'What's on my calendar today?'), create new ones ('Create new calendar event for Doctor at 10am tomorrow'), Set reminder on the event on either straight with lightfriend or in the calendar and get reminded via SMS or call."}</p>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fas fa-list-check"></i>{"Fetch and Create Tasks and Ideas"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Manage a personal task list or idea notebook. Create entries (e.g. call lightfriend and ask, 'Hey save this brilliant billion dollar idea i got'), fetch them ('List my saved ideas'), and organize via voice or SMS. Stored in google tasks and accessible anytime. Will not affect your existing google tasks."}</p>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fas fa-eye"></i>{"24/7 Critical Message Monitoring"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"AI constantly scans your connected apps (WhatsApp, Telegram, email) for critical or urgent messages. If detected as critical (cannot wait 2 more hours), you'll receive an immediate notification via SMS or call."}</p>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fas fa-newspaper"></i>{"Morning, Day and Evening Digests"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Get automated, AI-summarized digests of your messages, emails, calendar events sent via SMS at set times: morning overview, midday update, and evening recap to keep you informed without constant checking."}</p>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fas fa-clock"></i>{"Temporary Monitoring for Specific Content"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Set up short-term monitoring for specific content in your apps (e.g., 'Monitor email for package update'). Notifications are sent via SMS/call and once found the temporary monitoring task is removed."}</p>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fas fa-bell"></i>{"Priority Sender Notifications"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Designate priority contacts in the dashboard. Any messages from them across integrations trigger instant notifications to your phone via SMS or voice call, ensuring you never miss important communications."}</p>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fas fa-rocket"></i>{"All Future Features Included"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"As a subscriber, you'll automatically receive access to all upcoming features and updates, such as new app integrations, enhanced AI capabilities, or additional tools, without any price increase. While subscription prices will go up for new users as more features are added, early subscribers like you will keep their original lower price permanently."}</p>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fas fa-headset"></i>{"Priority Support"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Enjoy dedicated, fast-response support from the developer. Reach out via email (rasmus@ahtava.com) for help with setup, troubleshooting, or feature requests."}</p>
+                                </div>
+                            </details>
+                        </li>
                     </ul>
                 </div>
             </section>
@@ -266,6 +386,48 @@ pub fn landing() -> Html {
             </footer>
             <style>
                 {r#"
+    details {
+        cursor: pointer;
+        margin-bottom: 0.5rem;
+    }
+    summary {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        list-style: none;
+        position: relative;
+        padding-right: 1.5rem; /* Space for arrow */
+    }
+    summary::-webkit-details-marker {
+        display: none;
+    }
+    summary::after {
+        content: '▶'; /* Right-pointing arrow (closed state) */
+        position: absolute;
+        right: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        transition: transform 0.3s ease;
+        font-size: 0.8rem;
+        color: #7EB2FF;
+    }
+    details[open] summary::after {
+        content: '▼'; /* Down-pointing arrow (open state) */
+        transform: translateY(-50%) rotate(90deg); /* Optional rotation for visual feedback */
+    }
+    .feature-desc {
+        padding: 1rem;
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 8px;
+        color: #ddd;
+        font-size: 1rem;
+        margin-top: 0.5rem;
+    }
+    @media (max-width: 768px) {
+        .feature-desc {
+            font-size: 0.9rem;
+        }
+    }
     .hero-overlay {
         position: fixed;
         top: 0;
@@ -448,6 +610,50 @@ pub fn landing() -> Html {
         color: #bbb;
         line-height: 1.8;
         font-weight: 400;
+    }
+
+    .comparison-table {
+        margin-top: 2rem;
+        overflow-x: auto;
+    }
+    .comparison-table h3 {
+        font-size: 1.8rem;
+        text-align: center;
+        background: linear-gradient(45deg, #fff, #7EB2FF);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .comparison-table p {
+        text-align: center;
+        color: #ddd;
+        margin-bottom: 1.5rem;
+    }
+    .comparison-table table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 0 auto;
+        font-size: 1rem;
+        color: #ddd;
+    }
+    .comparison-table th, .comparison-table td {
+        padding: 1rem;
+        text-align: left;
+        border-bottom: 1px solid rgba(126, 178, 255, 0.2);
+    }
+    .comparison-table th {
+        background: rgba(0, 0, 0, 0.5);
+        color: #7EB2FF;
+    }
+    .comparison-table tr:hover {
+        background: rgba(126, 178, 255, 0.1);
+    }
+    @media (max-width: 768px) {
+        .comparison-table table {
+            font-size: 0.9rem;
+        }
+        .comparison-table th, .comparison-table td {
+            padding: 0.75rem;
+        }
     }
     .highlight {
         font-weight: 700;
