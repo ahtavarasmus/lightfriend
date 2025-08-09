@@ -428,11 +428,11 @@ pub fn faq() -> Html {
                     <h3>{"Bus"}</h3>
                     <p>{"If you use bus in your home town, ask for physical keycard which can be loaded with credits."}</p>
                     
-                    <h3>{"Taxi"}</h3>
-                    <p>{"In US, Canada and UK there is "}<a href="https://www.tremp.me/">{"Tremp."}</a></p>
+                    <h3>{"Taxi & Ridesharing"}</h3>
+                    <p>{"In US, Canada and UK there is "}<a href="https://www.tremp.me/">{"Tremp."}</a>{" And soon lightfriend will have its own Uber tool!"}</p>
                     
                     <h3>{"Maps"}</h3>
-                    <p>{"Physical paper map, maps on your computer or get a phone that has maps like "}<a href="https://www.thelightphone.com/">{"the Light Phone."}</a>{" Honestly, maps is a hard one and you will get lost a ton, but they make great adventures:)."}</p>
+                    <p>{"You can use lightfriend's Directions tool to get step-by-step navigation instructions via text! Also options include physical paper map, maps on your computer or get a phone that has maps like "}<a href="https://www.thelightphone.com/">{"the Light Phone."}</a>{" While you might still get lost occasionally, that's part of the adventure:)."}</p>
                 </FaqItem>
 
                 <FaqItem 
