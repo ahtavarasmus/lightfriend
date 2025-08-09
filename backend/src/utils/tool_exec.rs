@@ -295,3 +295,28 @@ pub async fn get_nearby_towns(
    
     Ok(place_names)
 }
+
+pub async fn get_coordinates(
+    client: &reqwest::Client,
+    address: &str,
+    api_key: &str,
+) -> Result<(f64, f64, String), Box<dyn Error>> {
+    let url = format!(
+        "https://api.geoapify.com/v1/geocode/search?text={}&format=json&apiKey={}",
+        urlencoding::encode(address),
+        api_key
+    );
+    let response: serde_json::Value = client.get(&url).send().await?.json().await?;
+    let results = response["results"].as_array().ok_or("No results found")?;
+    if results.is_empty() {
+        return Err("Location not found".into());
+    }
+    let result = &results[0];
+    let lat = result["lat"].as_f64().ok_or("Latitude not found")?;
+    let lon = result["lon"].as_f64().ok_or("Longitude not found")?;
+    let formatted = result["formatted"]
+        .as_str()
+        .unwrap_or(address)
+        .to_string();
+    Ok((lat, lon, formatted))
+}

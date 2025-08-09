@@ -17,7 +17,7 @@ use crate::{
         NewImapConnection, Bridge, NewBridge, WaitingCheck, 
         NewWaitingCheck, PrioritySender, NewPrioritySender, Keyword, 
         NewKeyword, NewGoogleTasks,
-        TaskNotification, NewTaskNotification,
+        TaskNotification, NewTaskNotification, Uber, NewUber,
     },
     schema::{
         users, usage_logs, 
@@ -725,6 +725,189 @@ impl UserRepository {
 
         Ok(connection.is_some())
     }
+
+    pub fn has_active_uber(&self, user_id: i32) -> Result<bool, DieselError> {
+        use crate::schema::uber;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let connection = uber::table
+            .filter(uber::user_id.eq(user_id))
+            .filter(uber::status.eq("active"))
+            .first::<crate::models::user_models::Uber>(&mut conn)
+            .optional()?;
+        Ok(connection.is_some())
+    }
+
+    pub fn create_uber_connection(
+        &self,
+        user_id: i32,
+        access_token: &str,
+        refresh_token: Option<&str>,
+        expires_in: i32,
+    ) -> Result<(), DieselError> {
+        use crate::schema::uber;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let encrypted_access_token = encrypt(access_token)
+            .map_err(|_| DieselError::RollbackTransaction)?;
+        let encrypted_refresh_token = refresh_token
+            .map(|token| encrypt(token))
+            .transpose()
+            .map_err(|_| DieselError::RollbackTransaction)?
+            .unwrap_or_default();
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+        let new_connection = NewUber {
+            user_id,
+            encrypted_access_token,
+            encrypted_refresh_token,
+            expires_in,
+            status: "active".to_string(),
+            last_update: current_time,
+            created_on: current_time,
+            description: "Uber Connection".to_string(),
+        };
+        // First, delete any existing connections for this user
+        diesel::delete(uber::table)
+            .filter(uber::user_id.eq(user_id))
+            .execute(&mut conn)?;
+        // Then insert the new connection
+        diesel::insert_into(uber::table)
+            .values(&new_connection)
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_uber_tokens(&self, user_id: i32) -> Result<Option<(String, String)>, DieselError> {
+        use crate::schema::uber;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let connection = uber::table
+            .filter(uber::user_id.eq(user_id))
+            .filter(uber::status.eq("active"))
+            .first::<crate::models::user_models::Uber>(&mut conn)
+            .optional()?;
+        if let Some(connection) = connection {
+            // Decrypt access token
+            let access_token = match decrypt(&connection.encrypted_access_token) {
+                Ok(token) => {
+                    tracing::debug!("Successfully decrypted access token");
+                    token
+                },
+                Err(e) => {
+                    tracing::error!("Failed to decrypt access token: {:?}", e);
+                    return Err(DieselError::RollbackTransaction);
+                }
+            };
+            // Decrypt refresh token
+            let refresh_token = match decrypt(&connection.encrypted_refresh_token) {
+                Ok(token) => {
+                    tracing::debug!("Successfully decrypted refresh token");
+                    token
+                },
+                Err(e) => {
+                    tracing::error!("Failed to decrypt refresh token: {:?}", e);
+                    return Err(DieselError::RollbackTransaction);
+                }
+            };
+            Ok(Some((access_token, refresh_token)))
+        } else {
+            tracing::info!("No active Uber connection found for user {}", user_id);
+            Ok(None)
+        }
+    }
+
+    pub fn delete_uber_connection(&self, user_id: i32) -> Result<(), DieselError> {
+        use crate::schema::uber;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::delete(uber::table)
+            .filter(uber::user_id.eq(user_id))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn get_uber_token_info(&self, user_id: i32) -> Result<Option<(String, String, i32, i32)>, DieselError> {
+        use crate::schema::uber;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let connection = uber::table
+            .filter(uber::user_id.eq(user_id))
+            .filter(uber::status.eq("active"))
+            .first::<crate::models::user_models::Uber>(&mut conn)
+            .optional()?;
+        if let Some(connection) = connection {
+            // Decrypt access token
+            let access_token = match decrypt(&connection.encrypted_access_token) {
+                Ok(token) => {
+                    tracing::debug!("Successfully decrypted access token");
+                    token
+                },
+                Err(e) => {
+                    tracing::error!("Failed to decrypt access token: {:?}", e);
+                    return Err(DieselError::RollbackTransaction);
+                }
+            };
+            // Decrypt refresh token
+            let refresh_token = match decrypt(&connection.encrypted_refresh_token) {
+                Ok(token) => {
+                    tracing::debug!("Successfully decrypted refresh token");
+                    token
+                },
+                Err(e) => {
+                    tracing::error!("Failed to decrypt refresh token: {:?}", e);
+                    return Err(DieselError::RollbackTransaction);
+                }
+            };
+            Ok(Some((access_token, refresh_token, connection.expires_in, connection.last_update)))
+        } else {
+            tracing::info!("No active Uber connection found for user {}", user_id);
+            Ok(None)
+        }
+    }
+
+    pub fn update_uber_access_token(
+        &self,
+        user_id: i32,
+        new_access_token: &str,
+        expires_in: i32,
+    ) -> Result<(), DieselError> {
+        use crate::schema::uber;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let encrypted_access_token = encrypt(new_access_token)
+            .map_err(|_| DieselError::RollbackTransaction)?;
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i32;
+        diesel::update(uber::table)
+            .filter(uber::user_id.eq(user_id))
+            .filter(uber::status.eq("active"))
+            .set((
+                uber::encrypted_access_token.eq(encrypted_access_token),
+                uber::expires_in.eq(expires_in),
+                uber::last_update.eq(current_time),
+            ))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_uber_refresh_token(
+        &self,
+        user_id: i32,
+        new_refresh_token: &str,
+    ) -> Result<(), DieselError> {
+        use crate::schema::uber;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let encrypted_refresh_token = encrypt(new_refresh_token)
+            .map_err(|_| DieselError::RollbackTransaction)?;
+        diesel::update(uber::table)
+            .filter(uber::user_id.eq(user_id))
+            .filter(uber::status.eq("active"))
+            .set(
+                uber::encrypted_refresh_token.eq(encrypted_refresh_token),
+            )
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
 
     pub fn get_google_tasks_tokens(&self, user_id: i32) -> Result<Option<(String, String)>, DieselError> {
         use crate::schema::google_tasks;

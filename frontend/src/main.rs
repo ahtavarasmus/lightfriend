@@ -51,6 +51,7 @@ mod connections {
     pub mod whatsapp;
     pub mod telegram;
     pub mod tasks;
+    pub mod uber;
 }
 
 mod auth {

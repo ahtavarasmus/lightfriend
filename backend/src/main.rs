@@ -49,6 +49,9 @@ mod handlers {
     pub mod telegram_handlers;
     pub mod self_host_handlers;
     pub mod twilio_handlers;
+    pub mod uber_auth;
+    pub mod uber;
+    pub mod google_maps;
 }
 
 mod utils {
@@ -112,7 +115,7 @@ use handlers::{
     admin_handlers, stripe_handlers, google_calendar_auth, google_calendar,
     google_tasks_auth, google_tasks, imap_auth, imap_handlers,
     whatsapp_auth, whatsapp_handlers, telegram_auth, telegram_handlers,
-    filter_handlers, twilio_handlers,
+    filter_handlers, twilio_handlers, uber_auth,
 };
 use api::{twilio_sms, elevenlabs, elevenlabs_webhook, shazam_call};
 
@@ -123,6 +126,7 @@ async fn health_check() -> &'static str {
 }
 
 type GoogleOAuthClient = BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
+type UberOAuthClient = BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 
 pub struct AppState {
     db_pool: DbPool,
@@ -132,7 +136,7 @@ pub struct AppState {
     user_calls: shazam_call::UserCallMap,
     google_calendar_oauth_client: GoogleOAuthClient,
     google_tasks_oauth_client: GoogleOAuthClient,
-    gmail_oauth_client: GoogleOAuthClient,
+    uber_oauth_client: GoogleOAuthClient,
     session_store: MemoryStore,
     login_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
     password_reset_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
@@ -202,22 +206,24 @@ async fn main() {
     let user_core= Arc::new(UserCore::new(pool.clone()));
     let user_repository = Arc::new(UserRepository::new(pool.clone()));
 
-    let client_id = std::env::var("GOOGLE_CALENDAR_CLIENT_ID").expect("GOOGLE_CALENDAR_CLIENT_ID must be set");
-    let client_secret = std::env::var("GOOGLE_CALENDAR_CLIENT_SECRET").expect("GOOGLE_CALENDAR_CLIENT_SECRET must be set");
-    let client_id_clone = client_id.clone();
-    let client_secret_clone = client_secret.clone();
     let server_url_oauth = std::env::var("SERVER_URL_OAUTH").expect("SERVER_URL_OAUTH must be set");
 
+    let client_id = std::env::var("GOOGLE_CALENDAR_CLIENT_ID").expect("GOOGLE_CALENDAR_CLIENT_ID must be set");
+    let client_secret = std::env::var("GOOGLE_CALENDAR_CLIENT_SECRET").expect("GOOGLE_CALENDAR_CLIENT_SECRET must be set");
     let google_calendar_oauth_client = BasicClient::new(ClientId::new(client_id.clone()))
         .set_client_secret(ClientSecret::new(client_secret.clone()))
         .set_auth_uri(AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).expect("Invalid auth URL"))
         .set_token_uri(TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).expect("Invalid token URL"))
         .set_redirect_uri(RedirectUrl::new(format!("{}/api/auth/google/calendar/callback", server_url_oauth)).expect("Invalid redirect URL"));
-    let gmail_oauth_client = BasicClient::new(ClientId::new(client_id_clone))
-        .set_client_secret(ClientSecret::new(client_secret_clone))
-        .set_auth_uri(AuthUrl::new("https://accounts.google.com/o/oauth2/v2/auth".to_string()).expect("Invalid auth URL"))
-        .set_token_uri(TokenUrl::new("https://oauth2.googleapis.com/token".to_string()).expect("Invalid token URL"))
-        .set_redirect_uri(RedirectUrl::new(format!("{}/api/auth/google/gmail/callback", server_url_oauth)).expect("Invalid redirect URL"));
+
+    let uber_url_oauth = std::env::var("UBER_API_URL").expect("UBER_API_URL must be set");
+    let uber_client_id = std::env::var("UBER_CLIENT_ID").expect("UBER_CLIENT_ID must be set");
+    let uber_client_secret = std::env::var("UBER_CLIENT_SECRET").expect("UBER_CLIENT_SECRET must be set");
+    let uber_oauth_client = BasicClient::new(ClientId::new(uber_client_id))
+        .set_client_secret(ClientSecret::new(uber_client_secret))
+        .set_auth_uri(AuthUrl::new(format!("{}/oauth/v2/authorize", uber_url_oauth)).expect("Invalid auth URL"))
+        .set_token_uri(TokenUrl::new(format!("{}/oauth/v2/token", uber_url_oauth)).expect("Invalid token URL"))
+        .set_redirect_uri(RedirectUrl::new(format!("{}/api/auth/uber/callback", server_url_oauth)).expect("Invalid redirect URL"));
 
     let session_store = MemoryStore::default();
     let is_prod = std::env::var("ENVIRONMENT") != Ok("development".to_string());
@@ -244,7 +250,7 @@ async fn main() {
         user_calls: Arc::new(Mutex::new(HashMap::new())),
         google_calendar_oauth_client,
         google_tasks_oauth_client,
-        gmail_oauth_client,
+        uber_oauth_client,
         session_store: session_store.clone(),
         login_limiter: DashMap::new(),
         password_reset_limiter: DashMap::new(),
@@ -288,6 +294,7 @@ async fn main() {
         .route("/api/call/fetch-chat-messages", get(elevenlabs::handle_fetch_specific_chat_messages_tool_call))
         .route("/api/call/search-chat-contacts", post(elevenlabs::handle_search_chat_contacts_tool_call))
         .route("/api/call/send-chat-message", post(elevenlabs::handle_confirm_send_chat_message))
+        .route("/api/call/directions", post(elevenlabs::handle_directions_tool_call))
         .layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::check_subscription_access))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 
@@ -298,7 +305,8 @@ async fn main() {
     let auth_built_in_webhook_routes = Router::new()
         .route("/api/stripe/webhook", post(stripe_handlers::stripe_webhook))
         .route("/api/auth/google/calendar/callback", get(google_calendar_auth::google_callback))
-        .route("/api/auth/google/tasks/callback", get(google_tasks_auth::google_tasks_callback));
+        .route("/api/auth/google/tasks/callback", get(google_tasks_auth::google_tasks_callback))
+        .route("/api/auth/uber/callback", get(uber_auth::uber_callback));
 
 
     // Public routes that don't need authentication
@@ -375,6 +383,11 @@ async fn main() {
         .route("/api/tasks", get(google_tasks::handle_tasks_fetching_route))
         .route("/api/tasks/create", post(google_tasks::handle_tasks_creation_route))
 
+        .route("/api/auth/uber/login", get(uber_auth::uber_login))
+        .route("/api/auth/uber/connection", delete(uber_auth::uber_disconnect))
+        .route("/api/auth/uber/status", get(uber_auth::uber_status))
+        //.route("api/uber", get(uber::test_status_change))
+
         .route("/api/auth/imap/login", post(imap_auth::imap_login))
         .route("/api/auth/imap/status", get(imap_auth::imap_status))
         .route("/api/auth/imap/disconnect", delete(imap_auth::delete_imap_connection))
@@ -400,6 +413,7 @@ async fn main() {
         .route("/api/whatsapp/send", post(whatsapp_handlers::send_message))
         .route("/api/whatsapp/search-rooms", post(whatsapp_handlers::search_whatsapp_rooms_handler))
         .route("/api/whatsapp/search-rooms", get(whatsapp_handlers::search_rooms_handler))
+
 
         // Filter routes
         .route("/api/filters/waiting-checks", get(filter_handlers::get_waiting_checks))

@@ -156,6 +156,20 @@ diesel::table! {
 }
 
 diesel::table! {
+    uber (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        encrypted_access_token -> Text,
+        encrypted_refresh_token -> Text,
+        status -> Text,
+        last_update -> Integer,
+        created_on -> Integer,
+        description -> Text,
+        expires_in -> Integer,
+    }
+}
+
+diesel::table! {
     usage_logs (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -289,6 +303,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     processed_emails,
     task_notifications,
     temp_variables,
+    uber,
     usage_logs,
     user_info,
     user_settings,

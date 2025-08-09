@@ -2329,3 +2329,44 @@ pub async fn handle_weather_tool_call(
 }
 
 
+#[derive(Deserialize)]
+pub struct DirectionsCallPayload {
+    pub start_address: String,
+    pub end_address: String,
+    pub mode: Option<String>,
+}
+
+pub async fn handle_directions_tool_call(
+    State(_state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    Json(payload): Json<DirectionsCallPayload>,
+) -> Json<serde_json::Value> {
+    // Extract user_id from query parameters
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Json(json!({
+                "error": "Missing or invalid user_id",
+            }));
+        }
+    };
+
+    match crate::tool_call_utils::internet::handle_directions_tool(
+        payload.start_address,
+        payload.end_address,
+        payload.mode,
+    ).await {
+        Ok(directions_info) => {
+            Json(json!({
+                "response": directions_info
+            }))
+        },
+        Err(e) => {
+            error!("Error getting directions information: {}", e);
+            Json(json!({
+                "error": "Failed to get directions information",
+                "details": e.to_string()
+            }))
+        }
+    }
+}

@@ -538,6 +538,7 @@ pub async fn process_sms(
         crate::tool_call_utils::internet::get_scan_qr_code_tool(),
         crate::tool_call_utils::internet::get_ask_perplexity_tool(),
         crate::tool_call_utils::internet::get_weather_tool(),
+        crate::tool_call_utils::internet::get_directions_tool(),
     ];
 
     let client = match create_openai_client(&state) {
@@ -759,6 +760,34 @@ pub async fn process_sms(
                         }
                         Err(e) => {
                             tracing::error!("Failed to get weather answer: {}", e);
+                            continue;
+                        }
+                    };
+                } else if name == "get_directions" {
+                    tracing::debug!("Executing get_directions tool call");
+                    #[derive(Deserialize, Serialize)]
+                    struct DirectionsQuestion {
+                        start_address: String,
+                        end_address: String,
+                        mode: Option<String>,
+                    }
+                    let c: DirectionsQuestion = match serde_json::from_str(arguments) {
+                        Ok(q) => q,
+                        Err(e) => {
+                            tracing::error!("Failed to parse directions question: {}", e);
+                            continue;
+                        }
+                    };
+                    let start_address = c.start_address;
+                    let end_address = c.end_address;
+                    let mode = c.mode;
+                    match crate::tool_call_utils::internet::handle_directions_tool(start_address, end_address, mode).await {
+                        Ok(answer) => {
+                            tracing::debug!("Successfully received directions answer");
+                            tool_answers.insert(tool_call_id, answer);
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to get directions answer: {}", e);
                             continue;
                         }
                     };

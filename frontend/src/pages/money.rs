@@ -654,6 +654,7 @@ pub fn feature_list(props: &FeatureListProps) -> Html {
                 <li><i class="fas fa-comments"></i>{base_messages_text}</li>
                 <li><i class="fas fa-search"></i>{"Perplexity AI Web Search"}</li>
                 <li><i class="fas fa-cloud-sun"></i>{"Weather Search and forecast of the next 6 hours"}</li>
+                <li><i class="fas fa-route"></i>{"Step-by-step Directions from Google Maps"}</li>
                 <li><i class="fas fa-image"></i>{"Photo Analysis & Translation (US & AUS only)"}</li>
                 <li><i class="fas fa-qrcode"></i>{"QR Code Scanning (US & AUS only)"}</li>
                 <li><i class="fab fa-whatsapp"></i>{"Send, Fetch and Monitor WhatsApp Messages"}</li>

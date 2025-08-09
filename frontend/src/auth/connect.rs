@@ -12,6 +12,7 @@ use crate::connections::calendar::CalendarConnect;
 use crate::connections::email::EmailConnect;
 use crate::connections::tasks::TasksConnect;
 use crate::connections::telegram::TelegramConnect;
+use crate::connections::uber::UberConnect;
 
 #[derive(Properties, PartialEq)]
 pub struct ConnectProps {
@@ -304,6 +305,11 @@ pub fn connect(props: &ConnectProps) -> Html {
                             <WhatsappConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount}/>
 
                             <TelegramConnect 
+                                user_id={props.user_id} 
+                                sub_tier={props.sub_tier.clone()} 
+                                discount={props.discount}
+                            />
+                            <UberConnect
                                 user_id={props.user_id} 
                                 sub_tier={props.sub_tier.clone()} 
                                 discount={props.discount}

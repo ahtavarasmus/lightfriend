@@ -17,6 +17,7 @@ use crate::schema::user_settings;
 use crate::schema::temp_variables;
 use crate::schema::message_history;
 use crate::schema::user_info;
+use crate::schema::uber;
 
 
 
@@ -290,6 +291,34 @@ pub struct NewConversation {
     pub active: bool,
     pub twilio_number: String,
     pub user_number: String,
+}
+
+#[derive(Queryable, Selectable, Insertable)]
+#[diesel(table_name = uber)]
+#[diesel(check_for_backend(diesel::sqlite::Sqlite))]
+pub struct Uber {
+    pub id: Option<i32>,
+    pub user_id: i32,
+    pub encrypted_access_token: String,
+    pub encrypted_refresh_token: String,
+    pub status: String,
+    pub last_update: i32,
+    pub created_on: i32,
+    pub description: String,
+    pub expires_in: i32, // for access token
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = uber)]
+pub struct NewUber {
+    pub user_id: i32,
+    pub encrypted_access_token: String,
+    pub encrypted_refresh_token: String,
+    pub status: String,
+    pub last_update: i32,
+    pub created_on: i32,
+    pub description: String,
+    pub expires_in: i32,
 }
 
 

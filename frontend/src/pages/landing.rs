@@ -126,6 +126,7 @@ pub fn landing() -> Html {
                             <span class="highlight-icon"><i class="fab fa-telegram"></i></span>
                             <span class="highlight-icon"><i class="fas fa-envelope"></i></span>
                             <span class="highlight-icon"><i class="fas fa-calendar"></i></span>
+                            <span class="highlight-icon"><i class="fa-solid fa-route"></i></span>
                             <span class="highlight-icon"><i class="fas fa-globe"></i></span>
                             {"."}
                         </p>
@@ -137,20 +138,6 @@ pub fn landing() -> Html {
                     </div>
                 </div>
             </header>
-            <div class="difference-section">
-                <div class="difference-content">
-                    <div class="difference-text">
-                        <h2>{"Your attention is the product."}</h2>
-                        <p>{"Every feed is optimized to hook you."}</p>
-                        <p>{"Every ping is a trap."}</p>
-                        <p>{"You’re up against casinos built by behavioral psychologists."}</p>
-                        <p>{"Lightfriend helps you "}<span class="highlight">{"opt out."}</span>{" You stay connected, but free."}</p>
-                    </div>
-                    <div class="difference-image">
-                        <img src="/assets/lightfriend-filter.png" alt="Lightfriend being a filter between you and the apps." loading="lazy" />
-                    </div>
-                </div>
-            </div>
             <section class="story-section">
                 <div class="story-grid">
                     <div class="story-item">
@@ -213,6 +200,14 @@ pub fn landing() -> Html {
                                 <summary><i class="fas fa-cloud-sun"></i>{"Weather Search and forecast of the next 6 hours"}</summary>
                                 <div class="feature-desc">
                                     <p>{"Request weather information for any location via SMS or voice. Receive current conditions, temperature, and a detailed 6-hour forecast. Example: 'Weather in London' returns instant updates."}</p>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fas fa-route"></i>{"Get Directions"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Get detailed turn-by-turn walking directions between any two locations via SMS or voice call. Example: 'How do I get walking from Central Park South & 5th Avenue, New York to Rockefeller Center, 45 Rockefeller Plaza, New York.' Note: You'll need to specify your starting location including city/area as we can't detect it automatically. On longer trips, just ask lightfriend for more information at any point during the trip. This tool uses Google Maps behind the scenes."}</p>
                                 </div>
                             </details>
                         </li>
