@@ -519,7 +519,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                             <div class="group-summary">
                                 <span class="service-count">
                                 {
-                                    if props.sub_tier.as_deref() != Some("self_hosted") && props.sub_tier.as_deref() != Some("tier 2") { {"5 tools ready!"} } else { "6 tools ready!" }
+                                    if props.sub_tier.as_deref() != Some("self_hosted") && props.sub_tier.as_deref() != Some("tier 2") { {"5 tools ready!"} } else { "7 tools ready!" }
                                 }
                                 </span>
                                 <i class={if group_states.get("tools").map(|s| s.expanded).unwrap_or(false) {
@@ -559,6 +559,19 @@ pub fn connect(props: &ConnectProps) -> Html {
                                 </div>
                                 <p class="service-description">
                                     {"Get instant weather updates and forecasts for any location through SMS or voice calls. Provides current conditions."}
+                                </p>
+                            </div>
+
+                            // Directions
+                            <div class="service-item">
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        <i class="fas fa-directions" style="color: #1E90FF; font-size: 24px; margin-right: 8px;"></i>
+                                        {"Get Directions"}
+                                    </div>
+                                </div>
+                                <p class="service-description">
+                                    {"Get step-by-step directions between any two addresses through SMS or voice calls. Includes estimated travel time, distance, and turn-by-turn navigation for walking, biking, driving, or public transit."}
                                 </p>
                             </div>
 
