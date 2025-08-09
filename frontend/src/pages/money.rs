@@ -55,12 +55,12 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
         let user_id = user_id.clone();
         let subscription_type = subscription_type.clone();
         let selected_country = selected_country.clone();
-      
+     
         Callback::from(move |e: MouseEvent| {
             e.prevent_default();
             let user_id = user_id.clone();
             let subscription_type = subscription_type.clone();
-          
+         
             if subscription_type != "basic" && subscription_type != "oracle" && selected_country == "Other" {
                 if let Some(window) = web_sys::window() {
                     if !window.confirm_with_message(
@@ -72,7 +72,7 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
                     }
                 }
             }
-          
+         
             wasm_bindgen_futures::spawn_local(async move {
                 if let Some(token) = window()
                     .and_then(|w| w.local_storage().ok())
@@ -572,7 +572,12 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                         { if (props.subscription_type == "hosted" || props.subscription_type == "guaranteed") && props.selected_country == "Other" {
                             html! { <li>{"Required: Bring your own number and unlock service in whatever country you're in. Checkout the guide below."}</li> }
                         } else if (props.subscription_type == "hosted" || props.subscription_type == "guaranteed") && ["FI", "UK", "AU"].contains(&props.selected_country.as_str()) {
-                            html! { <li>{"Messages not included - buy credits ahead of time. Credits are used for sending messages, voice calls, notifications, and more."}</li> }
+                            html! { 
+                                <>
+                                    <li>{"Messages not included - buy credits ahead of time. Credits are used for sending messages, voice calls, notifications, and more."}</li>
+                                    <li>{"Includes 10€ of credits for the first month to get started and more can be bought after signup."}</li>
+                                </>
+                            }
                         } else { html! {} }}
                     </ul>
                 </div>
@@ -596,7 +601,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
 pub struct FeatureListProps {
     pub selected_country: String,
 }
-
 #[function_component(FeatureList)]
 pub fn feature_list(props: &FeatureListProps) -> Html {
     let base_messages_text: String = match props.selected_country.as_str() {
@@ -1414,7 +1418,6 @@ pub fn pricing(props: &PricingProps) -> Html {
                             }
                         } else if (*selected_country) == "FI" || (*selected_country) == "AU" || (*selected_country) == "UK" {
                             html! {
-
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
