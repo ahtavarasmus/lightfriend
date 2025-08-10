@@ -1150,6 +1150,10 @@ pub async fn fetch_recent_bridge_contacts(
                 Ok(m) => m,
                 Err(_) => return None,
             };
+
+            if members.len() > 3 {
+                return None;  // Skip if not exactly a DM (more members indicate a group)
+            }
             let has_service_member = members.iter().any(|member| member.user_id().localpart().starts_with(&sender_prefix));
             if !has_service_member {
                 return None;

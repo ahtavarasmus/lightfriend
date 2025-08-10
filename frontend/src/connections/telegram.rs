@@ -442,7 +442,7 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         if *is_connecting {
                             if let Some(link) = (*login_link).clone() {
                                 <div class="login-link-container">
-                                    <p>{"Click the button below to connect your Telegram account:"}</p>
+                                    <p class="connect-instruction">{"Click the button below to connect your Telegram account:"}</p>
                                     <a href={link} target="_blank" class="telegram-login-button">
                                         {"Connect Telegram"}
                                     </a>
@@ -452,7 +452,7 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                                 </div>
                             } else {
                                 <div class="loading-container">
-                                    <p>{"Generating login link..."}</p>
+                                    <p class="connect-instruction">{"Generating login link..."}</p>
                                     <div class="loading-spinner"></div>
                                 </div>
                             }
@@ -484,6 +484,7 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         padding: 1.5rem;
                         margin: 1rem 0;
                         transition: all 0.3s ease;
+                        color: #fff;
                     }
                     .telegram-connect:hover {
                         transform: translateY(-2px);
@@ -560,6 +561,11 @@ pub fn telegram_connect(props: &TelegramProps) -> Html {
                         color: #999;
                         margin-top: 0.5rem;
                         font-size: 0.9rem;
+                    }
+                    .connect-instruction {
+                        color: #fff;
+                        margin-bottom: 1rem;
+                        font-size: 1rem;
                     }
                     .loading-container {
                         text-align: center;

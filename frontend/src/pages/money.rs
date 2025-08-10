@@ -575,7 +575,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                             html! { 
                                 <>
                                     <li>{"Messages not included - buy credits ahead of time. Credits are used for sending messages, voice calls, notifications, and more."}</li>
-                                    <li>{"Includes 10€ of credits for the first month to get started and more can be bought after signup."}</li>
+                                    <li>{"Get 10€ free credits on signup - buy more when needed."}</li>
                                 </>
                             }
                         } else { html! {} }}
