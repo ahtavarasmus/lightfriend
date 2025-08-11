@@ -310,13 +310,15 @@ pub fn Home() -> Html {
                         <div class="credits-info">
                         {
                             if let Some(profile) = (*profile_data).as_ref() {
-                                let phone_prefix = if profile.phone_number.starts_with("+1") {
+                                let phone_prefix = if profile.phone_number_country == Some("US".to_string()) {
                                     Some(("+1", "+18153684737"))
-                                } else if profile.phone_number.starts_with("+358") {
+                                } else if profile.phone_number_country == Some("CA".to_string()) {
+                                    Some(("+1", "+12892066453"))
+                                } else if profile.phone_number_country == Some("FI".to_string()) {
                                     Some(("+358", "+358454901522"))
-                                } else if profile.phone_number.starts_with("+44") {
+                                } else if profile.phone_number_country == Some("UK".to_string()) {
                                     Some(("+44", "+447383240344"))
-                                } else if profile.phone_number.starts_with("+61") {
+                                } else if profile.phone_number_country == Some("AU".to_string()) {
                                     Some(("+61", "+61489260976"))
                                 } else {
                                     None
@@ -490,13 +492,15 @@ pub fn Home() -> Html {
                     {
                         if let Some(profile) = (*profile_data).as_ref() {
                             if profile.sub_tier.is_some() {
-                                let phone_prefix = if profile.phone_number.starts_with("+1") {
+                                let phone_prefix = if profile.phone_number_country == Some("US".to_string()) {
                                     Some(("+1", "+18153684737"))
-                                } else if profile.phone_number.starts_with("+358") {
+                                } else if profile.phone_number_country == Some("CA".to_string()) {
+                                    Some(("+1", "+12892066453"))
+                                } else if profile.phone_number_country == Some("FI".to_string()) {
                                     Some(("+358", "+358454901522"))
-                                } else if profile.phone_number.starts_with("+44") {
+                                } else if profile.phone_number_country == Some("UK".to_string()) {
                                     Some(("+44", "+447383240344"))
-                                } else if profile.phone_number.starts_with("+61") {
+                                } else if profile.phone_number_country == Some("AU".to_string()) {
                                     Some(("+61", "+61489260976"))
                                 } else {
                                     None

@@ -1,3 +1,4 @@
+
 use stripe::{
     Client,
     Customer,
@@ -18,7 +19,6 @@ use stripe::{
 pub enum SubscriptionType {
     Hosted,
     SelfHosting,
-    DigitalDetox,
 }
 use serde::{Deserialize, Serialize};
 use axum::{
@@ -41,8 +41,6 @@ pub struct BuyCreditsRequest {
 pub struct SubscriptionCheckoutBody {
     pub subscription_type: SubscriptionType,
 }
-
-
 pub async fn create_unified_subscription_checkout(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -117,48 +115,27 @@ pub async fn create_unified_subscription_checkout(
         )
     })?;
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
-    // Select price ID based on subscription type and user's phone number
-    // Select price ID based on subscription type and user's phone number
-    let (base_price_id, trial_days, one_time_fee_id) = match body.subscription_type {
+    // Select price ID based on subscription type and user's phone number country
+    let base_price_id = match body.subscription_type {
         SubscriptionType::Hosted => {
-            let price_id = if user.phone_number.starts_with("+1") {
+            let country = user.phone_number_country.as_deref().unwrap_or("OTHER");
+            println!("country: {}", country);
+            if country == "US" || country == "CA" {
                 std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_US")
-            } else if user.phone_number.starts_with("+358") {
+            } else if country == "FI" {
                 std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_FI")
-            } else if user.phone_number.starts_with("+44") {
+            } else if country == "UK" {
                 std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_UK")
-            } else if user.phone_number.starts_with("+61") {
+            } else if country == "AU" {
                 std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_AU")
             } else {
                 std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER")
-            }.expect("Stripe price ID not found for region");
-            (price_id, None, None)
+            }.expect("Stripe price ID not found for region")
         },
         SubscriptionType::SelfHosting => {
-            let price_id = std::env::var("STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID")
-                .expect("Stripe price ID not found for region");
-            (price_id, None, None)
+            std::env::var("STRIPE_SUBSCRIPTION_SELF_HOSTING_PRICE_ID")
+                .expect("Stripe price ID not found for region")
         },
-        SubscriptionType::DigitalDetox => {
-            let price_id = if user.phone_number.starts_with("+1") {
-                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_US")
-            } else if user.phone_number.starts_with("+358") {
-                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_FI")
-            } else if user.phone_number.starts_with("+44") {
-                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_UK")
-            } else if user.phone_number.starts_with("+61") {
-                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_AU")
-            } else {
-                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER")
-            }.expect("Stripe price ID not found for region");
-            let one_time_fee_id = if user.phone_number.starts_with("+1") {
-                std::env::var("STRIPE_DIGITALDETOX_ONETIME_FEE_ID_US")
-            } else {
-                std::env::var("STRIPE_DIGITALDETOX_ONETIME_FEE_ID_OTHER")
-            }
-            .expect("Stripe one-time fee ID not found");
-            (price_id, Some(7), Some(one_time_fee_id))
-        }
     };
     let mut line_items = vec![
         stripe::CreateCheckoutSessionLineItems {
@@ -167,14 +144,6 @@ pub async fn create_unified_subscription_checkout(
             ..Default::default()
         }
     ];
-    // Add one-time fee for DigitalDetox
-    if let Some(fee_id) = one_time_fee_id {
-        line_items.push(stripe::CreateCheckoutSessionLineItems {
-            price: Some(fee_id),
-            quantity: Some(1),
-            ..Default::default()
-        });
-    }
     let success_url = format!("{}/billing?subscription=success", domain_url);
     let cancel_url = format!("{}/billing?subscription=canceled", domain_url);
     let mut create_params = CreateCheckoutSession {
@@ -199,26 +168,19 @@ pub async fn create_unified_subscription_checkout(
         }),
         ..Default::default()
     };
-    // Add trial period for DigitalDetox
-    if let Some(trial_days) = trial_days {
-        create_params.subscription_data = Some(stripe::CreateCheckoutSessionSubscriptionData {
-            trial_period_days: Some(trial_days),
-            ..Default::default()
-        });
-    }
+
     let success_url1 = format!("{}/billing?subscription=changed", domain_url);
     if let Some(current_subscription) = existing_subscription.data.first() {
         println!("Found existing subscription: {}", current_subscription.id);
-      
+     
         // Create metadata to track the subscription change
         let mut metadata = std::collections::HashMap::new();
         metadata.insert("replacing_subscription".to_string(), current_subscription.id.to_string());
         metadata.insert("plan_change".to_string(), "true".to_string());
         metadata.insert("user_id".to_string(), user_id.to_string());
-      
+     
         create_params.subscription_data = Some(stripe::CreateCheckoutSessionSubscriptionData {
             metadata: Some(metadata),
-            trial_period_days: trial_days, // Preserve trial_days from earlier
             ..Default::default()
         });
         // Update success URL to indicate plan change
@@ -237,14 +199,13 @@ pub async fn create_unified_subscription_checkout(
         )
     })?;
     println!("Subscription checkout session created successfully");
-  
+ 
     // Return the Checkout session URL
     Ok(Json(json!({
         "url": checkout_session.url.unwrap(),
         "message": "Redirecting to Stripe Checkout for subscription"
     })))
 }
-
 
 pub async fn create_customer_portal_session(
     State(state): State<Arc<AppState>>,

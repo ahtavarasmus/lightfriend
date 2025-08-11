@@ -213,17 +213,17 @@ pub fn landing() -> Html {
                         </li>
                         <li>
                             <details>
-                                <summary><i class="fas fa-image"></i>{"Photo Analysis & Translation (US & AUS only)"}</summary>
+                                <summary><i class="fas fa-image"></i>{"Photo Analysis & Translation (US, CA & AUS only)"}</summary>
                                 <div class="feature-desc">
-                                    <p>{"Send a photo via MMS to Lightfriend; the AI analyzes the image content (e.g., describes objects or scenes) or translates any visible text. Limited to US and Australia due to carrier MMS support. Example: Send a picture of a menu for translation."}</p>
+                                    <p>{"Send a photo via MMS to Lightfriend; the AI analyzes the image content (e.g., describes objects or scenes) or translates any visible text. Limited to US, Canada and Australia due to carrier MMS support. Example: Send a picture of a menu for translation."}</p>
                                 </div>
                             </details>
                         </li>
                         <li>
                             <details>
-                                <summary><i class="fas fa-qrcode"></i>{"QR Code Scanning (US & AUS only)"}</summary>
+                                <summary><i class="fas fa-qrcode"></i>{"QR Code Scanning (US, CA & AUS only)"}</summary>
                                 <div class="feature-desc">
-                                    <p>{"Take a photo of a QR code and send it via MMS; Lightfriend decodes it and sends back the embedded information, such as links or text. Available only in US and Australia. Example: Scan a product QR for details on the go."}</p>
+                                    <p>{"Take a photo of a QR code and send it via MMS; Lightfriend decodes it and sends back the embedded information, such as links or text. Available only in US, Canada and Australia. Example: Scan a product QR for details on the go."}</p>
                                 </div>
                             </details>
                         </li>
@@ -346,7 +346,7 @@ pub fn landing() -> Html {
                         </div>
                         <div class="faq-item">
                             <h3>{"How private is Lightfriend?"}</h3>
-                            <p>{"Lightfriend is hosted on a secure EU server with a strict zero-logging policy - nothing is stored beyond what's necessary. As a bootstrapped solo dev, I prioritize transparency: the code is open source for anyone to audit. The hosted setup requires some trust (zero access isn't feasible), but your data remains yours and can be deleted anytime."}</p>
+                            <p>{"Your data’s safe. Lightfriend runs on a secure EU server with no logging of your chats, searches, or personal info. All credentials are encrypted, and optional conversation history gets deleted automatically as you go - my server would fill up fast otherwise. Messaging app chats (like WhatsApp) are temporary too: they’re only accessible for 2 days after receiving them, then gone. I’m a solo dev, not some data-hungry corp. The code’s open-source on GitHub, anyone can check it’s legit. It’s a hosted app, so some trust is needed, but you own your data and can delete it anytime, no questions."}</p>
                         </div>
                     </div>
                 </div>

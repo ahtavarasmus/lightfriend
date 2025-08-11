@@ -413,9 +413,8 @@ pub async fn register(
     State(state): State<Arc<AppState>>,
     Json(reg_req): Json<RegisterRequest>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    
+   
     println!("Registration attempt for email: {}", reg_req.email);
-
     use regex::Regex;
     let email_regex = Regex::new(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$").unwrap();
     if !email_regex.is_match(&reg_req.email) {
@@ -425,13 +424,12 @@ pub async fn register(
             Json(json!({"error": "Invalid email format"}))
         ));
     }
-
     // Check if email exists
     println!("Checking if email exists...");
     if state.user_core.email_exists(&reg_req.email).map_err(|e| {
         println!("Database error while checking email: {}", e);
         (
-            StatusCode::INTERNAL_SERVER_ERROR, 
+            StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("Database error") }))
         )
     })? {
@@ -442,7 +440,6 @@ pub async fn register(
         ));
     }
     println!("Email is available");
-
     let phone_regex = Regex::new(r"^\+[1-9]\d{1,14}$").unwrap();
     if !phone_regex.is_match(&reg_req.phone_number) {
         println!("Invalid phone number format: {}", reg_req.phone_number);
@@ -451,7 +448,6 @@ pub async fn register(
             Json(json!({"error": "Phone number must be in E.164 format (e.g., +1234567890)"}))
         ));
     }
-
     if reg_req.password.len() < 8 {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -463,7 +459,7 @@ pub async fn register(
     if state.user_core.phone_number_exists(&reg_req.phone_number).map_err(|e| {
         println!("Database error while checking phone number: {}", e);
         (
-            StatusCode::INTERNAL_SERVER_ERROR, 
+            StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "error": format!("Database error") }))
         )
     })? {
@@ -474,7 +470,6 @@ pub async fn register(
         ));
     }
     println!("Phone number is available");
-
     // Hash password
     println!("Hashing password...");
     let password_hash = bcrypt::hash(&reg_req.password, bcrypt::DEFAULT_COST)
@@ -486,7 +481,6 @@ pub async fn register(
             )
         })?;
     println!("Password hashed successfully");
-
     // Create and insert user
     println!("Creating new user...");
     // Calculate timestamp 5 minutes from now
@@ -495,9 +489,7 @@ pub async fn register(
         .expect("Failed to calculate timestamp")
         .timestamp() as i32;
     println!("Set the time to live due in 5 minutes");
-
     let reg_r = reg_req.clone();
-
     let new_user = NewUser {
         email: reg_r.email,
         password_hash,
@@ -511,7 +503,6 @@ pub async fn register(
         discount: false,
         sub_tier: None,
     };
-
     state.user_core.create_user(new_user).map_err(|e| {
         println!("User creation failed: {}", e);
         (
@@ -519,11 +510,10 @@ pub async fn register(
             Json(json!({ "error": format!("User creation failed") })),
         )
     })?;
-
     println!("User registered successfully, setting preferred number");
-    
+   
     // Get the newly created user to get their ID
-    let user = state.user_core.find_by_email(&reg_req.email)
+    let mut user = state.user_core.find_by_email(&reg_req.email)
         .map_err(|e| (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": format!("Failed to retrieve user")}))
@@ -532,7 +522,11 @@ pub async fn register(
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({"error": "User not found after registration"}))
         ))?;
-
+    // Set phone number country
+    if let Err(e) = crate::handlers::profile_handlers::set_user_phone_country(&state, user.id, &reg_req.phone_number).await {
+        tracing::error!("Failed to set phone country during registration: {}", e);
+        // Continue without failing registration
+    }
     // Set preferred number if user has US number
     if reg_req.phone_number.starts_with("+1") {
         state.user_core.set_preferred_number_to_us_default(user.id)
@@ -545,17 +539,7 @@ pub async fn register(
         })?;
         println!("Preferred number set successfully, generating tokens");
     }
-
-    let user = state.user_core.find_by_email(&reg_req.email)
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to retrieve user")}))
-        ))?
-        .ok_or_else(|| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": "User not found after registration"}))
-        ))?;
-
+    // Refresh user if needed (e.g., after updates), but since we just set fields, can reuse or refetch if User model needs reloading
     // Generate access token (short-lived)
     let access_token = encode(
         &Header::default(),
@@ -571,7 +555,6 @@ pub async fn register(
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": "Token generation failed"}))
     ))?;
-
     // Generate refresh token (long-lived)
     let refresh_token = encode(
         &Header::default(),
@@ -587,7 +570,6 @@ pub async fn register(
         StatusCode::INTERNAL_SERVER_ERROR,
         Json(json!({"error": "Token generation failed"}))
     ))?;
-
     // Create response with HttpOnly cookies
     let mut response = Response::new(
         axum::body::Body::from(
@@ -597,7 +579,6 @@ pub async fn register(
             })).to_string()
         )
     );
-
     let cookie_options = "; HttpOnly; Secure; SameSite=Strict; Path=/";
     response.headers_mut().insert(
         "Set-Cookie",
@@ -605,19 +586,16 @@ pub async fn register(
             .parse()
             .unwrap(),
     );
-
     response.headers_mut().insert(
         "Set-Cookie",
         format!("refresh_token={}{}; Max-Age=604800", refresh_token, cookie_options)
             .parse()
             .unwrap(),
     );
-
     response.headers_mut().insert(
         "Content-Type",
         "application/json".parse().unwrap()
     );
-
     println!("Registration and login completed successfully");
     Ok(response)
 }

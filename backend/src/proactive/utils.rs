@@ -1307,9 +1307,6 @@ pub async fn send_notification(
 
             match crate::api::elevenlabs::make_notification_call(
                 &state.clone(),
-                user.phone_number.clone(),
-                user.preferred_number
-                    .unwrap_or_else(|| std::env::var("SHAZAM_PHONE_NUMBER").expect("SHAZAM_PHONE_NUMBER not set")),
                 content_type.clone(), // Notification type
                 first_message.clone().unwrap_or("Hello, I have a critical notification to tell you about".to_string()),
                 notification.to_string(),

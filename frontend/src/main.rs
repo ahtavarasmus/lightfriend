@@ -71,7 +71,8 @@ use pages::{
     supported_countries::SupportedCountries,
     home::is_logged_in,
     termsprivacy::{TermsAndConditions, PrivacyPolicy},
-    money::{Pricing},
+    money::{Pricing, PricingLoggedIn},
+
     self_host_instructions::SelfHostInstructions,
     bring_own_number::TwilioHostedInstructions, 
 };
@@ -376,17 +377,21 @@ pub fn pricing_wrapper() -> Html {
     }
 
     if let Some(profile) = (*profile_data).as_ref() {
+        web_sys::console::log_1(&"here in logged in".into());
         html! {
-            <Pricing
+            <PricingLoggedIn
                 user_id={profile.id}
                 user_email={profile.email.clone()}
                 sub_tier={profile.sub_tier.clone()}
                 is_logged_in={true}
                 phone_number={profile.phone_number.clone()}
                 verified={profile.verified.clone()}
+                phone_country={profile.phone_number_country.clone()}
             />
         }
     } else {
+
+        web_sys::console::log_1(&"here in not logged in".into());
         html! {
             <Pricing
                 user_id={0}
@@ -395,6 +400,7 @@ pub fn pricing_wrapper() -> Html {
                 is_logged_in={false}
                 phone_number={None::<String>}
                 verified=false
+                phone_country={None::<String>}
             />
         }
     }

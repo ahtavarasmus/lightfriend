@@ -96,6 +96,15 @@ impl UserCore {
         Ok(())
     }
 
+    pub fn update_phone_number_country(&self, user_id: i32, country: Option<&str>) -> Result<(), DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(users::table)
+            .filter(users::id.eq(user_id))
+            .set(users::phone_number_country.eq(country))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
     // Helper function to ensure user_info exists
     pub fn ensure_user_info_exists(&self, user_id: i32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");

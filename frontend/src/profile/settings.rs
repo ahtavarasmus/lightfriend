@@ -258,6 +258,7 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     estimated_monitoring_cost: (*user_profile).estimated_monitoring_cost,
                                     location: Some((*location).clone()),
                                     nearby_places: Some((*nearby_places).clone()),
+                                    phone_number_country: (*user_profile).phone_number_country.clone(),
                                 };
                                 // Notify parent component
                                 props.on_profile_update.emit(updated_profile.clone());

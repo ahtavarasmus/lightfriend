@@ -264,6 +264,7 @@ diesel::table! {
         confirm_send_event -> Nullable<Text>,
         waiting_checks_count -> Integer,
         next_billing_date_timestamp -> Nullable<Integer>,
+        phone_number_country -> Nullable<Text>,
     }
 }
 

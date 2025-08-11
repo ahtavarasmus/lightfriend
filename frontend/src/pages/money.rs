@@ -37,6 +37,8 @@ pub struct PricingProps {
     pub phone_number: Option<String>,
     #[prop_or_default]
     pub verified: bool,
+    #[prop_or_default]
+    pub phone_country: Option<String>,
 }
 #[derive(Properties, PartialEq, Clone)]
 pub struct CheckoutButtonProps {
@@ -604,7 +606,8 @@ pub struct FeatureListProps {
 #[function_component(FeatureList)]
 pub fn feature_list(props: &FeatureListProps) -> Html {
     let base_messages_text: String = match props.selected_country.as_str() {
-        "US" => "500 Messages per month included".to_string(),
+        "US" => "400 Messages per month included".to_string(),
+        "CA" => "400 Messages per month included".to_string(),
         "FI" | "UK" | "AU" => "Messages via prepaid credits".to_string(),
         _ => "Bring your own Twilio for messages (pay Twilio directly)".to_string(),
     };
@@ -735,16 +738,17 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
             </div>
         }
     } else {
-        let currency = if country == "US" { "$" } else { "€" };
+        let currency = if country == "US" || country == "CA" { "$" } else { "€" };
         let (msg_cost, voice_sec_cost, noti_msg_cost, noti_call_cost) = match country.as_str() {
             "US" => (0.075, 0.0033, 0.075, 0.15),
+            "CA" => (0.075, 0.0033, 0.075, 0.15),
             "FI" => (0.30, 0.005, 0.15, 0.70),
             "UK" => (0.30, 0.005, 0.15, 0.15),
             "AU" => (0.30, 0.005, 0.15, 0.15),
             _ => (0.0, 0.0, 0.0, 0.0),
         };
         let voice_min_cost = voice_sec_cost * 60.0;
-        if country != "US" {
+        if country != "US" || country != "CA" {
             html! {
                 <div class="credit-pricing">
                     <style>{credit_css}</style>
@@ -767,22 +771,9 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
         }
     }
 }
-#[function_component(Pricing)]
-pub fn pricing(props: &PricingProps) -> Html {
-    fn get_country_from_phone(phone_number: &str) -> String {
-        let digits: String = phone_number.chars().filter(|c| c.is_digit(10)).collect();
-        if digits.starts_with("1") {
-            "US".to_string()
-        } else if digits.starts_with("358") {
-            "FI".to_string()
-        } else if digits.starts_with("44") {
-            "UK".to_string()
-        } else if digits.starts_with("61") {
-            "AU".to_string()
-        } else {
-            "Other".to_string()
-        }
-    }
+
+#[function_component(PricingLoggedIn)]
+pub fn pricing_logged_in(props: &PricingProps) -> Html {
     let selected_country = use_state(|| "US".to_string());
     let country_name = use_state(|| String::new());
     {
@@ -802,42 +793,20 @@ pub fn pricing(props: &PricingProps) -> Html {
         let is_logged_in = props.is_logged_in;
         use_effect_with_deps(
             {
-                let user_phone = props.phone_number.clone();
+                let phone_country = props.phone_country.clone();
                 let selected_country = selected_country_state.clone();
                 let country_name = country_name_state.clone();
                 move |_| {
-                    if is_logged_in {
-                        if let Some(phone) = &user_phone {
-                            let country = get_country_from_phone(phone);
-                            selected_country.set(country);
-                            match selected_country.as_str() {
-                                "US" => country_name.set("United States".to_string()),
-                                "FI" => country_name.set("Finland".to_string()),
-                                "UK" => country_name.set("United Kingdom".to_string()),
-                                "AU" => country_name.set("Australia".to_string()),
-                                _ => country_name.set("Other".to_string()),
-                            }
+                    if let Some(country) = phone_country {
+                        selected_country.set(country);
+                        match selected_country.as_str() {
+                            "US" => country_name.set("United States".to_string()),
+                            "CA" => country_name.set("Canada".to_string()),
+                            "FI" => country_name.set("Finland".to_string()),
+                            "UK" => country_name.set("United Kingdom".to_string()),
+                            "AU" => country_name.set("Australia".to_string()),
+                            _ => country_name.set("Other".to_string()),
                         }
-                    } else {
-                        let selected_country = selected_country.clone();
-                        let country_name = country_name.clone();
-                        wasm_bindgen_futures::spawn_local(async move {
-                            if let Ok(response) = Request::get("https://ipapi.co/json/").send().await {
-                                if let Ok(json) = response.json::<Value>().await {
-                                    if let Some(code) = json.get("country_code").and_then(|c| c.as_str()) {
-                                        let code = code.to_uppercase();
-                                        if let Some(name) = json.get("country_name").and_then(|c| c.as_str()) {
-                                            country_name.set(name.to_string());
-                                        }
-                                        if ["US", "FI", "UK", "AU"].contains(&code.as_str()) {
-                                            selected_country.set(code);
-                                        } else {
-                                            selected_country.set("Other".to_string());
-                                        }
-                                    }
-                                }
-                            }
-                        });
                     }
                     || ()
                 }
@@ -847,6 +816,7 @@ pub fn pricing(props: &PricingProps) -> Html {
     }
     let hosted_prices: HashMap<String, f64> = HashMap::from([
         ("US".to_string(), 19.00),
+        ("CA".to_string(), 19.00),
         ("FI".to_string(), 19.00),
         ("UK".to_string(), 19.00),
         ("AU".to_string(), 19.00),
@@ -854,6 +824,7 @@ pub fn pricing(props: &PricingProps) -> Html {
     ]);
     let guaranteed_prices: HashMap<String, f64> = HashMap::from([
         ("US".to_string(), 59.00),
+        ("CA".to_string(), 59.00),
         ("FI".to_string(), 59.00),
         ("UK".to_string(), 59.00),
         ("AU".to_string(), 59.00),
@@ -876,10 +847,6 @@ pub fn pricing(props: &PricingProps) -> Html {
         },
         Feature {
             text: "Simple setup, connect apps and go".to_string(),
-            sub_items: vec![],
-        },
-        Feature {
-            text: "Secure no-logging policy".to_string(),
             sub_items: vec![],
         },
         Feature {
@@ -908,7 +875,7 @@ pub fn pricing(props: &PricingProps) -> Html {
             ],
         },
     ];
-    let currency_symbol = if *selected_country == "US" { "$" } else { "€" };
+    let currency_symbol = if *selected_country == "US" || *selected_country == "CA" { "$" } else { "€" };
     let pricing_css = r#"
     .pricing-grid {
         display: flex;
@@ -1339,7 +1306,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <div class="country-selector">
                             <label for="country">{"Select your country: "}</label>
                             <select id="country" onchange={on_country_change}>
-                                { for ["US", "FI", "UK", "AU", "Other"]
+                                { for ["US", "CA", "FI", "UK", "AU", "Other"]
                                     .iter()
                                     .map(|&c| html! {
                                         <option value={c} selected={*selected_country == c}>{c}</option>
@@ -1358,7 +1325,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     plan_name={"Hosted Plan"}
                     best_for={"Full-featured cloud service ready to go."}
                     price={*hosted_total_price}
-                    currency={if *selected_country == "US" { "$" } else { "€" }}
+                    currency={if *selected_country == "US" || *selected_country == "CA" { "$" } else { "€" }}
                     period={"/day"}
                     features={hosted_features.clone()}
                     subscription_type={"hosted"}
@@ -1379,7 +1346,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                     plan_name={"Guaranteed Plan"}
                     best_for={"Hosted Plan with zero loop holes. Full refund for the first month if not satisfied."}
                     price={*guaranteed_total_price}
-                    currency={if *selected_country == "US" { "$" } else { "€" }}
+                    currency={if *selected_country == "US" || *selected_country == "CA" { "$" } else { "€" }}
                     period={"/month"}
                     features={guaranteed_features.clone()}
                     subscription_type={"guaranteed"}
@@ -1403,12 +1370,12 @@ pub fn pricing(props: &PricingProps) -> Html {
                 <h2>{"Common Questions"}</h2>
                 <div class="faq-grid">
                     {
-                        if (*selected_country) == "US" {
+                        if (*selected_country) == "US" || (*selected_country) == "CA" {
                             html! {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Hosted Plan includes phone number for FI/AU/UK, but messages are bought separately before hand. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                    <p>{"Plans bill monthly. Hosted Plan includes everything from phone number to 400 in the US and Canada. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What counts as a Message?"}</summary>
@@ -1446,7 +1413,693 @@ pub fn pricing(props: &PricingProps) -> Html {
                     }
                     <details>
                         <summary>{"Is it available in my country?"}</summary>
-                        <p>{"Available globally. US everything is included. FI/UK/AU include a number but message are bought separately. Elsewhere bring your own number (guided setup, costs vary ~€0.05-0.50/text or free if you have extra android phone laying around with a another phone plan). Contact rasmus@ahtava.com for more details."}</p>
+                        <p>{"Available globally. US/CA everything is included. FI/UK/AU include a number but message are bought separately. Elsewhere bring your own number (guided setup, costs vary ~€0.05-0.50/text or free if you have extra android phone laying around with a another phone plan). Contact rasmus@ahtava.com for more details."}</p>
+                    </details>
+                </div>
+            </div>
+            <div class="footnotes">
+                <p class="footnote">{"* Gen Z spends 4-7 hours daily on phones, often regretting 60% of social media time. "}<a href="https://explodingtopics.com/blog/smartphone-usage-stats" target="_blank" rel="noopener noreferrer">{"Read the study"}</a><grok-card data-id="badfd9" data-type="citation_card"></grok-card></p>
+                <p class="footnote">{"The dumbphone is sold separately and is not included in the Hosted Plan."}</p>
+                <p class="footnote">{"For developers: Check out the open-source repo on GitHub if you'd like to self-host from source (requires technical setup)."}</p>
+                <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer" class="github-link">{"View GitHub Repo"}</a>
+            </div>
+            <div class="legal-links">
+                <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
+                {" | "}
+                <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
+            </div>
+        </div>
+    }
+}
+
+#[function_component(Pricing)]
+pub fn pricing(props: &PricingProps) -> Html {
+    let selected_country = use_state(|| "US".to_string());
+    let country_name = use_state(|| String::new());
+    {
+        use_effect_with_deps(
+            move |_| {
+                if let Some(window) = web_sys::window() {
+                    window.scroll_to_with_x_and_y(0.0, 0.0);
+                }
+                || ()
+            },
+            (),
+        );
+    }
+    {
+        let selected_country_state = selected_country.clone();
+        let country_name_state = country_name.clone();
+        let is_logged_in = props.is_logged_in;
+        use_effect_with_deps(
+            {
+                let phone_country = props.phone_country.clone();
+                let selected_country = selected_country_state.clone();
+                let country_name = country_name_state.clone();
+                move |_| {
+                    if is_logged_in {
+                        if let Some(country) = phone_country {
+                            selected_country.set(country);
+                            match selected_country.as_str() {
+                                "US" => country_name.set("United States".to_string()),
+                                "CA" => country_name.set("Canada".to_string()),
+                                "FI" => country_name.set("Finland".to_string()),
+                                "UK" => country_name.set("United Kingdom".to_string()),
+                                "AU" => country_name.set("Australia".to_string()),
+                                _ => country_name.set("Other".to_string()),
+                            }
+                        }
+                    } else {
+                        let selected_country = selected_country.clone();
+                        let country_name = country_name.clone();
+                        wasm_bindgen_futures::spawn_local(async move {
+                            if let Ok(response) = Request::get("https://ipapi.co/json/").send().await {
+                                if let Ok(json) = response.json::<Value>().await {
+                                    if let Some(code) = json.get("country_code").and_then(|c| c.as_str()) {
+                                        let code = code.to_uppercase();
+                                        if let Some(name) = json.get("country_name").and_then(|c| c.as_str()) {
+                                            country_name.set(name.to_string());
+                                        }
+                                        if ["US", "CA", "FI", "UK", "AU"].contains(&code.as_str()) {
+                                            selected_country.set(code);
+                                        } else {
+                                            selected_country.set("Other".to_string());
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    }
+                    || ()
+                }
+            },
+            (is_logged_in, props.phone_number.clone()),
+        );
+    }
+    let hosted_prices: HashMap<String, f64> = HashMap::from([
+        ("US".to_string(), 19.00),
+        ("CA".to_string(), 19.00),
+        ("FI".to_string(), 19.00),
+        ("UK".to_string(), 19.00),
+        ("AU".to_string(), 19.00),
+        ("Other".to_string(), 19.00),
+    ]);
+    let guaranteed_prices: HashMap<String, f64> = HashMap::from([
+        ("US".to_string(), 59.00),
+        ("CA".to_string(), 59.00),
+        ("FI".to_string(), 59.00),
+        ("UK".to_string(), 59.00),
+        ("AU".to_string(), 59.00),
+        ("Other".to_string(), 59.00),
+    ]);
+    let on_country_change = {
+        let selected_country = selected_country.clone();
+        Callback::from(move |e: Event| {
+            if let Some(target) = e.target_dyn_into::<HtmlSelectElement>() {
+                selected_country.set(target.value());
+            }
+        })
+    };
+    let hosted_total_price = hosted_prices.get(&*selected_country).unwrap_or(&0.0);
+    let guaranteed_total_price = guaranteed_prices.get(&*selected_country).unwrap_or(&0.0);
+    let hosted_features = vec![
+        Feature {
+            text: "Fully managed service hosted in EU".to_string(),
+            sub_items: vec![],
+        },
+        Feature {
+            text: "Simple setup, connect apps and go".to_string(),
+            sub_items: vec![],
+        },
+        Feature {
+            text: "Secure no-logging policy".to_string(),
+            sub_items: vec![],
+        },
+        Feature {
+            text: "All future updates, security, and priority support".to_string(),
+            sub_items: vec![],
+        },
+    ];
+    let guaranteed_features = vec![
+        Feature {
+            text: "Full Hosted Plan".to_string(),
+            sub_items: vec![],
+        },
+        Feature {
+            text: "Password Vault & Cheating Checker".to_string(),
+            sub_items: vec!["Lightfriend password vault for app blockers and physical lock boxes, 60-min relock window or permanent downgrade.".to_string()],
+        },
+        Feature {
+            text: "Free Cold Turkey Blocker Pro".to_string(),
+            sub_items: vec!["Block computer temptations with no escape hatch.".to_string()],
+        },
+        Feature {
+            text: "Optional Signup Bonuses".to_string(),
+            sub_items: vec![
+                "If needed: $20 for $40 Amazon gift card (for a dumbphone if you don't have one).".to_string(),
+                "For smartphone locking: $10 for $20 Amazon gift card (for a smartphone lock box you can close with a password).".to_string(),
+            ],
+        },
+    ];
+    let currency_symbol = if *selected_country == "US" || *selected_country == "CA" { "$" } else { "€" };
+    let pricing_css = r#"
+    .pricing-grid {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 2rem;
+        justify-content: center;
+        max-width: 1200px;
+        margin: 2rem auto;
+    }
+    .hosted-plans-section, .self-hosted-plans-section {
+        margin: 4rem auto;
+        max-width: 1200px;
+    }
+    .section-title {
+        text-align: center;
+        color: #7EB2FF;
+        font-size: 2.5rem;
+        margin-bottom: 2rem;
+    }
+    .pricing-panel {
+        position: relative;
+        min-height: 100vh;
+        padding: 6rem 2rem;
+        color: #ffffff;
+        z-index: 1;
+        overflow: hidden;
+    }
+    .pricing-panel::before {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100vh;
+        background-image: url('/assets/human_looking_at_field.webp');
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        opacity: 0.8;
+        z-index: -2;
+        pointer-events: none;
+    }
+    .pricing-panel::after {
+        content: '';
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100vh;
+        background: linear-gradient(
+            to bottom,
+            rgba(26, 26, 26, 0.75) 0%,
+            rgba(26, 26, 26, 0.9) 100%
+        );
+        z-index: -1;
+        pointer-events: none;
+    }
+    .pricing-header {
+        text-align: center;
+        margin-bottom: 4rem;
+    }
+    .pricing-header h1 {
+        font-size: 3.5rem;
+        margin-bottom: 1.5rem;
+        background: linear-gradient(45deg, #fff, #7EB2FF);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 700;
+    }
+    .pricing-header p {
+        color: #999;
+        font-size: 1.2rem;
+        max-width: 600px;
+        margin: 0 auto;
+    }
+    .country-selector {
+        text-align: center;
+        margin: 2rem 0;
+        background: rgba(30, 30, 30, 0.7);
+        padding: 1.5rem;
+        border-radius: 16px;
+        border: 1px solid rgba(30, 144, 255, 0.15);
+        max-width: 400px;
+        margin: 2rem auto;
+    }
+    .country-selector label {
+        color: #7EB2FF;
+        margin-right: 1rem;
+        font-size: 1.1rem;
+    }
+    .country-selector select {
+        padding: 0.8rem;
+        font-size: 1rem;
+        border-radius: 8px;
+        border: 1px solid rgba(30, 144, 255, 0.3);
+        background: rgba(30, 30, 30, 0.9);
+        color: #fff;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    .country-selector select:hover {
+        border-color: rgba(30, 144, 255, 0.5);
+    }
+    .pricing-faq {
+        max-width: 800px;
+        margin: 4rem auto;
+    }
+    .pricing-faq h2 {
+        color: #7EB2FF;
+        font-size: 2rem;
+        margin-bottom: 2rem;
+        text-align: center;
+    }
+    .faq-grid {
+        display: grid;
+        gap: 1rem;
+    }
+    details {
+        background: rgba(30, 30, 30, 0.8);
+        border: 1px solid rgba(30, 144, 255, 0.15);
+        border-radius: 12px;
+        padding: 1.5rem;
+        transition: all 0.3s ease;
+    }
+    details:hover {
+        border-color: rgba(30, 144, 255, 0.3);
+    }
+    summary {
+        color: #7EB2FF;
+        font-size: 1.1rem;
+        cursor: pointer;
+        padding: 0.5rem 0;
+    }
+    details p {
+        color: #e0e0e0;
+        margin-top: 1rem;
+        line-height: 1.6;
+        padding: 0.5rem 0;
+    }
+    .footnotes {
+        max-width: 800px;
+        margin: 3rem auto;
+        text-align: center;
+    }
+    .footnote {
+        color: #999;
+        font-size: 0.9rem;
+    }
+    .footnote a {
+        color: #7EB2FF;
+        text-decoration: none;
+        transition: color 0.3s ease;
+    }
+    .footnote a:hover {
+        color: #1E90FF;
+    }
+    .github-link {
+        color: #7EB2FF;
+        font-size: 0.9rem;
+        text-decoration: none;
+        transition: color 0.3s ease;
+    }
+    .github-link:hover {
+        color: #1E90FF;
+    }
+    .legal-links {
+        text-align: center;
+        margin-top: 2rem;
+    }
+    .legal-links a {
+        color: #999;
+        text-decoration: none;
+        transition: color 0.3s ease;
+    }
+    .legal-links a:hover {
+        color: #7EB2FF;
+    }
+    .topup-pricing {
+        max-width: 1000px;
+        margin: 4rem auto;
+        text-align: center;
+    }
+    .topup-pricing h2 {
+        color: #7EB2FF;
+        font-size: 2rem;
+        margin-bottom: 1rem;
+    }
+    .topup-pricing p {
+        color: #999;
+        margin-bottom: 2rem;
+    }
+    .pricing-card.main {
+        background: rgba(30, 30, 30, 0.8);
+        border: 1px solid rgba(30, 144, 255, 0.15);
+        padding: 2rem;
+        min-width: 400px;
+    }
+    .package-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem 0;
+        border-bottom: 1px solid rgba(30, 144, 255, 0.15);
+    }
+    .package-row:last-child {
+        border-bottom: none;
+    }
+    .package-row h3 {
+        font-size: 1.2rem;
+        margin: 0;
+    }
+    .package-row .price {
+        margin: 0;
+    }
+    .topup-packages {
+        max-width: 600px;
+        margin: 2rem auto;
+        align-items: center;
+        display: flex;
+        justify-content: center;
+    }
+    .package-row .price .amount {
+        font-size: 1.5rem;
+    }
+    .topup-toggle {
+        margin-top: 2rem;
+        text-align: center;
+    }
+    .topup-toggle p {
+        color: #999;
+        margin-bottom: 1rem;
+    }
+    .phone-number-options {
+        max-width: 1200px;
+        margin: 4rem auto;
+    }
+    .phone-number-section {
+        text-align: center;
+        padding: 2.5rem;
+    }
+    .phone-number-section h2 {
+        color: #7EB2FF;
+        font-size: 2.5rem;
+        margin-bottom: 2rem;
+    }
+    .options-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 2rem;
+        margin-top: 2rem;
+        max-width: 600px;
+        margin: 2rem auto;
+    }
+    .option-card {
+        background: rgba(30, 30, 30, 0.8);
+        border: 1px solid rgba(30, 144, 255, 0.15);
+        border-radius: 24px;
+        padding: 2.5rem;
+        backdrop-filter: blur(10px);
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    .option-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 32px rgba(30, 144, 255, 0.15);
+        border-color: rgba(30, 144, 255, 0.3);
+    }
+    .option-card h3 {
+        color: #7EB2FF;
+        font-size: 1.8rem;
+        margin-bottom: 1rem;
+    }
+    .option-card p {
+        color: #e0e0e0;
+        margin-bottom: 2rem;
+        font-size: 1.1rem;
+        line-height: 1.6;
+    }
+    .sentinel-extras-integrated {
+        margin: 2rem auto;
+        padding: 2rem;
+        background: rgba(30, 30, 30, 0.7);
+        border: 1px solid rgba(30, 144, 255, 0.15);
+        border-radius: 16px;
+        max-width: 600px;
+    }
+    .extras-section {
+        margin-bottom: 2rem;
+    }
+    .extras-section:last-child {
+        margin-bottom: 0;
+    }
+    .extras-section h4 {
+        color: #7EB2FF;
+        font-size: 1.3rem;
+        margin-bottom: 0.5rem;
+        text-align: center;
+    }
+    .extras-description {
+        color: #b0b0b0;
+        font-size: 0.95rem;
+        text-align: center;
+        margin-bottom: 1.5rem;
+    }
+    .extras-selector-inline {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+    .extras-summary-inline {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem;
+        background: rgba(30, 144, 255, 0.1);
+        border-radius: 8px;
+        margin-top: 0.5rem;
+    }
+    .quantity-selector-inline {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        justify-content: center;
+    }
+    .quantity-selector-inline label {
+        color: #7EB2FF;
+        font-size: 1rem;
+        font-weight: 500;
+        min-width: 120px;
+    }
+    .quantity-selector-inline select {
+        padding: 0.6rem 1rem;
+        font-size: 0.95rem;
+        border-radius: 8px;
+        border: 1px solid rgba(30, 144, 255, 0.3);
+        background: rgba(30, 30, 30, 0.9);
+        color: #fff;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        min-width: 140px;
+    }
+    .quantity-selector-inline select:hover {
+        border-color: rgba(30, 144, 255, 0.5);
+    }
+    .summary-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.25rem;
+    }
+    .summary-label {
+        color: #7EB2FF;
+        font-size: 0.9rem;
+        font-weight: 500;
+    }
+    .summary-value {
+        color: #fff;
+        font-size: 1rem;
+        font-weight: 600;
+    }
+    .time-value-section {
+        max-width: 800px;
+        margin: 2rem auto;
+        text-align: center;
+        background: rgba(30, 30, 30, 0.8);
+        border: 1px solid rgba(30, 144, 255, 0.15);
+        border-radius: 24px;
+        padding: 2rem;
+        backdrop-filter: blur(10px);
+    }
+    .time-value-section h2 {
+        color: #7EB2FF;
+        font-size: 2rem;
+        margin-bottom: 1rem;
+    }
+    .time-value-section p {
+        color: #e0e0e0;
+        font-size: 1.1rem;
+        margin-bottom: 1rem;
+    }
+    @media (max-width: 968px) {
+        .pricing-header h1 {
+            font-size: 2.5rem;
+        }
+        .pricing-panel {
+            padding: 4rem 1rem;
+        }
+        .pricing-grid {
+            flex-direction: column;
+        }
+    }
+    "#;
+    html! {
+        <div class="pricing-panel">
+            <style>{pricing_css}</style>
+            <div class="pricing-header">
+                <h1>{"Invest in Your Peace of Mind"}</h1>
+                <p>{"Lightfriend makes it possible to seriously switch to a dumbphone, saving you 2-4 hours per day of mindless scrolling.*"}</p>
+                <p>{"Save 120 hours/month starting at €19!"}</p>
+                {
+                    if *selected_country == "Other" {
+                        html! {
+                            <>
+                            <br/>
+                            <p class="availability-note" style="color: #ff9494; font-size: 0.9rem; margin-top: 0.5rem;">
+                                {format!("Note: Service may be limited or unavailable in {}. ", (*country_name).clone())}
+                                {" More info about supported countries can be checked in "}
+                                <span class="legal-links">
+                                    <a style="color: #1E90FF;" href="/supported-countries">{"Supported Countries"}</a>
+                                    {" or by emailing "}
+                                    <a style="color: #1E90FF;"
+                                       href={format!("mailto:rasmus@ahtava.com?subject=Country%20Availability%20Inquiry%20for%20{}&body=Hey,%0A%0AIs%20the%20service%20available%20in%20{}%3F%0A%0AThanks,%0A",
+                                       (*country_name).clone(), (*country_name).clone())}>
+                                        {"rasmus@ahtava.com"}
+                                    </a>
+                                </span>
+                                {". Contact to ask for availability"}
+                            </p>
+                            </>
+                        }
+                    } else {
+                        html! {}
+                    }
+                }
+            </div>
+            {
+                if !props.is_logged_in {
+                    html! {
+                        <div class="country-selector">
+                            <label for="country">{"Select your country: "}</label>
+                            <select id="country" onchange={on_country_change}>
+                                { for ["US", "CA", "FI", "UK", "AU", "Other"]
+                                    .iter()
+                                    .map(|&c| html! {
+                                        <option value={c} selected={*selected_country == c}>{c}</option>
+                                    })
+                                }
+                            </select>
+                        </div>
+                    }
+                } else {
+                    html! {}
+                }
+            }
+            <h2 class="section-title">{"Plans"}</h2>
+            <div class="pricing-grid">
+                <PricingCard
+                    plan_name={"Hosted Plan"}
+                    best_for={"Full-featured cloud service ready to go."}
+                    price={*hosted_total_price}
+                    currency={if *selected_country == "US" || *selected_country == "CA" { "$" } else { "€" }}
+                    period={"/day"}
+                    features={hosted_features.clone()}
+                    subscription_type={"hosted"}
+                    is_popular={true}
+                    is_premium={false}
+                    is_trial={false}
+                    user_id={props.user_id}
+                    user_email={props.user_email.clone()}
+                    is_logged_in={props.is_logged_in}
+                    verified={props.verified}
+                    sub_tier={props.sub_tier.clone()}
+                    selected_country={(*selected_country).clone()}
+                    coming_soon={false}
+                    hosted_prices={hosted_prices.clone()}
+                />
+                /*
+                <PricingCard
+                    plan_name={"Guaranteed Plan"}
+                    best_for={"Hosted Plan with zero loop holes. Full refund for the first month if not satisfied."}
+                    price={*guaranteed_total_price}
+                    currency={if *selected_country == "US" || *selected_country == "CA" { "$" } else { "€" }}
+                    period={"/month"}
+                    features={guaranteed_features.clone()}
+                    subscription_type={"guaranteed"}
+                    is_popular={false}
+                    is_premium={true}
+                    is_trial={false}
+                    user_id={props.user_id}
+                    user_email={props.user_email.clone()}
+                    is_logged_in={props.is_logged_in}
+                    verified={props.verified}
+                    sub_tier={props.sub_tier.clone()}
+                    selected_country={(*selected_country).clone()}
+                    coming_soon={false}
+                    hosted_prices={hosted_prices.clone()}
+                />
+            */
+            </div>
+            <FeatureList selected_country={(*selected_country).clone()} />
+            <CreditPricing selected_country={(*selected_country).clone()} />
+            <div class="pricing-faq">
+                <h2>{"Common Questions"}</h2>
+                <div class="faq-grid">
+                    {
+                        if (*selected_country) == "US" || (*selected_country) == "CA" {
+                            html! {
+                                <>
+                                <details>
+                                    <summary>{"How does billing work?"}</summary>
+                                    <p>{"Plans bill monthly. Hosted Plan includes everything from phone number to 400 in the US and Canada. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                </details>
+                                <details>
+                                    <summary>{"What counts as a Message?"}</summary>
+                                    <p>{"Voice calls (1 min = 1 Message), text queries (1 query = 1 Message), daily digests (1 digest = 1 Message), priority sender notifications (1 notification = 1/2 Message). Critical monitoring and custom checks are included."}</p>
+                                </details>
+                                </>
+                            }
+                        } else if (*selected_country) == "FI" || (*selected_country) == "AU" || (*selected_country) == "UK" {
+                            html! {
+                                <>
+                                <details>
+                                    <summary>{"How does billing work?"}</summary>
+                                    <p>{"Plans bill monthly. Hosted Plan includes phone number for FI/AU/UK, but messages are bought separately before hand. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                </details>
+                                <details>
+                                    <summary>{"Can I setup automatic recharge for message credits?"}</summary>
+                                    <p>{"Yes! After you purchase them the first time, you can set it recharge the specified amount."}</p>
+                               </details>
+                                </>
+                            }
+                        } else {
+                            html! {
+                                <>
+                                <details>
+                                    <summary>{"How does billing work?"}</summary>
+                                    <p>{"Plans bill monthly. Messages or phone number are not included. Checkout the guide on how to bring your own Number from the pricing card. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                </details>
+                                <details>
+                                    <summary>{"Can I setup automatic recharge for message credits?"}</summary>
+                                    <p>{"Yes! After you purchase them the first time, you can set it recharge the specified amount."}</p>
+                                </details>
+                                </>
+                            }
+                        }
+                    }
+                    <details>
+                        <summary>{"Is it available in my country?"}</summary>
+                        <p>{"Available globally. US/CA everything is included. FI/UK/AU include a number but message are bought separately. Elsewhere bring your own number (guided setup, costs vary ~€0.05-0.50/text or free if you have extra android phone laying around with a another phone plan). Contact rasmus@ahtava.com for more details."}</p>
                     </details>
                 </div>
             </div>

@@ -667,24 +667,48 @@ pub async fn send_conversation_message(
         state.user_core.get_twilio_credentials(user.id)?
     };
 
-
     let client = Client::new();
 
-    // Build form data with required fields
+    // Get or set country
+    let mut country = user.phone_number_country.clone();
+    if country.is_none() {
+        match crate::handlers::profile_handlers::set_user_phone_country(&state, user.id, &user.phone_number).await {
+            Ok(c) => country = c,
+            Err(e) => {
+                tracing::error!("Failed to set phone country: {}", e);
+                // Fallback to preferred_number logic
+                country = Some("Other".to_string());
+            }
+        }
+    }
+
+    // Determine From strategy
+    let mut use_messaging_service = false;
+    let mut from_number = user.preferred_number.clone().unwrap_or_default();
+
+    if let Some(c) = country {
+        match c.as_str() {
+            "US" => use_messaging_service = true,
+            "CA" => from_number = env::var("CAN_PHONE").unwrap_or_else(|_| { tracing::error!("CAN_PHONE not set"); user.preferred_number.clone().unwrap_or_default() }),
+            "FI" => from_number = env::var("FIN_PHONE").unwrap_or_else(|_| { tracing::error!("FIN_PHONE not set"); user.preferred_number.clone().unwrap_or_default() }),
+            "GB" => from_number = env::var("GB_PHONE").unwrap_or_else(|_| { tracing::error!("GB_PHONE not set"); user.preferred_number.clone().unwrap_or_default() }),
+            "AU" => from_number = env::var("AUS_PHONE").unwrap_or_else(|_| { tracing::error!("AUS_PHONE not set"); user.preferred_number.clone().unwrap_or_default() }),
+            _ => tracing::info!("Using preferred_number for unsupported country: {}", c),
+        }
+    }
+
+    // Build form_data
     let mut form_data = vec![
         ("To", user.phone_number.as_str()),
         ("Body", body),
     ];
 
-    // Use MessagingServiceSid for US recipients if available
-    let user_preferred_number = user.preferred_number.clone().unwrap();
-    let use_messaging_service = user_preferred_number.starts_with("+1");
-    let mut sid: String;
+    let sid = env::var("TWILIO_MESSAGING_SERVICE_SID").expect("TWILIO_MESSAGING_SERVICE_SID not set");
+    let sid_str = sid.as_str();
     if use_messaging_service {
-        sid = env::var("TWILIO_MESSAGING_SERVICE_SID")?;
-        form_data.push(("MessagingServiceSid", sid.as_str())); 
+        form_data.push(("MessagingServiceSid", sid_str));
     } else {
-        form_data.push(("From", user_preferred_number.as_str()));
+        form_data.push(("From", from_number.as_str()));
     }
 
     // Handle media_sid if provided

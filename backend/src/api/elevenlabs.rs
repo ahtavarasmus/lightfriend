@@ -2050,16 +2050,13 @@ pub async fn handle_email_response_tool_call(
 
 pub async fn make_notification_call(
     state: &Arc<AppState>,
-    to_phone_number: String,
-    preferred_from_number: String,
     content_type: String,
     notification_first_message: String,
     notification_message: String,
     user_id: String,
     user_timezone: Option<String>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-
-// Get user information to check for discount tier
+    // Get user information to check for discount tier
     let user = match state.user_core.find_by_id(user_id.parse::<i32>().unwrap_or_default()) {
         Ok(Some(user)) => user,
         Ok(None) => {
@@ -2083,6 +2080,7 @@ pub async fn make_notification_call(
             ));
         }
     };
+    let to_phone_number = user.phone_number.clone();
     let user_settings = match state.user_core.get_user_settings(user.id) {
         Ok(settings) => settings,
         Err(e) => {
@@ -2096,34 +2094,54 @@ pub async fn make_notification_call(
             ));
         }
     };
-    let phone_number = user.phone_number;
-
-    // Determine country based on phone_number
-    let is_fi = phone_number.starts_with("+358");
-    let is_au = phone_number.starts_with("+61");
-    let is_uk = phone_number.starts_with("+44");
-    let is_us = phone_number.starts_with("+1");
-
-    // Check if the user's phone number is from a supported country (US, FI, UK, AU)
-    let is_supported_country = is_fi || is_au || is_uk || is_us;
-
+    // Get or set phone_number_country
+    let country = match user.phone_number_country {
+        Some(c) => c,
+        None => {
+            match crate::handlers::profile_handlers::set_user_phone_country(&state, user.id, &user.phone_number).await {
+                Ok(Some(c)) => c,
+                Ok(None) => {
+                    error!("Failed to determine country for user {} after lookup", user.id);
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "Missing user country",
+                            "details": "Could not determine phone number country"
+                        }))
+                    ));
+                }
+                Err(e) => {
+                    error!("Failed to set phone_number_country for user {}: {}", user.id, e);
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "Failed to set user country",
+                            "details": e.to_string()
+                        }))
+                    ));
+                }
+            }
+        }
+    };
+    // Check if the user's country is supported (US, FI, GB, AU, DE, CA)
+    let is_supported_country = matches!(country.as_str(), "FI" | "AU" | "GB" | "US" | "DE" | "CA");
     let phone_number_id = if is_supported_country {
-        // Regular phone number selection
-        if is_fi {
-            std::env::var("FIN_PHONE_NUMBER_ID")
-        } else if is_au {
-            std::env::var("AUS_PHONE_NUMBER_ID")
-        } else if is_uk {
-            std::env::var("GB_PHONE_NUMBER_ID")
-        } else {
-            std::env::var("USA_PHONE_NUMBER_ID")
-        }.map_err(|e| {
-            error!("Failed to get phone number ID: {}", e);
+        // Regular phone number selection based on country
+        match country.as_str() {
+            "FI" => std::env::var("FIN_PHONE_NUMBER_ID"),
+            "AU" => std::env::var("AUS_PHONE_NUMBER_ID"),
+            "GB" => std::env::var("GB_PHONE_NUMBER_ID"),
+            "DE" => std::env::var("DE_PHONE_NUMBER_ID"), // Add env var if needed
+            "CA" => std::env::var("CAN_PHONE_NUMBER_ID"),
+            "US" => std::env::var("USA_PHONE_NUMBER_ID"),
+            _ => std::env::var("USA_PHONE_NUMBER_ID"), // Default to USA number for unsupported countries
+        }.map_err(|_| {
+            error!("Failed to get phone number ID for country: {}", country);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
                     "error": "Failed to get phone number ID",
-                    "details": e.to_string()
+                    "details": "Environment variable not set"
                 }))
             )
         })?
@@ -2143,22 +2161,17 @@ pub async fn make_notification_call(
             }
         }
     };
-
-    // Get voice ID based on the preferred number
-    let voice_id = if preferred_from_number.contains("+358") {
-        std::env::var("FI_VOICE_ID").expect("FI_VOICE_ID not set")
-    } else if preferred_from_number.contains("+49") {
-        std::env::var("DE_VOICE_ID").expect("DE_VOICE_ID not set")
-    } else {
-        std::env::var("US_VOICE_ID").expect("US_VOICE_ID not set")
+    // Get voice ID based on country
+    let voice_id = match user_settings.agent_language.to_lowercase().as_str() {
+        "fi" => std::env::var("FI_VOICE_ID").expect("FI_VOICE_ID not set"),
+        "de" => std::env::var("DE_VOICE_ID").expect("DE_VOICE_ID not set"),
+        _ => std::env::var("US_VOICE_ID").expect("US_VOICE_ID not set"), // Default for US/CA/GB/AU/Other
     };
-
     // Create dynamic variables map with notification message
     let mut dynamic_variables = HashMap::new();
     dynamic_variables.insert("notification_message".to_string(), json!(notification_message));
     dynamic_variables.insert("now".to_string(), json!(format!("{}", chrono::Utc::now())));
-    
-
+  
     // set the ids to -1 to prevent agent from making mistake
     dynamic_variables.insert("content_type".to_string(), json!(content_type));
     dynamic_variables.insert("user_id".to_string(), json!(user_id));
@@ -2167,7 +2180,6 @@ pub async fn make_notification_call(
         Some(ref tz) => tz.as_str(),
         None => "UTC",
     };
-
     // Get timezone offset using jiff
     let (hours, minutes) = match get_offset_with_jiff(timezone_str) {
         Ok((h, m)) => (h, m),
@@ -2176,17 +2188,14 @@ pub async fn make_notification_call(
             (0, 0) // UTC default
         }
     };
-
     // Format offset string (e.g., "+02:00" or "-05:30")
-    let offset = format!("{}{:02}:{:02}", 
+    let offset = format!("{}{:02}:{:02}",
         if hours >= 0 { "+" } else { "-" },
         hours.abs(),
         minutes.abs()
     );
-
     dynamic_variables.insert("timezone".to_string(), json!(timezone_str));
     dynamic_variables.insert("timezone_offset_from_utc".to_string(), json!(offset));
-
     // Create the payload for the call
     let payload = NotificationCallPayload {
         agent_id: std::env::var("AGENT_ID").expect("AGENT_ID not set"),
@@ -2205,7 +2214,6 @@ pub async fn make_notification_call(
             dynamic_variables,
         },
     };
-
     let client = reqwest::Client::new();
     let response = client
         .post("https://api.elevenlabs.io/v1/convai/twilio/outbound-call".to_string())
@@ -2223,7 +2231,6 @@ pub async fn make_notification_call(
                 }))
             )
         })?;
-
     if !response.status().is_success() {
         let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
         error!("ElevenLabs API returned error: {}", error_text);
@@ -2235,7 +2242,6 @@ pub async fn make_notification_call(
             }))
         ));
     }
-
     // Get user information before spawning the thread
     let user = match state.user_core.find_by_id(user_id.parse::<i32>().unwrap_or_default()) {
         Ok(Some(user)) => user,
@@ -2258,9 +2264,6 @@ pub async fn make_notification_call(
             })));
         }
     };
-
-
-
     // Send an immediate SMS notification
     // Truncate and clean notification message to ensure SMS compatibility
     let cleaned_message = notification_message
@@ -2276,7 +2279,6 @@ pub async fn make_notification_call(
         "Notification: {}",
         truncated_message
     );
-
     // Send the SMS notification
     if let Err(e) = crate::api::twilio_utils::send_conversation_message(
         &state,
@@ -2287,7 +2289,6 @@ pub async fn make_notification_call(
         error!("Failed to send notification SMS: {}", e);
         // Continue with the call even if SMS fails
     }
-
     Ok(Json(json!({
         "status": "success",
         "message": "Notification call initiated successfully",
