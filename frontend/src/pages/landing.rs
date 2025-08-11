@@ -358,18 +358,10 @@ pub fn landing() -> Html {
                     <Link<Route> to={Route::Pricing} classes="forward-link">
                         <button class="hero-cta">{"Start Today"}</button>
                     </Link<Route>>
-                    <a href="/faq#try-service" class="faq-link">
-                        {"Try demo first"}
-                    </a>
                     <p class="disclaimer">{"Works with smartphones and basic phones. Customize to your needs."}</p>
                     <div class="development-links">
                         <p>{"Source code on "}
                             <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">{"GitHub"}</a>
-                        </p>
-                        <p>{"Follow us at "}
-                            <a href="https://pacepeek.com/ahtavarasmus" target="_blank" rel="noopener noreferrer">{"pacepeek.com/ahtavarasmus"}</a>
-                            {" and "}
-                            <a href="https://x.com/rasmuscodes" target="_blank" rel="noopener noreferrer">{"x.com/rasmuscodes"}</a>
                         </p>
                         <div class="legal-links">
                             <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
@@ -388,28 +380,36 @@ pub fn landing() -> Html {
     summary {
         display: flex;
         align-items: center;
-        gap: 1rem;
         list-style: none;
-        position: relative;
-        padding-right: 1.5rem; /* Space for arrow */
+        gap: 1rem;
+        padding-right: 0; /* No extra padding, arrow will be in its own space */
     }
-    summary::-webkit-details-marker {
-        display: none;
-    }
+
     summary::after {
-        content: '▶'; /* Right-pointing arrow (closed state) */
-        position: absolute;
-        right: 0;
-        top: 50%;
-        transform: translateY(-50%);
-        transition: transform 0.3s ease;
+        content: '▶';
         font-size: 0.8rem;
         color: #7EB2FF;
+        margin-left: auto; /* Pushes arrow to the right without stretching it */
+        flex-shrink: 0; /* Prevent arrow from moving when content changes */
+        transition: transform 0.3s ease;
     }
+
+    details summary {
+        display: flex;
+        align-items: center;
+        cursor: pointer;
+    }
+
+    details summary::after {
+        content: "▶";
+        margin-left: 8px;
+        transition: transform 0.2s;
+    }
+
     details[open] summary::after {
-        content: '▼'; /* Down-pointing arrow (open state) */
-        transform: translateY(-50%) rotate(90deg); /* Optional rotation for visual feedback */
+        transform: rotate(90deg);
     }
+
     .feature-desc {
         padding: 1rem;
         background: rgba(0, 0, 0, 0.2);
