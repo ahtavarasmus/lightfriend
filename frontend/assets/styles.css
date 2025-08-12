@@ -186,6 +186,17 @@ body {
     align-items: center;
     position: relative;
 }
+.nav-logo-dark {
+    color: white;
+    text-decoration: none;
+    font-size: 1.5rem;
+    font-weight: 600;
+    background: linear-gradient(45deg, #7EB2FF, #4169E1);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    transition: opacity 0.3s ease;
+    z-index: 11;
+}
 
 .nav-logo {
     color: white;

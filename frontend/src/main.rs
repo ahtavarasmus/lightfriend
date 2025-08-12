@@ -477,8 +477,8 @@ pub fn nav(props: &NavProps) -> Html {
     html! {
         <nav class={classes!("top-nav", (*is_scrolled).then(|| "scrolled"))}>
             <div class="nav-content">
-                <Link<Route> to={Route::Home} classes="nav-logo">
-                    {"lightfriend"}
+                <Link<Route> to={Route::Home} classes="nav-logo-dark">
+                    {"lightfriend.ai"}
                 </Link<Route>>
                 <button class={close_class} onclick={toggle_menu}>
                     <span></span>

@@ -98,7 +98,7 @@ pub fn get_directions_tool() -> openai_api_rs::v1::chat_completion::Tool {
         "start_address".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The starting address or location for the directions.".to_string()),
+            description: Some("The starting address or location for the directions. Must be a specific, real-world address, landmark, or place name (e.g., '123 Main St, City, State' or 'Eiffel Tower, Paris'). Do not use vague terms like 'home', 'here', 'current location', or placeholders.".to_string()),
             ..Default::default()
         }),
     );
@@ -106,7 +106,7 @@ pub fn get_directions_tool() -> openai_api_rs::v1::chat_completion::Tool {
         "end_address".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The ending address or location for the directions.".to_string()),
+            description: Some("The ending address or location for the directions. Must be a specific, real-world address, landmark, or place name (e.g., '456 Elm St, City, State' or 'Statue of Liberty, New York'). Do not use vague terms like 'home', 'here', 'current location', or placeholders.".to_string()),
             ..Default::default()
         }),
     );
@@ -128,7 +128,7 @@ pub fn get_directions_tool() -> openai_api_rs::v1::chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("get_directions"),
-            description: Some(String::from("Fetches step-by-step directions from Google Maps between two addresses or locations, including duration and distance. Use this when the user asks for navigation or route instructions. Defaults to walking if mode is not specified.")),
+            description: Some(String::from("Fetches step-by-step directions from Google Maps between two addresses or locations, including duration and distance. Use this when the user asks for navigation or route instructions. Always ensure start_address and end_address are specific, real-world locations—never use vague terms like 'home' or placeholders. Defaults to walking if mode is not specified.")),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
@@ -305,12 +305,16 @@ pub async fn handle_directions_tool(
         end_address,
         mode: effective_mode.clone(),
     };
+            println!("here");
     match crate::handlers::google_maps::handle_get_directions(
         request,
     ).await {
         Ok(AxumJson(value)) => {
+            println!("here");
             let duration = value["duration"].as_str().unwrap_or("Unknown").to_string();
+            println!("here");
             let distance = value["distance"].as_str().unwrap_or("Unknown").to_string();
+            println!("here");
             let formatted_instructions = if let Some(instructions) = value["instructions"].as_array() {
                 instructions
                     .iter()
@@ -320,6 +324,7 @@ pub async fn handle_directions_tool(
             } else {
                 "No instructions found.".to_string()
             };
+            println!("here");
             Ok(format!("With {}: Duration: {}\nDistance: {}\nDirections:\n{}", effective_mode, duration, distance, formatted_instructions))
         }
         Err((status, AxumJson(err_value))) => {

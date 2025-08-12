@@ -36,6 +36,7 @@ pub async fn handle_get_directions(
         ))?;
 
     let client = reqwest::Client::new();
+    println!("haha");
 
     // Get starting coordinates
     let (start_lat, start_lon, _start_formatted) = match crate::utils::tool_exec::get_coordinates(&client, &request.start_address, &geoapify_api_key).await {
@@ -48,6 +49,7 @@ pub async fn handle_get_directions(
         }
     };
 
+    println!("haha");
     // Get ending coordinates
     let (end_lat, end_lon, _end_formatted) = match crate::utils::tool_exec::get_coordinates(&client, &request.end_address, &geoapify_api_key).await {
         Ok(coords) => coords,
@@ -58,6 +60,7 @@ pub async fn handle_get_directions(
             ));
         }
     };
+    println!("haha");
 
     // Normalize mode: map "public transport" to "transit", and validate others
     let api_mode = match request.mode.to_lowercase().as_str() {
@@ -79,6 +82,7 @@ pub async fn handle_get_directions(
         "https://maps.googleapis.com/maps/api/directions/json?origin={},{}&destination={},{}&mode={}&key={}",
         start_lat, start_lon, end_lat, end_lon, api_mode, google_maps_api_key
     );
+    println!("haha");
 
     let directions_response: Value = match client.get(&directions_url).send().await {
         Ok(res) => match res.json().await {
@@ -98,6 +102,7 @@ pub async fn handle_get_directions(
         }
     };
 
+    println!("haha");
     // Check for API errors
     if directions_response["status"].as_str() != Some("OK") {
         let error_message = directions_response["error_message"].as_str().unwrap_or("Unknown error");
@@ -111,36 +116,76 @@ pub async fn handle_get_directions(
     let mut duration = String::from("Unknown");
     let mut distance = String::from("Unknown");
     let mut instructions: Vec<String> = Vec::new();
+    println!("works?: {:#?}", directions_response);
 
     if let Some(routes) = directions_response["routes"].as_array() {
         if let Some(first_route) = routes.first() {
             if let Some(legs) = first_route["legs"].as_array() {
                 if let Some(first_leg) = legs.first() {
-                    if let Some(dur) = first_leg["duration"]["text"].as_str() {
-                        duration = dur.to_string();
-                    }
-                    if let Some(dist) = first_leg["distance"]["text"].as_str() {
-                        distance = dist.to_string();
-                    }
-                    if let Some(steps) = first_leg["steps"].as_array() {
-                        for step in steps {
-                            if let Some(html_instr) = step["html_instructions"].as_str() {
-                                // Simple HTML stripping for plain text
-                                let plain_text = html_instr
-                                    .replace("<b>", "")
-                                    .replace("</b>", "")
-                                    .replace("<div style=\"font-size:0.9em\">", " - ")
-                                    .replace("</div>", "")
-                                    .replace("<wbr/>", "");
-                                instructions.push(plain_text);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+                    duration = first_leg["duration"]["text"]
+                        .as_str()
+                        .ok_or((
+                            StatusCode::BAD_REQUEST,
+                            AxumJson(json!({"error": "Failed to extract journey duration"})),
+                        ))?
+                        .to_string();
 
+                    distance = first_leg["distance"]["text"]
+                        .as_str()
+                        .ok_or((
+                            StatusCode::BAD_REQUEST,
+                            AxumJson(json!({"error": "Failed to extract journey distance"})),
+                        ))?
+                        .to_string();
+
+                    let steps = first_leg["steps"].as_array()
+                        .ok_or((
+                            StatusCode::BAD_REQUEST,
+                            AxumJson(json!({"error": "Failed to extract journey steps"})),
+                        ))?;
+
+                    for (i, step) in steps.iter().enumerate() {
+                        let html_instr = step["html_instructions"]
+                            .as_str()
+                            .ok_or((
+                                StatusCode::BAD_REQUEST,
+                                AxumJson(json!({"error": format!("Failed to extract instruction at step {}", i + 1)})),
+                            ))?;
+
+                        // Simple HTML stripping for plain text
+                        let plain_text = html_instr
+                            .replace("<b>", "")
+                            .replace("</b>", "")
+                            .replace("<div style=\"font-size:0.9em\">", " - ")
+                            .replace("</div>", "")
+                            .replace("<wbr/>", "");
+                        instructions.push(plain_text);
+                    }
+                } else {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        AxumJson(json!({"error": "No route leg found in response"})),
+                    ));
+                }
+            } else {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    AxumJson(json!({"error": "No route legs found in response"})),
+                ));
+            }
+        } else {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                AxumJson(json!({"error": "No route found in response"})),
+            ));
+        }
+    } else {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            AxumJson(json!({"error": "No routes found in response"})),
+        ));
+    }
+    println!("haha last one");
     if instructions.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
