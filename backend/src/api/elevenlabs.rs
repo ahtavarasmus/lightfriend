@@ -369,14 +369,27 @@ pub struct WaitingCheckPayload {
 
 pub async fn handle_create_waiting_check_tool_call(
     State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<WaitingCheckPayload>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     tracing::debug!("Received waiting check creation request");
+
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Invalid or missing user_id parameter"
+                }))
+            ));
+        }
+    };
     // Verify user exists
-    match state.user_core.find_by_id(payload.user_id) {
+    match state.user_core.find_by_id(user_id) {
         Ok(Some(_user)) => {
             let new_check = crate::models::user_models::NewWaitingCheck {
-                user_id: payload.user_id,
+                user_id: user_id,
                 content: payload.content,
                 service_type: payload.service_type,
             };
@@ -384,11 +397,11 @@ pub async fn handle_create_waiting_check_tool_call(
             match state.user_repository.create_waiting_check(&new_check) {
                 Ok(_) => {
                     tracing::debug!("Successfully created waiting check for user: {}", 
-                        payload.user_id);
+                        user_id);
                     Ok(Json(json!({
                         "response": "I'll keep an eye out for that and notify you when I find it.",
                         "status": "success",
-                        "user_id": payload.user_id,
+                        "user_id": user_id,
                     })))
                 },
                 Err(e) => {
@@ -404,7 +417,7 @@ pub async fn handle_create_waiting_check_tool_call(
             }
         },
         Ok(None) => {
-            tracing::error!("User not found: {}", payload.user_id);
+            tracing::error!("User not found: {}", user_id);
             Err((
                 StatusCode::NOT_FOUND,
                 Json(json!({
