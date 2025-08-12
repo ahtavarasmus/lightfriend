@@ -362,7 +362,6 @@ pub async fn fetch_assistant(
 
 #[derive(Deserialize)]
 pub struct WaitingCheckPayload {
-    pub user_id: i32,
     pub content: String,
     pub service_type: String,
 }
