@@ -828,7 +828,7 @@ pub struct FireCrawlCallPayload {
 
 pub async fn handle_firecrawl_tool_call(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<MessageCallPayload>,
+    Json(payload): Json<FireCrawlCallPayload>,
 ) -> Json<serde_json::Value> {
     match crate::utils::tool_exec::handle_firecrawl_search(payload.message, 5).await {
         Ok(response) => {
