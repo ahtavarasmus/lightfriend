@@ -138,6 +138,32 @@ pub fn get_directions_tool() -> openai_api_rs::v1::chat_completion::Tool {
     }
 }
 
+
+
+pub fn get_firecrawl_search_tool() -> openai_api_rs::v1::chat_completion::Tool {
+    let mut properties = HashMap::new();
+    properties.insert(
+        "query".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("The search query to perform on the web.".to_string()),
+            ..Default::default()
+        }),
+    );
+    chat_completion::Tool {
+        r#type: chat_completion::ToolType::Function,
+        function: types::Function {
+            name: String::from("search_firecrawl"),
+            description: Some(String::from("Searches the web using Firecrawl.dev to fetch and scrape content from top results in markdown format. Use this tool for general web searches or when the user provides a query to find information across multiple sites. Results include titles, descriptions, URLs, and scraped markdown content.")),
+            parameters: types::FunctionParameters {
+                schema_type: types::JSONSchemaType::Object,
+                properties: Some(properties),
+                required: Some(vec![String::from("query")]),
+            },
+        },
+    }
+}
+
 use reqwest;
 use std::error::Error;
 use tracing;

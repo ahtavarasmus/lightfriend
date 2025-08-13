@@ -295,6 +295,7 @@ async fn main() {
         .route("/api/call/search-chat-contacts", post(elevenlabs::handle_search_chat_contacts_tool_call))
         .route("/api/call/send-chat-message", post(elevenlabs::handle_confirm_send_chat_message))
         .route("/api/call/directions", post(elevenlabs::handle_directions_tool_call))
+        .route("/api/call/firecrawl", post(elevenlabs::handle_firecrawl_tool_call))
         .layer(middleware::from_fn_with_state(state.clone(), handlers::auth_middleware::check_subscription_access))
         .route_layer(middleware::from_fn(elevenlabs::validate_elevenlabs_secret));
 

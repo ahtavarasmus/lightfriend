@@ -537,6 +537,7 @@ pub async fn process_sms(
         crate::tool_call_utils::management::get_update_monitoring_status_tool(),
         crate::tool_call_utils::internet::get_scan_qr_code_tool(),
         crate::tool_call_utils::internet::get_ask_perplexity_tool(),
+        crate::tool_call_utils::internet::get_firecrawl_search_tool(),
         crate::tool_call_utils::internet::get_weather_tool(),
         crate::tool_call_utils::internet::get_directions_tool(),
     ];
@@ -760,6 +761,31 @@ pub async fn process_sms(
                         }
                         Err(e) => {
                             tracing::error!("Failed to get weather answer: {}", e);
+                            continue;
+                        }
+                    };
+
+                } else if name == "search_firecrawl" {
+                    tracing::debug!("Executing search_firecrawl tool call");
+                    #[derive(Deserialize, Serialize)]
+                    struct FireCrawlQuestion {
+                        query: String,
+                    }
+                    let c: FireCrawlQuestion = match serde_json::from_str(arguments) {
+                        Ok(q) => q,
+                        Err(e) => {
+                            tracing::error!("Failed to parse fire crawl question: {}", e);
+                            continue;
+                        }
+                    };
+                    let query = c.query;
+                    match crate::utils::tool_exec::handle_firecrawl_search(query, 5).await {
+                        Ok(answer) => {
+                            tracing::debug!("Successfully received fire crawl answer");
+                            tool_answers.insert(tool_call_id, answer);
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to get fire crawl answer: {}", e);
                             continue;
                         }
                     };

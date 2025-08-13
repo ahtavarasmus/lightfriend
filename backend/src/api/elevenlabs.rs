@@ -820,6 +820,25 @@ pub async fn handle_perplexity_tool_call(
     }
 }
 
+pub async fn handle_firecrawl_tool_call(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<MessageCallPayload>,
+) -> Json<serde_json::Value> {
+    match crate::utils::tool_exec::handle_firecrawl_search(payload.message, 5).await {
+        Ok(response) => {
+            Json(json!({
+                "response": response
+            }))
+        },
+        Err(e) => {
+            error!("Error getting response from Firecrawl: {}", e);
+            Json(json!({
+                "error": "Failed to get response from AI"
+            }))
+        }
+    }
+}
+
 pub async fn handle_calendar_tool_call(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,

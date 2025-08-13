@@ -5,6 +5,42 @@ use std::error::Error;
 use crate::tool_call_utils::utils::create_openai_client;
 use openai_api_rs::v1::chat_completion::{self, ChatCompletionMessage, MessageRole, Content};
 
+use serde_json::{json, Value};
+
+pub async fn handle_firecrawl_search(
+    query: String,
+    limit: u32,
+) -> Result<String, Box<dyn Error>> {
+    let api_key = std::env::var("FIRECRAWL_API_KEY")
+        .map_err(|_| "FIRECRAWL_API_KEY environment variable not set")?;
+
+    let data = json!({
+      "query": query,
+      "limit": limit,
+      "location": "",
+      "tbs": "",
+      "scrapeOptions": {
+        "formats": [ "markdown" ]
+      }
+    });
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post("https://api.firecrawl.dev/v1/search")
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&data)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        return Err(format!("Failed to search: HTTP {}", response.status()).into());
+    }
+
+    let text = response.text().await?;
+    Ok(text)
+}
+
 pub async fn get_weather(
     state: &Arc<AppState>,
     location: &str, 
@@ -187,7 +223,7 @@ pub async fn ask_perplexity(
     ];
 
     let request = chat_completion::ChatCompletionRequest::new(
-        "perplexity/sonar-pro".to_string(),
+        "perplexity/sonar-reasoning-pro".to_string(),
         messages,
     );
 
