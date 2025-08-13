@@ -43,7 +43,7 @@ pub fn light_phone_3_whatsapp_guide() -> Html {
                 <p>{"Enhance your digital minimalism without sacrifices:"}</p>
                 <ul>
                     <li>{"Maintain Light Phone's distraction-free experience"}</li>
-                    <li>{"Access WhatsApp without making a phone with app store"}</li>
+                    <li>{"Access WhatsApp without needing a phone with app store"}</li>
                     <li>{"AI-powered monitoring for urgent messages only"}</li>
                     <li>{"Seamless integration with Light Phone's voice and text capabilities"}</li>
                 </ul>
