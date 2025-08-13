@@ -10,7 +10,6 @@ destination = "robots.txt"
 [build]
 target = "index.html"
 css = [
-    "assets/styles.css",
     "src/profile/billing.css",
     "src/profile/settings.css",
     "src/pages/money.css",
