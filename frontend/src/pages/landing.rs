@@ -156,8 +156,11 @@ pub fn landing() -> Html {
             <section class="story-section">
                 <div class="story-grid">
                     <div class="story-item">
-                        <img src="/assets/lightfriend-robot-scene-3.png" alt="Get notified" loading="lazy" />
-                        <p>{"Leave your smartphone behind. If it matters, Lightfriend will call you."}</p>
+                        <img src="/assets/lightfriend-robot-scene-3.png" alt="Lightfriend AI notifying user on dumbphone" loading="lazy" />
+                        <p class="story-text">
+                            {"Lightfriend enhances your dumbphone with connections to important apps as well as monitors them for you."}
+                            {" If it matters, you will receive a call. "}
+                        </p>
                     </div>
                     <div class="story-item">
                         <img src="/assets/lightfriend-robot-scene-4.png" alt="Ask whenever whatever" loading="lazy" />
@@ -1335,6 +1338,23 @@ pub fn landing() -> Html {
         font-weight: 500;
         margin: 0;
         text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+    }
+
+    .story-text {
+        color: #ddd;
+        font-size: 1.2rem;
+        line-height: 1.6;
+        margin: 1rem 0;
+    }
+    .story-text a.learn-more {
+        color: #7EB2FF;
+        text-decoration: none;
+        font-weight: 600;
+        transition: color 0.3s ease;
+    }
+    .story-text a.learn-more:hover {
+        color: #90c2ff;
+        text-shadow: 0 0 8px rgba(30, 144, 255, 0.3);
     }
     @media (max-width: 768px) {
         .story-section {

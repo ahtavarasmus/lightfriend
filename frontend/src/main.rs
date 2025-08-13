@@ -30,6 +30,8 @@ mod pages {
     pub mod self_host_instructions;
     pub mod setup_costs;
     pub mod bring_own_number;
+    pub mod lightphone3_whatsapp_guide;
+    pub mod blog;
 }
 
 mod components {
@@ -75,6 +77,8 @@ use pages::{
 
     self_host_instructions::SelfHostInstructions,
     bring_own_number::TwilioHostedInstructions, 
+    lightphone3_whatsapp_guide::LightPhone3WhatsappGuide,
+    blog::Blog,
 };
 
 use auth::{
@@ -105,6 +109,8 @@ pub enum Route {
     PasswordReset,
     #[at("/faq")]
     Faq,
+    #[at("/blog")]
+    Blog,
     #[at("/host-instructions")]
     SelfHostInstructions,
     #[at("/supported-countries")]
@@ -129,6 +135,8 @@ pub enum Route {
     Privacy,
     #[at("/pricing")]
     Pricing,
+    #[at("/light-phone-3-whatsapp-guide")]
+    LightPhone3WhatsappGuide,
 }
 
 fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: bool) -> Html {
@@ -160,6 +168,10 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
         Route::Faq => {
             info!("Rendering FAQ page");
             html! { <Faq /> }
+        },
+        Route::Blog => {
+            info!("Rendering Blog page");
+            html! { <Blog /> }
         },
         Route::SelfHostInstructions => {
             info!("Rendering Self Host Instructions page");
@@ -208,6 +220,10 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
         Route::Pricing => {
             info!("Rendering Pricing page");
             html! { <PricingWrapper /> }
+        },
+        Route::LightPhone3WhatsappGuide => {
+            info!("Rendering LightPhone3WhatsappGuide page");
+            html! { <LightPhone3WhatsappGuide /> }
         },
     }
 }
@@ -477,8 +493,8 @@ pub fn nav(props: &NavProps) -> Html {
     html! {
         <nav class={classes!("top-nav", (*is_scrolled).then(|| "scrolled"))}>
             <div class="nav-content">
-                <Link<Route> to={Route::Home} classes="nav-logo-dark">
-                    {"lightfriend.ai"}
+                <Link<Route> to={Route::Home} classes="nav-logo">
+                    {"lightfriend"}
                 </Link<Route>>
                 <button class={close_class} onclick={toggle_menu}>
                     <span></span>
@@ -494,6 +510,11 @@ pub fn nav(props: &NavProps) -> Html {
                                     <div onclick={close_menu.clone()}>
                                         <Link<Route> to={Route::Faq} classes="nav-link">
                                             {"FAQ"}
+                                        </Link<Route>>
+                                    </div>
+                                    <div onclick={close_menu.clone()}>
+                                        <Link<Route> to={Route::Blog} classes="nav-link">
+                                            {"Blog"}
                                         </Link<Route>>
                                     </div>
                                     <div onclick={close_menu.clone()}>
