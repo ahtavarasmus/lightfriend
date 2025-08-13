@@ -83,25 +83,34 @@ pub async fn handle_get_directions(
         start_lat, start_lon, end_lat, end_lon, api_mode, google_maps_api_key
     );
     println!("haha");
-
     let directions_response: Value = match client.get(&directions_url).send().await {
-        Ok(res) => match res.json().await {
-            Ok(json) => json,
-            Err(e) => {
+        Ok(res) => {
+            let status = res.status();
+            if !status.is_success() {
                 return Err((
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    AxumJson(json!({"error": format!("Failed to parse directions response: {}", e)})),
+                    AxumJson(json!({"error": format!("Google Maps API returned status code: {}", status)})),
                 ));
             }
+            match res.json().await {
+                Ok(json) => json,
+                Err(e) => {
+                    println!("JSON parsing error: {}", e);
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        AxumJson(json!({"error": "Failed to parse Google Maps API response"})),
+                    ));
+                }
+}
         },
         Err(e) => {
+            println!("Request error: {}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
-                AxumJson(json!({"error": format!("Failed to fetch directions: {}", e)})),
+                AxumJson(json!({"error": "Failed to connect to Google Maps API"})),
             ));
         }
     };
-
     println!("haha");
     // Check for API errors
     if directions_response["status"].as_str() != Some("OK") {

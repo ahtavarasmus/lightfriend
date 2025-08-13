@@ -5,21 +5,21 @@ use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 use gloo_net::http::Request;
 use crate::config;
-
 #[derive(Properties, PartialEq)]
 pub struct UberConnectProps {
     pub user_id: i32,
     pub sub_tier: Option<String>,
     pub discount: bool,
 }
-
 #[function_component(UberConnect)]
 pub fn uber_connect(props: &UberConnectProps) -> Html {
+    if props.user_id != 1 {
+        return html! {};
+    }
     let error = use_state(|| None::<String>);
     let uber_connected = use_state(|| false);
     let connecting_uber = use_state(|| false);
     let selected_status = use_state(|| String::new());
-
     // Check connection status on component mount
     {
         let uber_connected = uber_connected.clone();
@@ -55,7 +55,6 @@ pub fn uber_connect(props: &UberConnectProps) -> Html {
             () // Empty tuple as dependencies since we want this to run only once on mount
         )
     }
-
     let onclick_uber = {
         let connecting_uber = connecting_uber.clone();
         let error = error.clone();
@@ -101,7 +100,6 @@ pub fn uber_connect(props: &UberConnectProps) -> Html {
             }
         })
     };
-
     let onclick_delete_uber = {
         let uber_connected = uber_connected.clone();
         let error = error.clone();
@@ -135,7 +133,6 @@ pub fn uber_connect(props: &UberConnectProps) -> Html {
             }
         })
     };
-
     let onclick_test_uber = {
         let error = error.clone();
         Callback::from(move |_: MouseEvent| {
@@ -168,7 +165,6 @@ pub fn uber_connect(props: &UberConnectProps) -> Html {
             }
         })
     };
-
     let onchange_status = {
         let selected_status = selected_status.clone();
         Callback::from(move |e: Event| {
@@ -179,7 +175,6 @@ pub fn uber_connect(props: &UberConnectProps) -> Html {
             }
         })
     };
-
     let onclick_update_status = {
         let selected_status = selected_status.clone();
         let error = error.clone();
@@ -223,7 +218,6 @@ pub fn uber_connect(props: &UberConnectProps) -> Html {
             }
         })
     };
-
     html! {
         <div class="service-item">
             <div class="service-header">
@@ -237,7 +231,7 @@ pub fn uber_connect(props: &UberConnectProps) -> Html {
                 {
                     let display = element.get_attribute("style")
                         .unwrap_or_else(|| "display: none".to_string());
-                   
+                  
                     if display.contains("none") {
                         let _ = element.set_attribute("style", "display: block");
                     } else {

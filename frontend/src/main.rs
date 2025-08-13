@@ -52,6 +52,7 @@ mod connections {
     pub mod calendar;
     pub mod whatsapp;
     pub mod telegram;
+    pub mod signal;
     pub mod tasks;
     pub mod uber;
 }

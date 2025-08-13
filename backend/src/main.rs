@@ -29,26 +29,28 @@ use std::sync::Arc;
 use sentry;
 
 mod handlers {
-    pub mod auth_handlers;
-    pub mod auth_dtos;
-    pub mod profile_handlers;
-    pub mod billing_handlers;
-    pub mod admin_handlers;
-    pub mod stripe_handlers;
-    pub mod google_calendar_auth;
-    pub mod google_calendar;
-    pub mod imap_auth;
     pub mod auth_middleware;
+    pub mod auth_dtos;
+    pub mod admin_handlers;
+    pub mod auth_handlers;
+    pub mod profile_handlers;
+    pub mod filter_handlers;
+    pub mod twilio_handlers;
+    pub mod billing_handlers;
+    pub mod stripe_handlers;
+    pub mod google_calendar;
+    pub mod google_calendar_auth;
+    pub mod imap_auth;
     pub mod imap_handlers;
+    pub mod google_tasks_auth;
+    pub mod google_tasks;
     pub mod whatsapp_auth;
     pub mod whatsapp_handlers;
-    pub mod filter_handlers;
-    pub mod google_tasks;
-    pub mod google_tasks_auth;
+    pub mod signal_auth;
+    pub mod signal_handlers;
     pub mod telegram_auth;
     pub mod telegram_handlers;
     pub mod self_host_handlers;
-    pub mod twilio_handlers;
     pub mod uber_auth;
     pub mod uber;
     pub mod google_maps;
@@ -115,7 +117,7 @@ use handlers::{
     admin_handlers, stripe_handlers, google_calendar_auth, google_calendar,
     google_tasks_auth, google_tasks, imap_auth, imap_handlers,
     whatsapp_auth, whatsapp_handlers, telegram_auth, telegram_handlers,
-    filter_handlers, twilio_handlers, uber_auth,
+    signal_auth, signal_handlers, filter_handlers, twilio_handlers, uber_auth,
 };
 use api::{twilio_sms, elevenlabs, elevenlabs_webhook, shazam_call};
 
@@ -405,6 +407,15 @@ async fn main() {
         .route("/api/telegram/send", post(telegram_handlers::send_message))
         .route("/api/telegram/search-rooms", post(telegram_handlers::search_telegram_rooms_handler))
         .route("/api/telegram/search-rooms", get(telegram_handlers::search_rooms_handler))
+
+        .route("/api/auth/signal/status", get(signal_auth::get_signal_status))
+        .route("/api/auth/signal/connect", get(signal_auth::start_signal_connection))
+        .route("/api/auth/signal/disconnect", delete(signal_auth::disconnect_signal))
+        .route("/api/auth/signal/resync", post(signal_auth::resync_signal))
+        .route("/api/signal/test-messages", get(signal_handlers::test_fetch_messages))
+        .route("/api/signal/send", post(signal_handlers::send_message))
+        .route("/api/signal/search-rooms", post(signal_handlers::search_signal_rooms_handler))
+        .route("/api/signal/search-rooms", get(signal_handlers::search_rooms_handler))
 
         .route("/api/auth/whatsapp/status", get(whatsapp_auth::get_whatsapp_status))
         .route("/api/auth/whatsapp/connect", get(whatsapp_auth::start_whatsapp_connection))
