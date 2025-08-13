@@ -820,6 +820,12 @@ pub async fn handle_perplexity_tool_call(
     }
 }
 
+
+#[derive(Debug, Deserialize)]
+pub struct FireCrawlCallPayload {
+    query: String,
+}
+
 pub async fn handle_firecrawl_tool_call(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<MessageCallPayload>,
