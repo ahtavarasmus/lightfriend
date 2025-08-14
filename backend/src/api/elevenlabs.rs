@@ -2161,14 +2161,14 @@ pub async fn make_notification_call(
         }
     };
     // Check if the user's country is supported (US, FI, GB, AU, DE, CA)
-    let is_supported_country = matches!(country.as_str(), "FI" | "AU" | "GB" | "US" | "DE" | "CA");
+    let is_supported_country = matches!(country.as_str(), "FI" | "NL" | "AU" | "GB" | "US" | "DE" | "CA");
     let phone_number_id = if is_supported_country {
         // Regular phone number selection based on country
         match country.as_str() {
             "FI" => std::env::var("FIN_PHONE_NUMBER_ID"),
+            "NL" => std::env::var("NL_PHONE_NUMBER_ID"),
             "AU" => std::env::var("AUS_PHONE_NUMBER_ID"),
             "GB" => std::env::var("GB_PHONE_NUMBER_ID"),
-            "DE" => std::env::var("DE_PHONE_NUMBER_ID"), // Add env var if needed
             "CA" => std::env::var("CAN_PHONE_NUMBER_ID"),
             "US" => std::env::var("USA_PHONE_NUMBER_ID"),
             _ => std::env::var("USA_PHONE_NUMBER_ID"), // Default to USA number for unsupported countries

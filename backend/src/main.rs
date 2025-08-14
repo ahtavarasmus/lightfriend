@@ -147,6 +147,9 @@ pub struct AppState {
     matrix_invitation_tasks: Arc<Mutex<HashMap<i32, tokio::task::JoinHandle<()>>>>,
     matrix_clients: Arc<Mutex<HashMap<i32, Arc<matrix_sdk::Client>>>>,
     password_reset_otps: DashMap<String, (String, u64)>, // (email, (otp, expiration))
+    phone_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    phone_verify_verify_limiter: DashMap<String, RateLimiter<String, DefaultKeyedStateStore<String>, DefaultClock>>,
+    phone_verify_otps: DashMap<String, (String, u64)>,
 }
 
 pub fn validate_env() {
@@ -245,7 +248,6 @@ async fn main() {
 
     let state = Arc::new(AppState {
         db_pool: pool,
-        password_reset_otps: DashMap::new(),
         user_core: user_core.clone(),
         user_repository: user_repository.clone(),
         sessions: Arc::new(Mutex::new(HashMap::new())),
@@ -257,9 +259,13 @@ async fn main() {
         login_limiter: DashMap::new(),
         password_reset_limiter: DashMap::new(),
         password_reset_verify_limiter: DashMap::new(),
+        phone_verify_otps: DashMap::new(),
         matrix_sync_tasks,
         matrix_invitation_tasks,
         matrix_clients,
+        phone_verify_limiter: DashMap::new(),
+        phone_verify_verify_limiter: DashMap::new(),
+        password_reset_otps: DashMap::new(),
     });
 
     let twilio_routes = Router::new()
@@ -312,13 +318,15 @@ async fn main() {
         .route("/api/auth/uber/callback", get(uber_auth::uber_callback));
 
 
-    // Public routes that don't need authentication
+    // Public routes that don't need authentication. there's ratelimiting though
     let public_routes = Router::new()
         .route("/api/health", get(health_check))
         .route("/api/login", post(auth_handlers::login))
         .route("/api/register", post(auth_handlers::register))
         .route("/api/password-reset/request", post(auth_handlers::request_password_reset))
         .route("/api/password-reset/verify", post(auth_handlers::verify_password_reset))
+        .route("/api/phone-verify/request", post(auth_handlers::request_phone_verify))
+        .route("/api/phone-verify/verify", post(auth_handlers::verify_phone_verify))
         .route("/api/self-hosted/signup", post(self_host_handlers::self_hosted_signup))
         .route("/api/self-hosted/login", post(self_host_handlers::self_hosted_login))
         .route("/api/self-hosting-status", get(self_host_handlers::self_hosted_status))

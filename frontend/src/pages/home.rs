@@ -64,12 +64,6 @@ fn render_notification_settings(profile: Option<&UserProfile>) -> Html {
         </div>
     }
 }
-const PHONE_NUMBERS: &[(&str, &str, Option<&str>)] = &[
-    ("us", "+18153684737", None),
-    ("fin", "+358454901522", None),
-    ("gb", "+447383240344", None),
-    ("aus", "+61489260976", None),
-];
 #[derive(Clone, PartialEq)]
 enum DashboardTab {
     Connections,
@@ -316,6 +310,8 @@ pub fn Home() -> Html {
                                     Some(("+1", "+12892066453"))
                                 } else if profile.phone_number_country == Some("FI".to_string()) {
                                     Some(("+358", "+358454901522"))
+                                } else if profile.phone_number_country == Some("NL".to_string()) {
+                                    Some(("+31", "+3197010207742"))
                                 } else if profile.phone_number_country == Some("UK".to_string()) {
                                     Some(("+44", "+447383240344"))
                                 } else if profile.phone_number_country == Some("AU".to_string()) {
@@ -498,6 +494,8 @@ pub fn Home() -> Html {
                                     Some(("+1", "+12892066453"))
                                 } else if profile.phone_number_country == Some("FI".to_string()) {
                                     Some(("+358", "+358454901522"))
+                                } else if profile.phone_number_country == Some("NL".to_string()) {
+                                    Some(("+31", "+3197010207742"))
                                 } else if profile.phone_number_country == Some("UK".to_string()) {
                                     Some(("+44", "+447383240344"))
                                 } else if profile.phone_number_country == Some("AU".to_string()) {

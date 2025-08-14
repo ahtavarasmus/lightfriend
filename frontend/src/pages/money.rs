@@ -573,7 +573,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                         }) }
                         { if (props.subscription_type == "hosted" || props.subscription_type == "guaranteed") && props.selected_country == "Other" {
                             html! { <li>{"Required: Bring your own number and unlock service in whatever country you're in. Checkout the guide below."}</li> }
-                        } else if (props.subscription_type == "hosted" || props.subscription_type == "guaranteed") && ["FI", "UK", "AU"].contains(&props.selected_country.as_str()) {
+                        } else if (props.subscription_type == "hosted" || props.subscription_type == "guaranteed") && ["FI", "NL", "UK", "AU"].contains(&props.selected_country.as_str()) {
                             html! { 
                                 <>
                                     <li>{"Messages not included - buy credits ahead of time. Credits are used for sending messages, voice calls, notifications, and more."}</li>
@@ -608,7 +608,7 @@ pub fn feature_list(props: &FeatureListProps) -> Html {
     let base_messages_text: String = match props.selected_country.as_str() {
         "US" => "400 Messages per month included".to_string(),
         "CA" => "400 Messages per month included".to_string(),
-        "FI" | "UK" | "AU" => "Messages via prepaid credits".to_string(),
+        "FI" | "NL" | "UK" | "AU" => "Messages via prepaid credits".to_string(),
         _ => "Bring your own Twilio for messages (pay Twilio directly)".to_string(),
     };
     let feature_css = r#"
@@ -743,6 +743,7 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
             "US" => (0.075, 0.0033, 0.075, 0.15),
             "CA" => (0.075, 0.0033, 0.075, 0.15),
             "FI" => (0.30, 0.005, 0.15, 0.70),
+            "NL" => (0.30, 0.005, 0.15, 0.45),
             "UK" => (0.30, 0.005, 0.15, 0.15),
             "AU" => (0.30, 0.005, 0.15, 0.15),
             _ => (0.0, 0.0, 0.0, 0.0),
@@ -803,6 +804,7 @@ pub fn pricing_logged_in(props: &PricingProps) -> Html {
                             "US" => country_name.set("United States".to_string()),
                             "CA" => country_name.set("Canada".to_string()),
                             "FI" => country_name.set("Finland".to_string()),
+                            "NL" => country_name.set("Netherlands".to_string()),
                             "UK" => country_name.set("United Kingdom".to_string()),
                             "AU" => country_name.set("Australia".to_string()),
                             _ => country_name.set("Other".to_string()),
@@ -818,6 +820,7 @@ pub fn pricing_logged_in(props: &PricingProps) -> Html {
         ("US".to_string(), 19.00),
         ("CA".to_string(), 19.00),
         ("FI".to_string(), 19.00),
+        ("NL".to_string(), 19.00),
         ("UK".to_string(), 19.00),
         ("AU".to_string(), 19.00),
         ("Other".to_string(), 19.00),
@@ -826,6 +829,7 @@ pub fn pricing_logged_in(props: &PricingProps) -> Html {
         ("US".to_string(), 59.00),
         ("CA".to_string(), 59.00),
         ("FI".to_string(), 59.00),
+        ("NL".to_string(), 59.00),
         ("UK".to_string(), 59.00),
         ("AU".to_string(), 59.00),
         ("Other".to_string(), 59.00),
@@ -1306,7 +1310,7 @@ pub fn pricing_logged_in(props: &PricingProps) -> Html {
                         <div class="country-selector">
                             <label for="country">{"Select your country: "}</label>
                             <select id="country" onchange={on_country_change}>
-                                { for ["US", "CA", "FI", "UK", "AU", "Other"]
+                                { for ["US", "CA", "FI", "NL", "UK", "AU", "Other"]
                                     .iter()
                                     .map(|&c| html! {
                                         <option value={c} selected={*selected_country == c}>{c}</option>
@@ -1383,7 +1387,7 @@ pub fn pricing_logged_in(props: &PricingProps) -> Html {
                                 </details>
                                 </>
                             }
-                        } else if (*selected_country) == "FI" || (*selected_country) == "AU" || (*selected_country) == "UK" {
+                        } else if (*selected_country) == "FI" || (*selected_country) == "NL"  || (*selected_country) == "AU" || (*selected_country) == "UK" {
                             html! {
                                 <>
                                 <details>
@@ -1464,6 +1468,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 "US" => country_name.set("United States".to_string()),
                                 "CA" => country_name.set("Canada".to_string()),
                                 "FI" => country_name.set("Finland".to_string()),
+                                "NL" => country_name.set("Netherlands".to_string()),
                                 "UK" => country_name.set("United Kingdom".to_string()),
                                 "AU" => country_name.set("Australia".to_string()),
                                 _ => country_name.set("Other".to_string()),
@@ -1480,7 +1485,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                         if let Some(name) = json.get("country_name").and_then(|c| c.as_str()) {
                                             country_name.set(name.to_string());
                                         }
-                                        if ["US", "CA", "FI", "UK", "AU"].contains(&code.as_str()) {
+                                        if ["US", "CA", "FI", "NL", "UK", "AU"].contains(&code.as_str()) {
                                             selected_country.set(code);
                                         } else {
                                             selected_country.set("Other".to_string());
@@ -1500,6 +1505,7 @@ pub fn pricing(props: &PricingProps) -> Html {
         ("US".to_string(), 19.00),
         ("CA".to_string(), 19.00),
         ("FI".to_string(), 19.00),
+        ("NL".to_string(), 19.00),
         ("UK".to_string(), 19.00),
         ("AU".to_string(), 19.00),
         ("Other".to_string(), 19.00),
@@ -1508,6 +1514,7 @@ pub fn pricing(props: &PricingProps) -> Html {
         ("US".to_string(), 59.00),
         ("CA".to_string(), 59.00),
         ("FI".to_string(), 59.00),
+        ("NL".to_string(), 59.00),
         ("UK".to_string(), 59.00),
         ("AU".to_string(), 59.00),
         ("Other".to_string(), 59.00),
@@ -1992,7 +1999,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                         <div class="country-selector">
                             <label for="country">{"Select your country: "}</label>
                             <select id="country" onchange={on_country_change}>
-                                { for ["US", "CA", "FI", "UK", "AU", "Other"]
+                                { for ["US", "CA", "FI", "NL", "UK", "AU", "Other"]
                                     .iter()
                                     .map(|&c| html! {
                                         <option value={c} selected={*selected_country == c}>{c}</option>
@@ -2069,7 +2076,7 @@ pub fn pricing(props: &PricingProps) -> Html {
                                 </details>
                                 </>
                             }
-                        } else if (*selected_country) == "FI" || (*selected_country) == "AU" || (*selected_country) == "UK" {
+                        } else if (*selected_country) == "FI" || (*selected_country) == "NL" || (*selected_country) == "AU" || (*selected_country) == "UK" {
                             html! {
                                 <>
                                 <details>

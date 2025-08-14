@@ -427,6 +427,7 @@ pub async fn validate_twilio_signature(
 
         auth_token = if user.phone_number.starts_with("+1") ||
                    user.phone_number.starts_with("+358") ||
+                   user.phone_number.starts_with("+31") ||
                    user.phone_number.starts_with("+44") ||
                    user.phone_number.starts_with("+61") {
             std::env::var("TWILIO_AUTH_TOKEN")
@@ -494,6 +495,7 @@ pub async fn delete_twilio_message_media(
     // Check if user has SMS discount tier and use their credentials if they do
     let (account_sid, auth_token) = if user.phone_number.starts_with("+1") ||
        user.phone_number.starts_with("+358") ||
+       user.phone_number.starts_with("+31") ||
        user.phone_number.starts_with("+44") ||
        user.phone_number.starts_with("+61") {
         (
@@ -564,6 +566,7 @@ pub async fn delete_twilio_message(
 
     let (account_sid, auth_token) = if user.phone_number.starts_with("+1") ||
        user.phone_number.starts_with("+358") ||
+       user.phone_number.starts_with("+31") ||
        user.phone_number.starts_with("+44") ||
        user.phone_number.starts_with("+61") {
         (
@@ -632,8 +635,8 @@ pub async fn send_conversation_message(
         println!("NOT SENDING MESSAGE SINCE ENVIRONMENT IS DEVELOPMENT");
         return Ok("dev not sending anything".to_string());
     }
-    let is_self_hosted = user.sub_tier == Some("self_hosted".to_string());
 
+    /*
     if let Ok((device_id, api_key)) = state.user_core.get_textbee_credentials(user.id) {
         if media_sid.is_none() {
             // Use TextBee for text-only messages
@@ -652,11 +655,13 @@ pub async fn send_conversation_message(
         }
         // If media is present, fall back to Twilio
     }
+    */
     // If TextBee not set up or failed, fall back to Twilio
 
     // Twilio send logic
     let (account_sid, auth_token) = if user.phone_number.starts_with("+1") ||
        user.phone_number.starts_with("+358") ||
+       user.phone_number.starts_with("+31") ||
        user.phone_number.starts_with("+44") ||
        user.phone_number.starts_with("+61") {
         (
@@ -691,6 +696,7 @@ pub async fn send_conversation_message(
             "US" => use_messaging_service = true,
             "CA" => from_number = env::var("CAN_PHONE").unwrap_or_else(|_| { tracing::error!("CAN_PHONE not set"); user.preferred_number.clone().unwrap_or_default() }),
             "FI" => from_number = env::var("FIN_PHONE").unwrap_or_else(|_| { tracing::error!("FIN_PHONE not set"); user.preferred_number.clone().unwrap_or_default() }),
+            "NL" => from_number = env::var("NL_PHONE").unwrap_or_else(|_| { tracing::error!("NL_PHONE not set"); user.preferred_number.clone().unwrap_or_default() }),
             "GB" => from_number = env::var("GB_PHONE").unwrap_or_else(|_| { tracing::error!("GB_PHONE not set"); user.preferred_number.clone().unwrap_or_default() }),
             "AU" => from_number = env::var("AUS_PHONE").unwrap_or_else(|_| { tracing::error!("AUS_PHONE not set"); user.preferred_number.clone().unwrap_or_default() }),
             _ => tracing::info!("Using preferred_number for unsupported country: {}", c),
@@ -733,6 +739,7 @@ pub async fn send_conversation_message(
         .form(&form_data)
         .send()
         .await?;
+
 
     let status = resp.status();
     if !status.is_success() {

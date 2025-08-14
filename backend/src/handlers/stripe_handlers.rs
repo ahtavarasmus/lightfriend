@@ -706,7 +706,7 @@ pub async fn stripe_webhook(
                     }
                     // Add bonus credits for new hosted plan
                     if let Ok(Some(user)) = state.user_repository.find_by_stripe_customer_id(&customer_id.as_str()) {
-                        let is_eligible_for_credits = user.phone_number.starts_with("+358") || user.phone_number.starts_with("+44") || user.phone_number.starts_with("+61");
+                        let is_eligible_for_credits = user.phone_number.starts_with("+358") || user.phone_number.starts_with("+44") || user.phone_number.starts_with("+61") || user.phone_number.starts_with("+31");
                         let sub_info = extract_subscription_info(&base_price);
                         let is_digital_detox = is_digital_detox_subscription(&subscription.items.data);
                         let is_hosted = sub_info.tier == "tier 2" && !is_digital_detox;

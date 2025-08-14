@@ -350,7 +350,6 @@ pub async fn check_message_importance(
 }
 
 
-
 // Helper function to calculate hours until a target hour
 fn hours_until(current_hour: u32, target_hour: u32) -> u32 {
     if current_hour <= target_hour {

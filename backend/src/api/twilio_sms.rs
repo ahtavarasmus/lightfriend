@@ -1152,24 +1152,6 @@ pub async fn process_sms(
         }
     };
 
-
-    let should_charge = if user.free_reply && !payload.body.to_lowercase().starts_with("forget") {
-        false
-    } else {
-        true
-    };
-    if let Err(e) = state.user_core.set_free_reply(user.id, false) {
-        tracing::error!("Failed to reset set_free_reply flag: {}", e);
-    }
-
-    // Perform clarification check
-    let (is_clarifying, clarify_explanation) = crate::tool_call_utils::utils::perform_clarification_check(
-        &client,
-        &chat_messages,
-        &payload.body,
-        &final_response
-    ).await;
-
     // Perform evaluation
     let (eval_result, eval_reason) = crate::tool_call_utils::utils::perform_evaluation(
         &client,
@@ -1180,31 +1162,13 @@ pub async fn process_sms(
     ).await;
 
     let mut final_response_with_notice = final_response.clone();
-    if is_clarifying {
-        if let Err(e) = state.user_core.set_free_reply(user.id, true) {
-            tracing::error!("Failed to set the set_free_reply flag: {}", e);
-        }
-        final_response_with_notice = format!("{} (free reply)", final_response);
-    }
-    tracing::debug!("is_clarifying message: {}", is_clarifying);
 
-    let status = if should_charge {"charging".to_string()} else {"this was free reply".to_string()};
-    tracing::debug!("STATUS: {}", status);
     let mut final_eval: String = "".to_string();
     if let Some(eval) = eval_reason {
-        if let Some(clarify_expl) = clarify_explanation {
-            final_eval = format!("success reason: {}; clarifying explanation: {}",eval,clarify_expl);
-        } else {
-            final_eval = format!("success reason: {}", eval);
-        }
-    } else if let Some(clarify_expl) = clarify_explanation {
-        final_eval = format!("clarifying reason: {}", clarify_expl);
+        final_eval = format!("success reason: {}", eval);
     }
-    tracing::debug!("FINAL_EVAL: {}", final_eval);
 
     let processing_time_secs = start_time.elapsed().as_secs(); // Calculate processing time
-
-
 
     // Clean up old message history based on save_context setting
     let save_context = user_settings.save_context.unwrap_or(0);
@@ -1247,7 +1211,7 @@ pub async fn process_sms(
             Some(processing_time_secs as i32),
             Some(eval_result),
             Some(final_eval),
-            Some(status),
+            None,
             None,
             None
         ) {
@@ -1300,9 +1264,7 @@ pub async fn process_sms(
     ).await {
         Ok(message_sid) => {
             // Log the SMS usage metadata and store message history
-            tracing::debug!("status of the message: {}", status);
             
-
             // Log usage
             if let Err(e) = state.user_repository.log_usage(
                 user.id,
@@ -1312,47 +1274,43 @@ pub async fn process_sms(
                 Some(processing_time_secs as i32),
                 Some(eval_result),
                 Some(final_eval.clone()),
-                Some(status.clone()),
+                None,
                 None,
                 None,
             ) {
                 tracing::error!("Failed to log SMS usage: {}", e);
             }
 
-
-            if should_charge {
-                // Only deduct credits if we should charge
-                if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
-                    tracing::error!("Failed to deduct user credits: {}", e);
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        [(axum::http::header::CONTENT_TYPE, "application/json")],
-                        axum::Json(TwilioResponse {
-                            message: "Failed to process credits points".to_string(),
-                        })
-                    );
-                }
-                        
-                match state.user_repository.is_credits_under_threshold(user.id) {
-                    Ok(is_under) => {
-                        if is_under {
-                            tracing::debug!("User {} credits is under threshold, attempting automatic charge", user.id);
-                            // Get user information
-                            if user.charge_when_under {
-                                use axum::extract::{State, Path};
-                                let state_clone = Arc::clone(&state);
-                                tokio::spawn(async move {
-                                    let _ = crate::handlers::stripe_handlers::automatic_charge(
-                                        State(state_clone),
-                                        Path(user.id),
-                                    ).await;
-                                    tracing::debug!("Recharged the user successfully back up!");
-                                });
-                            }
+            if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user.id, "message", None) {
+                tracing::error!("Failed to deduct user credits: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    axum::Json(TwilioResponse {
+                        message: "Failed to process credits points".to_string(),
+                    })
+                );
+            }
+                    
+            match state.user_repository.is_credits_under_threshold(user.id) {
+                Ok(is_under) => {
+                    if is_under {
+                        tracing::debug!("User {} credits is under threshold, attempting automatic charge", user.id);
+                        // Get user information
+                        if user.charge_when_under {
+                            use axum::extract::{State, Path};
+                            let state_clone = Arc::clone(&state);
+                            tokio::spawn(async move {
+                                let _ = crate::handlers::stripe_handlers::automatic_charge(
+                                    State(state_clone),
+                                    Path(user.id),
+                                ).await;
+                                tracing::debug!("Recharged the user successfully back up!");
+                            });
                         }
-                    },
-                    Err(e) => tracing::error!("Failed to check if user credits is under threshold: {}", e),
-                }
+                    }
+                },
+                Err(e) => tracing::error!("Failed to check if user credits is under threshold: {}", e),
             }
 
             (

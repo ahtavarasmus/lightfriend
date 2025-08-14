@@ -160,6 +160,8 @@ pub fn digest_section(props: &DigestSectionProps) -> Html {
         "US"
     } else if phone_number.starts_with("+358") {
         "FI"
+    } else if phone_number.starts_with("+31") {
+        "NL"
     } else if phone_number.starts_with("+44") {
         "UK"
     } else if phone_number.starts_with("+61") {

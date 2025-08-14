@@ -15,6 +15,7 @@ pub async fn check_user_credits(
     let messages_are_included;
     if user.phone_number.starts_with("+1") ||
             user.phone_number.starts_with("+358") ||
+            user.phone_number.starts_with("+31") ||
             user.phone_number.starts_with("+44") ||
             user.phone_number.starts_with("+61") {
         messages_are_included = false;
@@ -32,6 +33,8 @@ pub async fn check_user_credits(
         (0.075, 0.0033, 0.075, 0.15) // US
     } else if user.phone_number.starts_with("+358") {
         (0.30, 0.005, 0.15, 0.70) // Finland
+    } else if user.phone_number.starts_with("+31") {
+        (0.30, 0.005, 0.15, 0.45) // NL
     } else if user.phone_number.starts_with("+44") {
         (0.30, 0.005, 0.15, 0.15) // UK
     } else if user.phone_number.starts_with("+61") {
@@ -138,6 +141,7 @@ pub fn deduct_user_credits(
     let messages_are_included;
     if user.phone_number.starts_with("+1") ||
             user.phone_number.starts_with("+358") ||
+            user.phone_number.starts_with("+31") ||
             user.phone_number.starts_with("+44") ||
             user.phone_number.starts_with("+61") {
         messages_are_included = false;
@@ -155,6 +159,8 @@ pub fn deduct_user_credits(
         (0.075, 0.0033, 0.075, 0.15) // US
     } else if user.phone_number.starts_with("+358") {
         (0.30, 0.005, 0.15, 0.70) // Finland
+    } else if user.phone_number.starts_with("+31") {
+        (0.30, 0.005, 0.15, 0.45) // NL 
     } else if user.phone_number.starts_with("+44") {
         (0.30, 0.005, 0.15, 0.15) // UK
     } else if user.phone_number.starts_with("+61") {

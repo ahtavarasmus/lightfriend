@@ -214,6 +214,8 @@ pub async fn get_profile(
                 "US".to_string()
             } else if phone_number.starts_with("+358") {
                 "FI".to_string()
+            } else if phone_number.starts_with("+31") {
+                "NL".to_string()
             } else if phone_number.starts_with("+44") {
                 "UK".to_string()
             } else if phone_number.starts_with("+61") {
@@ -783,6 +785,8 @@ pub async fn set_user_phone_country(state: &Arc<AppState>, user_id: i32, phone_n
         }
     } else if phone_number.starts_with("+358") {
         country = Some("FI".to_string());
+    } else if phone_number.starts_with("+31") {
+        country = Some("NL".to_string());
     } else if phone_number.starts_with("+44") {
         country = Some("GB".to_string());
     } else if phone_number.starts_with("+61") {

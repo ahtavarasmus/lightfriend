@@ -713,6 +713,8 @@ impl UserCore {
                 "US"
             } else if phone_number.starts_with("+358") {
                 "FI"
+            } else if phone_number.starts_with("+31") {
+                "NL"
             } else if phone_number.starts_with("+44") {
                 "UK"
             } else if phone_number.starts_with("+61") {
@@ -730,6 +732,8 @@ impl UserCore {
                     ("US", Some("call")) => notifications_per_month * 0.5, // 1/2 message cost
                     ("FI", Some("sms")) => notifications_per_month * 0.15,
                     ("FI", Some("call")) => notifications_per_month * 0.70,
+                    ("NL", Some("sms")) => notifications_per_month * 0.15,
+                    ("NL", Some("call")) => notifications_per_month * 0.45,
                     ("UK", Some("sms")) => notifications_per_month * 0.15,
                     ("UK", Some("call")) => notifications_per_month * 0.15,
                     ("AU", Some("sms")) => notifications_per_month * 0.15,
@@ -789,7 +793,6 @@ impl UserCore {
                 }
             }
         };
-        println!("average per day: {}", average_priority_per_day);
         // Get user's phone number to determine country
         let phone_number = self
             .find_by_id(user_id)?
@@ -800,6 +803,8 @@ impl UserCore {
             "US"
         } else if phone_number.starts_with("+358") {
             "FI"
+        } else if phone_number.starts_with("+31") {
+            "NL"
         } else if phone_number.starts_with("+44") {
             "UK"
         } else if phone_number.starts_with("+61") {
@@ -813,6 +818,7 @@ impl UserCore {
             match (country, "sms") {
                 ("US", "sms") => notifications_per_month * 0.15 / 2.0,
                 ("FI", "sms") => notifications_per_month * 0.15,
+                ("NL", "sms") => notifications_per_month * 0.15,
                 ("UK", "sms") => notifications_per_month * 0.15,
                 ("AU", "sms") => notifications_per_month * 0.15,
                 _ => 0.0, // No pricing for "Other"

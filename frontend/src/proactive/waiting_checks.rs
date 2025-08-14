@@ -174,6 +174,8 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
         "US"
     } else if phone_number.starts_with("+358") {
         "FI"
+    } else if phone_number.starts_with("+31") {
+        "NL"
     } else if phone_number.starts_with("+44") {
         "UK"
     } else if phone_number.starts_with("+61") {
@@ -184,6 +186,7 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
     let sms_extra: Html = match country {
         "US" => html! { <span class="price-note">{" (1/2 Message per notification)"}</span> },
         "FI" => html! { <span class="price-note">{format!(" (€{:.2} per notification)", 0.15)}</span> },
+        "NL" => html! { <span class="price-note">{format!(" (€{:.2} per notification)", 0.15)}</span> },
         "UK" => html! { <span class="price-note">{format!(" (£{:.2} per notification)", 0.15)}</span> },
         "AU" => html! { <span class="price-note">{format!(" (${:.2} per notification)", 0.15)}</span> },
         "Other" => html! { <span class="price-note">{" ("}<a href="/bring-own-number">{"see pricing"}</a>{" per notification)"}</span> },

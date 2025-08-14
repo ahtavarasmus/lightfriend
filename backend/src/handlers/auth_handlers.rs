@@ -409,6 +409,177 @@ pub async fn verify_password_reset(
     Ok(Json(response))
 }
 
+
+#[derive(serde::Deserialize)]
+pub struct SendOtpRequest {
+    phone_number: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct VerifyOtpRequest {
+    phone_number: String,
+    otp: String,
+}
+
+pub async fn request_phone_verify(
+    State(state): State<Arc<AppState>>,
+    Json(reset_req): Json<SendOtpRequest>,
+) -> Result<Json<PasswordResetResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Define rate limit: 3 attempts per hour per phone_number
+    let quota = Quota::per_hour(NonZeroU32::new(3).unwrap());
+    let limiter_key = reset_req.phone_number.clone();
+    // Get or create a rate limiter for this phone_number
+    let entry = state.phone_verify_limiter
+        .entry(limiter_key.clone())
+        .or_insert_with(|| RateLimiter::keyed(quota));
+    let limiter = entry.value();
+    // Check if rate limit is exceeded
+    if limiter.check_key(&limiter_key).is_err() {
+        println!("Rate limit exceeded for phone verify request: [redacted phone]");
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({"error": "Too many verification attempts. Please try again later."}))
+        ));
+    }
+    // Find user by phone_number
+    let user = match state.user_core.find_by_phone_number(&reset_req.phone_number) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "No user found with this phone number"}))
+            ));
+        }
+        Err(_) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Database error"}))
+            ));
+        }
+    };
+    // Generate 6-digit OTP
+    let otp: String = rand::thread_rng()
+        .sample_iter(&rand::distributions::Uniform::new(0, 10))
+        .take(6)
+        .map(|d| d.to_string())
+        .collect();
+    // Store OTP with expiration (5 minutes from now)
+    let expiration = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() + 300; // 5 minutes
+    // Remove any existing OTP for this phone_number first
+    state.phone_verify_otps.remove(&reset_req.phone_number);
+    // Insert the new OTP
+    state.phone_verify_otps.insert(
+        reset_req.phone_number.clone(),
+        (otp.clone(), expiration)
+    );
+    println!("Stored OTP {} for phone {} with expiration {}", otp, reset_req.phone_number, expiration);
+    let message = format!("Your Lightfriend verification code is: {}. Valid for 5 minutes.", otp);
+    if let Err(_) = crate::api::twilio_utils::send_conversation_message(
+        &state,
+        &message,
+        None,
+        &user
+    ).await {
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to send OTP"}))
+        ));
+    }
+    Ok(Json(PasswordResetResponse {
+        message: "Verification code sent to your phone".to_string()
+    }))
+}
+
+pub async fn verify_phone_verify(
+    State(state): State<Arc<AppState>>,
+    Json(verify_req): Json<VerifyOtpRequest>,
+) -> Result<Json<PasswordResetResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Define rate limit: 3 attempts per 60 minutes per phone_number
+    let quota = Quota::with_period(std::time::Duration::from_secs(60 * 60))
+        .unwrap()
+        .allow_burst(NonZeroU32::new(3).unwrap());
+    let limiter_key = verify_req.phone_number.clone();
+    // Get or create a rate limiter for this phone_number
+    let entry = state.phone_verify_verify_limiter
+        .entry(limiter_key.clone())
+        .or_insert_with(|| RateLimiter::keyed(quota));
+    let limiter = entry.value();
+    // Check if rate limit is exceeded
+    if limiter.check_key(&limiter_key).is_err() {
+        println!("Rate limit exceeded for phone verify verification: [redacted phone]");
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({"error": "Too many verification attempts. Please try again later."}))
+        ));
+    }
+    println!("Verifying OTP {} for phone {}", verify_req.otp, verify_req.phone_number);
+   
+    // Remove the OTP data immediately to prevent any hanging references
+    let otp_data = match state.phone_verify_otps.remove(&verify_req.phone_number) {
+        Some((_, data)) => data, // The first element is the key (phone), second is the value tuple
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "No valid OTP found for this phone number"}))
+            ));
+        }
+    };
+    let (stored_otp, expiration_time) = otp_data;
+    let current_time = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    if current_time > expiration_time {
+        println!("OTP expired: current_time {} > expiration {}", current_time, expiration_time);
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "OTP has expired"}))
+        ));
+    }
+    if verify_req.otp != stored_otp {
+        println!("OTP mismatch: provided {} != stored {}", verify_req.otp, stored_otp);
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "Invalid OTP"}))
+        ));
+    }
+    // Find user by phone_number to verify
+    let user = match state.user_core.find_by_phone_number(&verify_req.phone_number) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({"error": "No user found with this phone number"}))
+            ));
+        }
+        Err(_) => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": "Database error"}))
+            ));
+        }
+    };
+    // Verify the user
+    if let Err(e) = state.user_core.verify_user(user.id) {
+        tracing::error!("Error verifying user: {}", e);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({"error": "Failed to verify user"}))
+        ));
+    }
+    println!("User verified successfully");
+   
+    // Create success response
+    let response = PasswordResetResponse {
+        message: "Phone number has been verified successfully.".to_string()
+    };
+   
+    Ok(Json(response))
+}
+
 pub async fn register(
     State(state): State<Arc<AppState>>,
     Json(reg_req): Json<RegisterRequest>,
@@ -625,3 +796,5 @@ pub async fn testing_handler(
         }
     }
 }
+
+

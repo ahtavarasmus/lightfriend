@@ -105,6 +105,8 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
         "US"
     } else if phone_number.starts_with("+358") {
         "FI"
+    } else if phone_number.starts_with("+31") {
+        "NL"
     } else if phone_number.starts_with("+44") {
         "UK"
     } else if phone_number.starts_with("+61") {
@@ -116,6 +118,7 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
     let currency = match country {
         "US" => "", // No currency symbol for US (Messages will be used)
         "FI" => "€",
+        "NL" => "€",
         "UK" => "£",
         "AU" => "$",
         _ => "$",
@@ -124,6 +127,7 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
     let sms_extra: Html = match country {
         "US" => html! { <span>{" (1/2 Message)"}</span> },
         "FI" => html! { <span>{format!(" (€{:.2} per message)", 0.15)}</span> },
+        "NL" => html! { <span>{format!(" (€{:.2} per message)", 0.15)}</span> },
         "UK" => html! { <span>{format!(" (£{:.2} per message)", 0.15)}</span> },
         "AU" => html! { <span>{format!(" (${:.2} per message)", 0.15)}</span> },
         "Other" => html! { <>{" ("}<a href="/bring-own-number">{"see pricing"}</a>{")"}</> },
@@ -133,6 +137,7 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
     let call_extra: Html = match country {
         "US" => html! { <span>{" (1/2 Message)"}</span> },
         "FI" => html! { <span>{format!(" (€{:.2} per call)", 0.70)}</span> },
+        "NL" => html! { <span>{format!(" (€{:.2} per call)", 0.70)}</span> },
         "UK" => html! { <span>{format!(" (£{:.2} per call)", 0.15)}</span> },
         "AU" => html! { <span>{format!(" (${:.2} per call)", 0.15)}</span> },
         "Other" => html! { <>{" ("}<a href="/bring-own-number">{"see pricing"}</a>{")"}</> },

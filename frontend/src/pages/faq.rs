@@ -251,7 +251,7 @@ pub fn faq() -> Html {
                 >
                     <p>{"Lightfriend can be made to work globally, but all features may not work everywhere."}</p> 
                     <p>{"For people in the US and Canada, lightfriend phone number and messages are included."}</p>
-                    <p>{"If you live Finland, UK or Australia, lightfriend provides a phone number, but messages have to be bought separately beforehand."}</p>
+                    <p>{"If you live Finland, UK, Netherlands or Australia, lightfriend provides a phone number, but messages have to be bought separately beforehand."}</p>
                     <p>{"Elsewhere you will have to bring your own Twilio number or if you have an extra android phone with extra phone plan laying around, you can use it to send and receive sms messages through it without extra costs. See your country's Twilio pricing and regulations from "}<a href="/bring-own-number">{"here"}</a> {" or ask about the service availability in your country by emailing "}<a href="mailto:rasmus@ahtava.com">{"rasmus@ahtava.com."}</a></p>
                 
                 </FaqItem>
