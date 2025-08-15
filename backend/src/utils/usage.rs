@@ -30,15 +30,15 @@ pub async fn check_user_credits(
 
     // Define costs based on phone number
     let (message_cost, voice_second_cost, noti_msg_cost, noti_call_cost) = if user.phone_number.starts_with("+1") {
-        (0.075, 0.0033, 0.075, 0.15) // US
+        (0.075, 0.0033, 0.075, 0.15) // US, CA
     } else if user.phone_number.starts_with("+358") {
         (0.30, 0.005, 0.15, 0.70) // Finland
     } else if user.phone_number.starts_with("+31") {
         (0.30, 0.005, 0.15, 0.45) // NL
     } else if user.phone_number.starts_with("+44") {
-        (0.30, 0.005, 0.15, 0.15) // UK
+        (0.30, 0.005, 0.15, 0.20) // UK
     } else if user.phone_number.starts_with("+61") {
-        (0.30, 0.005, 0.15, 0.15) // Australia
+        (0.30, 0.005, 0.15, 0.20) // Australia
     } else {
         (0.0, 0.0, 0.0, 0.0) 
     };
@@ -162,9 +162,9 @@ pub fn deduct_user_credits(
     } else if user.phone_number.starts_with("+31") {
         (0.30, 0.005, 0.15, 0.45) // NL 
     } else if user.phone_number.starts_with("+44") {
-        (0.30, 0.005, 0.15, 0.15) // UK
+        (0.30, 0.005, 0.15, 0.20) // UK
     } else if user.phone_number.starts_with("+61") {
-        (0.30, 0.005, 0.15, 0.15) // Australia
+        (0.30, 0.005, 0.15, 0.20) // Australia
     } else {
         (0.0, 0.0, 0.0, 0.0) 
     };

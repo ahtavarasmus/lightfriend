@@ -57,7 +57,7 @@ pub fn get_create_waiting_check_tool() -> openai_api_rs::v1::chat_completion::To
         "content".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The content to look for in incoming messages".to_string()),
+            description: Some("The content to look for in future incoming messages".to_string()),
             ..Default::default()
         }),
     );
@@ -65,8 +65,17 @@ pub fn get_create_waiting_check_tool() -> openai_api_rs::v1::chat_completion::To
         "service_type".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Which service to monitor. Must be either \"messaging\" or \"email\".".to_string()),
+            description: Some("Which service to start monitoring for. Must be either \"messaging\" or \"email\".".to_string()),
             enum_values: Some(vec!["messaging".to_string(), "email".to_string()]),
+            ..Default::default()
+        }),
+    );
+    waiting_check_properties.insert(
+        "noti_type".to_string(),
+        Box::new(types::JSONSchemaDefine {
+            schema_type: Some(types::JSONSchemaType::String),
+            description: Some("How to notify user when content is found. Must be either \"sms\" or \"call\". If the user doesn't mention how they want to be notified, default to \"sms\"".to_string()),
+            enum_values: Some(vec!["sms".to_string(), "call".to_string()]),
             ..Default::default()
         }),
     );
@@ -78,7 +87,7 @@ pub fn get_create_waiting_check_tool() -> openai_api_rs::v1::chat_completion::To
             description: Some(String::from(
                 "Creates a waiting check for monitoring email or messages. \
                  Use this when the user wants to be notified in the future about specific content that appears \
-                 in their emails or messaging apps such as WhatsApp.",
+                 in their emails or messaging apps such as WhatsApp or Telegram.",
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
@@ -98,6 +107,7 @@ use std::error::Error;
 pub struct WaitingCheckArgs {
     pub content: String,
     pub service_type: String,
+    pub noti_type: Option<String>,
 }
 
 pub async fn handle_create_waiting_check(
@@ -111,6 +121,7 @@ pub async fn handle_create_waiting_check(
         user_id,
         content: args.content,
         service_type: args.service_type,
+        noti_type: args.noti_type,
     };
 
     state.user_repository.create_waiting_check(&new_check).map_err(|e| Box::new(e) as Box<dyn Error>)?;

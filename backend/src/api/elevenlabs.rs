@@ -364,6 +364,7 @@ pub async fn fetch_assistant(
 pub struct WaitingCheckPayload {
     pub content: String,
     pub service_type: String,
+    pub noti_type: Option<String>,
 }
 
 pub async fn handle_create_waiting_check_tool_call(
@@ -391,6 +392,7 @@ pub async fn handle_create_waiting_check_tool_call(
                 user_id: user_id,
                 content: payload.content,
                 service_type: payload.service_type,
+                noti_type: payload.noti_type,
             };
 
             match state.user_repository.create_waiting_check(&new_check) {

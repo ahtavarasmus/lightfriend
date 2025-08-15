@@ -632,14 +632,8 @@ pub fn Home() -> Html {
                     }
                     <footer class="dashboard-footer">
                         <div class="development-links">
-                            <p>{"Follow development progress at "}
-                                <a href="https://pacepeek.com/ahtavarasmus" target="_blank" rel="noopener noreferrer">
-                                    {"pacepeek.com/ahtavarasmus"}
-                                </a>
-                                {" or "}
-                                <a href="https://x.com/rasmuscodes" target="_blank" rel="noopener noreferrer">
-                                    {"x.com/rasmuscodes"}
-                                </a>
+                            <p>{"Source code on "}
+                                <a href="https://github.com/ahtavarasmus/lightfriend" target="_blank" rel="noopener noreferrer">{"GitHub"}</a>
                             </p>
                             <div class="legal-links">
                                 <a href="/terms">{"Terms & Conditions"}</a>

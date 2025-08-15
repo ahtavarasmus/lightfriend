@@ -874,19 +874,24 @@ pub async fn handle_bridge_message(
 
     let service_cap = capitalize(&service);
 
-    // FAST CHECKS SECOND - Check priority senders if active
+        // FAST CHECKS SECOND - Check priority senders if active
     for priority_sender in &priority_senders {
-
         let clean_priority_sender = priority_sender.sender
             .split(&room_suffix)
             .next()
             .unwrap_or(&priority_sender.sender)
             .trim()
             .to_string();
-
         if chat_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) ||
            sender_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) {
-            
+           
+            // Determine suffix based on noti_type
+            let suffix = match priority_sender.noti_type.as_ref().map(|s| s.as_str()) {
+                Some("call") => "_call",
+                _ => "_sms",
+            };
+            let notification_type = format!("{}_priority{}", service, suffix);
+           
             // Check if user has enough credits for notification
             match crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await {
                 Ok(()) => {
@@ -895,8 +900,7 @@ pub async fn handle_bridge_message(
                     let content_clone = content.clone();
                     let message = trim_for_sms(&service, &priority_sender.sender, &content_clone);
                     let first_message = format!("Hello, you have an important {} message from {}.", service_cap, priority_sender.sender);
-                    let notification_type = format!("{}_priority", service);
-                    
+                   
                     // Spawn a new task for sending notification
                     tokio::spawn(async move {
                         // Send the notification
@@ -907,7 +911,7 @@ pub async fn handle_bridge_message(
                             notification_type,
                             Some(first_message),
                         ).await;
-                        
+                       
                     });
                     return;
                 }
@@ -918,7 +922,7 @@ pub async fn handle_bridge_message(
         }
     }
 
-    if !waiting_checks.is_empty() {
+        if !waiting_checks.is_empty() {
         // Check if any waiting checks match the message
         if let Ok((check_id_option, message, first_message)) = crate::proactive::utils::check_waiting_check_match(
             &state,
@@ -928,15 +932,26 @@ pub async fn handle_bridge_message(
             if let Some(check_id) = check_id_option {
                 let message = message.unwrap_or(format!("Waiting check matched in {}, but failed to get content", service).to_string());
                 let first_message = first_message.unwrap_or(format!("Hey, I found a match for one of your waiting checks in {}.", service_cap));
-                
+               
+                // Find the matched waiting check to determine noti_type
+                let matched_waiting_check = waiting_checks.iter().find(|wc| wc.id == Some(check_id)).cloned();
+                let suffix = if let Some(wc) = matched_waiting_check {
+                    match wc.noti_type.as_ref().map(|s| s.as_str()) {
+                        Some("call") => "_call",
+                        _ => "_sms",
+                    }
+                } else {
+                    "_sms"
+                };
+                let notification_type = format!("{}_waiting_check{}", service, suffix);
+               
                 // Delete the matched waiting check
                 if let Err(e) = state.user_repository.delete_waiting_check_by_id(user_id, check_id) {
                     tracing::error!("Failed to delete waiting check {}: {}", check_id, e);
                 }
-                
+               
                 // Send notification
                 let state_clone = state.clone();
-                let notification_type = format!("{}_waiting_check", service);
                 tokio::spawn(async move {
                     crate::proactive::utils::send_notification(
                         &state_clone,

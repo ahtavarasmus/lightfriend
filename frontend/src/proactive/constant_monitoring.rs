@@ -17,11 +17,13 @@ pub struct Room {
 pub struct MonitoredContact {
     pub sender: String,
     pub service_type: String,
+    pub noti_type: Option<String>,
 }
 #[derive(Deserialize, Serialize)]
 pub struct MonitoredContactRequest {
     sender: String,
     service_type: String,
+    noti_type: Option<String>,
 }
 #[derive(Properties, PartialEq, Clone)]
 pub struct MonitoredContactsProps {
@@ -62,7 +64,8 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
     let all_contacts = props.contacts.clone();
     let all_empty = all_contacts.is_empty();
     let new_contact = use_state(|| String::new());
-    let selected_service = use_state(|| String::new());
+    let selected_service = use_state(|| "".to_string());
+    let selected_noti_type = use_state(|| "sms".to_string());
     let contacts_local = use_state(|| props.contacts.clone());
     let error_message = use_state(|| None::<String>);
     let show_info = use_state(|| false);
@@ -71,34 +74,6 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
     let is_searching = use_state(|| false);
     let average_per_day = use_state(|| 0.0);
     let estimated_monthly_price = use_state(|| 0.0);
-    // Load selected service from local storage on mount
-    {
-        let selected_service = selected_service.clone();
-        use_effect_with_deps(
-            move |_| {
-                if let Some(storage) = window().and_then(|w| w.local_storage().ok()).flatten() {
-                    if let Ok(Some(value)) = storage.get_item("monitored_selected_service") {
-                        selected_service.set(value);
-                    }
-                }
-                || ()
-            },
-            (),
-        );
-    }
-    // Save selected service to local storage when it changes
-    {
-        let selected_service = selected_service.clone();
-        use_effect_with_deps(
-            move |selected_service| {
-                if let Some(storage) = window().and_then(|w| w.local_storage().ok()).flatten() {
-                    let _ = storage.set_item("monitored_selected_service", &**selected_service);
-                }
-                || ()
-            },
-            (*selected_service).clone(),
-        );
-    }
     let hide_suggestions = {
         let show_suggestions = show_suggestions.clone();
         Callback::from(move |_| {
@@ -138,7 +113,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                 let show_suggestions = show_suggestions.clone();
                 let is_searching = is_searching.clone();
                 is_searching.set(true);
-              
+             
                 spawn_local(async move {
                     match Request::get(&format!(
                         "{}/api/{}/search-rooms?search={}",
@@ -222,9 +197,10 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
         let new_contact = new_contact.clone();
         let refresh = refresh_from_server.clone();
         let selected_service = selected_service.clone();
+        let selected_noti_type = selected_noti_type.clone();
         let contacts_local = contacts_local.clone();
         let error_message = error_message.clone();
-  
+ 
         Callback::from(move |_| {
             let identifier = (*new_contact).trim().to_string();
             if identifier.is_empty() { return; }
@@ -241,7 +217,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                 error_message.set(Some("Please enter a valid email address".to_string()));
                 return;
             }
-      
+     
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
                 .flatten()
@@ -251,6 +227,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                 let new_contact = new_contact.clone();
                 let refresh = refresh.clone();
                 let service_type = service_type.clone();
+                let noti_type = (*selected_noti_type).clone();
                 spawn_local(async move {
                     let _ = Request::post(&format!(
                         "{}/api/filters/monitored-contact/{}",
@@ -261,6 +238,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     .json(&MonitoredContactRequest {
                         sender: identifier,
                         service_type: service_type.clone(),
+                        noti_type: Some(noti_type),
                     })
                     .unwrap()
                     .send()
@@ -274,7 +252,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
     };
     let delete_monitored_contact = {
         let refresh = refresh_from_server.clone();
-  
+ 
         Callback::from(move |(identifier, service_type): (String, String)| {
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
@@ -283,7 +261,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                 .flatten()
             {
                 let refresh = refresh.clone();
-          
+         
                 spawn_local(async move {
                     let _ = Request::delete(&format!(
                         "{}/api/filters/monitored-contact/{}/{}",
@@ -294,7 +272,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     .header("Authorization", &format!("Bearer {}", token))
                     .send()
                     .await;
-              
+             
                     refresh.emit(());
                 });
             }
@@ -401,6 +379,24 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                         color: #fff;
                         padding: 0.5rem;
                     }
+                    .noti-select {
+                        padding: 0.75rem;
+                        border-radius: 8px;
+                        border: 1px solid rgba(245, 158, 11, 0.2);
+                        background: rgba(0, 0, 0, 0.2);
+                        color: #fff;
+                        min-width: 100px;
+                        cursor: pointer;
+                    }
+                    .noti-select:focus {
+                        outline: none;
+                        border-color: #F59E0B;
+                    }
+                    .noti-select option {
+                        background: #1a1a1a;
+                        color: #fff;
+                        padding: 0.5rem;
+                    }
                     .waiting-check-fields input[type="text"] {
                         padding: 0.75rem;
                         border-radius: 8px;
@@ -475,13 +471,27 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                         color: #D3D3D3;
                         border: 1px solid rgba(245, 158, 11, 0.2);
                     }
-                    .service-type-badge.messaging {
+                    .service-type-badge.whatsapp {
                         color: #25D366;
                         border: 1px solid rgba(236, 72, 153, 0.2);
                     }
                     .service-type-badge.telegram {
                         color: #0088cc;
                         border: 1px solid rgba(0, 136, 204, 0.2);
+                    }
+                    .noti-type-badge {
+                        padding: 0.25rem 0.75rem;
+                        border-radius: 8px;
+                        font-size: 0.8rem;
+                        background: rgba(0, 0, 0, 0.2);
+                    }
+                    .noti-type-badge.sms {
+                        color: #4ECDC4;
+                        border: 1px solid rgba(78, 205, 196, 0.2);
+                    }
+                    .noti-type-badge.call {
+                        color: #FF6347;
+                        border: 1px solid rgba(255, 99, 71, 0.2);
                     }
                     .filter-list li:hover {
                         border-color: rgba(245, 158, 11, 0.2);
@@ -633,8 +643,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     </button>
                 </div>
                 <div class="flow-description">
-                    {"Get notified about messages from your monitored contacts"}
-                    {". Note: Check info for notification quotas."}
+                    {"Get always notified about messages from your monitored contacts"}
                 </div>
                 <div class="notification-cost">
                     {if *estimated_monthly_price == 0.0 {
@@ -693,9 +702,10 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                                 }
                             })}
                         >
-                            <option value="imap">{"Email"}</option>
                             <option value="whatsapp">{"WhatsApp"}</option>
                             <option value="telegram">{"Telegram"}</option>
+                            <option value="imap">{"Email"}</option>
+                            <option value="">{"Select Service"}</option>
                         </select>
                         {
                             if !(*selected_service).is_empty() {
@@ -796,6 +806,28 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                                 html! {}
                             }
                         }
+                        {
+                            if !(*selected_service).is_empty() {
+                                html! {
+                                    <select
+                                        class="noti-select"
+                                        value={(*selected_noti_type).clone()}
+                                        onchange={Callback::from({
+                                            let selected_noti_type = selected_noti_type.clone();
+                                            move |e: Event| {
+                                                let input: HtmlInputElement = e.target_unchecked_into();
+                                                selected_noti_type.set(input.value());
+                                            }
+                                        })}
+                                    >
+                                        <option value="call">{"Call"}</option>
+                                        <option value="sms">{"SMS"}</option>
+                                    </select>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
                     </div>
                     {
                         if !(*selected_service).is_empty() {
@@ -813,6 +845,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     let service_type_class = match contact.service_type.as_str() {
                         "imap" => "email",
                         "telegram" => "telegram",
+                        "whatsapp" => "whatsapp",
                         _ => "messaging",
                     };
                     let service_type_display = match contact.service_type.as_str() {
@@ -821,10 +854,16 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                         "telegram" => "Telegram",
                         _ => "Unknown",
                     };
+                    let noti_type_display = contact.noti_type.as_ref().map(|s| s.as_str()).unwrap_or("sms");
+                    let noti_type_class = match noti_type_display {
+                        "call" => "call",
+                        _ => "sms",
+                    };
                     html! {
                         <li>
                             <span>{identifier.clone()}</span>
                             <span class={classes!("service-type-badge", service_type_class)}>{service_type_display}</span>
+                            <span class={classes!("noti-type-badge", noti_type_class)}>{noti_type_display.to_uppercase()}</span>
                             <button class="delete-btn"
                                 onclick={Callback::from({
                                     let identifier = identifier.clone();

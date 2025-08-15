@@ -163,13 +163,11 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             Vec::new()
                                         }
                                     };
-
                                     // Mark emails as processed and format them for importance checking
                                     let mut emails_content = String::from("New emails:\n");
                                     for email in &sorted_emails {
-
                                         // Check if sender matches priority senders and send the noti anyways about it
-                                        if priority_senders.iter().any(|priority_sender| {
+                                        if let Some(matched_sender) = priority_senders.iter().find(|priority_sender| {
                                             let priority_lower = priority_sender.sender.to_lowercase();
                                             // Check 'from' (display name)
                                             let from_matches = email.from.as_deref().unwrap_or("Unknown").to_lowercase().contains(&priority_lower);
@@ -178,7 +176,14 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             from_matches || from_email_matches
                                         }) {
                                             tracing::info!("Fast check: Priority sender matched for user {}", user.id);
-                                            
+                                           
+                                            // Determine suffix based on noti_type
+                                            let suffix = match matched_sender.noti_type.as_ref().map(|s| s.as_str()) {
+                                                Some("call") => "_call",
+                                                _ => "_sms",
+                                            };
+                                            let notification_type = format!("email_priority{}", suffix);
+                                           
                                             // Format the notification message with sender and content
                                             let message = format!(
                                                 "Email from: {}\nSubject: {}\nContent: {}",
@@ -186,11 +191,11 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                 email.subject.as_deref().unwrap_or("No subject"),
                                                 email.body.as_deref().unwrap_or("No content").chars().take(200).collect::<String>()
                                             );
-                                            let first_message = format!("Hello, you have a critical email from {} with subject: {}", 
-                                                        email.from.as_deref().unwrap_or("Unknown"),
-                                                        email.subject.as_deref().unwrap_or("No subject")
-                                                    );
-                                            
+                                            let first_message = format!("Hello, you have a critical email from {} with subject: {}",
+                                                email.from.as_deref().unwrap_or("Unknown"),
+                                                email.subject.as_deref().unwrap_or("No subject")
+                                            );
+                                           
                                             // Spawn a new task for sending notification
                                             let state_clone = state.clone();
                                             tokio::spawn(async move {
@@ -198,7 +203,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                     &state_clone,
                                                     user.id,
                                                     &message,
-                                                    "email_priority".to_string(),
+                                                    notification_type,
                                                     Some(first_message),
                                                 ).await;
                                             });
@@ -213,7 +218,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                             email.body.as_deref().unwrap_or("No content")
                                         );
 
-                                        // Check waiting checks first if they exist
+                                                                                // Check waiting checks first if they exist
                                         let waiting_checks = match state.user_repository.get_waiting_checks(user.id, "email") {
                                             Ok(checks) => checks,
                                             Err(e) => {
@@ -221,7 +226,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                 Vec::new()
                                             }
                                         };
-
                                         if !waiting_checks.is_empty() {
                                             // Check if any waiting checks match the message
                                             if let Ok((check_id_option, message, first_message)) = crate::proactive::utils::check_waiting_check_match(
@@ -232,12 +236,24 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                 if let Some(check_id) = check_id_option {
                                                     let message = message.unwrap_or("Waiting check matched in Email, but failed to get content".to_string());
                                                     let first_message = first_message.unwrap_or("Hey, I found a match for one of your waiting checks in Email.".to_string());
-                                                    
+                                                   
+                                                    // Find the matched waiting check to determine noti_type
+                                                    let matched_waiting_check = waiting_checks.iter().find(|wc| wc.id == Some(check_id)).cloned();
+                                                    let suffix = if let Some(wc) = matched_waiting_check {
+                                                        match wc.noti_type.as_ref().map(|s| s.as_str()) {
+                                                            Some("call") => "_call",
+                                                            _ => "_sms",
+                                                        }
+                                                    } else {
+                                                        "_sms"
+                                                    };
+                                                    let notification_type = format!("email_waiting_check{}", suffix);
+                                                   
                                                     // Delete the matched waiting check
                                                     if let Err(e) = state.user_repository.delete_waiting_check_by_id(user.id, check_id) {
                                                         tracing::error!("Failed to delete waiting check {}: {}", check_id, e);
                                                     }
-                                                    
+                                                   
                                                     // Send notification
                                                     let state_clone = state.clone();
                                                     let user_id = user.id;
@@ -246,7 +262,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                             &state_clone,
                                                             user_id,
                                                             &message,
-                                                            "email_waiting_check".to_string(),
+                                                            notification_type,
                                                             Some(first_message),
                                                         ).await;
                                                     });

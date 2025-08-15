@@ -119,6 +119,7 @@ diesel::table! {
         user_id -> Integer,
         sender -> Text,
         service_type -> Text,
+        noti_type -> Nullable<Text>,
     }
 }
 
@@ -274,6 +275,7 @@ diesel::table! {
         user_id -> Integer,
         content -> Text,
         service_type -> Text,
+        noti_type -> Nullable<Text>,
     }
 }
 

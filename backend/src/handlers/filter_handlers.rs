@@ -22,12 +22,14 @@ use crate::{
 pub struct WaitingCheckRequest {
     content: String,
     service_type: String, // imap, whatsapp, etc.
+    noti_type: Option<String>, // "sms" or "call"
 }
 
 #[derive(Deserialize)]
 pub struct PrioritySenderRequest {
     sender: String,
     service_type: String, // imap, whatsapp, etc.
+    noti_type: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -48,6 +50,7 @@ pub struct WaitingCheckResponse {
     user_id: i32,
     content: String,
     service_type: String,
+    noti_type: Option<String>, // "sms" or "call"
 }
 
 #[derive(Serialize)]
@@ -55,6 +58,7 @@ pub struct PrioritySenderResponse {
     user_id: i32,
     sender: String,
     service_type: String,
+    noti_type: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -84,6 +88,7 @@ pub async fn create_waiting_check(
         user_id: auth_user.user_id,
         content: request.content,
         service_type: request.service_type,
+        noti_type: request.noti_type,
     };
 
     match state.user_repository.create_waiting_check(&new_check) {
@@ -150,6 +155,7 @@ pub async fn get_waiting_checks(
         user_id: check.user_id,
         content: check.content,
         service_type: check.service_type,
+        noti_type: check.noti_type,
     }).collect();
 
     Ok(Json(response))
@@ -167,6 +173,7 @@ pub async fn create_priority_sender(
         user_id: auth_user.user_id,
         sender: request.sender.clone(),
         service_type: request.service_type,
+        noti_type: request.noti_type,
     };
 
     match state.user_repository.create_priority_sender(&new_sender) {
@@ -246,6 +253,7 @@ pub async fn get_priority_senders(
         user_id: sender.user_id,
         sender: sender.sender,
         service_type: sender.service_type,
+        noti_type: sender.noti_type,
     }).collect();
     let full_response = json!({
         "contacts": response,

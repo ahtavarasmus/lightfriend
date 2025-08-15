@@ -285,7 +285,7 @@ pub fn proactive_agent_section() -> Html {
                             <li>{"When disabled, you won't receive any notifications."}</li>
                             <li>{"When enabled, monitoring follows the rules set below."}</li>
                             <li>{"You can toggle this setting on the fly by calling or texting lightfriend to turn monitoring off/on."}</li>
-                            <li>{"This is useful when you want monitoring in specific situations. For example, you can enable monitoring when going for a run, and disable it when you're safely at home."}</li>
+                            <li>{"This is useful when you want monitoring in specific situations. For example, you can enable monitoring when going for a run, and disable it when you're return home."}</li>
                         </ul>
                     </div>
                 </div>
