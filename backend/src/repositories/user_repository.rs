@@ -1107,15 +1107,15 @@ impl UserRepository {
     }
 
     pub fn has_active_bridges(&self, user_id: i32) -> Result<bool, DieselError> {
-    use crate::schema::bridges;
-    let mut conn = self.pool.get().expect("Failed to get DB connection");
-    let count = bridges::table
-        .filter(bridges::user_id.eq(user_id))
-        .filter(bridges::status.eq("connected"))
-        .count()
-        .get_result::<i64>(&mut conn)?;
-    Ok(count > 0)
-}
+        use crate::schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let count = bridges::table
+            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::status.eq("connected"))
+            .count()
+            .get_result::<i64>(&mut conn)?;
+        Ok(count > 0)
+    }
 
     pub fn get_active_signal_connection(&self, user_id: i32) -> Result<Option<Bridge>, DieselError> {
         use crate::schema::bridges;

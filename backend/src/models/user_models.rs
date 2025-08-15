@@ -398,7 +398,7 @@ pub struct NewCalendarNotification {
 }
 
 
-#[derive(Queryable, Selectable, Insertable)]
+#[derive(Queryable, Selectable, Insertable, Debug)]
 #[diesel(table_name = waiting_checks)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct WaitingCheck {
@@ -416,7 +416,7 @@ pub struct NewWaitingCheck {
     pub service_type: String,// like email, whatsapp, .. 
 }
 
-#[derive(Queryable, Selectable, Insertable)]
+#[derive(Queryable, Selectable, Insertable, Debug)]
 #[diesel(table_name = priority_senders)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct PrioritySender {

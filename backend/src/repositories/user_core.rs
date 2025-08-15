@@ -72,6 +72,14 @@ impl UserCore {
         Ok(users_list)
     }
 
+    pub fn get_users_by_tier(&self, tier: &str) -> Result<Vec<User>, DieselError> {
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        let users_list = users::table
+            .filter(users::sub_tier.eq(Some(tier)))
+            .load::<User>(&mut conn)?;
+        Ok(users_list)
+    }
+
     pub fn delete_user(&self, user_id: i32) -> Result<(), DieselError> {
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         diesel::delete(users::table.find(user_id))

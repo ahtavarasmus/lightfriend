@@ -36,17 +36,6 @@ pub struct KeywordRequest {
     service_type: String, // imap, whatsapp, etc.
 }
 
-#[derive(Deserialize)]
-pub struct ImportancePriorityRequest {
-    threshold: i32,
-    service_type: String, // imap, whatsapp, etc.
-}
-
-#[derive(Deserialize)]
-pub struct FilterToggleRequest {
-    active: bool,
-}
-
 // Response DTOs
 #[derive(Serialize)]
 pub struct ConnectedService {

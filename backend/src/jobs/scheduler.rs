@@ -91,48 +91,20 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
     // Create a job that runs every 10 minutes to check for new IMAP messages
     let state_clone = Arc::clone(&state);
-    let message_monitor_job = Job::new_async("0 */10 * * * *", move |_, _| {
+    // TODO CHANGE BEFORE PROD
+    //let message_monitor_job = Job::new_async("0 */10 * * * *", move |_, _| {
+    let message_monitor_job = Job::new_async("*/30 * * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
             
-            // Get all users with valid message monitor subscription
-            let users_with_subscription = match state.user_core.get_all_users() {
-                Ok(users) => {
-                    let mut subscribed_users = Vec::new();
-                    for user in users {
-                        match state.user_repository.has_valid_subscription_tier(user.id, "tier 2") {
-                            Ok(true) => {
-                                if !state.user_core.get_proactive_agent_on(user.id).unwrap_or(true) {
-                                    tracing::debug!("User {} does not have monitoring enabled", user.id);
-                                    continue;
-                                }
-                                subscribed_users.push(user);
-                            },
-                            Ok(false) => {
-                                tracing::debug!("User {} does not have valid subscription or messages left for message monitoring", user.id);
-                            },
-                            Err(e) => {
-                                error!("Failed to check subscription status for user {}: {:?}", user.id, e);
-                            }
-                        }
-                    }
-                    subscribed_users
-                },
-                Err(e) => {
-                    error!("Failed to fetch users: {}", e);
-                    Vec::new()
-                }
-            };
-
             // Process each subscribed user
-            for user in users_with_subscription {
+            for user in state.user_core.get_users_by_tier("tier 2").unwrap_or(Vec::new()){
 
                 // Check IMAP service
                 if let Ok(imap_users) = state.user_repository.get_active_imap_connection_users() {
                     if imap_users.contains(&user.id) {
                         match imap_handlers::fetch_emails_imap(&state, user.id, true, Some(10), true, true).await {
                             Ok(emails) => {
-                                
                                 match state.user_repository.get_processed_emails(user.id) {
                                     Ok(mut processed_emails) => {
                                         // Define constants
@@ -196,22 +168,14 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     let mut emails_content = String::from("New emails:\n");
                                     for email in &sorted_emails {
 
-                                        // Check if this email was already processed
-                                        if let Ok(already_processed) = state.user_repository.is_email_processed(user.id, &email.id) {
-                                            if already_processed {
-                                                debug!("Skipping already processed email {}", email.id);
-                                                continue;
-                                            }
-                                        }
-                                        
-                                        if let Err(e) = state.user_repository.mark_email_as_processed(user.id, &email.id) {
-                                            error!("Failed to mark email {} as processed: {}", email.id, e);
-                                            continue;
-                                        }
-
                                         // Check if sender matches priority senders and send the noti anyways about it
                                         if priority_senders.iter().any(|priority_sender| {
-                                            email.from.as_deref().unwrap_or("Uknown").to_lowercase().contains(&priority_sender.sender.to_lowercase())
+                                            let priority_lower = priority_sender.sender.to_lowercase();
+                                            // Check 'from' (display name)
+                                            let from_matches = email.from.as_deref().unwrap_or("Unknown").to_lowercase().contains(&priority_lower);
+                                            // Also check 'from_email' (actual email address)
+                                            let from_email_matches = email.from_email.as_deref().unwrap_or("Unknown").to_lowercase().contains(&priority_lower);
+                                            from_matches || from_email_matches
                                         }) {
                                             tracing::info!("Fast check: Priority sender matched for user {}", user.id);
                                             
@@ -290,7 +254,6 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                                 }
                                             }
                                         }
-
 
                                         // Add email to content string for importance checking
                                         emails_content.push_str(&email_content);

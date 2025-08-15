@@ -138,7 +138,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                 let show_suggestions = show_suggestions.clone();
                 let is_searching = is_searching.clone();
                 is_searching.set(true);
-               
+              
                 spawn_local(async move {
                     match Request::get(&format!(
                         "{}/api/{}/search-rooms?search={}",
@@ -224,7 +224,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
         let selected_service = selected_service.clone();
         let contacts_local = contacts_local.clone();
         let error_message = error_message.clone();
-   
+  
         Callback::from(move |_| {
             let identifier = (*new_contact).trim().to_string();
             if identifier.is_empty() { return; }
@@ -241,7 +241,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                 error_message.set(Some("Please enter a valid email address".to_string()));
                 return;
             }
-       
+      
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
                 .flatten()
@@ -274,7 +274,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
     };
     let delete_monitored_contact = {
         let refresh = refresh_from_server.clone();
-   
+  
         Callback::from(move |(identifier, service_type): (String, String)| {
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
@@ -283,7 +283,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                 .flatten()
             {
                 let refresh = refresh.clone();
-           
+          
                 spawn_local(async move {
                     let _ = Request::delete(&format!(
                         "{}/api/filters/monitored-contact/{}/{}",
@@ -294,7 +294,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     .header("Authorization", &format!("Bearer {}", token))
                     .send()
                     .await;
-               
+              
                     refresh.emit(());
                 });
             }
@@ -343,17 +343,6 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                         -webkit-background-clip: text;
                         -webkit-text-fill-color: transparent;
                         transition: opacity 0.3s ease;
-                    }
-                    .status-badge {
-                        background: rgba(245, 158, 11, 0.1);
-                        color: #F59E0B;
-                        padding: 0.25rem 0.75rem;
-                        border-radius: 12px;
-                        font-size: 0.8rem;
-                    }
-                    .status-badge.active {
-                        background: rgba(52, 211, 153, 0.1);
-                        color: #34D399;
                     }
                     .flow-description {
                         color: #999;
@@ -424,38 +413,6 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                         outline: none;
                         border-color: #F59E0B;
                     }
-                    .date-label {
-                        display: flex;
-                        flex-direction: column;
-                        gap: 0.25rem;
-                    }
-                    .date-label span {
-                        font-size: 0.8rem;
-                        color: #999;
-                    }
-                    .date-label input[type="date"] {
-                        padding: 0.75rem;
-                        border-radius: 8px;
-                        border: 1px solid rgba(245, 158, 11, 0.2);
-                        background: rgba(0, 0, 0, 0.2);
-                        color: #fff;
-                        min-width: 150px;
-                    }
-                    .waiting-check-fields label {
-                        display: flex;
-                        align-items: center;
-                        gap: 0.5rem;
-                        color: #999;
-                        font-size: 0.9rem;
-                    }
-                    .waiting-check-fields input[type="checkbox"] {
-                        width: 16px;
-                        height: 16px;
-                        border-radius: 4px;
-                        border: 1px solid rgba(245, 158, 11, 0.2);
-                        background: rgba(0, 0, 0, 0.2);
-                        cursor: pointer;
-                    }
                     .waiting-check-input button {
                         padding: 0.75rem 2rem;
                         border-radius: 8px;
@@ -515,7 +472,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                         background: rgba(0, 0, 0, 0.2);
                     }
                     .service-type-badge.email {
-                        color: #1E90FF;
+                        color: #D3D3D3;
                         border: 1px solid rgba(245, 158, 11, 0.2);
                     }
                     .service-type-badge.messaging {
@@ -550,57 +507,6 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     .filter-list .delete-btn:hover {
                         background: rgba(255, 99, 71, 0.1);
                         transform: scale(1.1);
-                    }
-                    .toggle-container {
-                        display: flex;
-                        align-items: center;
-                        gap: 1rem;
-                        margin-top: 1rem;
-                    }
-                    .toggle-label {
-                        color: #999;
-                        font-size: 0.9rem;
-                    }
-                    .switch {
-                        position: relative;
-                        display: inline-block;
-                        width: 48px;
-                        height: 24px;
-                    }
-                    .switch input {
-                        opacity: 0;
-                        width: 0;
-                        height: 0;
-                    }
-                    .slider {
-                        position: absolute;
-                        cursor: pointer;
-                        top: 0;
-                        left: 0;
-                        right: 0;
-                        bottom: 0;
-                        background: rgba(0, 0, 0, 0.2);
-                        border: 1px solid rgba(245, 158, 11, 0.2);
-                        transition: .4s;
-                        border-radius: 24px;
-                    }
-                    .slider:before {
-                        position: absolute;
-                        content: "";
-                        height: 16px;
-                        width: 16px;
-                        left: 4px;
-                        bottom: 3px;
-                        background-color: #fff;
-                        transition: .4s;
-                        border-radius: 50%;
-                    }
-                    input:checked + .slider {
-                        background: #F59E0B;
-                        border-color: #F59E0B;
-                    }
-                    input:checked + .slider:before {
-                        transform: translateX(24px);
                     }
                     .error-message {
                         background: rgba(255, 99, 71, 0.1);

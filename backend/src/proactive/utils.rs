@@ -19,22 +19,25 @@ use chrono::{DateTime, Utc, Duration};
 /// Prompt for matching incoming messages against the user’s *waiting checks*.
 /// A waiting check represents something the user explicitly asked to be notified
 /// about (e.g. \"Tell me when the shipment arrives\").
-const WAITING_CHECK_PROMPT: &str = r#"You are an AI that determines whether an incoming message *definitively* satisfies **one** of the outstanding waiting checks listed below.
+const WAITING_CHECK_PROMPT: &str = r#"You are an AI that determines whether an incoming message *definitively* satisfies **one** of the outstanding waiting checks listed below. Each waiting check's 'Content' describes the condition the message must meet.
 
 **Match rules**
-• Use semantic reasoning (synonyms, paraphrases, context) and translate non‑English text internally before evaluation.
-• A match must be *unambiguous*: the message clearly fulfils the user’s condition. Ambiguous or partial matches DO NOT count.
+• Interpret the waiting check 'Content' as the user's condition or instruction for matching.
+• If the content is descriptive or instructional (e.g., a sentence >5 words), use semantic reasoning (synonyms, paraphrases, context) to evaluate fulfillment. Translate non-English text internally.
+• If the content is short (≤5 words, e.g., keywords), require the message to contain *all* those words (case-insensitive, but exact matches preferred; stems/synonyms only if explicitly related).
+• A match must be *unambiguous*: the message clearly fulfills the condition. Ambiguous, partial, or sender-only matches DO NOT count.
+• Do not match based solely on sender or metadata unless explicitly stated in the content.
 • If multiple checks could match, choose the single *best* match (highest confidence). Return `null` if none match.
 
 If a match is found you MUST additionally craft two short notifications:
-1. `sms_message` (≤160 chars) – a concise SMS describing the event.
-2. `first_message` (≤100 chars) – an attention‑grabbing first sentence a voice assistant would speak on a call.
+1. `sms_message` (≤160 chars) – a concise SMS describing the event.
+2. `first_message` (≤100 chars) – an attention-grabbing first sentence a voice assistant would speak on a call.
 
 Return JSON with:
-• `waiting_check_id` – integer ID of the matched check, or null
-• `sms_message` – Option<String> (required when matched, else null)
-• `first_message` – Option<String> (required when matched, else null)
-• `match_explanation` – ≤120 chars explaining why it matched (or empty when null)
+• `waiting_check_id` – integer ID of the matched check, or null
+• `sms_message` – String (required when matched, else empty string)
+• `first_message` – String (required when matched, else empty string)
+• `match_explanation` – ≤120 chars explaining why it matched (or empty when null)
 "#;
 
 const CRITICAL_PROMPT: &str = r#"You are an AI that decides whether an incoming user message is **critical** — i.e. it must be surfaced within **two hours** and cannot wait for the next scheduled summary.
@@ -176,7 +179,7 @@ pub async fn check_waiting_check_match(
         messages)
         .tools(tools)
         .tool_choice(chat_completion::ToolChoiceType::Required)
-        .temperature(0.2)
+        .temperature(0.0)
         .max_tokens(200);
 
     let result = client.chat_completion(request).await?;
