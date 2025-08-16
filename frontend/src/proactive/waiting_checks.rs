@@ -88,7 +88,7 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
         let selected_noti_type = selected_noti_type.clone();
         let checks_local = checks_local.clone();
         let error_message = error_message.clone();
-       
+      
         Callback::from(move |_| {
             let check = (*new_check).trim().to_string();
             if check.is_empty() { return; }
@@ -99,7 +99,7 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
                 error_message.set(Some("Maximum of 5 waiting checks allowed".to_string()));
                 return;
             }
-           
+          
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
                 .flatten()
@@ -134,7 +134,7 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
     };
     let delete_waiting_check = {
         let refresh = refresh_from_server.clone();
-       
+      
         Callback::from(move |(content, service_type): (String, String)| {
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
@@ -143,7 +143,7 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
                 .flatten()
             {
                 let refresh = refresh.clone();
-               
+              
                 spawn_local(async move {
                     let _ = Request::delete(&format!(
                         "{}/api/filters/waiting-check/{}/{}",
@@ -154,7 +154,7 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
                     .header("Authorization", &format!("Bearer {}", token))
                     .send()
                     .await;
-                   
+                  
                     refresh.emit(());
                 });
             }
@@ -555,6 +555,25 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
                             <li>{"You can set up to 5 waiting checks at a time"}</li>
                             <li>{"Waiting checks can also be set through SMS or voice calls with lightfriend. Just ask lightfriend to keep an eye out for something!"}</li>
                         </ul>
+                    </div>
+                    <h4>{"Best Practices for Waiting Check Phrases"}</h4>
+                    <div class="info-subsection">
+                        <p>{"Enter a phrase describing what to watch for in incoming messages. For best results:"}</p>
+                        <ul>
+                            <li><strong>{"Keep it short (≤5 words)"}</strong>{" for exact keyword matches: e.g., 'meeting rescheduled' or 'order shipped'. The message must contain all these words (case-insensitive)."}</li>
+                            <li><strong>{"Use longer descriptions (>5 words)"}</strong>{" for smarter, context-aware matching: e.g., 'Any update from Rasmus about the new phone model, including synonyms like smartphone or device'. This allows paraphrases and related ideas."}</li>
+                            <li><strong>{"Include sender if important"}</strong>{": e.g., 'Message from @rasmus containing phone details' – otherwise, sender alone won't trigger a match."}</li>
+                            <li><strong>{"Be specific and unambiguous"}</strong>{": Avoid vague terms; include conditions like 'must include a link' or 'related to travel plans'."}</li>
+                            <li><strong>{"Non-English?"}</strong>{" The AI handles translations internally."}</li>
+                            <li>{"Examples:"}
+                                <ul>
+                                    <li>{"Short: 'flight delayed'"}</li>
+                                    <li>{"Long: 'Notification from bank about unusual activity on my account'"}</li>
+                                    <li>{"With sender: 'Email from support@company.com with resolution to ticket #123'"}</li>
+                                </ul>
+                            </li>
+                        </ul>
+                        <p>{"Notifications will only trigger on clear, definitive matches."}</p>
                     </div>
                 </div>
             </div>

@@ -25,9 +25,6 @@ pub fn changelog() -> Html {
             </section>
             <section class="changelog-list-section">
                 <div class="changelog-entry">
-                    <blockquote class="twitter-tweet"><p lang="en" dir="ltr">{"today i fixed bugs on lightfriends priority sender and waiting check functions and they should be now better at matching content. also added ability to set call or sms to each individual priority sender and waiting check so you can set them on the dashboard or by telling… "}<a href="https://t.co/R6umnBBKHz">{"pic.twitter.com/R6umnBBKHz"}</a></p>{"&mdash; rasmus (@ahtavarasm_us) "}<a href="https://twitter.com/ahtavarasm_us/status/1956449164663161005?ref_src=twsrc%5Etfw">{"August 15, 2025"}</a></blockquote> <script src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
-                </div>
-                <div class="changelog-entry">
                 <blockquote class="twitter-tweet"><p lang="en" dir="ltr">{"today i fixed bugs on lightfriends priority sender and waiting check functions and they should be now better at matching content. also added ability to set call or sms to each individual priority sender and waiting check so you can set them on the dashboard or by telling… "}<a href="https://t.co/R6umnBBKHz">{"pic.twitter.com/R6umnBBKHz"}</a></p>{"&mdash; rasmus (@ahtavarasm_us) "}<a href="https://twitter.com/ahtavarasm_us/status/1956449164663161005?ref_src=twsrc%5Etfw">{"August 15, 2025"}</a></blockquote> <script src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
                 </div>
                 <div class="changelog-entry">

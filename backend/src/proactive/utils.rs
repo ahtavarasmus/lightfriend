@@ -20,24 +20,28 @@ use chrono::{DateTime, Utc, Duration};
 /// A waiting check represents something the user explicitly asked to be notified
 /// about (e.g. \"Tell me when the shipment arrives\").
 const WAITING_CHECK_PROMPT: &str = r#"You are an AI that determines whether an incoming message *definitively* satisfies **one** of the outstanding waiting checks listed below. Each waiting check's 'Content' describes the condition the message must meet.
+    **Match rules**
+    • Interpret the waiting check 'Content' as the user's condition or instruction for matching.
+    • If the content is descriptive or instructional (e.g., a sentence >5 words), use semantic reasoning (synonyms, paraphrases, context) to evaluate fulfillment. Translate non-English text internally.
+    • If the content is short (≤5 words, e.g., keywords), require the message to contain *all* those words (case-insensitive, but exact matches preferred; stems/synonyms only if explicitly related).
+    • A match must be *unambiguous*: the message clearly fulfills the condition. Ambiguous, partial, or sender-only matches DO NOT count.
+    • Do not match based solely on sender or metadata unless explicitly stated in the content.
+    • If multiple checks could match, choose the single *best* match (highest confidence). Return `null` if none match.
 
-**Match rules**
-• Interpret the waiting check 'Content' as the user's condition or instruction for matching.
-• If the content is descriptive or instructional (e.g., a sentence >5 words), use semantic reasoning (synonyms, paraphrases, context) to evaluate fulfillment. Translate non-English text internally.
-• If the content is short (≤5 words, e.g., keywords), require the message to contain *all* those words (case-insensitive, but exact matches preferred; stems/synonyms only if explicitly related).
-• A match must be *unambiguous*: the message clearly fulfills the condition. Ambiguous, partial, or sender-only matches DO NOT count.
-• Do not match based solely on sender or metadata unless explicitly stated in the content.
-• If multiple checks could match, choose the single *best* match (highest confidence). Return `null` if none match.
+    **Edge cases**:
+    • If the check mentions a sender (e.g., 'from Rasmus'), require the message metadata to match exactly.
+    • For conditions like 'related to [topic]', use broad semantic similarity but ensure at least 70% conceptual overlap.
+    • Ignore irrelevant message parts; focus only on fulfilling the core condition.
 
-If a match is found you MUST additionally craft two short notifications:
-1. `sms_message` (≤160 chars) – a concise SMS describing the event.
-2. `first_message` (≤100 chars) – an attention-grabbing first sentence a voice assistant would speak on a call.
+    If a match is found you MUST additionally craft two short notifications:
+    1. `sms_message` (≤160 chars) – a concise SMS describing the event.
+    2. `first_message` (≤100 chars) – an attention-grabbing first sentence a voice assistant would speak on a call.
 
-Return JSON with:
-• `waiting_check_id` – integer ID of the matched check, or null
-• `sms_message` – String (required when matched, else empty string)
-• `first_message` – String (required when matched, else empty string)
-• `match_explanation` – ≤120 chars explaining why it matched (or empty when null)
+    Return JSON with:
+    • `waiting_check_id` – integer ID of the matched check, or null
+    • `sms_message` – String (required when matched, else empty string). Ensure `sms_message` is neutral and factual, e.g., 'Matched waiting check: Update from Rasmus on phone received.'
+    • `first_message` – String (required when matched, else empty string). `first_message` should be urgent and spoken-friendly, e.g., 'Hey, you have an update from Rasmus about the phone!'
+    • `match_explanation` – ≤120 chars explaining why it matched (or empty when null)
 "#;
 
 const CRITICAL_PROMPT: &str = r#"You are an AI that decides whether an incoming user message is **critical** — i.e. it must be surfaced within **two hours** and cannot wait for the next scheduled summary.

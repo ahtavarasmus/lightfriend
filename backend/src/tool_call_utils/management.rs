@@ -51,13 +51,21 @@ pub async fn handle_set_proactive_agent(
 pub fn get_create_waiting_check_tool() -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
     use std::collections::HashMap;
-
     let mut waiting_check_properties = HashMap::new();
     waiting_check_properties.insert(
         "content".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The content to look for in future incoming messages".to_string()),
+            description: Some(
+                "The content to look for in future incoming messages. Craft this phrase based on the user's described want for optimal matching:
+                - Keep it short (≤5 words) for exact keyword matches, e.g., 'meeting rescheduled' or 'order shipped' – requires all words to appear (case-insensitive).
+                - Use longer descriptions (>5 words) for semantic/context-aware matching, e.g., 'Any update from Rasmus about the new phone model, including synonyms like smartphone or device' – allows paraphrases, synonyms, and related concepts.
+                - Include sender if relevant, e.g., 'Message from @rasmus containing phone details' – otherwise, sender alone won't trigger.
+                - Be specific and unambiguous: Include conditions like 'must include a link' or 'related to travel plans'. Avoid vague terms.
+                - Handle non-English internally via AI translation.
+                - Examples: Short: 'flight delayed'. Long: 'Notification from bank about unusual activity on my account'. With sender: 'Email from support@company.com with resolution to ticket #123'.
+                The goal is clear, definitive matches.".to_string()
+            ),
             ..Default::default()
         }),
     );
@@ -65,7 +73,7 @@ pub fn get_create_waiting_check_tool() -> openai_api_rs::v1::chat_completion::To
         "service_type".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("Which service to start monitoring for. Must be either \"messaging\" or \"email\".".to_string()),
+            description: Some("Which service to start monitoring for. Must be either \"messaging\" or \"email\". Infer from user context; default to \"email\" if unclear.".to_string()),
             enum_values: Some(vec!["messaging".to_string(), "email".to_string()]),
             ..Default::default()
         }),
@@ -74,12 +82,11 @@ pub fn get_create_waiting_check_tool() -> openai_api_rs::v1::chat_completion::To
         "noti_type".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("How to notify user when content is found. Must be either \"sms\" or \"call\". If the user doesn't mention how they want to be notified, default to \"sms\"".to_string()),
+            description: Some("How to notify user when content is found. Must be either \"sms\" or \"call\". If the user doesn't mention how they want to be notified, default to \"sms\".".to_string()),
             enum_values: Some(vec!["sms".to_string(), "call".to_string()]),
             ..Default::default()
         }),
     );
-
     chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
@@ -87,7 +94,8 @@ pub fn get_create_waiting_check_tool() -> openai_api_rs::v1::chat_completion::To
             description: Some(String::from(
                 "Creates a waiting check for monitoring email or messages. \
                  Use this when the user wants to be notified in the future about specific content that appears \
-                 in their emails or messaging apps such as WhatsApp or Telegram.",
+                 in their emails or messaging apps such as WhatsApp or Telegram. \
+                 Always craft the 'content' parameter thoughtfully based on the user's description to ensure reliable matches; see 'content' guidance for best practices.",
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
@@ -97,6 +105,7 @@ pub fn get_create_waiting_check_tool() -> openai_api_rs::v1::chat_completion::To
         },
     }
 }
+
 
 use serde::Deserialize;
 use std::sync::Arc;
