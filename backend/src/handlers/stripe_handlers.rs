@@ -805,7 +805,7 @@ pub async fn stripe_webhook(
                             if user.phone_number_country == Some("US".to_string()) || user.phone_number_country == Some("CA".to_string()) {
                                 messages = 200.00 - (days_until_billing * amount_of_digests) as f32;
                             } else {
-                                messages = 0;
+                                messages = 0.0;
                             }
                         } else if base_price == self_hosting_id {
                             // Self-hosting subscription - no messages

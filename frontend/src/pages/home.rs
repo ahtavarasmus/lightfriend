@@ -639,6 +639,8 @@ pub fn Home() -> Html {
                                 <a href="/terms">{"Terms & Conditions"}</a>
                                 {" | "}
                                 <a href="/privacy">{"Privacy Policy"}</a>
+                                {" | "}
+                                <a href="/updates">{"Updates"}</a>
                             </div>
                         </div>
                     </footer>

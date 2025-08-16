@@ -32,6 +32,7 @@ mod pages {
     pub mod bring_own_number;
     pub mod lightphone3_whatsapp_guide;
     pub mod blog;
+    pub mod change_log;
 }
 
 mod components {
@@ -80,6 +81,7 @@ use pages::{
     bring_own_number::TwilioHostedInstructions, 
     lightphone3_whatsapp_guide::LightPhone3WhatsappGuide,
     blog::Blog,
+    change_log::Changelog,
 };
 
 use auth::{
@@ -112,6 +114,8 @@ pub enum Route {
     Faq,
     #[at("/blog")]
     Blog,
+    #[at("/updates")]
+    Changelog,
     #[at("/host-instructions")]
     SelfHostInstructions,
     #[at("/supported-countries")]
@@ -173,6 +177,10 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
         Route::Blog => {
             info!("Rendering Blog page");
             html! { <Blog /> }
+        },
+        Route::Changelog => {
+            info!("Rendering Changelog page");
+            html! { <Changelog /> }
         },
         Route::SelfHostInstructions => {
             info!("Rendering Self Host Instructions page");
