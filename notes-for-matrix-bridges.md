@@ -11,8 +11,8 @@ login to postgres
 ```psql -d mw_<service_name>```
 create new user to this bridge db and grant permissions
 ```CREATE USER mw_<service_name> WITH PASSWORD 'password-for-the-matrix-bridge';```
-```GRANT ALL PRIVILEGES ON DATABASE mw_<service_name> TO mw_<service_name>;```
-```GRANT ALL ON SCHEMA public TO mw_telegram;```
+```GRANT ALL PRIVILEGES ON DATABASE mv_<service_name> TO mw_<service_name>;```
+```GRANT ALL ON SCHEMA public TO mw_<service_name>;```
 if db already exists
 ```dropdb mw_<service_name>```
 endif
@@ -37,6 +37,7 @@ endif
 endif
 
 *in config.yaml*:
+    // the following might differ with different bridges, but there should be an explanation in there
     database: postgres://mw_<service_name>:password-for-the-mautrix-bridge@localhost/mw_<service_name>?sslmode=disable
 
     homeserver->address->http://localhost:8008
@@ -89,6 +90,18 @@ endif
         )
         reload synapse and bridge
         
+    )
+    (in signal bridges:
+        bridge->split_portals: true
+        bridge->cleanup_on_logout->enabled: true
+                                 ->manual: all delete
+                                 ->bad_credentials: all delete
+
+        for double_puppeting:
+        double_puppet->secrets:
+            localhost: as_token:<as_token_from_double_puppet.yaml>:
+
+        double_puppet->servers: {}
     )
 
 endin
