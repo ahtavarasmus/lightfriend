@@ -320,23 +320,25 @@ pub async fn fetch_assistant(
                 tracing::error!("Failed to log call usage: {}", e);
                 // Continue execution even if logging fails
             }
-            // Fetch recent contacts for whatsapp
-            let whatsapp_contacts = crate::utils::bridge::fetch_recent_bridge_contacts("whatsapp", &state, user.id).await.unwrap_or_else(|e| {
-                tracing::error!("Failed to fetch whatsapp contacts: {}", e);
-                Vec::new()
-            });
-            let whatsapp_names: Vec<String> = whatsapp_contacts.iter().map(|r| r.display_name.clone()).collect();
-            let whatsapp_str = whatsapp_names.join(", ");
-            dynamic_variables.insert("recent_whatsapp_contacts".to_string(), json!(whatsapp_str));
+            // Fetch recent contacts for all platforms and combine into a single string
+            let platforms = vec!["whatsapp", "telegram", "signal"];
+            let mut all_contacts_str = String::new();
 
-            // Fetch recent contacts for telegram
-            let telegram_contacts = crate::utils::bridge::fetch_recent_bridge_contacts("telegram", &state, user.id).await.unwrap_or_else(|e| {
-                tracing::error!("Failed to fetch telegram contacts: {}", e);
-                Vec::new()
-            });
-            let telegram_names: Vec<String> = telegram_contacts.iter().map(|r| r.display_name.clone()).collect();
-            let telegram_str = telegram_names.join(", ");
-            dynamic_variables.insert("recent_telegram_contacts".to_string(), json!(telegram_str));
+            for platform in platforms {
+                let contacts = crate::utils::bridge::fetch_recent_bridge_contacts(platform, &state, user.id).await.unwrap_or_else(|e| {
+                    tracing::error!("Failed to fetch {} contacts: {}", platform, e);
+                    Vec::new()
+                });
+                let names: Vec<String> = contacts.iter().map(|r| r.display_name.clone()).collect();
+                let contacts_str = names.join(", ");
+                
+                if !all_contacts_str.is_empty() {
+                    all_contacts_str.push_str("; ");
+                }
+                all_contacts_str.push_str(&format!("{}: {}", crate::utils::bridge::capitalize(platform), contacts_str));
+            }
+
+            dynamic_variables.insert("recent_contacts".to_string(), json!(all_contacts_str));
         },
         Ok(None) => {
             tracing::debug!("No user found for number: {}", caller_number);
@@ -1344,12 +1346,12 @@ pub async fn handle_confirm_send_chat_message(
     };
     // Extract platform from query parameters
     let platform = match params.get("platform") {
-        Some(p) if p == "telegram" || p == "whatsapp" => p.clone(),
+        Some(p) if p == "telegram" || p == "whatsapp" || p == "signal" => p.clone(),
         _ => {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(json!({
-                    "error": "Missing or invalid platform. Must be 'telegram' or 'whatsapp'."
+                    "error": "Missing or invalid platform. Must be 'telegram' or 'whatsapp' or 'signal'."
                 }))
             ));
         }
@@ -1389,7 +1391,7 @@ pub async fn handle_confirm_send_chat_message(
         }
     };
     let capitalized_platform = platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &platform[1..];
-    let trim_suffix = if platform == "whatsapp" { " (WA)" } else { " (Telegram)" };
+    let trim_suffix = if platform == "whatsapp" { " (WA)" } else if platform == "telegram" { " (Telegram)" } else { " " };
     // If confirmation is not required, send the message directly
     if !user_settings.require_confirmation {
         // First find the room
@@ -1716,12 +1718,12 @@ pub async fn handle_search_chat_contacts_tool_call(
     };
     // Extract platform from query parameters
     let platform = match params.get("platform") {
-        Some(p) if p == "telegram" || p == "whatsapp" => p.clone(),
+        Some(p) if p == "signal" || p == "telegram" || p == "whatsapp" => p.clone(),
         _ => {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(json!({
-                    "error": "Missing or invalid platform. Must be 'telegram' or 'whatsapp'."
+                    "error": "Missing or invalid platform. Must be 'telegram' or 'whatsapp' or 'signal'."
                 }))
             ));
         }
@@ -1796,12 +1798,12 @@ pub async fn handle_fetch_specific_chat_messages_tool_call(
     };
     // Extract platform from query parameters
     let platform = match params.get("platform") {
-        Some(p) if p == "telegram" || p == "whatsapp" => p.clone(),
+        Some(p) if p == "signal" || p == "telegram" || p == "whatsapp" => p.clone(),
         _ => {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(json!({
-                    "error": "Missing or invalid platform. Must be 'telegram' or 'whatsapp'."
+                    "error": "Missing or invalid platform. Must be 'telegram' or 'whatsapp' or 'signal'."
                 }))
             ));
         }
@@ -1882,12 +1884,12 @@ pub async fn handle_fetch_recent_messages_tool_call(
     };
     // Extract platform from query parameters
     let platform = match params.get("platform") {
-        Some(p) if p == "telegram" || p == "whatsapp" => p.clone(),
+        Some(p) if p == "telegram" || p == "signal" || p == "whatsapp" => p.clone(),
         _ => {
             return Err((
                 StatusCode::BAD_REQUEST,
                 Json(json!({
-                    "error": "Missing or invalid platform. Must be 'telegram' or 'whatsapp'."
+                    "error": "Missing or invalid platform. Must be 'telegram' or 'whatsapp' or 'signal'."
                 }))
             ));
         }

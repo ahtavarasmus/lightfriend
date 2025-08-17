@@ -221,7 +221,7 @@ pub struct MessageInfo {
     pub sender: String,
     pub content: String,
     pub timestamp_rfc: String,
-    pub platform: String, // e.g., "email", "whatsapp", "telegram", etc.
+    pub platform: String, // e.g., "email", "whatsapp", "telegram", "signal" etc.
 }
 
 #[derive(Debug, Serialize)]
@@ -571,6 +571,38 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 }
             }
 
+            // Fetch Signal messages
+            if let Some(bridge) = state.user_repository.get_bridge(user_id, "signal")? {
+                match crate::utils::bridge::fetch_bridge_messages("signal", state, user_id, start_timestamp, true).await {
+                    Ok(signal_messages) => {
+                        // Convert Signal Message to MessageInfo and add to messages
+                        let signal_infos: Vec<MessageInfo> = signal_messages.into_iter()
+                            .map(|msg| MessageInfo {
+                                sender: msg.room_name,
+                                content: msg.content,
+                                timestamp_rfc: msg.formatted_timestamp,
+                                platform: "signal".to_string(),
+                            })
+                            .collect();
+                        
+                        tracing::debug!(
+                            "Fetched {} Signal messages from the last {} hours for digest",
+                            signal_infos.len(),
+                            hours_since_prev
+                        );
+
+                        // Extend messages with Signal messages
+                        messages.extend(signal_infos);
+
+                        // Sort all messages by timestamp (most recent first)
+                        messages.sort_by(|a, b| b.timestamp_rfc.cmp(&a.timestamp_rfc));
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to fetch Signal messages for digest: {}", e);
+                    }
+                }
+            }
+
             // Log total number of messages
             tracing::debug!(
                 "Total {} messages collected for digest",
@@ -804,6 +836,38 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                     }
                     Err(e) => {
                         tracing::error!("Failed to fetch Telegram messages for digest: {}", e);
+                    }
+                }
+            }
+
+            // Fetch Signal messages
+            if let Some(bridge) = state.user_repository.get_bridge(user_id, "signal")? {
+                match crate::utils::bridge::fetch_bridge_messages("signal", state, user_id, start_timestamp, true).await {
+                    Ok(signal_messages) => {
+                        // Convert Signal Message to MessageInfo and add to messages
+                        let signal_infos: Vec<MessageInfo> = signal_messages.into_iter()
+                            .map(|msg| MessageInfo {
+                                sender: msg.room_name,
+                                content: msg.content,
+                                timestamp_rfc: msg.formatted_timestamp,
+                                platform: "signal".to_string(),
+                            })
+                            .collect();
+                        
+                        tracing::debug!(
+                            "Fetched {} Signal messages from the last {} hours for digest",
+                            signal_infos.len(),
+                            hours_since_prev
+                        );
+
+                        // Extend messages with Signal messages
+                        messages.extend(signal_infos);
+
+                        // Sort all messages by timestamp (most recent first)
+                        messages.sort_by(|a, b| b.timestamp_rfc.cmp(&a.timestamp_rfc));
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to fetch Signal messages for digest: {}", e);
                     }
                 }
             }
@@ -1057,6 +1121,38 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 }
             }
 
+            // Fetch Signal messages
+            if let Some(bridge) = state.user_repository.get_bridge(user_id, "signal")? {
+                match crate::utils::bridge::fetch_bridge_messages("signal", state, user_id, start_timestamp, true).await {
+                    Ok(signal_messages) => {
+                        // Convert Signal Message to MessageInfo and add to messages
+                        let signal_infos: Vec<MessageInfo> = signal_messages.into_iter()
+                            .map(|msg| MessageInfo {
+                                sender: msg.room_name,
+                                content: msg.content,
+                                timestamp_rfc: msg.formatted_timestamp,
+                                platform: "signal".to_string(),
+                            })
+                            .collect();
+                        
+                        tracing::debug!(
+                            "Fetched {} Signal messages from the last {} hours for digest",
+                            signal_infos.len(),
+                            hours_since_prev
+                        );
+
+                        // Extend messages with Signal messages
+                        messages.extend(signal_infos);
+
+                        // Sort all messages by timestamp (most recent first)
+                        messages.sort_by(|a, b| b.timestamp_rfc.cmp(&a.timestamp_rfc));
+                    }
+                    Err(e) => {
+                        tracing::error!("Failed to fetch Signal messages for digest: {}", e);
+                    }
+                }
+            }
+
             // Log total number of messages
             tracing::debug!(
                 "Total {} messages collected for digest",
@@ -1110,7 +1206,7 @@ Rules
 • Plain text only.
 • Start each item on a new line; you may prefix items with a hyphen (“-”) if helpful, but keep the newline.
 • Put truly critical or actionable items first.
-• Mention the platform (EMAIL / WHATSAPP / TELEGRAM / CALENDAR) only when it adds essential context.
+• Mention the platform (EMAIL / WHATSAPP / TELEGRAM / SIGNAL / CALENDAR) only when it adds essential context.
 • Add timestamp to messages when it makes sense.
 • For calendar, include only events starting in the next few hours; mention next-day events if relevant, with brief clues about what they involve.
 • Tease information to encourage follow-ups, e.g., "Email from boss re: project deadline" instead of full message body.

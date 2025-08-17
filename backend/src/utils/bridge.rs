@@ -74,6 +74,7 @@ fn get_room_suffix(service: &str) -> String {
     match service {
         "whatsapp" => "(WA)".to_string(),
         "telegram" => "(Telegram)".to_string(),
+        "signal" => "(Signal)".to_string(),
         _ => format!(" ({})", service.to_uppercase()),
     }
 }
@@ -89,6 +90,10 @@ fn infer_service(room_name: &str, sender_localpart: &str) -> Option<String> {
     if room_name.contains("(tg)") || sender_localpart.starts_with("telegram_") || sender_localpart.starts_with("telegram") {
         println!("Detected Telegram");
         return Some("telegram".to_string());
+    }
+    if room_name.contains("Signal") || sender_localpart.starts_with("signal_") || sender_localpart.starts_with("signal") {
+        println!("Detected Signal");
+        return Some("signal".to_string());
     }
     println!("No service detected");
     None
@@ -720,12 +725,7 @@ pub async fn handle_bridge_message(
     client: MatrixClient,
     state: Arc<AppState>,
 ) {
-    let running_environment = std::env::var("ENVIRONMENT").unwrap();
-    if running_environment == "development".to_string() {
-        return;
-    }
     tracing::debug!("Entering bridge message handler");
-
     // Check message age
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -734,7 +734,6 @@ pub async fn handle_bridge_message(
     let message_ts = event.origin_server_ts.0;
     let age_ms = now.saturating_sub(message_ts.into()); // Use saturating_sub to handle any potential clock skew
     const HALF_HOUR_MS: u64 = 30 * 60 * 1000;
-
     if age_ms > HALF_HOUR_MS {
         tracing::debug!(
             "Skipping old message: age {} ms (event ID: {})",
@@ -743,7 +742,127 @@ pub async fn handle_bridge_message(
         );
         return;
     }
+    // Find the user ID for this Matrix client
+    let client_user_id = client.user_id().unwrap().to_string();
+    // Extract the local part of the Matrix user ID (before the domain)
+    let local_user_id = client_user_id
+        .split(':')
+        .next()
+        .map(|s| s.trim_start_matches('@')) // Remove leading '@'
+        .unwrap_or(&client_user_id); // Fallback to original if parsing fails
+    let user = match state.user_repository.get_user_by_matrix_user_id(local_user_id) {
+        Ok(Some(user)) => user,
+        _ => return,
+    };
+    let user_id = user.id;
+    // New: Check if this is a bridge management room
+    let room_id_str = room.room_id().to_string();
+    let bridge_types = vec!["signal", "telegram", "whatsapp"];
+    let mut bridges = Vec::new();
+    for bridge_type in &bridge_types {
+        if let Ok(Some(bridge)) = state.user_repository.get_bridge(user_id, bridge_type) {
+            bridges.push(bridge);
+        }
+    }
+    if let Some(bridge) = bridges.iter().find(|b| b.room_id.as_ref().map_or(false, |rid| rid == &room_id_str)) {
+        // This is a management room for a bridge
+        tracing::debug!("Processing message in {} bridge management room", bridge.bridge_type);
+        // Skip if bridge is in connecting state (handled by monitor task)
+        if bridge.status == "connecting" {
+            tracing::debug!("Skipping disconnection check during initial connection for {}", bridge.bridge_type);
+            return;
+        }
 
+        
+        // Get the bridge bot ID for this service
+        let bridge_bot_var = match bridge.bridge_type.as_str() {
+            "signal" => "SIGNAL_BRIDGE_BOT",
+            "whatsapp" => "WHATSAPP_BRIDGE_BOT",
+            "telegram" => "TELEGRAM_BRIDGE_BOT",
+            _ => return, // Unknown bridge type
+        };
+        let bridge_bot = match std::env::var(bridge_bot_var) {
+            Ok(bot) => bot,
+            Err(_) => {
+                tracing::error!("{} not set", bridge_bot_var);
+                return;
+            }
+        };
+        let bot_user_id = match matrix_sdk::ruma::OwnedUserId::try_from(bridge_bot) {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::error!("Invalid bridge bot ID: {}", e);
+                return;
+            }
+        };
+        
+        // Check if sender is the bridge bot
+        if event.sender != bot_user_id {
+            tracing::debug!("Message not from bridge bot, skipping");
+            return;
+        }
+        
+        // Extract message content
+        let content = match event.content.msgtype {
+            MessageType::Text(t) => t.body,
+            MessageType::Notice(n) => n.body,
+            _ => {
+                tracing::debug!("Non-text/notice message in management room, skipping");
+                return;
+            }
+        };
+
+        println!("bridge bot management room content: {}", content);
+        
+        // Define disconnection patterns (customize per bridge if needed)
+        let disconnection_patterns = vec![
+            "disconnected",
+            "connection lost",
+            "logged out",
+            "authentication failed",
+            "login failed",
+            "error",
+            "failed",
+            "timeout",
+            "invalid",
+        ];
+        let lower_content = content.to_lowercase();
+        if disconnection_patterns.iter().any(|p| lower_content.contains(p)) {
+            tracing::info!("Detected disconnection in {} bridge for user {}: {}", bridge.bridge_type, user_id, content);
+            
+            // Delete the bridge record
+            if let Err(e) = state.user_repository.delete_bridge(user_id, &bridge.bridge_type) {
+                tracing::error!("Failed to delete {} bridge: {}", bridge.bridge_type, e);
+            }
+            
+            // Check if there are any remaining active bridges
+            let has_active_bridges = match state.user_repository.has_active_bridges(user_id) {
+                Ok(has) => has,
+                Err(e) => {
+                    tracing::error!("Failed to check active bridges: {}", e);
+                    false
+                }
+            };
+            if !has_active_bridges {
+                // No active bridges left, remove client and sync task
+                let mut matrix_clients = state.matrix_clients.lock().await;
+                let mut sync_tasks = state.matrix_sync_tasks.lock().await;
+                if let Some(task) = sync_tasks.remove(&user_id) {
+                    task.abort();
+                    tracing::debug!("Aborted sync task for user {}", user_id);
+                }
+                if matrix_clients.remove(&user_id).is_some() {
+                    tracing::debug!("Removed Matrix client for user {}", user_id);
+                }
+            }
+        } else {
+            tracing::debug!("No disconnection detected in management room message");
+        }
+        
+        // Return early since this is not a portal message
+        return;
+    }
+    // Proceed with existing portal message handling if not a management room
     // Get room name
     let room_name = match room.display_name().await {
         Ok(name) => name.to_string(),
@@ -752,10 +871,11 @@ pub async fn handle_bridge_message(
             return;
         }
     };
-
     let sender_localpart = event.sender.localpart().to_string();
-
-
+    if user_id == 1 {
+        println!("room_name: {}", room_name);
+        println!("sender_localpart: {}", sender_localpart);
+    }
     let service = match infer_service(&room_name, &sender_localpart) {
         Some(s) => s,
         None => {
@@ -763,39 +883,18 @@ pub async fn handle_bridge_message(
             return;
         }
     };
-
-
     let room_suffix = get_room_suffix(&service);
     let sender_prefix = get_sender_prefix(&service);
-
     if !room_name.contains(&room_suffix) {
         tracing::debug!("Skipping non-{} room", service);
         return;
     }
-
     if !sender_localpart.starts_with(&sender_prefix) {
         tracing::debug!("Skipping non-{} sender", service);
         return;
     }
-
-    // Find the user ID for this Matrix client
-    let client_user_id = client.user_id().unwrap().to_string();
-
-    // Extract the local part of the Matrix user ID (before the domain)
-    let local_user_id = client_user_id
-        .split(':')
-        .next()
-        .map(|s| s.trim_start_matches('@')) // Remove leading '@'
-        .unwrap_or(&client_user_id); // Fallback to original if parsing fails
-
-    let user = match state.user_repository.get_user_by_matrix_user_id(local_user_id) {
-        Ok(Some(user)) => user,
-        _ => return,
-    };
-
-    let user_id = user.id;
     // Check if user has valid subscription
-    let has_valid_sub = state.user_repository.has_valid_subscription_tier(user_id, "tier 2").unwrap_or(false) || 
+    let has_valid_sub = state.user_repository.has_valid_subscription_tier(user_id, "tier 2").unwrap_or(false) ||
         state.user_repository.has_valid_subscription_tier(user_id, "self_hosted").unwrap_or(false);
     if !has_valid_sub {
         tracing::debug!("User {} does not have valid subscription for WhatsApp monitoring", user_id);
@@ -805,8 +904,6 @@ pub async fn handle_bridge_message(
         tracing::debug!("User {} does not have monitoring enabled", user_id);
         return;
     }
-
-
     // Extract message content
     let content = match event.content.msgtype {
         MessageType::Text(t) => t.body,
@@ -819,11 +916,9 @@ pub async fn handle_bridge_message(
         MessageType::Emote(t) => t.body,
         _ => return,
     };
-
     if user_id == 1 { // if admin for debugging
         println!("message: {}", content);
     }
-
     // Skip error messages
     if content.contains("Failed to bridge media") ||
        content.contains("media no longer available") ||
@@ -832,48 +927,43 @@ pub async fn handle_bridge_message(
         tracing::debug!("Skipping error message because content contained error messages");
         return;
     }
-
     let chat_name = room_name
         .split(&room_suffix)
         .next()
         .unwrap_or(&room_name)
         .trim()
         .to_string();
-    
+   
     let sender_name = sender_localpart
         .strip_prefix(&sender_prefix)
         .unwrap_or(&sender_localpart)
         .to_string();
-
     let waiting_checks = state.user_repository.get_waiting_checks(user_id, "messaging").unwrap_or(Vec::new());
-
     let priority_senders = state.user_repository.get_priority_senders(user_id, &service).unwrap_or(Vec::new());
-
     fn trim_for_sms(service: &str, sender: &str, content: &str) -> String {
         let prefix = format!("{} from ", capitalize(&service));
         let separator = ": ";
         let max_len = 157;
-
         let static_len = prefix.len() + separator.len();
         let mut remaining = max_len - static_len;
-
         // Reserve up to 30 chars for sender
         let mut sender_trimmed = sender.chars().take(30).collect::<String>();
         if sender.len() > sender_trimmed.len() {
             sender_trimmed.push('…');
         }
         remaining = remaining.saturating_sub(sender_trimmed.len());
-
         let mut content_trimmed = content.chars().take(remaining).collect::<String>();
         if content.len() > content_trimmed.len() {
             content_trimmed.push('…');
         }
-
         format!("{}{}{}{}", prefix, sender_trimmed, separator, content_trimmed)
     }
-
     let service_cap = capitalize(&service);
 
+    let running_environment = std::env::var("ENVIRONMENT").unwrap();
+    if running_environment == "development".to_string() {
+        return;
+    }
         // FAST CHECKS SECOND - Check priority senders if active
     for priority_sender in &priority_senders {
         let clean_priority_sender = priority_sender.sender
@@ -884,14 +974,14 @@ pub async fn handle_bridge_message(
             .to_string();
         if chat_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) ||
            sender_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) {
-           
+          
             // Determine suffix based on noti_type
             let suffix = match priority_sender.noti_type.as_ref().map(|s| s.as_str()) {
                 Some("call") => "_call",
                 _ => "_sms",
             };
             let notification_type = format!("{}_priority{}", service, suffix);
-           
+          
             // Check if user has enough credits for notification
             match crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await {
                 Ok(()) => {
@@ -900,7 +990,7 @@ pub async fn handle_bridge_message(
                     let content_clone = content.clone();
                     let message = trim_for_sms(&service, &priority_sender.sender, &content_clone);
                     let first_message = format!("Hello, you have an important {} message from {}.", service_cap, priority_sender.sender);
-                   
+                  
                     // Spawn a new task for sending notification
                     tokio::spawn(async move {
                         // Send the notification
@@ -911,7 +1001,7 @@ pub async fn handle_bridge_message(
                             notification_type,
                             Some(first_message),
                         ).await;
-                       
+                      
                     });
                     return;
                 }
@@ -922,7 +1012,7 @@ pub async fn handle_bridge_message(
         }
     }
 
-        if !waiting_checks.is_empty() {
+    if !waiting_checks.is_empty() {
         // Check if any waiting checks match the message
         if let Ok((check_id_option, message, first_message)) = crate::proactive::utils::check_waiting_check_match(
             &state,
@@ -932,7 +1022,7 @@ pub async fn handle_bridge_message(
             if let Some(check_id) = check_id_option {
                 let message = message.unwrap_or(format!("Waiting check matched in {}, but failed to get content", service).to_string());
                 let first_message = first_message.unwrap_or(format!("Hey, I found a match for one of your waiting checks in {}.", service_cap));
-               
+              
                 // Find the matched waiting check to determine noti_type
                 let matched_waiting_check = waiting_checks.iter().find(|wc| wc.id == Some(check_id)).cloned();
                 let suffix = if let Some(wc) = matched_waiting_check {
@@ -944,12 +1034,12 @@ pub async fn handle_bridge_message(
                     "_sms"
                 };
                 let notification_type = format!("{}_waiting_check{}", service, suffix);
-               
+              
                 // Delete the matched waiting check
                 if let Err(e) = state.user_repository.delete_waiting_check_by_id(user_id, check_id) {
                     tracing::error!("Failed to delete waiting check {}: {}", check_id, e);
                 }
-               
+              
                 // Send notification
                 let state_clone = state.clone();
                 tokio::spawn(async move {
@@ -965,7 +1055,6 @@ pub async fn handle_bridge_message(
             }
         }
     }
-
     // Check message importance based on waiting checks and criticality
     let user_settings = match state.user_core.get_user_settings(user_id) {
         Ok(settings) => settings,
@@ -974,17 +1063,15 @@ pub async fn handle_bridge_message(
             return;
         }
     };
-
     if user_settings.critical_enabled.is_none() {
         tracing::debug!("Critical message checking disabled for user {}", user_id);
         return;
     }
-
     if let Ok((is_critical, message, first_message)) = crate::proactive::utils::check_message_importance(&state, &format!("{} from {}: {}", service_cap, chat_name, content)).await {
         if is_critical {
             let message = message.unwrap_or(format!("Critical {} message found, failed to get content, but you can check your {} to see it.", service_cap, service));
             let first_message = first_message.unwrap_or(format!("Hey, I found some critical {} message.", service_cap));
-            
+           
             // Spawn a new task for sending critical message notification
             let state_clone = state.clone();
             let notification_type = format!("{}_critical", service);

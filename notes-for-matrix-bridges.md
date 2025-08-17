@@ -5,16 +5,17 @@ These are notes currently for running the matrix bridges I have made.
 ### database config:
 
 *if postgres(good for multiple users)*:
+when running these on ubuntu add 'sudo -u postgres in front'
 create new bridge db
 ```createdb mv_<service_name>```
 login to postgres
-```psql -d mw_<service_name>```
+```psql -d mv_<service_name>```
 create new user to this bridge db and grant permissions
 ```CREATE USER mw_<service_name> WITH PASSWORD 'password-for-the-matrix-bridge';```
 ```GRANT ALL PRIVILEGES ON DATABASE mv_<service_name> TO mw_<service_name>;```
 ```GRANT ALL ON SCHEMA public TO mw_<service_name>;```
 if db already exists
-```dropdb mw_<service_name>```
+```dropdb mv_<service_name>```
 endif
 
 *if sqlite(enough for single user)*:
@@ -100,6 +101,7 @@ endif
         for double_puppeting:
         double_puppet->secrets:
             localhost: as_token:<as_token_from_double_puppet.yaml>:
+        appservice->async_transactions: true
 
         double_puppet->servers: {}
     )

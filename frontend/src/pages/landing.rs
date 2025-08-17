@@ -139,6 +139,7 @@ pub fn landing() -> Html {
                             {"Switch to a dumbphone without feeling isolated, even if your life depends on "}
                             <span class="highlight-icon"><i class="fab fa-whatsapp"></i></span>
                             <span class="highlight-icon"><i class="fab fa-telegram"></i></span>
+                            <span class="highlight-icon"><i class="fab fa-signal-messenger"></i></span>
                             <span class="highlight-icon"><i class="fas fa-envelope"></i></span>
                             <span class="highlight-icon"><i class="fas fa-calendar"></i></span>
                             <span class="highlight-icon"><i class="fa-solid fa-route"></i></span>
@@ -266,6 +267,15 @@ pub fn landing() -> Html {
                                 <summary><i class="fab fa-telegram"></i>{"Send, Fetch and Monitor Telegram Messages"}</summary>
                                 <div class="feature-desc">
                                     <p>{"Link your Telegram account in the web dashboard. Then, send messages (e.g., 'send telegram to Bob saying I'm outside right now'), fetch recent messages ('fetch telegram pls') or from specific chat ('Check telegram for mom') and monitor for new messages with automatic SMS or call notifications for important updates."}</p>
+                                    // <iframe class="feature-video" src="https://www.youtube.com/embed/VIDEO_ID" allowfullscreen=true></iframe>
+                                </div>
+                            </details>
+                        </li>
+                        <li>
+                            <details>
+                                <summary><i class="fab fa-signal-messenger"></i>{"Send, Fetch and Monitor Signal Messages"}</summary>
+                                <div class="feature-desc">
+                                    <p>{"Link your Signal account in the web dashboard. Then, send messages (e.g., 'Send message on signal to Bob saying '5 min'), fetch recent messages ('Check signal') or from specific chat ('see if signal messages from Greg') and monitor for new messages with automatic SMS or call notifications for important updates."}</p>
                                     // <iframe class="feature-video" src="https://www.youtube.com/embed/VIDEO_ID" allowfullscreen=true></iframe>
                                 </div>
                             </details>

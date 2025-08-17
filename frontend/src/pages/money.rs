@@ -666,6 +666,7 @@ pub fn feature_list(props: &FeatureListProps) -> Html {
                 <li><i class="fas fa-qrcode"></i>{"QR Code Scanning (US & AUS only)"}</li>
                 <li><i class="fab fa-whatsapp"></i>{"Send, Fetch and Monitor WhatsApp Messages"}</li>
                 <li><i class="fab fa-telegram"></i>{"Send, Fetch and Monitor Telegram Messages"}</li>
+                <li><i class="fab fa-signal-messenger"></i>{"Send, Fetch and Monitor Signal Messages"}</li>
                 <li><i class="fas fa-envelope"></i>{"Fetch and Monitor Emails"}</li>
                 <li><i class="fas fa-calendar-days"></i>{"Fetch, Create and Monitor Calendar events"}</li>
                 <li><i class="fas fa-list-check"></i>{"Fetch and Create Tasks and Ideas"}</li>

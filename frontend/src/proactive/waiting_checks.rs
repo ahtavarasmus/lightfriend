@@ -636,8 +636,8 @@ pub fn waiting_checks_section(props: &WaitingChecksProps) -> Html {
                                 }
                             })}
                         >
-                            <option value="sms">{"SMS"}</option>
                             <option value="call">{"Call"}</option>
+                            <option value="sms">{"SMS"}</option>
                         </select>
                     </div>
                     <button onclick={Callback::from(move |_| add_waiting_check.emit(()))}>{"Add"}</button>

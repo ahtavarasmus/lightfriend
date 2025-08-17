@@ -148,18 +148,17 @@ async fn connect_signal(
         return Err(anyhow!("Bot {} failed to join room", bot_user_id));
     }
     // Send login command
-    let login_command = "login".to_string();
-    tracing::debug!("📤 Sending Signal login command: {}", login_command);
+    let login_command = "!signal login".to_string();
+    tracing::info!("📤 Sending Signal login command: {}", login_command);
     room.send(RoomMessageEventContent::text_plain(&login_command)).await?;
     // Optimized QR code detection with event handler
     let mut qr_code_url = None;
-    tracing::debug!("⏳ Starting QR code monitoring");
+    tracing::info!("⏳ Starting QR code monitoring");
    
     // Use shorter sync timeout for faster response
     let sync_settings = MatrixSyncSettings::default().timeout(Duration::from_millis(1500));
     for attempt in 1..=60 { // Increased to 60 attempts for longer user input time
         println!("📡 Sync attempt #{}/60", attempt);
-        tracing::debug!("📡 Sync attempt #{}", attempt);
         client.sync_once(sync_settings.clone()).await?;
         if let Some(room) = client.get_room(&room_id) {
             // Get only the most recent messages to reduce processing time
@@ -184,9 +183,10 @@ async fn connect_signal(
                             };
                             match event_content.msgtype {
                                 MessageType::Image(image_content) => {
+                                    tracing::info!("Received Image message: {:#?}", image_content);
                                     if let matrix_sdk::ruma::events::room::MediaSource::Plain(url) = &image_content.source {
                                         qr_code_url = Some(url.to_string());
-                                        tracing::debug!("🔑 Found QR code URL");
+                                        tracing::info!("🔑 Found QR code URL: {:#?}", qr_code_url);
                                         break;
                                     } else {
                                         // Handle unexpected encrypted case, e.g., log an error and continue
@@ -194,18 +194,23 @@ async fn connect_signal(
                                     }
                                 },
                                 MessageType::Notice(text_content) => {
+                                    tracing::info!("Received Notice message: {}", text_content.body);
                                     // Check for errors or other notices
                                     if text_content.body.contains("error") {
                                         return Err(anyhow!("Error from bot: {}", text_content.body));
                                     }
                                 },
                                 MessageType::Text(text_content) => {
+                                    tracing::info!("Received Text message: {}", text_content.body);
                                     // Check for errors or other texts
                                     if text_content.body.contains("error") {
                                         return Err(anyhow!("Error from bot: {}", text_content.body));
                                     }
                                 },
-                                _ => continue,
+                                _ => {
+                                    tracing::info!("Received other message type: {:#?}", event_content.msgtype);
+                                    continue
+                                }
                             };
                         }
                     }
@@ -221,6 +226,14 @@ async fn connect_signal(
     let qr_code_url = qr_code_url.ok_or(anyhow!("Signal QR code not received within timeout. Please try again."))?;
     Ok((room_id.into(), qr_code_url))
 }
+
+use matrix_sdk::media::MediaFormat;
+use matrix_sdk::ruma::events::room::MediaSource;
+use matrix_sdk::media::MediaRequestParameters;
+use base64::engine::general_purpose::STANDARD as Base64Engine;
+use matrix_sdk::ruma::MxcUri;
+use base64::Engine;
+
 pub async fn start_signal_connection(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -258,8 +271,42 @@ pub async fn start_signal_connection(
             AxumJson(json!({"error": format!("Failed to connect to Signal bridge: {}", e)})),
         )
     })?;
-    // Debug: Log the QR code URL
-    tracing::info!("Generated QR code URL");
+
+    tracing::info!("📥 Fetching QR code media bytes via SDK...");
+    let mxc = matrix_sdk::ruma::OwnedMxcUri::try_from(qr_code_url.as_str()).map_err(|e| {
+        tracing::error!("Invalid MXC URI: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            AxumJson(json!({"error": "Invalid QR code URI"})),
+        )
+    })?;
+
+    let request = MediaRequestParameters {
+        source: MediaSource::Plain(mxc.to_owned()),
+        format: MediaFormat::File,
+    };
+
+    let bytes = client.media()
+        .get_media_content(&request, false) // false = don't download if already cached, but irrelevant here
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to download QR code media: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                AxumJson(json!({"error": format!("Failed to fetch QR code image: {}", e)})),
+            )
+        })?;
+
+    let base64_str = Base64Engine.encode(&bytes);
+    let data_url = format!("data:image/png;base64,{}", base64_str);
+
+    if auth_user.user_id == 1 {
+        tracing::info!("Generated data URL for QR code (preview: {}...)", &data_url[0..50]);
+    }
+
+    // Replace qr_code_url with data_url for the response
+    let qr_code_url = data_url;
+
     // Create bridge record
     let current_time = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -306,6 +353,8 @@ pub async fn start_signal_connection(
     });
     Ok(AxumJson(SignalConnectionResponse { qr_code_url }))
 }
+
+
 pub async fn get_signal_status(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -371,9 +420,10 @@ async fn monitor_signal_connection(
                                 MessageType::Notice(notice_content) => notice_content.body,
                                 _ => continue,
                             };
+                            println!("CONTENT: {}", content);
                             // Check for successful login message first
-                            if content.contains("successful login") || content.contains("Logged in") {
-                                tracing::debug!("🎉 Signal successfully connected for user {}", user_id);
+                            if content.contains("Successfully logged in") {
+                                tracing::info!("🎉 Signal successfully connected for user {}", user_id);
                                
                                 // Update bridge status to connected
                                 let current_time = std::time::SystemTime::now()

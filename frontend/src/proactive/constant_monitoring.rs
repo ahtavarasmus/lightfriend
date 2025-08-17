@@ -479,6 +479,10 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                         color: #0088cc;
                         border: 1px solid rgba(0, 136, 204, 0.2);
                     }
+                    .service-type-badge.signal {
+                        color: #3A76F0;<grok-card data-id="24576a" data-type="citation_card"></grok-card>
+                        border: 1px solid rgba(58, 118, 240, 0.2);
+                    }
                     .noti-type-badge {
                         padding: 0.25rem 0.75rem;
                         border-radius: 8px;
@@ -665,8 +669,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     <div class="info-subsection">
                         <ul>
                             <li>{"Lightfriend will notify you about all messages from your monitored contacts"}</li>
-                            <li>{"For WhatsApp, enter the contact's name or phone number"}</li>
-                            <li>{"For Telegram, enter the contact's name or phone number"}</li>
+                            <li>{"For WhatsApp, Telegram, Signal, enter the contact's name or phone number"}</li>
                             <li>{"For Email, enter the contact's email address"}</li>
                         </ul>
                     </div>
@@ -704,6 +707,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                         >
                             <option value="whatsapp">{"WhatsApp"}</option>
                             <option value="telegram">{"Telegram"}</option>
+                            <option value="signal">{"Signal"}</option>
                             <option value="imap">{"Email"}</option>
                             <option value="">{"Select Service"}</option>
                         </select>
@@ -718,6 +722,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                                                 "imap" => "Enter email address",
                                                 "whatsapp" => "Search WhatsApp chats or add manually",
                                                 "telegram" => "Search Telegram chats or add manually",
+                                                "signal" => "Search Signal chats or add manually",
                                                 _ => "Select app first from the left",
                                             }}
                                             value={(*new_contact).clone()}
@@ -845,14 +850,23 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     let service_type_class = match contact.service_type.as_str() {
                         "imap" => "email",
                         "telegram" => "telegram",
+                        "signal" => "signal",
                         "whatsapp" => "whatsapp",
                         _ => "messaging",
                     };
                     let service_type_display = match contact.service_type.as_str() {
-                        "imap" => "Email",
-                        "whatsapp" => "WhatsApp",
-                        "telegram" => "Telegram",
+                        "imap" => " Email",
+                        "whatsapp" => " WhatsApp",
+                        "telegram" => " Telegram",
+                        "signal" => " Signal",
                         _ => "Unknown",
+                    };
+                    let icon_class = match contact.service_type.as_str() {
+                        "imap" => "fas fa-envelope",
+                        "whatsapp" => "fab fa-whatsapp",
+                        "telegram" => "fab fa-telegram",
+                        "signal" => "fab fa-signal-messenger",
+                        _ => "",
                     };
                     let noti_type_display = contact.noti_type.as_ref().map(|s| s.as_str()).unwrap_or("sms");
                     let noti_type_class = match noti_type_display {
@@ -862,7 +876,12 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     html! {
                         <li>
                             <span>{identifier.clone()}</span>
-                            <span class={classes!("service-type-badge", service_type_class)}>{service_type_display}</span>
+                            <span class={classes!("service-type-badge", service_type_class)}>
+                            if !icon_class.is_empty() {
+                                <i class={icon_class}></i>
+                            }
+                            {service_type_display}
+                            </span>
                             <span class={classes!("noti-type-badge", noti_type_class)}>{noti_type_display.to_uppercase()}</span>
                             <button class="delete-btn"
                                 onclick={Callback::from({

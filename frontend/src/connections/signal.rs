@@ -12,9 +12,9 @@ struct SignalStatus {
     status: String,
     created_at: i32,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone, Debug)]
 struct SignalConnectionResponse {
-    qr_url: String,
+    qr_code_url: String,
 }
 #[derive(Properties, PartialEq)]
 pub struct SignalProps {
@@ -31,6 +31,8 @@ pub fn signal_connect(props: &SignalProps) -> Html {
     let qr_link = use_state(|| None::<String>);
     let error = use_state(|| None::<String>);
     let is_connecting = use_state(|| false);
+    let show_disconnect_modal = use_state(|| false);
+    let is_disconnecting = use_state(|| false);
     let fetch_status = {
         let connection_status = connection_status.clone();
         let error = error.clone();
@@ -101,7 +103,8 @@ pub fn signal_connect(props: &SignalProps) -> Html {
                         Ok(response) => {
                             match response.json::<SignalConnectionResponse>().await {
                                 Ok(connection_response) => {
-                                    qr_link.set(Some(connection_response.qr_url));
+                                    qr_link.set(Some(connection_response.qr_code_url.clone()));
+                                    web_sys::console::log_1(&format!("qr link url: {:#?}", connection_response.qr_code_url.clone()).into());
                                     error.set(None);
                                     let poll_interval = 5000;
                                     let poll_duration = 300000;
@@ -172,15 +175,20 @@ pub fn signal_connect(props: &SignalProps) -> Html {
     let disconnect = {
         let connection_status = connection_status.clone();
         let error = error.clone();
+        let is_disconnecting = is_disconnecting.clone();
+        let show_disconnect_modal = show_disconnect_modal.clone();
         Callback::from(move |_| {
             let connection_status = connection_status.clone();
             let error = error.clone();
+            let is_disconnecting = is_disconnecting.clone();
+            let show_disconnect_modal = show_disconnect_modal.clone();
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
                 .flatten()
                 .and_then(|storage| storage.get_item("token").ok())
                 .flatten()
             {
+                is_disconnecting.set(true);
                 spawn_local(async move {
                     match Request::delete(&format!("{}/api/auth/signal/disconnect", config::get_backend_url()))
                         .header("Authorization", &format!("Bearer {}", token))
@@ -199,7 +207,11 @@ pub fn signal_connect(props: &SignalProps) -> Html {
                             error.set(Some("Failed to disconnect Signal".to_string()));
                         }
                     }
+                    is_disconnecting.set(false);
+                    show_disconnect_modal.set(false);
                 });
+            } else {
+                show_disconnect_modal.set(false);
             }
         })
     };
@@ -207,7 +219,7 @@ pub fn signal_connect(props: &SignalProps) -> Html {
         <div class="signal-connect">
             <div class="service-header">
                 <div class="service-name">
-                    <img src="https://upload.wikimedia.org/wikipedia/commons/5/5c/Signal-Logo.svg.png" alt="Signal"/>
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/6/60/Signal-Logo-Ultramarine_(2024).svg" alt="Signal Logo" />
                     {"Signal"}
                 </div>
                 if let Some(status) = (*connection_status).clone() {
@@ -272,9 +284,48 @@ pub fn signal_connect(props: &SignalProps) -> Html {
                                 <p class="service-description">
                                     {"Send and receive Signal messages through SMS or voice calls."}
                                 </p>
-                                <button onclick={disconnect} class="disconnect-button">
+                                <button onclick={
+                                    let show_disconnect_modal = show_disconnect_modal.clone();
+                                    Callback::from(move |_| show_disconnect_modal.set(true))
+                                } class="disconnect-button">
                                     {"Disconnect"}
                                 </button>
+                                if *show_disconnect_modal {
+                                    <div class="modal-overlay">
+                                        <div class="modal-content">
+                                            <h3>{"Confirm Disconnection"}</h3>
+                                            <p>{"Are you sure you want to disconnect Signal? This will:"}</p>
+                                            <ul>
+                                                <li>{"Stop all Signal message forwarding"}</li>
+                                                <li>{"Delete all your Signal data from our servers"}</li>
+                                                <li>{"Require reconnection to use Signal features again"}</li>
+                                            </ul>
+                                            if *is_disconnecting {
+                                                <p class="disconnecting-message">{"Disconnecting Signal... Please wait."}</p>
+                                            }
+                                            <div class="modal-buttons">
+                                                <button onclick={
+                                                    let show_disconnect_modal = show_disconnect_modal.clone();
+                                                    Callback::from(move |_| show_disconnect_modal.set(false))
+                                                } class="cancel-button" disabled={*is_disconnecting}>
+                                                    {"Cancel"}
+                                                </button>
+                                                <button onclick={
+                                                    let disconnect = disconnect.clone();
+                                                    Callback::from(move |_| {
+                                                        disconnect.emit(());
+                                                    })
+                                                } class="confirm-disconnect-button" disabled={*is_disconnecting}>
+                                                    if *is_disconnecting {
+                                                        <span class="button-spinner"></span> {"Disconnecting..."}
+                                                    } else {
+                                                        {"Yes, Disconnect"}
+                                                    }
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
                                 {
                                     html! {
                                         <button onclick={{
@@ -728,6 +779,90 @@ pub fn signal_connect(props: &SignalProps) -> Html {
                         font-size: 0.9rem;
                         padding-top: 1rem;
                         border-top: 1px solid rgba(0, 136, 204, 0.1);
+                    }
+                    .modal-overlay {
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                        background: rgba(0, 0, 0, 0.85);
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        z-index: 1000;
+                    }
+                    .modal-content {
+                        background: #1a1a1a;
+                        border: 1px solid rgba(0, 136, 204, 0.2);
+                        border-radius: 12px;
+                        padding: 2rem;
+                        max-width: 500px;
+                        width: 90%;
+                        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+                    }
+                    .modal-content h3 {
+                        color: #FF6347;
+                        margin-bottom: 1rem;
+                    }
+                    .modal-content p {
+                        color: #CCC;
+                        margin-bottom: 1rem;
+                    }
+                    .modal-content ul {
+                        margin-bottom: 2rem;
+                        padding-left: 1.5rem;
+                    }
+                    .modal-content li {
+                        color: #999;
+                        margin-bottom: 0.5rem;
+                    }
+                    .modal-buttons {
+                        display: flex;
+                        gap: 1rem;
+                        justify-content: flex-end;
+                    }
+                    .cancel-button {
+                        background: transparent;
+                        border: 1px solid rgba(204, 204, 204, 0.3);
+                        color: #CCC;
+                        padding: 0.8rem 1.5rem;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                    }
+                    .cancel-button:hover {
+                        background: rgba(204, 204, 204, 0.1);
+                        transform: translateY(-2px);
+                    }
+                    .confirm-disconnect-button {
+                        background: linear-gradient(45deg, #FF6347, #FF4500);
+                        color: white;
+                        border: none;
+                        padding: 0.8rem 1.5rem;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                    }
+                    .confirm-disconnect-button:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 12px rgba(255, 99, 71, 0.3);
+                    }
+                    .button-spinner {
+                        display: inline-block;
+                        width: 16px;
+                        height: 16px;
+                        border: 2px solid rgba(255, 255, 255, 0.3);
+                        border-radius: 50%;
+                        border-top-color: #fff;
+                        animation: spin 1s ease-in-out infinite;
+                        margin-right: 8px;
+                        vertical-align: middle;
+                    }
+                    .disconnecting-message {
+                        color: #0088cc;
+                        margin: 1rem 0;
+                        font-weight: bold;
                     }
                 "#}
             </style>

@@ -11,8 +11,8 @@ pub fn get_search_chat_contacts_tool() -> openai_api_rs::v1::chat_completion::To
         "platform".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The platform to fetch messages from. Must be 'telegram' or 'whatsapp'.".to_string()),
-            enum_values: Some(vec!["telegram".to_string(), "whatsapp".to_string()]),
+            description: Some("The platform to fetch messages from. Must be either 'telegram', 'whatsapp' or 'signal'.".to_string()),
+            enum_values: Some(vec!["telegram".to_string(), "whatsapp".to_string(), "signal".to_string()]),
             ..Default::default()
         }),
     );
@@ -30,7 +30,7 @@ pub fn get_search_chat_contacts_tool() -> openai_api_rs::v1::chat_completion::To
             name: String::from("search_chat_contacts"),
             description: Some(String::from(
                 "Searches to check if specific contacts, rooms, groups, or channels exist on the specified platform by name or keyword. \
-                Use this only when the user asks to search, find, or check for the existence of contacts/people/groups/channels on Telegram or WhatsApp. \
+                Use this only when the user asks to search, find, or check for the existence of contacts/people/groups/channels on Telegram, WhatsApp or Signal. \
                 Do not use this for searching messages within a chat; use the separate message search tool for that."
             )),
             parameters: types::FunctionParameters {
@@ -50,8 +50,8 @@ pub fn get_fetch_chat_messages_tool() -> openai_api_rs::v1::chat_completion::Too
         "platform".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The platform to fetch messages from. Must be 'telegram' or 'whatsapp'.".to_string()),
-            enum_values: Some(vec!["telegram".to_string(), "whatsapp".to_string()]),
+            description: Some("The platform to fetch messages from. Must be either 'telegram', 'whatsapp' or 'signal'.".to_string()),
+            enum_values: Some(vec!["telegram".to_string(), "whatsapp".to_string(), "signal".to_string()]),
             ..Default::default()
         }),
     );
@@ -76,7 +76,7 @@ pub fn get_fetch_chat_messages_tool() -> openai_api_rs::v1::chat_completion::Too
         function: types::Function {
             name: String::from("fetch_chat_messages"),
             description: Some(String::from(
-                "Fetches messages from a specific chat/room on Telegram or WhatsApp. \
+                "Fetches messages from a specific chat/room on Telegram, WhatsApp or Signal. \
                 Use this ONLY if the user specifies a particular contact or group (e.g., 'messages from John Doe'). \
                 Do not use if no specific chat is mentioned—use fetch_recent_messages instead. \
                 Returns the latest messages from that chat."
@@ -98,8 +98,8 @@ pub fn get_fetch_recent_messages_tool() -> openai_api_rs::v1::chat_completion::T
         "platform".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The platform to fetch recent messages from. Must be 'telegram' or 'whatsapp'.".to_string()),
-            enum_values: Some(vec!["telegram".to_string(), "whatsapp".to_string()]),
+            description: Some("The platform to fetch recent messages from. Must be either 'telegram', 'whatsapp' or 'signal'.".to_string()),
+            enum_values: Some(vec!["telegram".to_string(), "whatsapp".to_string(), "signal".to_string()]),
             ..Default::default()
         }),
     );
@@ -116,7 +116,7 @@ pub fn get_fetch_recent_messages_tool() -> openai_api_rs::v1::chat_completion::T
         function: types::Function {
             name: String::from("fetch_recent_messages"),
             description: Some(String::from(
-                "Fetches recent messages across ALL chats on Telegram or WhatsApp from the given start time. \
+                "Fetches recent messages across ALL chats on Telegram, WhatsApp or Signal from the given start time. \
                 Use this when the user asks about recent messages without naming a specific chat (e.g., 'fetch telegram messages'). \
                 Do not use if a particular contact or group is specified—use fetch_chat_messages instead."
             )),
@@ -137,8 +137,8 @@ pub fn get_send_chat_message_tool() -> openai_api_rs::v1::chat_completion::Tool 
         "platform".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The platform to fetch recent messages from. Must be 'telegram' or 'whatsapp'.".to_string()),
-            enum_values: Some(vec!["telegram".to_string(), "whatsapp".to_string()]),
+            description: Some("The platform to fetch recent messages from. Must be either 'telegram', 'whatsapp' or 'signal'.".to_string()),
+            enum_values: Some(vec!["telegram".to_string(), "whatsapp".to_string(), "signal".to_string()]),
             ..Default::default()
         }),
     );
@@ -164,7 +164,7 @@ pub fn get_send_chat_message_tool() -> openai_api_rs::v1::chat_completion::Tool 
             name: String::from("send_chat_message"),
             description: Some(String::from(
                 "Sends a message to a specific chat on the specified platform. \
-                Use this when the user asks to send a message to a contact or group on Telegram or WhatsApp. \
+                Use this when the user asks to send a message to a contact or group on Telegram, WhatsApp or Signal. \
                 This tool will fuzzy search for the chat_name, confirm with the user, and require their confirmation before sending."
             )),
             parameters: types::FunctionParameters {
