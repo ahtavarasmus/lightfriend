@@ -24,9 +24,6 @@ pub struct SignalProps {
 }
 #[function_component(SignalConnect)]
 pub fn signal_connect(props: &SignalProps) -> Html {
-    if props.user_id != 1 {
-        return html! {};
-    }
     let connection_status = use_state(|| None::<SignalStatus>);
     let qr_link = use_state(|| None::<String>);
     let error = use_state(|| None::<String>);
