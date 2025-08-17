@@ -44,9 +44,8 @@ impl UserRepository {
         use crate::schema::message_history;
         use diesel::prelude::*;
         use crate::utils::encryption;
-
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
+       
         let user_messages: Vec<crate::models::user_models::MessageHistory>;
         // First, get the user messages to establish time boundaries
         if include_tools {
@@ -65,27 +64,26 @@ impl UserRepository {
                 .limit(limit)
                 .load::<crate::models::user_models::MessageHistory>(&mut conn)?;
         }
-
         if user_messages.is_empty() {
             return Ok(Vec::new());
         }
-
         // Get the timestamp of the oldest user message
         let oldest_timestamp = user_messages.last().map(|msg| msg.created_at).unwrap_or(0);
-
         // Now get all messages from the oldest user message onwards
         let encrypted_messages = message_history::table
             .filter(message_history::user_id.eq(user_id))
             .filter(message_history::created_at.ge(oldest_timestamp))
             .order_by(message_history::created_at.desc())
-
             .load::<crate::models::user_models::MessageHistory>(&mut conn)?;
-
-        // Decrypt the content of each message
+        // Decrypt the content of each message and filter out empty assistant messages
         let mut decrypted_messages = Vec::new();
         for mut msg in encrypted_messages {
             match encryption::decrypt(&msg.encrypted_content) {
                 Ok(decrypted_content) => {
+                    if msg.role == "assistant" && decrypted_content.is_empty() {
+                        // Skip empty assistant messages
+                        continue;
+                    }
                     msg.encrypted_content = decrypted_content;
                     decrypted_messages.push(msg);
                 }
@@ -96,7 +94,6 @@ impl UserRepository {
                 }
             }
         }
-
         Ok(decrypted_messages)
     }
 
