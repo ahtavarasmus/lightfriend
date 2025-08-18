@@ -1131,10 +1131,9 @@ pub async fn process_sms(
                 }
                 Err(e) => {
                     tracing::info!("Failed to get follow-up completion: {}", e);
-                    fail = true;
                     tool_answers.values().next()
-                        .map(|ans| format!("Based on my research: {} (you were not charged for this message)", ans.chars().take(370).collect::<String>()))
-                        .unwrap_or_else(|| "I apologize, but I encountered an error processing your request. (you were not charged for this message)".to_string())
+                        .map(|ans| format!("Based on my research: {}", ans.chars().take(370).collect::<String>()))
+                        .unwrap_or_else(|| "I apologize, but I encountered an error processing your request.".to_string())
                 }
             }
         }

@@ -329,8 +329,7 @@ pub async fn fetch_assistant(
                     tracing::error!("Failed to fetch {} contacts: {}", platform, e);
                     Vec::new()
                 });
-                let names: Vec<String> = contacts.iter().map(|r| r.display_name.clone()).collect();
-                let contacts_str = names.join(", ");
+                let contacts_str = contacts.join(", ");
                 
                 if !all_contacts_str.is_empty() {
                     all_contacts_str.push_str("; ");

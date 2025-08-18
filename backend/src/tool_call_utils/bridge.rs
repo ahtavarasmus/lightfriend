@@ -208,7 +208,7 @@ pub async fn handle_send_chat_message(
     image_url: Option<&str>
 ) -> Result<(StatusCode, [(HeaderName, &'static str); 1], Json<TwilioResponse>), Box<dyn std::error::Error>> {
     let args: SendChatMessageArgs = serde_json::from_str(args)?;
-  
+ 
     // Get user settings to check confirmation preference
     let user_settings = state.user_core.get_user_settings(user_id)?;
     let capitalized_platform = args.platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &args.platform[1..];
@@ -264,37 +264,12 @@ pub async fn handle_send_chat_message(
         }
     }
     // If confirmation is required, search for the chat room first (fuzzy match)
-    let rooms = match crate::utils::bridge::search_bridge_rooms(
-        &args.platform,
-        state,
-        user_id,
-        &args.chat_name,
-    ).await {
-        Ok(rooms) => rooms,
-        Err(e) => {
-            let error_msg = format!("Failed to find contact. Please make sure you're connected to {} bridge.", capitalized_platform);
-            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                state,
-                error_msg.as_str(),
-                None,
-                user,
-            ).await {
-                eprintln!("Failed to send error message: {}", e);
-            }
-            return Ok((
-                StatusCode::OK,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                Json(TwilioResponse {
-                    message: error_msg.to_string(),
-                })
-            ));
-        }
-    };
-    if rooms.is_empty() {
-        let error_msg = format!("No {} contacts found matching '{}'.", capitalized_platform, args.chat_name.as_str());
+    let bridge = state.user_repository.get_bridge(user_id, &args.platform)?;
+    if bridge.map(|b| b.status != "connected").unwrap_or(true) {
+        let error_msg = format!("Failed to find contact. Please make sure you're connected to {} bridge.", capitalized_platform);
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
             state,
-            &error_msg,
+            error_msg.as_str(),
             None,
             user,
         ).await {
@@ -304,13 +279,56 @@ pub async fn handle_send_chat_message(
             StatusCode::OK,
             [(axum::http::header::CONTENT_TYPE, "application/json")],
             Json(TwilioResponse {
-                message: error_msg,
+                message: error_msg.to_string(),
             })
         ));
     }
-    // Get the best match (first result)
-    let best_match = &rooms[0];
-    let exact_name = best_match.display_name.trim_end_matches(" (WA)").to_string().trim_end_matches(" (Telegram)").to_string();
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
+    let rooms = match crate::utils::bridge::get_service_rooms(&client, &args.platform).await {
+        Ok(rooms) => rooms,
+        Err(e) => {
+            let error_msg = format!("Failed to fetch {} rooms: {}", capitalized_platform, e);
+            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                state,
+                &error_msg,
+                None,
+                user,
+            ).await {
+                eprintln!("Failed to send error message: {}", e);
+            }
+            return Ok((
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                Json(TwilioResponse {
+                    message: error_msg,
+                })
+            ));
+        }
+    };
+    let best_match = crate::utils::bridge::search_best_match(&rooms, &args.chat_name);
+    let best_match = match best_match {
+        Some(room) => room,
+        None => {
+            let error_msg = format!("No {} contacts found matching '{}'.", capitalized_platform, args.chat_name.as_str());
+            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                state,
+                &error_msg,
+                None,
+                user,
+            ).await {
+                eprintln!("Failed to send error message: {}", e);
+            }
+            return Ok((
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                Json(TwilioResponse {
+                    message: error_msg,
+                })
+            ));
+        }
+    };
+    // Get the best match
+    let exact_name = crate::utils::bridge::remove_bridge_suffix(&best_match.display_name);
     // Set the temporary variable for WhatsApp message
     if let Err(e) = state.user_core.set_temp_variable(
         user_id,
@@ -385,6 +403,7 @@ pub async fn handle_send_chat_message(
         }
     }
 }
+
 #[derive(Deserialize)]
 struct SearchChatContactsArgs {
     platform: String,

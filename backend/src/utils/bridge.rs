@@ -70,7 +70,7 @@ fn get_sender_prefix(service: &str) -> String {
     format!("{}_", service)
 }
 
-fn remove_bridge_suffix(chat_name: &str) -> String {
+pub fn remove_bridge_suffix(chat_name: &str) -> String {
     if chat_name.ends_with("(WA)") {
         chat_name.trim_end_matches("(WA)").trim().to_string()
     } else if chat_name.ends_with("(Telegram)") {
@@ -100,6 +100,161 @@ fn infer_service(room_name: &str, sender_localpart: &str) -> Option<String> {
     None
 }
 
+pub async fn get_service_rooms(client: &MatrixClient, service: &str) -> Result<Vec<BridgeRoom>> {
+    let joined_rooms = client.joined_rooms();
+    let sender_prefix = get_sender_prefix(service);
+    let service_cap = capitalize(service);
+    let skip_terms = vec![
+        format!("{}bot", service),
+        format!("{}-bridge", service),
+        format!("{} Bridge", service_cap),
+        format!("{} bridge bot", service_cap),
+    ];
+    let mut futures = Vec::new();
+    for room in joined_rooms {
+        let sender_prefix = sender_prefix.clone();
+        let skip_terms = skip_terms.clone();
+        futures.push(async move {
+            let display_name = match room.display_name().await {
+                Ok(name) => name.to_string(),
+                Err(_) => return None,
+            };
+            if skip_terms.iter().any(|t| display_name.contains(t)) {
+                return None;
+            }
+            // Check membership instead of last message sender
+            let members = match room.members(RoomMemberships::JOIN).await {
+                Ok(m) => m,
+                Err(_) => return None,
+            };
+            let has_service_member = members.iter().any(|member| member.user_id().localpart().starts_with(&sender_prefix));
+            if !has_service_member {
+                return None;
+            }
+            // Get last activity from most recent message, regardless of sender
+            let mut options = matrix_sdk::room::MessagesOptions::backward();
+            options.limit = matrix_sdk::ruma::UInt::new(1).unwrap();
+            let last_activity = match room.messages(options).await {
+                Ok(response) => response.chunk.first()
+                    .and_then(|event| event.raw().deserialize().ok())
+                    .map(|e: AnySyncTimelineEvent| i64::from(e.origin_server_ts().0) / 1000)
+                    .unwrap_or(0),
+                Err(_) => 0,
+            };
+            Some(BridgeRoom {
+                room_id: room.room_id().to_string(),
+                display_name,
+                last_activity,
+                last_activity_formatted: format_timestamp(last_activity, None),
+            })
+        });
+    }
+    let results = join_all(futures).await;
+    let mut rooms: Vec<BridgeRoom> = results.into_iter().flatten().collect();
+    rooms.sort_by_key(|r| std::cmp::Reverse(r.last_activity));
+    Ok(rooms)
+}
+
+pub fn find_exact_room(
+    bridge_rooms: &[BridgeRoom],
+    search_term: &str,
+) -> Option<BridgeRoom> {
+    let search_term_lower = search_term.trim().to_lowercase();
+    if let Some(room) = bridge_rooms.iter().find(|r| remove_bridge_suffix(r.display_name.as_str()).to_lowercase() == search_term_lower) {
+        tracing::info!("Found exact match for room");
+        return Some(room.clone());
+    }
+    None
+}
+
+pub fn search_best_match(
+    bridge_rooms: &[BridgeRoom],
+    search_term: &str,
+) -> Option<BridgeRoom> {
+    let search_term_lower = search_term.trim().to_lowercase();
+    // Try exact match first (fastest)
+    if let Some(room) = bridge_rooms.iter().find(|r| remove_bridge_suffix(r.display_name.as_str()).to_lowercase() == search_term_lower) {
+        tracing::info!("Found exact match for room");
+        return Some(room.clone());
+    }
+    // Then try substring match
+    if let Some(room) = bridge_rooms.iter()
+        .filter(|r| remove_bridge_suffix(r.display_name.as_str()).to_lowercase().contains(&search_term_lower))
+        .max_by_key(|r| r.last_activity) {
+        tracing::info!("Found substring match for room");
+        return Some(room.clone());
+    }
+    // Finally try similarity match
+    let best_match = bridge_rooms.iter()
+        .map(|r| (strsim::jaro_winkler(&search_term_lower, &remove_bridge_suffix(r.display_name.as_str()).to_lowercase()), r))
+        .filter(|(score, _)| *score >= 0.7)
+        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    if let Some((score, room)) = best_match {
+        tracing::info!("Found similar match with score {}", score);
+        Some(room.clone())
+    } else {
+        None
+    }
+}
+
+pub fn get_best_matches(
+    bridge_rooms: &[BridgeRoom],
+    search_term: &str,
+) -> Vec<String> {
+    let search_term_lower = search_term.trim().to_lowercase();
+    let mut matches: Vec<(f64, String)> = bridge_rooms.iter()
+        .map(|r| {
+            let name = remove_bridge_suffix(&r.display_name);
+            let name_lower = name.to_lowercase();
+            (strsim::jaro_winkler(&search_term_lower, &name_lower), name.to_string())
+        })
+        .filter(|(score, _)| *score >= 0.7)
+        .collect();
+    matches.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+    matches.into_iter().take(5).map(|(_, name)| name).collect()
+}
+
+pub async fn fetch_bridge_room_messages(
+    service: &str,
+    state: &Arc<AppState>,
+    user_id: i32,
+    chat_name: &str,
+    limit: Option<u64>,
+) -> Result<(Vec<BridgeMessage>, String)> {
+    tracing::info!(
+        "Starting {} message fetch - User: {}, chat: {}, limit: {}",
+        capitalize(&service),
+        user_id,
+        chat_name,
+        limit.unwrap_or(20)
+    );
+    if let Some(bridge) = state.user_repository.get_bridge(user_id, service)? {
+        if bridge.status != "connected" {
+            return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(&service)));
+        }
+    } else {
+        return Err(anyhow!("{} bridge not found", capitalize(&service)));
+    }
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
+    let rooms = get_service_rooms(&client, service).await?;
+    let matching_room = search_best_match(&rooms, chat_name);
+    let user_info = state.user_core.get_user_info(user_id)?;
+    match matching_room {
+        Some(room_info) => {
+            let room_id = match matrix_sdk::ruma::OwnedRoomId::try_from(room_info.room_id.as_str()) {
+                Ok(id) => id,
+                Err(e) => return Err(anyhow!("Invalid room ID: {}", e)),
+            };
+            let room = match client.get_room(&room_id) {
+                Some(r) => r,
+                None => return Err(anyhow!("Room not found")),
+            };
+            fetch_messages_from_room(service, room, limit, user_info.timezone).await
+        }
+        None => Err(anyhow!("No matching {} room found for '{}'", capitalize(&service), chat_name))
+    }
+}
+
 pub async fn fetch_bridge_messages(
     service: &str,
     state: &Arc<AppState>,
@@ -107,132 +262,44 @@ pub async fn fetch_bridge_messages(
     start_time: i64,
     unread_only: bool,
 ) -> Result<Vec<BridgeMessage>> {
-
     tracing::info!("Fetching {} messages for user {}", service, user_id);
-    
+   
     let user_info= state.user_core.get_user_info(user_id)?;
-
     // Get Matrix client and check bridge status (use cached version for better performance)
     let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
-
     let bridge = state.user_repository.get_bridge(user_id, service)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
         return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(&service)));
     }
-
-
-    let sender_prefix = get_sender_prefix(service);
-
-    let service_cap = capitalize(&service);
-
-    let skip_terms = vec![
-        format!("{}bot", service),
-        format!("{}-bridge", service),
-        format!("{} Bridge", service_cap),
-        format!("{} bridge bot", service_cap),
-    ];
-
-    // Structure to hold room info
-    struct RoomInfo {
-        room: Room,
-        last_activity: i64,
-        display_name: String,
+    let service_rooms = get_service_rooms(&client, service).await?;
+    let mut room_infos: Vec<(Room, BridgeRoom)> = Vec::new();
+    for bridge_room in service_rooms {
+        let room_id = match matrix_sdk::ruma::OwnedRoomId::try_from(bridge_room.room_id.as_str()) {
+            Ok(id) => id,
+            Err(_) => continue,
+        };
+        let Some(room) = client.get_room(&room_id) else { continue; };
+        if unread_only && room.unread_notification_counts().notification_count == 0 {
+            continue;
+        }
+        room_infos.push((room, bridge_room));
     }
-
-    // Process rooms in parallel
-    let joined_rooms = client.joined_rooms();
-    
-    let mut futures = Vec::new();
-    for room in joined_rooms {
-        let skip_terms = skip_terms.clone();
-        let sender_prefix = sender_prefix.clone();
-        futures.push(async move {
-            
-            // Quick checks first
-            let display_name = match room.display_name().await {
-                Ok(name) => name.to_string(),
-                Err(_) => return None,
-            };
-
-            if skip_terms.iter().any(|t| display_name.contains(t)){
-                return None;
-            }
-
-            if unread_only && room.unread_notification_counts().notification_count == 0 {
-                return None; 
-            }
-            let members = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
-                Ok(members) => members,
-                Err(_) => return None,
-            };
-            // Check for at least one member with the service prefix to confirm service type
-            let has_service_member = members.iter().any(|member| member.user_id().localpart().starts_with(&sender_prefix));
-            if !has_service_member {
-                return None;
-            }
-
-            // Get last message timestamp
-            let mut options = matrix_sdk::room::MessagesOptions::backward();
-            options.limit = matrix_sdk::ruma::UInt::new(10).unwrap();
-            
-            let last_activity = match room.messages(options).await {
-                Ok(response) => {
-                    // Find the most recent WhatsApp message timestamp
-                    response.chunk.iter()
-                        .filter_map(|event| {
-                            if let Ok(any_event) = event.raw().deserialize() {
-                                if let AnySyncTimelineEvent::MessageLike(
-                                    matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
-                                ) = any_event {
-                                    if let SyncRoomMessageEvent::Original(e) = msg {
-                                        if e.sender.localpart().starts_with(&sender_prefix) {
-                                            Some(i64::from(e.origin_server_ts.0) / 1000)
-                                        } else {
-                                            None
-                                        }
-                                    } else { None }
-                                } else { None }
-                            } else { None }
-                        })
-                        .next() // Get the first (most recent) WhatsApp message timestamp
-                        .unwrap_or(0)
-                },
-                Err(_) => 0,
-            };
-
-            Some(RoomInfo {
-                room,
-                last_activity,
-                display_name,
-            })
-        });
-    }
-
-    // Collect results from parallel processing
-    let results = join_all(futures).await;
-    let mut room_infos = results.into_iter().flatten().collect::<Vec<_>>();
-    
-    room_infos.sort_by_key(|r| std::cmp::Reverse(r.last_activity));
-    let recent_rooms = room_infos.into_iter().take(10).collect::<Vec<_>>();
-    
-    // Fetch latest message from each room
+    // Already sorted by last_activity desc from get_service_rooms
+    room_infos.truncate(5);
+    // Fetch messages in parallel
     let user_timezone = user_info.timezone.clone();
-    
-    // Process rooms in parallel
+    let sender_prefix = get_sender_prefix(service);
     let mut futures = Vec::new();
-    for room_info in recent_rooms {
-        let room = room_info.room.clone();
-        let room_name = room_info.display_name.clone();
-        let user_timezone = user_timezone.clone();
+    for (room, bridge_room) in room_infos {
         let sender_prefix = sender_prefix.clone();
-
+        let user_timezone = user_timezone.clone();
+        let room_name = remove_bridge_suffix(&bridge_room.display_name);
         futures.push(async move {
             let mut options = matrix_sdk::room::MessagesOptions::backward();
-            options.limit = matrix_sdk::ruma::UInt::new(20).unwrap();
-                    
+            options.limit = matrix_sdk::ruma::UInt::new(50).unwrap(); // Fetch enough to cover filters
+            let mut messages: Vec<BridgeMessage> = Vec::new();
             match room.messages(options).await {
                 Ok(response) => {
-                    // Process all messages in the chunk to find WhatsApp messages
                     for event in response.chunk.iter() {
                         if let Ok(any_sync_event) = event.raw().deserialize() {
                             if let AnySyncTimelineEvent::MessageLike(
@@ -245,24 +312,24 @@ pub async fn fetch_bridge_messages(
                                     }
                                     _ => continue,
                                 };
-
                                 // Skip messages outside time range
                                 if timestamp < start_time {
                                     continue;
                                 }
-
+                                if !sender.localpart().starts_with(&sender_prefix) {
+                                    continue;
+                                }
                                 let (msgtype, body) = match content.msgtype {
                                     MessageType::Text(t) => ("text", t.body),
                                     MessageType::Notice(n) => ("notice", n.body),
-                                    MessageType::Image(_) => ("image", "📎 IMAGE".into()),
-                                    MessageType::Video(_) => ("video", "📎 VIDEO".into()),
-                                    MessageType::File(_) => ("file", "📎 FILE".into()),
-                                    MessageType::Audio(_) => ("audio", "📎 AUDIO".into()),
-                                    MessageType::Location(_) => ("location", "📍 LOCATION".into()),
+                                    MessageType::Image(i) => ("image", if i.body.is_empty() { "📎 IMAGE".into() } else { i.body }),
+                                    MessageType::Video(v) => ("video", if v.body.is_empty() { "📎 VIDEO".into() } else { v.body }),
+                                    MessageType::File(f) => ("file", if f.body.is_empty() { "📎 FILE".into() } else { f.body }),
+                                    MessageType::Audio(a) => ("audio", if a.body.is_empty() { "📎 AUDIO".into() } else { a.body }),
+                                    MessageType::Location(l) => ("location", "📍 LOCATION".into()),
                                     MessageType::Emote(t) => ("emote", t.body),
                                     _ => continue,
                                 };
-
                                 // Skip error messages
                                 if body.contains("Failed to bridge media") ||
                                    body.contains("media no longer available") ||
@@ -270,17 +337,18 @@ pub async fn fetch_bridge_messages(
                                    body.starts_with("* Failed to") {
                                     continue;
                                 }
-                                if sender.localpart().starts_with(&sender_prefix) {
-                                    return Some(BridgeMessage {
-                                        sender: sender.to_string(),
-                                        sender_display_name: sender.localpart().to_string(),
-                                        content: body,
-                                        timestamp,
-                                        formatted_timestamp: format_timestamp(timestamp, user_timezone),
-                                        message_type: msgtype.to_string(),
-                                        room_name: room_name.clone(),
-                                        media_url: None,
-                                    });
+                                messages.push(BridgeMessage {
+                                    sender: sender.to_string(),
+                                    sender_display_name: sender.localpart().to_string(),
+                                    content: body,
+                                    timestamp,
+                                    formatted_timestamp: format_timestamp(timestamp, user_timezone.clone()),
+                                    message_type: msgtype.to_string(),
+                                    room_name: room_name.clone(),
+                                    media_url: None,
+                                });
+                                if messages.len() == 5 {
+                                    break;
                                 }
                             }
                         }
@@ -288,27 +356,20 @@ pub async fn fetch_bridge_messages(
                 }
                 Err(e) => tracing::error!("Failed to fetch messages: {}", e),
             }
-            None
+            messages
         });
     }
-
-    // Collect results from parallel processing
+    // Collect results
     let results = join_all(futures).await;
-    let mut messages = results.into_iter().flatten().collect::<Vec<_>>();
-
+    let mut messages: Vec<BridgeMessage> = results.into_iter().flatten().collect();
     // Sort by timestamp (most recent first)
     messages.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
     tracing::info!("Retrieved {} latest messages from most active rooms", messages.len());
-
     Ok(messages)
 }
 
-
 use futures::future::join_all;
 use matrix_sdk::room::MessagesOptions;
-use tokio::sync::Mutex;
-use std::collections::HashMap;
-
 
 pub async fn send_bridge_message(
     service: &str,
@@ -320,94 +381,45 @@ pub async fn send_bridge_message(
 ) -> Result<BridgeMessage> {
     // Get user for timezone info
     tracing::info!("Sending {} message", service);
-    
+   
     let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
-
     let bridge = state.user_repository.get_bridge(user_id, service)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
         return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(&service)));
     }
-
-    // Get all joined rooms
-    let joined_rooms = client.joined_rooms();
-    let sender_prefix = get_sender_prefix(service);
-    let service_cap = capitalize(&service);
-    let skip_terms = vec![
-        format!("{}bot", service),
-        format!("{}-bridge", service),
-        format!("{} Bridge", service_cap),
-        format!("{} bridge bot", service_cap),
-    ];
-    let search_term_lower = chat_name.trim().to_lowercase();
-
-    let mut futures = Vec::new();
-    for room in joined_rooms {
-        let sender_prefix = sender_prefix.clone();
-        let skip_terms = skip_terms.clone();
-        futures.push(async move {
-            let display_name = match room.display_name().await {
-                Ok(n) => n.to_string(),
-                Err(_) => return None,
+    let service_rooms = get_service_rooms(&client, service).await?;
+    let exact_room = find_exact_room(&service_rooms, chat_name);
+    let room = match exact_room {
+        Some(room_info) => {
+            let room_id = match matrix_sdk::ruma::OwnedRoomId::try_from(room_info.room_id.as_str()) {
+                Ok(id) => id,
+                Err(e) => return Err(anyhow!("Invalid room ID: {}", e)),
             };
-            if skip_terms.iter().any(|t| display_name.contains(t)) {
-                return None;
+            match client.get_room(&room_id) {
+                Some(r) => r,
+                None => return Err(anyhow!("Room not found")),
             }
-            // Get room members
-            let members = match room.members(matrix_sdk::RoomMemberships::JOIN).await {
-                Ok(members) => members,
-                Err(_) => return None,
-            };
-            let has_service_member = members.iter().any(|member| member.user_id().localpart().starts_with(&sender_prefix));
-            if !has_service_member {
-                return None;
-            }
-            let chat_name_part = display_name.trim().to_string();
-            Some((room, chat_name_part))
-        });
-    }
-
-    // Collect results
-    let found_rooms: Vec<(Room, String)> = join_all(futures)
-        .await
-        .into_iter()
-        .flatten()
-        .collect();
-    // Find exact match
-    let target_room = found_rooms.iter()
-        .find(|(_, name)| name.to_lowercase() == search_term_lower)
-        .map(|(room, _)| room.clone());
-    let room = match target_room {
-        Some(r) => r,
+        }
         None => {
-            // Provide a helpful error message listing similar rooms
-            let similar_rooms: Vec<String> = found_rooms
-                .iter()
-                .filter(|(_, name)| name.to_lowercase().contains(&search_term_lower))
-                .map(|(_, name)| name.clone())
-                .collect();
-            let error_msg = if similar_rooms.is_empty() {
+            let suggestions = get_best_matches(&service_rooms, chat_name);
+            let error_msg = if suggestions.is_empty() {
                 format!("Could not find exact matching {} room for '{}'", capitalize(&service), chat_name)
             } else {
                 format!(
                     "Could not find exact matching {} room for '{}'. Did you mean one of these?\n{}",
                     capitalize(&service),
                     chat_name,
-                    similar_rooms.join("\n")
+                    suggestions.join("\n")
                 )
             };
             return Err(anyhow!(error_msg));
         }
     };
-
     use matrix_sdk::{
         ruma::events::room::message::{
             RoomMessageEventContent, MessageType, ImageMessageEventContent,
         },
     };
-
-    // Create message content
-    let content = RoomMessageEventContent::text_plain(message);
-
     if let Some(url) = media_url {
         // ── 1. Download the image and get MIME type ────────────────────────────────
         let resp = reqwest::get(&url).await?;
@@ -418,39 +430,31 @@ pub async fn send_bridge_message(
             .and_then(|h| h.to_str().ok())
             .and_then(|s| s.parse().ok())
             .unwrap_or_else(|| mime_guess::MimeGuess::from_path(&url).first_or_octet_stream());
-
         // Now consume the response to get the bytes
         let bytes = resp.bytes().await?;
         let size = bytes.len();
-
         // ── 2. Filename (best-effort) ────────────────────────────────────────────
         let filename = std::path::Path::new(&url)
             .file_name()
             .and_then(|p| p.to_str())
             .unwrap_or("file");
-
         // ── 3. Upload to the homeserver ──────────────────────────────────────────
         let upload_resp = client
             .media()
             .upload(&mime, bytes.to_vec(), None)
             .await?;
-
         let mxc: matrix_sdk::ruma::OwnedMxcUri = upload_resp.content_uri;
-
         // ── 4. Build the image-message content with caption in *one* event ──────
         let mut img = ImageMessageEventContent::plain(
-            message.to_owned(),   // ← this is the caption / body
+            message.to_owned(), // ← this is the caption / body
             mxc,
         );
-
         // Optional but nice: add basic metadata so bridges & clients know the size
         let mut imageinfo = matrix_sdk::ruma::events::room::ImageInfo::new();
         imageinfo.size = Some(matrix_sdk::ruma::UInt::new(size as u64).unwrap_or_default());
         img.info = Some(Box::new(imageinfo));
-
         // Wrap it as a generic “m.room.message”
         let content = RoomMessageEventContent::new(MessageType::Image(img));
-
         // ── 5. Send it ───────────────────────────────────────────────────────────
         room.send(content).await?;
     } else {
@@ -458,7 +462,6 @@ pub async fn send_bridge_message(
         room.send(RoomMessageEventContent::text_plain(message)).await?;
     }
     tracing::debug!("Message sent!");
-
     let user_info= state.user_core.get_user_info(user_id)?;
     let current_timestamp = chrono::Utc::now().timestamp();
     // Return the sent message details
@@ -478,142 +481,6 @@ pub async fn send_bridge_message(
 use matrix_sdk::RoomMemberships;
 use strsim;
 use matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent;
-
-#[derive(Debug)]
-struct BridgeSearchRoom {
-    room: matrix_sdk::room::Room,
-    chat_name: String,
-    last_activity: i64,
-}
-
-
-pub async fn fetch_bridge_room_messages(
-    service: &str,
-    state: &Arc<AppState>,
-    user_id: i32,
-    chat_name: &str,
-    limit: Option<u64>,
-) -> Result<(Vec<BridgeMessage>, String)> {
-    
-    tracing::debug!(
-        "Starting {} message fetch - User: {}, chat: {}, limit: {}", 
-        capitalize(&service),
-        user_id, 
-        chat_name,
-        limit.unwrap_or(20)
-    );
-
-    if let Some(bridge) = state.user_repository.get_bridge(user_id, service)? {
-        if bridge.status != "connected" {
-            return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(&service)));
-        }
-    } else {
-        return Err(anyhow!("{} bridge not found", capitalize(&service)));
-    }
-
-    let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
-
-    let sender_prefix = get_sender_prefix(service);
-    let joined_rooms = client.joined_rooms();
-    let search_term_lower = chat_name.trim().to_lowercase();
-    let service_cap = capitalize(&service);
-    let skip_terms = vec![
-        format!("{}bot", service),
-        format!("{}-bridge", service),
-        format!("{} Bridge", service_cap),
-        format!("{} bridge bot", service_cap),
-    ];
-
-    let mut futures = Vec::new();
-    for room in joined_rooms {
-        let sender_prefix = sender_prefix.clone();
-        let skip_terms = skip_terms.clone();
-        futures.push(async move {
-            let display_name = match room.display_name().await {
-                Ok(name) => name.to_string(),
-                Err(_) => return None,
-            };
-
-            if skip_terms.iter().any(|t| display_name.contains(t)) {
-                return None;
-            }
-
-            // Check bridge bot membership efficiently
-            let members = match room.members(RoomMemberships::JOIN).await {
-                Ok(members) => members,
-                Err(_) => return None,
-            };
-
-            let has_service_member = members.iter().any(|member| member.user_id().localpart().starts_with(&sender_prefix));
-            if !has_service_member {
-                return None;
-            }
-            let chat_name_part = display_name.trim().to_string();
-
-            // Get last activity timestamp efficiently
-            let mut options = MessagesOptions::backward();
-            options.limit = matrix_sdk::ruma::UInt::new(1).unwrap();
-            let last_activity = match room.messages(options).await {
-                Ok(resp) => resp.chunk.first()
-                    .and_then(|e| e.raw().deserialize().ok())
-                    .map(|e: AnySyncTimelineEvent| i64::from(e.origin_server_ts().0) / 1000)
-                    .unwrap_or(0),
-                Err(_) => 0,
-            };
-
-            Some(BridgeSearchRoom {
-                room,
-                chat_name: chat_name_part,
-                last_activity,
-            })
-        });
-    }
-
-    // Collect parallel results
-    let bridge_rooms: Vec<BridgeSearchRoom> = join_all(futures)
-        .await
-        .into_iter()
-        .flatten()
-        .collect();
-
-
-    // Find matching room with optimized search
-    let matching_room = {
-        // Try exact match first (fastest)
-        if let Some(room) = bridge_rooms.iter().find(|r| r.chat_name.to_lowercase() == search_term_lower) {
-            tracing::info!("Found exact match for room");
-            Some(room)
-        }
-        // Then try substring match
-        else if let Some(room) = bridge_rooms.iter()
-            .filter(|r| r.chat_name.to_lowercase().contains(&search_term_lower))
-            .max_by_key(|r| r.last_activity) {
-            tracing::info!("Found substring match for room");
-            Some(room)
-        }
-        // Finally try similarity match
-        else {
-            let best_match = bridge_rooms.iter()
-                .map(|r| (strsim::jaro_winkler(&search_term_lower, &r.chat_name.to_lowercase()), r))
-                .filter(|(score, _)| *score >= 0.7)
-                .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-            
-            if let Some((score, room)) = best_match {
-                tracing::info!("Found similar match with score {}", score);
-                Some(room)
-            } else {
-                None
-            }
-        }
-    };
-
-    let user_settings = state.user_core.get_user_settings(user_id)?;
-    let user_info = state.user_core.get_user_info(user_id)?;
-    match matching_room {
-        Some(room) => fetch_messages_from_room(service, room.room.clone(), limit, user_info.timezone).await,
-        None => Err(anyhow!("No matching {} room found for '{}'", capitalize(&service), chat_name))
-    }
-}
 
 async fn fetch_messages_from_room(
     service: &str,
@@ -1059,77 +926,19 @@ pub async fn search_bridge_rooms(
     user_id: i32,
     search_term: &str,
 ) -> Result<Vec<BridgeRoom>> {
-    let bridge_bot_username = get_bridge_bot_username(service);
     // Validate bridge connection first
     let bridge = state.user_repository.get_bridge(user_id, service)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
         return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(&service)));
     }
     let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
-    let joined_rooms = client.joined_rooms();
+    let all_rooms = get_service_rooms(&client, service).await?;
     let search_term_lower = search_term.trim().to_lowercase();
-    let sender_prefix = get_sender_prefix(service); // Define here for cloning into futures
-    let service_cap = capitalize(service);
-    // Add skip_terms to avoid control/admin rooms (e.g., "Telegram bridge bot")
-    let skip_terms = vec![
-        format!("{}bot", service),
-        format!("{}-bridge", service),
-        format!("{} Bridge", service_cap),
-        format!("{} bridge bot", service_cap),
-    ];
-    // Process rooms in parallel
-    let room_futures = joined_rooms.into_iter().map(|room| {
-        let sender_prefix = sender_prefix.clone();
-        let skip_terms = skip_terms.clone();
-        async move {
-            // Quick check for room name
-            let room_name = match room.display_name().await {
-                Ok(name) => name.to_string(),
-                Err(_) => return None,
-            };
-            if skip_terms.iter().any(|t| room_name.contains(t)) {
-                return None;
-            }
-            let members = match room.members(RoomMemberships::JOIN).await {
-                Ok(m) => m,
-                Err(_) => return None,
-            };
-            // Removed strict suffix check; instead, confirm bridge room via membership
-            let has_service_member = members.iter().any(|member| member.user_id().localpart().starts_with(&sender_prefix));
-            if !has_service_member {
-                return None;
-            }
-            // Handle clean_name with or without suffix
-            let clean_name = room_name.trim().to_string();
-            // Get last activity timestamp efficiently
-            let mut options = matrix_sdk::room::MessagesOptions::backward();
-            options.limit = matrix_sdk::ruma::UInt::new(1).unwrap();
-           
-            let last_activity = match room.messages(options).await {
-                Ok(response) => response.chunk.first()
-                    .and_then(|event| event.raw().deserialize().ok())
-                    .map(|e: AnySyncTimelineEvent| i64::from(e.origin_server_ts().0) / 1000)
-                    .unwrap_or(0),
-                Err(_) => 0,
-            };
-            Some((clean_name, BridgeRoom {
-                room_id: room.room_id().to_string(),
-                display_name: room_name,
-                last_activity,
-                last_activity_formatted: format_timestamp(last_activity, None),
-            }))
-        }
-    });
-    // Collect results from parallel processing
-    let all_rooms: Vec<(String, BridgeRoom)> = join_all(room_futures)
-        .await
-        .into_iter()
-        .flatten()
-        .collect();
     // Single-pass matching with prioritized results
     let mut matching_rooms: Vec<(f64, BridgeRoom)> = all_rooms
         .into_iter()
-        .filter_map(|(name, room)| {
+        .filter_map(|room| {
+            let name = remove_bridge_suffix(&room.display_name);
             let name_lower = name.to_lowercase();
             if name_lower == search_term_lower {
                 // Exact match gets highest priority
@@ -1163,90 +972,46 @@ pub async fn fetch_recent_bridge_contacts(
     service: &str,
     state: &Arc<AppState>,
     user_id: i32,
-) -> Result<Vec<BridgeRoom>> {
-    // Validate bridge connection first
+) -> Result<Vec<String>> {
     let bridge = state.user_repository.get_bridge(user_id, service)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
         return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(service)));
     }
-
     let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
-    let joined_rooms = client.joined_rooms();
-
-    let sender_prefix = get_sender_prefix(service);
-    let service_cap = capitalize(service);
-    let skip_terms = vec![
-        format!("{}bot", service),
-        format!("{}-bridge", service),
-        format!("{} Bridge", service_cap),
-        format!("{} bridge bot", service_cap),
-    ];
-
-    // Process rooms in parallel
-    let room_futures = joined_rooms.into_iter().map(|room| {
-        let sender_prefix = sender_prefix.clone();
-        let skip_terms = skip_terms.clone();
-        async move {
-            // Quick check for room name
-            let display_name = match room.display_name().await {
-                Ok(name) => name.to_string(),
+    let rooms = get_service_rooms(&client, service).await?;
+    let mut futures = Vec::new();
+    for bridge_room in rooms {
+        let client = client.clone();
+        futures.push(async move {
+            let room_id = match matrix_sdk::ruma::OwnedRoomId::try_from(bridge_room.room_id.as_str()) {
+                Ok(id) => id,
                 Err(_) => return None,
             };
-
-            // Skip control/admin rooms based on name terms
-            if skip_terms.iter().any(|t| display_name.contains(t)) {
-                return None;
-            }
-
-            // Confirm bridge room via membership
+            let room = match client.get_room(&room_id) {
+                Some(r) => r,
+                None => return None,
+            };
             let members = match room.members(RoomMemberships::JOIN).await {
                 Ok(m) => m,
                 Err(_) => return None,
             };
-
             if members.len() > 3 {
-                return None;  // Skip if not exactly a DM (more members indicate a group)
-            }
-            let has_service_member = members.iter().any(|member| member.user_id().localpart().starts_with(&sender_prefix));
-            if !has_service_member {
                 return None;
             }
-
-            // Get last activity timestamp efficiently (most recent message, sent or received)
-            let mut options = matrix_sdk::room::MessagesOptions::backward();
-            options.limit = matrix_sdk::ruma::UInt::new(1).unwrap();
-
-            let last_activity = match room.messages(options).await {
-                Ok(response) => response.chunk.first()
-                    .and_then(|event| event.raw().deserialize().ok())
-                    .map(|e: AnySyncTimelineEvent| i64::from(e.origin_server_ts().0) / 1000)
-                    .unwrap_or(0),
-                Err(_) => 0,
-            };
-
-            Some(BridgeRoom {
-                room_id: room.room_id().to_string(),
-                display_name,
-                last_activity,
-                last_activity_formatted: format_timestamp(last_activity, None),
-            })
+            Some(remove_bridge_suffix(&bridge_room.display_name))
+        });
+    }
+    let results = join_all(futures).await;
+    let mut seen = std::collections::HashSet::new();
+    let mut room_names: Vec<String> = Vec::new();
+    for name in results.into_iter().flatten() {
+        if seen.insert(name.clone()) {
+            room_names.push(name);
         }
-    });
-
-    // Collect results from parallel processing
-    let mut recent_rooms: Vec<BridgeRoom> = join_all(room_futures)
-        .await
-        .into_iter()
-        .flatten()
-        .collect();
-
-    // Sort by last activity (most recent first) and take top 10
-    recent_rooms.sort_unstable_by_key(|r| std::cmp::Reverse(r.last_activity));
-    recent_rooms.truncate(10);
-
-    tracing::info!("Retrieved {} most recent {} contacts", recent_rooms.len(), capitalize(service));
-
-    Ok(recent_rooms)
+    }
+    room_names.truncate(10);
+    tracing::info!("Retrieved {} most recent {} contacts", room_names.len(), capitalize(service));
+    Ok(room_names)
 }
 
 pub fn capitalize(s: &str) -> String {
