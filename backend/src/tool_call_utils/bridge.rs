@@ -200,7 +200,6 @@ struct SendChatMessageArgs {
     chat_name: String,
     message: String,
 }
-
 pub async fn handle_send_chat_message(
     state: &Arc<AppState>,
     user_id: i32,
@@ -209,10 +208,62 @@ pub async fn handle_send_chat_message(
     image_url: Option<&str>
 ) -> Result<(StatusCode, [(HeaderName, &'static str); 1], Json<TwilioResponse>), Box<dyn std::error::Error>> {
     let args: SendChatMessageArgs = serde_json::from_str(args)?;
-   
+  
     // Get user settings to check confirmation preference
     let user_settings = state.user_core.get_user_settings(user_id)?;
-    // First search for the chat room
+    let capitalized_platform = args.platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &args.platform[1..];
+    println!("confirmation: {}", user_settings.require_confirmation);
+    // If confirmation is not required, send the message directly using the provided chat_name
+    if !user_settings.require_confirmation {
+        let exact_name = args.chat_name.clone();
+        let message = args.message.clone();
+        match crate::utils::bridge::send_bridge_message(
+            &args.platform,
+            state,
+            user_id,
+            &exact_name,
+            &message,
+            image_url.map(|url| url.to_string()),
+        ).await {
+            Ok(_) => {
+                let success_msg = format!("{} message: '{}' sent to '{}'", capitalized_platform, message ,exact_name);
+                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    state,
+                    &success_msg,
+                    None,
+                    user,
+                ).await {
+                    eprintln!("Failed to send success message: {}", e);
+                }
+                return Ok((
+                    StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    Json(TwilioResponse {
+                        message: success_msg,
+                    })
+                ));
+            }
+            Err(e) => {
+                let error_msg = format!("Failed to send {} message: {}", capitalized_platform, e);
+                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    state,
+                    &error_msg,
+                    None,
+                    user,
+                ).await {
+                    eprintln!("Failed to send error message: {}", e);
+                }
+                return Ok((
+                    StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    Json(TwilioResponse {
+                        message: error_msg,
+                    })
+                ));
+            }
+        }
+    }
+    // If confirmation is required, search for the chat room first (fuzzy match)
     let rooms = match crate::utils::bridge::search_bridge_rooms(
         &args.platform,
         state,
@@ -221,7 +272,6 @@ pub async fn handle_send_chat_message(
     ).await {
         Ok(rooms) => rooms,
         Err(e) => {
-            let capitalized_platform = args.platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &args.platform[1..];
             let error_msg = format!("Failed to find contact. Please make sure you're connected to {} bridge.", capitalized_platform);
             if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                 state,
@@ -241,7 +291,6 @@ pub async fn handle_send_chat_message(
         }
     };
     if rooms.is_empty() {
-        let capitalized_platform = args.platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &args.platform[1..];
         let error_msg = format!("No {} contacts found matching '{}'.", capitalized_platform, args.chat_name.as_str());
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
             state,
@@ -262,59 +311,6 @@ pub async fn handle_send_chat_message(
     // Get the best match (first result)
     let best_match = &rooms[0];
     let exact_name = best_match.display_name.trim_end_matches(" (WA)").to_string().trim_end_matches(" (Telegram)").to_string();
-    println!("confirmation: {}", user_settings.require_confirmation);
-    // If confirmation is not required, send the message directly
-    if !user_settings.require_confirmation {
-        let message = args.message.clone();
-        match crate::utils::bridge::send_bridge_message(
-            &args.platform,
-            state,
-            user_id,
-            &exact_name,
-            &message,
-            image_url.map(|url| url.to_string()),
-        ).await {
-            Ok(_) => {
-                let capitalized_platform = args.platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &args.platform[1..];
-                let success_msg = format!("{} message: '{}' sent to '{}'", capitalized_platform, message ,exact_name);
-                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                    state,
-                    &success_msg,
-                    None,
-                    user,
-                ).await {
-                    eprintln!("Failed to send success message: {}", e);
-                }
-                return Ok((
-                    StatusCode::OK,
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    Json(TwilioResponse {
-                        message: success_msg,
-                    })
-                ));
-            }
-            Err(e) => {
-                let capitalized_platform = args.platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &args.platform[1..];
-                let error_msg = format!("Failed to send {} message: {}", capitalized_platform, e);
-                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                    state,
-                    &error_msg,
-                    None,
-                    user,
-                ).await {
-                    eprintln!("Failed to send error message: {}", e);
-                }
-                return Ok((
-                    StatusCode::OK,
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    Json(TwilioResponse {
-                        message: error_msg,
-                    })
-                ));
-            }
-        }
-    }
-    // If confirmation is required, continue
     // Set the temporary variable for WhatsApp message
     if let Err(e) = state.user_core.set_temp_variable(
         user_id,
@@ -328,7 +324,6 @@ pub async fn handle_send_chat_message(
         image_url,
     ) {
         tracing::error!("Failed to set temporary variable: {}", e);
-        let capitalized_platform = args.platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &args.platform[1..];
         if let Err(e) = crate::api::twilio_utils::send_conversation_message(
             state,
             format!("Failed to prepare {} message sending. (contact rasmus@ahtava.com)", capitalized_platform).as_str(),
@@ -347,7 +342,6 @@ pub async fn handle_send_chat_message(
     }
     tracing::info!("Successfully set temporary variable");
     // Format the confirmation message with the found contact name and image if present
-    let capitalized_platform = args.platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &args.platform[1..];
     let confirmation_msg = if image_url.is_some() {
         format!(
             "Send {} to '{}' with the above image and a caption '{}' (reply 'Yes' to confirm, otherwise it will be discarded)",
@@ -391,7 +385,6 @@ pub async fn handle_send_chat_message(
         }
     }
 }
-
 #[derive(Deserialize)]
 struct SearchChatContactsArgs {
     platform: String,

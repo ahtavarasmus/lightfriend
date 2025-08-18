@@ -526,7 +526,7 @@ pub async fn process_sms(
         crate::tool_call_utils::bridge::get_send_chat_message_tool(),
         crate::tool_call_utils::bridge::get_fetch_chat_messages_tool(),
         crate::tool_call_utils::bridge::get_fetch_recent_messages_tool(),
-        //crate::tool_call_utils::bridge::get_search_chat_contacts_tool(), // idk if we need this
+        crate::tool_call_utils::bridge::get_search_chat_contacts_tool(), // idk if we need this
         crate::tool_call_utils::email::get_fetch_emails_tool(),
         crate::tool_call_utils::email::get_fetch_specific_email_tool(),
         crate::tool_call_utils::calendar::get_fetch_calendar_event_tool(),
@@ -1130,7 +1130,7 @@ pub async fn process_sms(
                     response
                 }
                 Err(e) => {
-                    tracing::error!("Failed to get follow-up completion: {}", e);
+                    tracing::info!("Failed to get follow-up completion: {}", e);
                     fail = true;
                     tool_answers.values().next()
                         .map(|ans| format!("Based on my research: {} (you were not charged for this message)", ans.chars().take(370).collect::<String>()))

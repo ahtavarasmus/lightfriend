@@ -91,9 +91,8 @@ pub async fn start_scheduler(state: Arc<AppState>) {
 
     // Create a job that runs every 10 minutes to check for new IMAP messages
     let state_clone = Arc::clone(&state);
-    // TODO CHANGE BEFORE PROD
-    //let message_monitor_job = Job::new_async("0 */10 * * * *", move |_, _| {
-    let message_monitor_job = Job::new_async("*/30 * * * * *", move |_, _| {
+    let message_monitor_job = Job::new_async("0 */10 * * * *", move |_, _| {
+    //let message_monitor_job = Job::new_async("*/30 * * * * *", move |_, _| {
         let state = state_clone.clone();
         Box::pin(async move {
             
