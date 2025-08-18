@@ -39,11 +39,9 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
     let fetch_status = {
         let connection_status = connection_status.clone();
         let error = error.clone();
-
         Callback::from(move |_| {
             let connection_status = connection_status.clone();
             let error = error.clone();
-
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
                 .flatten()
@@ -91,13 +89,11 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
         let qr_code = qr_code.clone();
         let error = error.clone();
         let fetch_status = fetch_status.clone();
-
         Callback::from(move |_| {
             let is_connecting = is_connecting.clone();
             let qr_code = qr_code.clone();
             let error = error.clone();
             let fetch_status = fetch_status.clone();
-
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
                 .flatten()
@@ -114,20 +110,18 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         Ok(response) => {
                             // Debug: Log the response status
                             web_sys::console::log_1(&format!("Response status: {}", response.status()).into());
-                            
-                match response.json::<WhatsappConnectionResponse>().await {
+                           
+                            match response.json::<WhatsappConnectionResponse>().await {
                                 Ok(connection_response) => {
                                     // Debug: Log that we received the verification code
                                     web_sys::console::log_1(&format!("Received verification code: {}", &connection_response.pairing_code).into());
-                                    
+                                   
                                     qr_code.set(Some(connection_response.pairing_code));
                                     error.set(None);
-
                                     // Start polling for status
                                     let poll_interval = 5000; // 5 seconds
                                     let poll_duration = 300000; // 5 minutes
                                     let start_time = js_sys::Date::now();
-
                                     // Create a recursive polling function
                                     fn create_poll_fn(
                                         start_time: f64,
@@ -145,15 +139,12 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                                                 error.set(Some("Connection attempt timed out".to_string()));
                                                 return;
                                             }
-
                                             fetch_status.emit(());
-
                                             // Clone all necessary values for the next iteration
                                             let is_connecting = is_connecting.clone();
                                             let qr_code = qr_code.clone();
                                             let error = error.clone();
                                             let fetch_status = fetch_status.clone();
-
                                             // Schedule next poll
                                             let poll_fn = create_poll_fn(
                                                 start_time,
@@ -171,7 +162,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                                             handle.forget();
                                         })
                                     }
-
                                     // Start the polling
                                     let poll_fn = create_poll_fn(
                                         start_time,
@@ -206,13 +196,11 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
         let error = error.clone();
         let is_disconnecting = is_disconnecting.clone(); // Clone the new state
         let show_disconnect_modal = show_disconnect_modal.clone(); // Clone to close modal later
-
         Callback::from(move |_| {
             let connection_status = connection_status.clone();
             let error = error.clone();
             let is_disconnecting = is_disconnecting.clone();
             let show_disconnect_modal = show_disconnect_modal.clone();
-
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
                 .flatten()
@@ -251,7 +239,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
         <div class="whatsapp-connect">
             <div class="service-header">
                 <div class="service-name">
-                    <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp"  width="24" height="24"/>
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp" width="24" height="24"/>
                     {"WhatsApp"}
                 </div>
                 if let Some(status) = (*connection_status).clone() {
@@ -266,7 +254,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                     {
                         let display = element.get_attribute("style")
                             .unwrap_or_else(|| "display: none".to_string());
-                        
+                       
                         if display.contains("none") {
                             let _ = element.set_attribute("style", "display: block");
                         } else {
@@ -277,9 +265,8 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                     {"ⓘ"}
                 </button>
             </div>
-                <div id="whatsapp-info" class="info-section" style="display: none">
+            <div id="whatsapp-info" class="info-section" style="display: none">
                 <h4>{"How It Works"}</h4>
-
                 <div class="info-subsection">
                     <h5>{"SMS and Voice Call Tools"}</h5>
                     <ul>
@@ -288,8 +275,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         <li>{"Search Contacts: Search for WhatsApp contacts or chat rooms by name"}</li>
                         <li>{"Send Message: Give message content and recipient name and lightfriend will confirm with you the message to be sent. Reply with yes or no to send or discard the suggestion. Voice call will also confirm the suggestion through SMS first."}</li>
                     </ul>
-                    </div>
-
+                </div>
                 <div class="info-subsection security-notice">
                     <h5>{"Security & Privacy"}</h5>
                     <p>{"Your security is our priority. Here's how we protect your messages:"}</p>
@@ -297,11 +283,10 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         <li>{"Your WhatsApp messages are end-to-end encrypted between WhatsApp and our Matrix server, keeping them safe from prying eyes. To deliver them via SMS, our server decrypts the messages, ensuring they’re readable when you request them. We use the same trusted Matrix server and WhatsApp bridge technology as Beeper, with robust encryption and strict access controls to protect your data at every step."}</li>
                         <li>{"When you disconnect your WhatsApp account, all your WhatsApp data will be automatically deleted from our servers."}</li>
                     </ul>
-
                     <p class="security-recommendation">{"Note: While we maintain high security standards, SMS and voice calls use standard cellular networks. For maximum privacy, use WhatsApp directly for sensitive communications."}</p>
                 </div>
             </div>
-            
+           
             if let Some(status) = (*connection_status).clone() {
                 <div class="connection-status">
                     if status.connected {
@@ -312,7 +297,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                                     html! {
                                         <div class="sync-indicator">
                                             <div class="sync-spinner"></div>
-                                            <p>{"Building the bridge... This may take up to 5 minutes. History will not be fetched. Only future messages will be visible and if you want to send a message to someone, they may need to first send something to you before lightfriend can find their contact info."}</p>
+                                            <p>{"Building the bridge... This may take up to 5 minutes. Only future messages will be visible. To send messages, contacts may need to message you first."}</p>
                                         </div>
                                     }
                                 } else {
@@ -321,7 +306,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                             }
                             <div class="button-group">
                                 <p class="service-description">
-                                    {"Send and receive WhatsApp messages through SMS or voice calls. (currently only works with direct messages and not groups."}
+                                    {"Send and receive WhatsApp messages through SMS or voice calls (direct messages only)."}
                                 </p>
                                 <button onclick={
                                     let show_disconnect_modal = show_disconnect_modal.clone();
@@ -465,7 +450,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                                                                 "chat_name": "Rasmus Ähtävä",
                                                                 "message": "rasmus testing matrix, sorry:)"
                                                             });
-
                                                             match Request::post(&format!("{}/api/whatsapp/send", config::get_backend_url()))
                                                                 .header("Authorization", &format!("Bearer {}", token))
                                                                 .header("Content-Type", "application/json")
@@ -506,7 +490,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                                                             let request_body = serde_json::json!({
                                                                 "search_term": "leevi"
                                                             });
-
                                                             match Request::post(&format!("{}/api/whatsapp/search-rooms", config::get_backend_url()))
                                                                 .header("Authorization", &format!("Bearer {}", token))
                                                                 .header("Content-Type", "application/json")
@@ -546,57 +529,58 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                             if *is_connecting {
                                 if let Some(pairing_code) = (*qr_code).clone() {
                                     <div class="verification-code-container">
-                                    <button onclick={{
-                                        let error = error.clone();
-                                        Callback::from(move |_| {
+                                        <button onclick={{
                                             let error = error.clone();
-                                            if let Some(token) = window()
-                                                .and_then(|w| w.local_storage().ok())
-                                                .flatten()
-                                                .and_then(|storage| storage.get_item("token").ok())
-                                                .flatten()
-                                            {
-                                                spawn_local(async move {
-                                                    match Request::post(&format!("{}/api/auth/whatsapp/reset", config::get_backend_url()))
-                                                        .header("Authorization", &format!("Bearer {}", token))
-                                                        .send()
-                                                        .await
-                                                    {
-                                                        Ok(_) => {
-                                                            // Reload the page to restart the connection process
-                                                            if let Some(window) = web_sys::window() {
-                                                                                                            let location = window.location();
-                                                                                                            let _ = location.reload();
+                                            Callback::from(move |_| {
+                                                let error = error.clone();
+                                                if let Some(token) = window()
+                                                    .and_then(|w| w.local_storage().ok())
+                                                    .flatten()
+                                                    .and_then(|storage| storage.get_item("token").ok())
+                                                    .flatten()
+                                                {
+                                                    spawn_local(async move {
+                                                        match Request::post(&format!("{}/api/auth/whatsapp/reset", config::get_backend_url()))
+                                                            .header("Authorization", &format!("Bearer {}", token))
+                                                            .send()
+                                                            .await
+                                                        {
+                                                            Ok(_) => {
+                                                                // Reload the page to restart the connection process
+                                                                if let Some(window) = web_sys::window() {
+                                                                    let location = window.location();
+                                                                    let _ = location.reload();
+                                                                }
+                                                            }
+                                                            Err(_) => {
+                                                                error.set(Some("Failed to reset WhatsApp connection".to_string()));
                                                             }
                                                         }
-                                                        Err(_) => {
-                                                            error.set(Some("Failed to reset WhatsApp connection".to_string()));
-                                                        }
-                                                    }
-                                                });
-                                            }
-                                        })
-                                    }} class="reset-button">
-                                        {"Having trouble? Reset Connection"}
-                                    </button>
-                                    <p>{"Enter this code in WhatsApp to connect:"}</p>
-                                    <div class="verification-code">
-                                        {pairing_code}
+                                                    });
+                                                }
+                                            })
+                                        }} class="reset-button">
+                                            {"Having trouble? Reset Connection"}
+                                        </button>
+                                        <p class="code-prompt">{"Enter this code in WhatsApp to connect:"}</p>
+                                        <div class="verification-code">
+                                            {pairing_code}
+                                        </div>
+                                        <p class="instruction-note">{"Note: Connects to the WhatsApp account linked to your current phone number. For a different account, update your number in Settings first, connect, then revert."}</p>
+                                        <ol class="instruction-list">
+                                            <li>{"Open WhatsApp on your phone"}</li>
+                                            <li>{"Go to Settings > Linked Devices"}</li>
+                                            <li>{"Tap 'Link a Device'"}</li>
+                                            <li>{"Enter the code when prompted"}</li>
+                                            <li>{"Wait a few minutes for the connection"}</li>
+                                        </ol>
                                     </div>
-                                    <p class="instruction">{"Note: This will connect the WhatsApp account associated with your current phone number. If you need to connect a different WhatsApp account, first update your phone number in Settings, connect WhatsApp, then change your number back."}</p>
-                                    <p class="instruction">{"1. Open WhatsApp on your phone"}</p>
-                                    <p class="instruction">{"2. Go to Settings > Linked Devices"}</p>
-                                    <p class="instruction">{"3. Tap 'Link a Device'"}</p>
-                                    <p class="instruction">{"4. When prompted, enter this code"}</p>
-                                    <p class="instruction">{"5. Wait for few minutes to let lightfriend build the connection"}</p>
-
-                                </div>
-                            } else {
-                                <div class="loading-container">
-                                    <p>{"Generating connection code...(may take a moment, stay still:D)"}</p>
-                                    <div class="loading-spinner"></div>
-                                </div>
-                            }
+                                } else {
+                                    <div class="loading-container">
+                                        <p>{"Generating connection code..."}</p>
+                                        <div class="loading-spinner"></div>
+                                    </div>
+                                }
                             } else {
                                 if props.sub_tier.as_deref() == Some("tier 2") || props.discount {
                                     <p class="service-description">
@@ -622,16 +606,13 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
             } else {
                 <p>{"Loading connection status..."}</p>
             }
-
             if let Some(error_msg) = (*error).clone() {
                 <div class="error-message">
                     {error_msg}
                 </div>
             }
-
             <style>
                 {r#"
-
                     .button-spinner {
                         display: inline-block;
                         width: 16px;
@@ -643,7 +624,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         margin-right: 8px;
                         vertical-align: middle;
                     }
-
                     .disconnecting-message {
                         color: #1E90FF;
                         margin: 1rem 0;
@@ -653,7 +633,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         transform: translateY(-2px);
                         box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
                     }
-
                     .test-button {
                         background: linear-gradient(45deg, #4CAF50, #45a049);
                         color: white;
@@ -666,45 +645,36 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         transition: all 0.3s ease;
                         margin-top: 1rem;
                     }
-
                     .test-button:hover {
                         transform: translateY(-2px);
                         box-shadow: 0 4px 20px rgba(76, 175, 80, 0.3);
                     }
-
                     .test-send-button {
                         background: linear-gradient(45deg, #FF8C00, #FFA500);
                         margin-top: 0.5rem;
                     }
-
                     .test-send-button:hover {
                         box-shadow: 0 4px 20px rgba(255, 140, 0, 0.3);
                     }
-
                     .test-search-button {
                         background: linear-gradient(45deg, #9C27B0, #BA68C8);
                         margin-top: 0.5rem;
                     }
-
                     .test-search-button:hover {
                         box-shadow: 0 4px 20px rgba(156, 39, 176, 0.3);
                     }
-
-                    
-
+                   
                     .button-group {
                         display: flex;
                         flex-direction: column;
                         gap: 1rem;
                         margin-bottom: 1rem;
                     }
-
                     @media (min-width: 768px) {
                         .button-group {
                             flex-direction: row;
                         }
                     }
-
                     .resync-button {
                         background: linear-gradient(45deg, #2196F3, #03A9F4);
                         color: white;
@@ -715,12 +685,10 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         transition: all 0.3s ease;
                         flex: 1;
                     }
-
                     .resync-button:hover {
                         transform: translateY(-2px);
                         box-shadow: 0 4px 20px rgba(33, 150, 243, 0.3);
                     }
-
                     .disconnect-button {
                         flex: 1;
                     }
@@ -728,7 +696,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         text-align: center;
                         margin: 2rem 0;
                     }
-
                     .loading-spinner {
                         display: inline-block;
                         width: 40px;
@@ -739,7 +706,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         animation: spin 1s ease-in-out infinite;
                         margin: 1rem auto;
                     }
-
                     @keyframes spin {
                         to { transform: rotate(360deg); }
                     }
@@ -751,39 +717,31 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         margin: 1rem 0;
                         transition: all 0.3s ease;
                     }
-
                     .whatsapp-connect:hover {
                         transform: translateY(-2px);
                         border-color: rgba(30, 144, 255, 0.4);
                         box-shadow: 0 4px 20px rgba(30, 144, 255, 0.1);
                     }
-
                     .whatsapp-connect h3 {
                         color: #7EB2FF;
                         margin-bottom: 1rem;
                     }
-
                     .connection-status {
                         margin: 1rem 0;
                     }
-
                     .status {
                         font-weight: bold;
                     }
-
                     .status.connected {
                         color: #4CAF50;
                     }
-
                     .status.disconnected {
                         color: #999;
                     }
-
                     .verification-code-container {
                         margin: 1.5rem 0;
                         text-align: center;
                     }
-
                     .verification-code {
                         font-family: monospace;
                         font-size: 2.5rem;
@@ -797,13 +755,29 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         display: inline-block;
                         border: 2px solid rgba(30, 144, 255, 0.2);
                     }
-
-                    .instruction {
-                        color: #999;
-                        margin-top: 1rem;
-                        font-size: 0.9rem;
+                    .code-prompt {
+                        color: #DDD;
+                        font-size: 1.1rem;
+                        margin-bottom: 0.5rem;
                     }
-
+                    .instruction-note {
+                        color: #BBB;
+                        font-size: 0.95rem;
+                        margin: 1.5rem 0 1rem;
+                        font-style: italic;
+                    }
+                    .instruction-list {
+                        color: #DDD;
+                        font-size: 1rem;
+                        padding-left: 1.5rem;
+                        margin: 0 auto;
+                        max-width: 400px;
+                        text-align: left;
+                    }
+                    .instruction-list li {
+                        margin-bottom: 0.75rem;
+                        line-height: 1.4;
+                    }
                     .connect-button, .disconnect-button {
                         background: linear-gradient(45deg, #1E90FF, #4169E1);
                         color: white;
@@ -814,24 +788,20 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         transition: all 0.3s ease;
                         margin-top: 1rem;
                     }
-
                     .disconnect-button {
                         background: transparent;
                         border: 1px solid rgba(255, 99, 71, 0.3);
                         color: #FF6347;
                     }
-
                     .disconnect-button:hover {
                         background: rgba(255, 99, 71, 0.1);
                         border-color: rgba(255, 99, 71, 0.5);
                         transform: translateY(-2px);
                     }
-
                     .connect-button:hover {
                         transform: translateY(-2px);
                         box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3);
                     }
-
                     .error-message {
                         color: #FF4B4B;
                         background: rgba(255, 75, 75, 0.1);
@@ -840,7 +810,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         padding: 1rem;
                         margin-top: 1rem;
                     }
-
                     .modal-overlay {
                         position: fixed;
                         top: 0;
@@ -853,7 +822,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         align-items: center;
                         z-index: 1000;
                     }
-
                     .modal-content {
                         background: #1a1a1a;
                         border: 1px solid rgba(30, 144, 255, 0.2);
@@ -863,33 +831,27 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         width: 90%;
                         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
                     }
-
                     .modal-content h3 {
                         color: #FF6347;
                         margin-bottom: 1rem;
                     }
-
                     .modal-content p {
                         color: #CCC;
                         margin-bottom: 1rem;
                     }
-
                     .modal-content ul {
                         margin-bottom: 2rem;
                         padding-left: 1.5rem;
                     }
-
                     .modal-content li {
                         color: #999;
                         margin-bottom: 0.5rem;
                     }
-
                     .modal-buttons {
                         display: flex;
                         gap: 1rem;
                         justify-content: flex-end;
                     }
-
                     .cancel-button {
                         background: transparent;
                         border: 1px solid rgba(204, 204, 204, 0.3);
@@ -899,12 +861,10 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         cursor: pointer;
                         transition: all 0.3s ease;
                     }
-
                     .cancel-button:hover {
                         background: rgba(204, 204, 204, 0.1);
                         transform: translateY(-2px);
                     }
-
                     .confirm-disconnect-button {
                         background: linear-gradient(45deg, #FF6347, #FF4500);
                         color: white;
@@ -914,7 +874,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         cursor: pointer;
                         transition: all 0.3s ease;
                     }
-
                     .confirm-disconnect-button:hover {
                         transform: translateY(-2px);
                         box-shadow: 0 4px 12px rgba(255, 99, 71, 0.3);
@@ -930,22 +889,19 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         margin-right: 10px;
                         box-sizing: border-box;
                     }
-
                     .sync-indicator {
                         display: flex;
-                        align-items: space-between;
+                        align-items: center;
                         background: rgba(30, 144, 255, 0.1);
                         border-radius: 8px;
                         padding: 1rem;
                         margin-bottom: 1rem;
                         color: #1E90FF;
                     }
-
                     .sync-indicator p {
                         margin: 0;
                         font-size: 0.9rem;
                     }
-
                     .upgrade-prompt {
                         background: rgba(30, 144, 255, 0.05);
                         border: 1px solid rgba(30, 144, 255, 0.1);
@@ -954,24 +910,20 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         text-align: center;
                         margin: 1rem 0;
                     }
-
                     .upgrade-content {
                         max-width: 400px;
                         margin: 0 auto;
                     }
-
                     .upgrade-content h3 {
                         color: #1E90FF;
                         margin-bottom: 1rem;
                         font-size: 1.5rem;
                     }
-
                     .upgrade-content p {
-                        color: #666;
+                        color: #BBB;
                         margin-bottom: 1rem;
                         line-height: 1.5;
                     }
-
                     .upgrade-button {
                         display: inline-block;
                         background: linear-gradient(45deg, #1E90FF, #4169E1);
@@ -983,12 +935,10 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         transition: all 0.3s ease;
                         margin-top: 1rem;
                     }
-
                     .upgrade-button:hover {
                         transform: translateY(-2px);
                         box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3);
                     }
-
                     .info-button {
                         background: none;
                         border: none;
@@ -1005,78 +955,64 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         transition: all 0.3s ease;
                         margin-left: auto;
                     }
-
                     .info-button:hover {
                         background: rgba(30, 144, 255, 0.1);
                         transform: scale(1.1);
                     }
-
                     #whatsapp-info {
                         max-height: 400px;
                         overflow-y: auto;
                         scrollbar-width: thin;
                         scrollbar-color: rgba(30, 144, 255, 0.5) rgba(30, 144, 255, 0.1);
                     }
-
                     #whatsapp-info::-webkit-scrollbar {
                         width: 8px;
                     }
-
                     #whatsapp-info::-webkit-scrollbar-track {
                         background: rgba(30, 144, 255, 0.1);
                         border-radius: 4px;
                     }
-
                     #whatsapp-info::-webkit-scrollbar-thumb {
                         background: rgba(30, 144, 255, 0.5);
                         border-radius: 4px;
                     }
-
                     #whatsapp-info::-webkit-scrollbar-thumb:hover {
                         background: rgba(30, 144, 255, 0.7);
                     }
-
                     .security-notice {
                         background: rgba(30, 144, 255, 0.1);
                         padding: 1.2rem;
                         border-radius: 8px;
                         border: 1px solid rgba(30, 144, 255, 0.2);
                     }
-
                     .security-notice p {
                         margin: 0 0 1rem 0;
                         color: #CCC;
                     }
-
                     .security-notice p:last-child {
                         margin-bottom: 0;
                     }
-
                     .security-recommendation {
                         font-style: italic;
-                        color: #999 !important;
+                        color: #BBB !important;
                         margin-top: 1rem !important;
                         font-size: 0.9rem;
                         padding-top: 1rem;
                         border-top: 1px solid rgba(30, 144, 255, 0.1);
                     }
-
                     .service-header {
                         display: flex;
                         align-items: center;
                         gap: 1rem;
                         flex-wrap: wrap;
                     }
-
                     .service-name {
                         flex: 1;
                         min-width: 150px;
                     }
-
                     .service-status {
                         white-space: nowrap;
                     }
-
                     .reset-button {
                         background: linear-gradient(45deg, #FF8C00, #FFA500);
                         color: white;
@@ -1089,19 +1025,19 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         width: 100%;
                         font-weight: bold;
                     }
-
                     .reset-button:hover {
                         transform: translateY(-2px);
                         box-shadow: 0 4px 12px rgba(255, 140, 0, 0.3);
                         background: linear-gradient(45deg, #FFA500, #FFB700);
                     }
-
                     @keyframes spin {
                         to { transform: rotate(360deg); }
+                    }
+                    .service-description {
+                        color: #DDD;
                     }
                 "#}
             </style>
         </div>
     }
 }
-

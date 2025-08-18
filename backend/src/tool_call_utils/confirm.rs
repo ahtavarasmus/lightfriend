@@ -143,7 +143,7 @@ pub async fn handle_confirmation(
                 should_continue = true;
             }
         }
-    } else if event_type == "telegram" || event_type == "whatsapp" {
+    } else if event_type == "telegram" || event_type == "whatsapp" || event_type == "signal" {
         // Get the message details from temp variables
         let details = match state.user_core.get_temp_variable(user.id, event_type) {
             Ok(Some((recipient, _, message_content, _, _, _, image_url))) => {
