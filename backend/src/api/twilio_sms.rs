@@ -523,7 +523,7 @@ pub async fn process_sms(
 
     // Define tools
     let tools = vec![
-        crate::tool_call_utils::bridge::get_send_chat_message_tool(),
+        crate::tool_call_utils::bridge::get_send_chat_message_tool(user.confirm_send_event.is_some()),
         crate::tool_call_utils::bridge::get_fetch_chat_messages_tool(),
         crate::tool_call_utils::bridge::get_fetch_recent_messages_tool(),
         crate::tool_call_utils::bridge::get_search_chat_contacts_tool(), // idk if we need this

@@ -129,7 +129,7 @@ pub fn get_fetch_recent_messages_tool() -> openai_api_rs::v1::chat_completion::T
     }
 }
 
-pub fn get_send_chat_message_tool() -> openai_api_rs::v1::chat_completion::Tool {
+pub fn get_send_chat_message_tool(confirmation: bool) -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
     use std::collections::HashMap;
     let mut properties = HashMap::new();
@@ -146,7 +146,11 @@ pub fn get_send_chat_message_tool() -> openai_api_rs::v1::chat_completion::Tool 
         "chat_name".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: Some("The chat name or room name to send the message to. Doesn't have to be exact since fuzzy search is used.".to_string()),
+            description: if confirmation {
+                Some("The chat name or room name to send the message to. Doesn't have to be exact since fuzzy search is used.".to_string())
+            } else {
+                Some("The chat name or room name to send the message to. Must be exact.".to_string())
+            },
             ..Default::default()
         }),
     );
@@ -162,11 +166,22 @@ pub fn get_send_chat_message_tool() -> openai_api_rs::v1::chat_completion::Tool 
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("send_chat_message"),
-            description: Some(String::from(
-                "Sends a message to a specific chat on the specified platform. \
-                Use this when the user asks to send a message to a contact or group on Telegram, WhatsApp or Signal. \
-                This tool will fuzzy search for the chat_name, confirm with the user, and require their confirmation before sending."
-            )),
+            description: if confirmation {
+                Some(String::from(
+                    "Sends a message to a specific chat on the specified platform. \
+                    Use this when the user asks to send a message to a contact or group on Telegram, WhatsApp or Signal. \
+                    This tool will fuzzy search for the chat_name, confirm with the user, and require their confirmation before sending.
+                    Only use this tool if the user has explicitly mentioned the message content or it is obviously clear what content they want to send; otherwise, ask the user to specify the message content before calling the tool."
+                ))
+            } else {
+                Some(String::from(
+                    "Sends a message to a specific chat on the specified platform if the chat_name is an exact match. \
+                    Use this when the user asks to send a message to a contact or group on Telegram, WhatsApp or Signal. \
+                    If the chat_name is not exact, this tool will perform a fuzzy search and return suggestions for the user to choose from. \
+                    After user confirmation, call this tool again with the exact selected chat_name to send the message.
+                    Only use this tool if the user has explicitly mentioned the message content or it is obviously clear what content they want to send; otherwise, ask the user to specify the message content before calling the tool."
+                ))
+            },
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
