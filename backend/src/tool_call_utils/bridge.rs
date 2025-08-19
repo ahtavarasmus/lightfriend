@@ -202,9 +202,6 @@ pub struct BridgeTimeFrame {
     pub start: String,
 }
 
-use crate::utils::bridge::capitalize;
-
-
 use axum::http::{StatusCode, HeaderName};
 use crate::models::user_models::User;
 use crate::api::twilio_sms::TwilioResponse;

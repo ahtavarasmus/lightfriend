@@ -1390,138 +1390,186 @@ pub async fn handle_confirm_send_chat_message(
         }
     };
     let capitalized_platform = platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &platform[1..];
-    let trim_suffix = if platform == "whatsapp" { " (WA)" } else if platform == "telegram" { " (Telegram)" } else { " " };
-    // If confirmation is not required, send the message directly
+    // If confirmation is not required, send the message directly using the provided chat_name
     if !user_settings.require_confirmation {
-        // First find the room
-        match crate::utils::bridge::fetch_bridge_room_messages(
+        let exact_name = payload.chat_name.clone();
+      
+        // Send the message directly
+        match crate::utils::bridge::send_bridge_message(
             &platform,
             &state,
             user_id,
-            &payload.chat_name,
-            Some(1), // Limit to 1 message since we only need the room name
+            &exact_name,
+            &payload.message,
+            None, // No image URL in this case
         ).await {
-            Ok((_, room_name)) => {
-                let clean_room_name = room_name.trim_end_matches(trim_suffix).to_string();
-               
-                // Send the message directly
-                match crate::utils::bridge::send_bridge_message(
-                    &platform,
-                    &state,
-                    user_id,
-                    &clean_room_name,
-                    &payload.message,
-                    None, // No image URL in this case
-                ).await {
-                    Ok(_) => {
-                        let sent_msg = format!("{} message sent to '{}'", capitalized_platform, clean_room_name);
-                        Ok(Json(json!({
-                            "status": "success",
-                            "message": sent_msg,
-                            "room_name": clean_room_name,
-                        })))
-                    }
-                    Err(e) => {
-                        error!("Failed to send {} message: {}", capitalized_platform, e);
-                        Err((
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({
-                                "error": format!("Failed to send {} message", capitalized_platform),
-                                "details": e.to_string()
-                            }))
-                        ))
-                    }
-                }
+            Ok(_) => {
+                let sent_msg = format!("{} message sent to '{}'", capitalized_platform, exact_name);
+                Ok(Json(json!({
+                    "status": "success",
+                    "message": sent_msg,
+                    "room_name": exact_name,
+                })))
             }
             Err(e) => {
-                error!("Failed to find {} room: {}", capitalized_platform, e);
+                error!("Failed to send {} message: {}", capitalized_platform, e);
                 Err((
-                    StatusCode::NOT_FOUND,
+                    StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({
-                        "error": format!("Failed to find {} room", capitalized_platform),
+                        "error": format!("Failed to send {} message", capitalized_platform),
                         "details": e.to_string()
                     }))
                 ))
             }
         }
     } else {
-        // If confirmation is required, continue with the existing flow
-        match crate::utils::bridge::fetch_bridge_room_messages(
-            &platform,
-            &state,
-            user_id,
-            &payload.chat_name,
-            Some(1), // Limit to 1 message since we only need the room name
-        ).await {
-            Ok((_, room_name)) => {
-                // Get the actual room name without the suffix
-                let clean_room_name = room_name.trim_end_matches(trim_suffix).to_string();
-               
-                // Set the temporary variable for the message
-                if let Err(e) = state.user_core.set_temp_variable(
-                    user_id,
-                    Some(&platform),
-                    Some(&clean_room_name),
-                    None,
-                    Some(&payload.message),
-                    None,
-                    None,
-                    None,
-                    None,
-                ) {
-                    tracing::error!("Failed to set temporary variable: {}", e);
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({
-                            "error": format!("Failed to prepare {} message", capitalized_platform),
-                            "details": e.to_string()
-                        }))
-                    ));
-                }
-                // Create confirmation message
-                let confirmation_message = format!(
-                    "Send {} to '{}' with content: '{}' (yes-> send, no -> discard) (free reply)",
-                    capitalized_platform,
-                    clean_room_name,
-                    payload.message
-                );
-                // Send the confirmation SMS
-                match crate::api::twilio_utils::send_conversation_message(
+        // If confirmation is required, check bridge connection
+        let bridge = match state.user_repository.get_bridge(user_id, &platform) {
+            Ok(bridge) => bridge,
+            Err(e) => {
+                error!("Failed to get bridge: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": "Failed to get bridge"
+                    }))
+                ));
+            }
+        };
+        if bridge.map(|b| b.status != "connected").unwrap_or(true) {
+            let error_msg = format!("Failed to find contact. Please make sure you're connected to {} bridge.", capitalized_platform);
+            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                &state,
+                &error_msg,
+                None,
+                &user,
+            ).await {
+                error!("Failed to send error message: {}", e);
+            }
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": error_msg
+                }))
+            ));
+        }
+        let client = match crate::utils::matrix_auth::get_cached_client(user_id, &state).await {
+            Ok(client) => client,
+            Err(e) => {
+                let error_msg = format!("Failed to get client: {}", e);
+                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                     &state,
-                    &confirmation_message,
+                    &error_msg,
                     None,
                     &user,
                 ).await {
-                    Ok(message_sid) => {
-                        // Deduct credits for the confirmation message
-                        if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
-                            error!("Failed to deduct user credits: {}", e);
-                        }
-                        Ok(Json(json!({
-                            "status": "success",
-                            "message": format!("{} confirmation message sent", capitalized_platform),
-                            "room_name": clean_room_name,
-                            "message_sid": message_sid
-                        })))
-                    }
-                    Err(e) => {
-                        error!("Failed to send confirmation SMS: {}", e);
-                        Err((
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(json!({
-                                "error": "Failed to send confirmation message",
-                                "details": e.to_string()
-                            }))
-                        ))
-                    }
+                    error!("Failed to send error message: {}", e);
                 }
-            },
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": error_msg
+                    }))
+                ));
+            }
+        };
+        // Fetch rooms
+        let rooms = match crate::utils::bridge::get_service_rooms(&client, &platform).await {
+            Ok(rooms) => rooms,
             Err(e) => {
-                error!("Failed to find {} room: {}", capitalized_platform, e);
-                Err((
+                let error_msg = format!("Failed to fetch {} rooms: {}", capitalized_platform, e);
+                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    &state,
+                    &error_msg,
+                    None,
+                    &user,
+                ).await {
+                    error!("Failed to send error message: {}", e);
+                }
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": error_msg
+                    }))
+                ));
+            }
+        };
+        let best_match = crate::utils::bridge::search_best_match(&rooms, &payload.chat_name);
+        let best_match = match best_match {
+            Some(room) => room,
+            None => {
+                let error_msg = format!("No {} contacts found matching '{}'.", capitalized_platform, payload.chat_name);
+                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    &state,
+                    &error_msg,
+                    None,
+                    &user,
+                ).await {
+                    error!("Failed to send error message: {}", e);
+                }
+                return Err((
                     StatusCode::NOT_FOUND,
                     Json(json!({
-                        "error": format!("Failed to find {} room", capitalized_platform),
+                        "error": error_msg
+                    }))
+                ));
+            }
+        };
+        // Get the exact name
+        let exact_name = crate::utils::bridge::remove_bridge_suffix(&best_match.display_name);
+        // Set the temporary variable for the message
+        if let Err(e) = state.user_core.set_temp_variable(
+            user_id,
+            Some(&platform),
+            Some(&exact_name),
+            None,
+            Some(&payload.message),
+            None,
+            None,
+            None,
+            None,
+        ) {
+            tracing::error!("Failed to set temporary variable: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": format!("Failed to prepare {} message", capitalized_platform),
+                    "details": e.to_string()
+                }))
+            ));
+        }
+        // Create confirmation message
+        let confirmation_message = format!(
+            "Send {} to '{}' with content: '{}' (yes-> send, no -> discard) (free reply)",
+            capitalized_platform,
+            exact_name,
+            payload.message
+        );
+        // Send the confirmation SMS
+        match crate::api::twilio_utils::send_conversation_message(
+            &state,
+            &confirmation_message,
+            None,
+            &user,
+        ).await {
+            Ok(message_sid) => {
+                // Deduct credits for the confirmation message
+                if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
+                    error!("Failed to deduct user credits: {}", e);
+                }
+                Ok(Json(json!({
+                    "status": "success",
+                    "message": format!("{} confirmation message sent", capitalized_platform),
+                    "room_name": exact_name,
+                    "message_sid": message_sid
+                })))
+            }
+            Err(e) => {
+                error!("Failed to send confirmation SMS: {}", e);
+                Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "error": "Failed to send confirmation message",
                         "details": e.to_string()
                     }))
                 ))
