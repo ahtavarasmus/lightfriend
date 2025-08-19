@@ -26,6 +26,9 @@ pub fn changelog() -> Html {
             <section class="changelog-list-section">
 
                 <div class="changelog-entry">
+                    <blockquote class="twitter-tweet"><p lang="en" dir="ltr">{"Signal messenger now also works on lightfriend along with whatsapp and telegram! i fixed the bug with message sending with confirmation setting on so you can now send messages to those platforms using voice calls and text messages. "}<a href="https://t.co/NOUNLaHBmN">{"pic.twitter.com/NOUNLaHBmN"}</a></p>{"&mdash; rasmus (@ahtavarasm_us) "}<a href="https://twitter.com/ahtavarasm_us/status/1957743131882893332?ref_src=twsrc%5Etfw">{"August 19, 2025"}</a></blockquote> <script src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+                </div>
+                <div class="changelog-entry">
                     <blockquote class="twitter-tweet"><p lang="en" dir="ltr">{"today i made a change log page with all these X posts embedded. Also made prompts more reliable for setting waiting checks both on sms and voice calls. Also configured the signal bridge so it's now running on my mac locally - maybe live tomorrow if everything goes well. "}<a href="https://t.co/nCPI4w5LuB">{"pic.twitter.com/nCPI4w5LuB"}</a></p>{"&mdash; rasmus (@ahtavarasm_us) "}<a href="https://twitter.com/ahtavarasm_us/status/1956810473753788745?ref_src=twsrc%5Etfw">{"August 16, 2025"}</a></blockquote> <script src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
                 </div>
 
