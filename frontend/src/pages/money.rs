@@ -1432,6 +1432,8 @@ pub fn pricing_logged_in(props: &PricingProps) -> Html {
                 <Link<Route> to={Route::Terms}>{"Terms & Conditions"}</Link<Route>>
                 {" | "}
                 <Link<Route> to={Route::Privacy}>{"Privacy Policy"}</Link<Route>>
+                {" | "}
+                <Link<Route> to={Route::Changelog}>{"Updates"}</Link<Route>>
             </div>
         </div>
     }
@@ -1967,7 +1969,6 @@ pub fn pricing(props: &PricingProps) -> Html {
             <div class="pricing-header">
                 <h1>{"Invest in Your Peace of Mind"}</h1>
                 <p>{"Lightfriend makes it possible to seriously switch to a dumbphone, saving you 2-4 hours per day of mindless scrolling.*"}</p>
-                <p>{"Save 120 hours/month starting at €19!"}</p>
                 {
                     if *selected_country == "Other" {
                         html! {

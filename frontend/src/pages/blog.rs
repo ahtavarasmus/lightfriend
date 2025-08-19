@@ -24,6 +24,15 @@ pub fn blog() -> Html {
                 <p>{"Latest updates, guides, and insights on minimalist living with Lightfriend"}</p>
             </section>
             <section class="blog-list-section">
+
+                <div class="blog-post-preview">
+                    <Link<Route> to={Route::SwitchToDumbphoneGuide}>
+                        <img src="/assets/lightphone2.png" alt="How to Switch to a Dumbphone" loading="lazy" class="blog-preview-image" />
+                        <h2>{"How to Switch to a Dumbphone"}</h2>
+                        <p>{"All the things you need to consider when joining the dumbphone revolution."}</p>
+                        <span class="blog-date">{"August 19, 2025"}</span>
+                    </Link<Route>>
+                </div>
                 <div class="blog-post-preview">
                     <Link<Route> to={Route::LightPhone3WhatsappGuide}>
                         <img src="/assets/light-phone-3-whatsapp-integration.webp" alt="Light Phone 3 with WhatsApp via Lightfriend AI" loading="lazy" class="blog-preview-image" />
@@ -31,8 +40,8 @@ pub fn blog() -> Html {
                         <p>{"Discover how to add WhatsApp functionality to your Light Phone 3 without compromising its minimalist design. Stay connected via SMS and voice while maintaining digital detox benefits."}</p>
                         <span class="blog-date">{"August 13, 2025"}</span>
                     </Link<Route>>
+
                 </div>
-                // Add more blog post previews here as needed
             </section>
             <style>
                 {r#"

@@ -15,6 +15,10 @@ mod profile {
     pub mod settings;
     pub mod timezone_detector;
 }
+
+mod blog {
+    pub mod switch_to_dumbphone;
+}
 mod pages {
     pub mod home;
     pub mod landing;
@@ -84,6 +88,10 @@ use pages::{
     change_log::Changelog,
 };
 
+use blog::{
+    switch_to_dumbphone::SwitchToDumbphoneGuide,
+};
+
 use auth::{
     signup::register::Register,
     signup::login::Login,
@@ -142,6 +150,8 @@ pub enum Route {
     Pricing,
     #[at("/light-phone-3-whatsapp-guide")]
     LightPhone3WhatsappGuide,
+    #[at("/how-to-switch-to-dumbphone")]
+    SwitchToDumbphoneGuide,
 }
 
 fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: bool) -> Html {
@@ -233,6 +243,10 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
         Route::LightPhone3WhatsappGuide => {
             info!("Rendering LightPhone3WhatsappGuide page");
             html! { <LightPhone3WhatsappGuide /> }
+        },
+        Route::SwitchToDumbphoneGuide => {
+            info!("Rendering SwitchToDumbphoneGuide page");
+            html! { <SwitchToDumbphoneGuide /> }
         },
     }
 }
