@@ -598,6 +598,22 @@ pub fn Home() -> Html {
                                     </div>
                                     {
                                         if let Some(profile) = (*profile_data).as_ref() {
+                                            if profile.sub_tier.is_some() {
+                                                html! {
+                                                    <div class="subscriber-promo">
+                                                        <p>{"Subscribed users can get 20% off from Cold Turkey Blocker Pro with code LIGHTFRIEND"}</p>
+                                                        <a href="https://getcoldturkey.com" target="_blank" rel="noopener noreferrer">{"getcoldturkey.com"}</a>
+                                                    </div>
+                                                }
+                                            } else {
+                                                html! {}
+                                            }
+                                        } else {
+                                            html! {}
+                                        }
+                                    }
+                                    {
+                                        if let Some(profile) = (*profile_data).as_ref() {
                                             render_notification_settings(Some(profile))
                                         } else {
                                             html! {}
@@ -1054,6 +1070,25 @@ pub fn Home() -> Html {
                         }
                         .feature-suggestion a:hover {
                             color: #7EB2FF;
+                            text-decoration: underline;
+                        }
+                        .subscriber-promo {
+                            margin-top: 1rem;
+                            padding: 1rem;
+                            background: rgba(30, 144, 255, 0.05);
+                            border: 1px solid rgba(30, 144, 255, 0.1);
+                            border-radius: 8px;
+                            text-align: center;
+                        }
+                        .subscriber-promo p {
+                            color: #fff;
+                            margin-bottom: 0.5rem;
+                        }
+                        .subscriber-promo a {
+                            color: #1E90FF;
+                            text-decoration: none;
+                        }
+                        .subscriber-promo a:hover {
                             text-decoration: underline;
                         }
                         .development-links {

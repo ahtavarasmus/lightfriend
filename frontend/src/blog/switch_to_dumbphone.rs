@@ -52,12 +52,6 @@ pub fn switch_to_dumbphone_guide() -> Html {
                 <p>{"Many banks require authentication apps for logging in, but they usually offer physical code calculators or security token devices as alternatives. These small devices generate one-time codes for logging into your bank account. Contact your bank to request a physical authentication device - they typically provide these free of charge or for a small fee. Some banks may call these devices 'key fobs', 'code calculators', or 'security tokens'."}</p>
                 <h2>{"Transportation"}</h2>
                 <p>{"Transportation solutions vary by country, but there are several options available. Many cities offer physical keycards for public transit. For ride-hailing, Lightfriend will soon integrate with Uber and similar services. Alternative platforms like tremp.me offer ride-sharing possibilities. For navigation, modern dumbphones like The Light Phone and Mudita Kompakt include built-in maps. Additionally, Lightfriend can provide step-by-step directions through voice calls or SMS when you need guidance."}</p>
-                <h2>{"Benefits of Switching to Dumbphone"}</h2>
-                <p>{"Reclaim your time and attention:"}</p>
-                <ul>
-                    <li>{"Reduced distractions, more life and better mental health"}</li>
-                    <li>{"Computer handles heavy lifting seamlessly"}</li>
-                </ul>
                 <h2>{"Step-by-Step Guide to Switching"}</h2>
                 <ol>
                     <li>{"Choose and buy your dumbphone"}</li>

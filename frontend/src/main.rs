@@ -72,7 +72,7 @@ use pages::{
     supported_countries::SupportedCountries,
     home::is_logged_in,
     termsprivacy::{TermsAndConditions, PrivacyPolicy},
-    money::{Pricing, PricingLoggedIn},
+    money::UnifiedPricing,
     self_host_instructions::SelfHostInstructions,
     bring_own_number::TwilioHostedInstructions,
     lightphone3_whatsapp_guide::LightPhone3WhatsappGuide,
@@ -360,67 +360,142 @@ pub fn self_host_instructions_wrapper() -> Html {
         }
     }
 }
+
+use serde_json::Value;
+use std::collections::HashMap;
+
 #[function_component(PricingWrapper)]
 pub fn pricing_wrapper() -> Html {
     let profile_data = use_state(|| None::<UserProfile>);
-   
+    let selected_country = use_state(|| "US".to_string());
+    let country_name = use_state(|| String::new());
+    let ip_country_name = use_state(|| String::new());
+    let is_logged_in = use_state(|| false);
+
+    let country_map: HashMap<String, String> = [
+        ("US".to_string(), "United States".to_string()),
+        ("CA".to_string(), "Canada".to_string()),
+        ("FI".to_string(), "Finland".to_string()),
+        ("NL".to_string(), "Netherlands".to_string()),
+        ("UK".to_string(), "United Kingdom".to_string()),
+        ("AU".to_string(), "Australia".to_string()),
+        ("Other".to_string(), "Other".to_string()),
+    ].iter().cloned().collect();
+
     {
+        let selected_country = selected_country.clone();
+        let country_name = country_name.clone();
+        let ip_country_name = ip_country_name.clone();
+        let is_logged_in = is_logged_in.clone();
         let profile_data = profile_data.clone();
-       
+        let country_map = country_map.clone();
+
         use_effect_with_deps(move |_| {
+            if let Some(window) = web_sys::window() {
+                let _ = window.scroll_to_with_x_and_y(0.0, 0.0);
+            }
+
             wasm_bindgen_futures::spawn_local(async move {
-                if let Some(token) = window()
+                let mut ip_code = "Other".to_string();
+                let mut ip_name = "your country".to_string();
+
+                if let Ok(resp) = Request::get("https://ipapi.co/json/").send().await {
+                    if let Ok(json) = resp.json::<Value>().await {
+                        if let Some(code) = json.get("country_code").and_then(|v| v.as_str()) {
+                            ip_code = code.to_uppercase();
+                        }
+                        if let Some(name) = json.get("country_name").and_then(|v| v.as_str()) {
+                            ip_name = name.to_string();
+                        }
+                    }
+                }
+
+                ip_country_name.set(ip_name.clone());
+
+                let known_countries = ["US", "CA", "FI", "NL", "UK", "AU"];
+                if !known_countries.contains(&ip_code.as_str()) {
+                    ip_code = "Other".to_string();
+                }
+
+                selected_country.set(ip_code.clone());
+                country_name.set(if ip_code == "Other" { ip_name.clone() } else { country_map.get(&ip_code).cloned().unwrap_or(ip_name.clone()) });
+
+                let token_opt = window()
                     .and_then(|w| w.local_storage().ok())
                     .flatten()
                     .and_then(|storage| storage.get_item("token").ok())
-                    .flatten()
-                {
-                    match Request::get(&format!("{}/api/profile", config::get_backend_url()))
+                    .flatten();
+
+                if let Some(token) = token_opt {
+                    if let Ok(response) = Request::get(&format!("{}/api/profile", config::get_backend_url()))
                         .header("Authorization", &format!("Bearer {}", token))
                         .send()
                         .await
                     {
-                        Ok(response) => {
-                            if let Ok(profile) = response.json::<UserProfile>().await {
-                                profile_data.set(Some(profile));
+                        if let Ok(profile) = response.json::<UserProfile>().await {
+                            profile_data.set(Some(profile.clone()));
+                            is_logged_in.set(true);
+
+                            let phone_country = profile.phone_number_country.unwrap_or("US".to_string());
+                            selected_country.set(phone_country.clone());
+
+                            let full_name = country_map.get(&phone_country).cloned().unwrap_or(phone_country.clone());
+                            country_name.set(full_name);
+
+                            if phone_country == "Other" {
+                                country_name.set(ip_name.clone());
                             }
+                        } else {
+                            is_logged_in.set(false);
                         }
-                        Err(_) => {}
+                    } else {
+                        is_logged_in.set(false);
                     }
+                } else {
+                    is_logged_in.set(false);
                 }
             });
-           
+
             || ()
         }, ());
     }
-    if let Some(profile) = (*profile_data).as_ref() {
-        web_sys::console::log_1(&"here in logged in".into());
-        html! {
-            <PricingLoggedIn
-                user_id={profile.id}
-                user_email={profile.email.clone()}
-                sub_tier={profile.sub_tier.clone()}
-                is_logged_in={true}
-                phone_number={profile.phone_number.clone()}
-                verified={profile.verified.clone()}
-                phone_country={profile.phone_number_country.clone()}
-            />
-        }
+
+    let on_country_change = if !*is_logged_in {
+        let selected_country = selected_country.clone();
+        let country_name = country_name.clone();
+        let ip_country_name = ip_country_name.clone();
+        let country_map = country_map.clone();
+        Some(Callback::from(move |e: Event| {
+            if let Some(target) = e.target_dyn_into::<web_sys::HtmlSelectElement>() {
+                let value = target.value();
+                selected_country.set(value.clone());
+                let new_name = if value == "Other" {
+                    (*ip_country_name).clone()
+                } else {
+                    country_map.get(&value).cloned().unwrap_or(value.clone())
+                };
+                country_name.set(new_name);
+            }
+        }))
     } else {
-        web_sys::console::log_1(&"here in not logged in".into());
-        html! {
-            <Pricing
-                user_id={0}
-                user_email={"".to_string()}
-                sub_tier={None::<String>}
-                is_logged_in={false}
-                phone_number={None::<String>}
-                verified=false
-                phone_country={None::<String>}
-            />
-        }
+        None
+    };
+
+    html! {
+        <UnifiedPricing
+            user_id={profile_data.as_ref().map(|p| p.id).unwrap_or(0)}
+            user_email={profile_data.as_ref().map(|p| p.email.clone()).unwrap_or("".to_string())}
+            sub_tier={profile_data.as_ref().and_then(|p| p.sub_tier.clone())}
+            is_logged_in={*is_logged_in}
+            phone_number={profile_data.as_ref().and_then(|p| Some(p.phone_number.clone()))}
+            verified={profile_data.as_ref().map(|p| p.verified).unwrap_or(false)}
+            selected_country={(*selected_country).clone()}
+            country_name={(*country_name).clone()}
+            on_country_change={on_country_change}
+        />
     }
 }
+
 #[derive(Properties, PartialEq)]
 pub struct NavProps {
     pub logged_in: bool,
