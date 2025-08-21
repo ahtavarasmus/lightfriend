@@ -16,6 +16,7 @@ mod profile {
 }
 mod blog {
     pub mod switch_to_dumbphone;
+    pub mod read_books_accidentally;
 }
 mod pages {
     pub mod home;
@@ -81,6 +82,7 @@ use pages::{
 };
 use blog::{
     switch_to_dumbphone::SwitchToDumbphoneGuide,
+    read_books_accidentally::ReadMoreAccidentallyGuide,
 };
 use auth::{
     signup::register::Register,
@@ -138,6 +140,8 @@ pub enum Route {
     LightPhone3WhatsappGuide,
     #[at("/how-to-switch-to-dumbphone")]
     SwitchToDumbphoneGuide,
+    #[at("/how-to-read-more-accidentally")]
+    ReadMoreAccidentallyGuide,
 }
 fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: bool) -> Html {
     if matches!(self_hosting_status, SelfHostingStatus::SelfHostedSignup | SelfHostingStatus::SelfHostedLogin) {
@@ -231,6 +235,10 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
         Route::SwitchToDumbphoneGuide => {
             info!("Rendering SwitchToDumbphoneGuide page");
             html! { <SwitchToDumbphoneGuide /> }
+        },
+        Route::ReadMoreAccidentallyGuide => {
+            info!("Rendering ReadMoreAccidentallyGuide page");
+            html! { <ReadMoreAccidentallyGuide /> }
         },
     }
 }

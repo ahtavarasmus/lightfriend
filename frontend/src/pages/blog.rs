@@ -26,6 +26,14 @@ pub fn blog() -> Html {
             <section class="blog-list-section">
 
                 <div class="blog-post-preview">
+                    <Link<Route> to={Route::ReadMoreAccidentallyGuide}>
+                        <img src="/assets/man_accidentally_reading_books.png" alt="How to Read Books Accidentally" loading="lazy" class="blog-preview-image" />
+                        <h2>{"How to Read Books Accidentally"}</h2>
+                        <p>{"How to Read More Without Willpower"}</p>
+                        <span class="blog-date">{"August 19, 2025"}</span>
+                    </Link<Route>>
+                </div>
+                <div class="blog-post-preview">
                     <Link<Route> to={Route::SwitchToDumbphoneGuide}>
                         <img src="/assets/lightphone2.png" alt="How to Switch to a Dumbphone" loading="lazy" class="blog-preview-image" />
                         <h2>{"How to Switch to a Dumbphone"}</h2>

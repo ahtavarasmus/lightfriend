@@ -644,6 +644,23 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
             flex: 0 1 calc(50% - 1rem);
         }
     }
+
+.learn-more-section {
+    text-align: center;
+    margin-top: 1.5rem;
+    margin-bottom: 1rem;
+}
+.learn-more-link {
+    color: #1E90FF;
+    text-decoration: none;
+    font-size: 1.1rem;
+    font-weight: 500;
+    transition: color 0.3s ease;
+}
+.learn-more-link:hover {
+    color: #7EB2FF;
+    text-decoration: underline;
+}
     "#;
     html! {
         <div class={classes!("pricing-card", "subscription",
@@ -684,6 +701,10 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                         html! {}
                     }}
                 </div>
+                    <div class="learn-more-section">
+                        <a href="/how-to-switch-to-dumbphone" class="learn-more-link">{"How to switch to a dumbphone and what you'll need"}</a>
+                    </div>
+
                 <div class="includes">
                     <ul class="quota-list">
                         { for props.features.iter().flat_map(|feature| {
@@ -1485,7 +1506,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Hosted Plan includes phone number for FI/AU/UK, but messages are bought separately before hand. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                    <p>{"Plans bill monthly. Hosted Plan includes phone number for FI/AU/UK/NL, but messages are bought separately before hand. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
                                 </details>
                                 <details>
                                     <summary>{"Can I setup automatic recharge for message credits?"}</summary>
@@ -1510,7 +1531,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                     }
                     <details>
                         <summary>{"Is it available in my country?"}</summary>
-                        <p>{"Available globally. US/CA everything is included. FI/UK/AU include a number but message are bought separately. Elsewhere bring your own number (guided setup, costs vary ~€0.05-0.50/text or free if you have extra android phone laying around with a another phone plan). Contact rasmus@ahtava.com for more details."}</p>
+                        <p>{"Available globally. US/CA everything is included. FI/UK/AU/NL include a number but message are bought separately. Elsewhere bring your own number (guided setup, costs vary ~€0.05-0.50/text or free if you have extra android phone laying around with a another phone plan). Contact rasmus@ahtava.com for more details."}</p>
                     </details>
                 </div>
             </div>
