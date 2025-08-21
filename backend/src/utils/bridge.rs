@@ -564,6 +564,57 @@ pub async fn handle_bridge_message(
     state: Arc<AppState>,
 ) {
     tracing::debug!("Entering bridge message handler");
+    /*
+
+    let notification_settings = match client.notification_settings() {
+        Ok(settings) => settings,
+        Err(e) => {
+            tracing::error!("Failed to get notification settings: {}", e);
+            return; // Or handle as needed; e.g., assume not muted to proceed
+        }
+    };
+
+    let room_id = room.room_id();
+    let user_defined_mode = match notification_settings.get_user_defined_room_notification_mode(room_id).await {
+        Ok(mode) => mode,
+        Err(e) => {
+            tracing::error!("Failed to get user-defined notification mode: {}", e);
+            None
+        }
+    };
+
+    let effective_mode = if let Some(mode) = user_defined_mode {
+        mode
+    } else {
+        // Fall back to default; determine room properties
+        let is_encrypted = match room.is_encrypted().await {
+            Ok(val) => val,
+            Err(e) => {
+                tracing::error!("Failed to check if room is encrypted: {}", e);
+                false // Default assumption; adjust as needed
+            }
+        };
+        let is_one_to_one = match room.is_direct().await {
+            Ok(val) => val,
+            Err(e) => {
+                tracing::error!("Failed to check if room is direct: {}", e);
+                false // Default assumption; adjust as needed
+            }
+        };
+        match notification_settings.get_default_room_notification_mode(is_encrypted, is_one_to_one).await {
+            Ok(mode) => mode,
+            Err(e) => {
+                tracing::error!("Failed to get default notification mode: {}", e);
+                return; // Or assume not muted
+            }
+        }
+    };
+
+    if effective_mode == matrix_sdk::notification_settings::RoomNotificationMode::Mute {
+        tracing::debug!("Skipping message from muted room: {}", room.room_id());
+        return;
+    }
+    */
     // Check message age
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -581,7 +632,8 @@ pub async fn handle_bridge_message(
         return;
     }
     // Find the user ID for this Matrix client
-    let client_user_id = client.user_id().unwrap().to_string();
+    let matrix_user_id = client.user_id().unwrap().to_owned(); // Clone to OwnedUserId
+    let client_user_id = matrix_user_id.to_string();
     // Extract the local part of the Matrix user ID (before the domain)
     let local_user_id = client_user_id
         .split(':')
@@ -720,8 +772,14 @@ pub async fn handle_bridge_message(
     };
     let member_count = members.len() as u64;
     if member_count > 3 {
-        tracing::info!("Skipping message from group room ({} members)", member_count);
-        return;
+        let is_mentioned = event.content.mentions.as_ref()
+            .map(|m| m.user_ids.contains(&matrix_user_id))
+            .unwrap_or(false);
+        if !is_mentioned {
+            tracing::info!("Skipping message from group room ({} members) since user wasn't mentioned", member_count);
+            return;
+        }
+        tracing::info!("User {} is mentioned in message (event ID: {})", user_id, event.event_id);
     }
     let sender_localpart = event.sender.localpart().to_string();
     let service = match infer_service(&room_name, &sender_localpart) {

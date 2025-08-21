@@ -1034,7 +1034,8 @@ pub fn landing() -> Html {
         left: 0;
         width: 100%;
         height: 100vh;
-        background-image: url('/assets/boy_holding_dumbphone_in_crowded_place.webp');
+        //background-image: url('/assets/boy_holding_dumbphone_in_crowded_place.webp');
+        background-image: url('/assets/giphy-3160518167.gif');
         background-size: cover;
         background-position: center;
         background-repeat: no-repeat;

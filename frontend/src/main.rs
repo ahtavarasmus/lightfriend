@@ -4,7 +4,6 @@ use log::{info, Level};
 use web_sys::{window, MouseEvent};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
-
 mod config;
 mod profile {
     pub mod stripe;
@@ -15,7 +14,6 @@ mod profile {
     pub mod settings;
     pub mod timezone_detector;
 }
-
 mod blog {
     pub mod switch_to_dumbphone;
 }
@@ -38,11 +36,9 @@ mod pages {
     pub mod blog;
     pub mod change_log;
 }
-
 mod components {
     pub mod notification;
 }
-
 mod proactive {
     pub mod common;
     pub mod waiting_checks;
@@ -51,7 +47,6 @@ mod proactive {
     pub mod critical;
     pub mod agent_on;
 }
-
 mod connections {
     pub mod email;
     pub mod calendar;
@@ -61,7 +56,6 @@ mod connections {
     pub mod tasks;
     pub mod uber;
 }
-
 mod auth {
     pub mod connect;
     pub mod verify;
@@ -72,7 +66,6 @@ mod admin {
     pub mod dashboard;
     pub mod usage;
 }
-
 use pages::{
     home::Home,
     faq::Faq,
@@ -80,38 +73,31 @@ use pages::{
     home::is_logged_in,
     termsprivacy::{TermsAndConditions, PrivacyPolicy},
     money::{Pricing, PricingLoggedIn},
-
     self_host_instructions::SelfHostInstructions,
-    bring_own_number::TwilioHostedInstructions, 
+    bring_own_number::TwilioHostedInstructions,
     lightphone3_whatsapp_guide::LightPhone3WhatsappGuide,
     blog::Blog,
     change_log::Changelog,
 };
-
 use blog::{
     switch_to_dumbphone::SwitchToDumbphoneGuide,
 };
-
 use auth::{
     signup::register::Register,
     signup::login::Login,
     signup::password_reset::PasswordReset,
     verify::Verify,
 };
-
 use profile::profile::Billing;
 use admin::dashboard::AdminDashboard;
-
 use crate::profile::billing_models::UserProfile;
 use gloo_net::http::Request;
-
 #[derive(Clone, PartialEq)]
 pub enum SelfHostingStatus {
     SelfHostedSignup,
     SelfHostedLogin,
     Normal,
 }
-
 #[derive(Clone, Routable, PartialEq)]
 pub enum Route {
     #[at("/self-hosted")]
@@ -153,7 +139,6 @@ pub enum Route {
     #[at("/how-to-switch-to-dumbphone")]
     SwitchToDumbphoneGuide,
 }
-
 fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: bool) -> Html {
     if matches!(self_hosting_status, SelfHostingStatus::SelfHostedSignup | SelfHostingStatus::SelfHostedLogin) {
         return match routes {
@@ -166,7 +151,6 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
             }
         };
     }
-
     match routes {
         Route::SelfHosted => {
             if !logged_in {
@@ -250,14 +234,13 @@ fn switch(routes: Route, self_hosting_status: &SelfHostingStatus, logged_in: boo
         },
     }
 }
-
 #[function_component(TwilioHostedInstructionsWrapper)]
 pub fn twilio_hosted_instructions_wrapper() -> Html {
     let profile_data = use_state(|| None::<UserProfile>);
-    
+   
     {
         let profile_data = profile_data.clone();
-        
+       
         use_effect_with_deps(move |_| {
             wasm_bindgen_futures::spawn_local(async move {
                 if let Some(token) = window()
@@ -280,11 +263,10 @@ pub fn twilio_hosted_instructions_wrapper() -> Html {
                     }
                 }
             });
-            
+           
             || ()
         }, ());
     }
-
     if let Some(profile) = (*profile_data).as_ref() {
         html! {
             <TwilioHostedInstructions
@@ -313,14 +295,13 @@ pub fn twilio_hosted_instructions_wrapper() -> Html {
         }
     }
 }
-
 #[function_component(SelfHostInstructionsWrapper)]
 pub fn self_host_instructions_wrapper() -> Html {
     let profile_data = use_state(|| None::<UserProfile>);
-    
+   
     {
         let profile_data = profile_data.clone();
-        
+       
         use_effect_with_deps(move |_| {
             wasm_bindgen_futures::spawn_local(async move {
                 if let Some(token) = window()
@@ -343,11 +324,10 @@ pub fn self_host_instructions_wrapper() -> Html {
                     }
                 }
             });
-            
+           
             || ()
         }, ());
     }
-
     if let Some(profile) = (*profile_data).as_ref() {
         html! {
             <SelfHostInstructions
@@ -380,14 +360,13 @@ pub fn self_host_instructions_wrapper() -> Html {
         }
     }
 }
-
 #[function_component(PricingWrapper)]
 pub fn pricing_wrapper() -> Html {
     let profile_data = use_state(|| None::<UserProfile>);
-    
+   
     {
         let profile_data = profile_data.clone();
-        
+       
         use_effect_with_deps(move |_| {
             wasm_bindgen_futures::spawn_local(async move {
                 if let Some(token) = window()
@@ -410,11 +389,10 @@ pub fn pricing_wrapper() -> Html {
                     }
                 }
             });
-            
+           
             || ()
         }, ());
     }
-
     if let Some(profile) = (*profile_data).as_ref() {
         web_sys::console::log_1(&"here in logged in".into());
         html! {
@@ -429,7 +407,6 @@ pub fn pricing_wrapper() -> Html {
             />
         }
     } else {
-
         web_sys::console::log_1(&"here in not logged in".into());
         html! {
             <Pricing
@@ -444,48 +421,44 @@ pub fn pricing_wrapper() -> Html {
         }
     }
 }
-
 #[derive(Properties, PartialEq)]
 pub struct NavProps {
     pub logged_in: bool,
     pub on_logout: Callback<()>,
     pub self_hosting_status: SelfHostingStatus,
 }
-
 #[function_component(Nav)]
 pub fn nav(props: &NavProps) -> Html {
     let NavProps { logged_in, on_logout, self_hosting_status } = props;
     let menu_open = use_state(|| false);
     let is_scrolled = use_state(|| false);
-
     {
         let is_scrolled = is_scrolled.clone();
         use_effect_with_deps(move |_| {
             let window = web_sys::window().unwrap();
             let document = window.document().unwrap();
-            
+           
             let scroll_callback = Closure::wrap(Box::new(move || {
                 let scroll_top = document.document_element().unwrap().scroll_top();
                 is_scrolled.set(scroll_top > 2500);
             }) as Box<dyn FnMut()>);
-            
+           
             window.add_event_listener_with_callback("scroll", scroll_callback.as_ref().unchecked_ref())
                 .unwrap();
-            
+           
             move || {
                 window.remove_event_listener_with_callback("scroll", scroll_callback.as_ref().unchecked_ref())
                     .unwrap();
             }
         }, ());
     }
-    
+   
     let handle_logout = {
         let on_logout = on_logout.clone();
         Callback::from(move |_| {
             on_logout.emit(());
         })
     };
-
     let toggle_menu = {
         let menu_open = menu_open.clone();
         Callback::from(move |e: MouseEvent| {
@@ -493,26 +466,22 @@ pub fn nav(props: &NavProps) -> Html {
             menu_open.set(!*menu_open);
         })
     };
-
     let close_menu = {
         let menu_open = menu_open.clone();
         Callback::from(move |_: MouseEvent| {
             menu_open.set(false);
         })
     };
-
     let menu_class = if *menu_open {
         "nav-right mobile-menu-open"
     } else {
         "nav-right"
     };
-
     let close_class = if *menu_open {
         "burger-menu close-burger-menu"
     } else {
         "burger-menu"
     };
-
     html! {
         <nav class={classes!("top-nav", (*is_scrolled).then(|| "scrolled"))}>
             <div class="nav-content">
@@ -595,12 +564,10 @@ pub fn nav(props: &NavProps) -> Html {
         </nav>
     }
 }
-
 #[function_component]
 fn App() -> Html {
     let logged_in = use_state(|| is_logged_in());
     let self_hosting_status = use_state(|| SelfHostingStatus::Normal);
-
     {
         let self_hosting_status = self_hosting_status.clone();
         use_effect_with_deps(move |_| {
@@ -652,7 +619,6 @@ fn App() -> Html {
             }
         })
     };
-
     html! {
         <>
             <BrowserRouter>
@@ -662,7 +628,6 @@ fn App() -> Html {
         </>
     }
 }
-
 fn main() {
     console_error_panic_hook::set_once();
     console_log::init_with_level(Level::Info).expect("error initializing log");

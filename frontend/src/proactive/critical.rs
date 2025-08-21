@@ -5,24 +5,20 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::window;
 use serde::{Deserialize, Serialize};
 use crate::config;
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CriticalResponse {
     enabled: Option<String>,
     average_critical_per_day: f32,
     estimated_monthly_price: f32,
 }
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UpdateCriticalRequest {
     enabled: Option<String>,
 }
-
 #[derive(Properties, PartialEq)]
 pub struct CriticalSectionProps {
     pub phone_number: String,
 }
-
 #[function_component(CriticalSection)]
 pub fn critical_section(props: &CriticalSectionProps) -> Html {
     let critical_enabled = use_state(|| None::<String>);
@@ -30,7 +26,6 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
     let estimated_price = use_state(|| 0.0);
     let show_info = use_state(|| false);
     let is_saving = use_state(|| false);
-
     // Load critical notification settings when component mounts
     {
         let critical_enabled = critical_enabled.clone();
@@ -67,7 +62,6 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
             (),
         );
     }
-
     let handle_option_change = {
         let critical_enabled = critical_enabled.clone();
         let is_saving = is_saving.clone();
@@ -99,7 +93,6 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
             }
         })
     };
-
     let phone_number = props.phone_number.clone();
     let country = if phone_number.starts_with("+1") {
         "US"
@@ -114,7 +107,6 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
     } else {
         "Other"
     };
-
     let currency = match country {
         "US" => "", // No currency symbol for US (Messages will be used)
         "FI" => "€",
@@ -123,7 +115,6 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
         "AU" => "$",
         _ => "$",
     };
-
     let sms_extra: Html = match country {
         "US" => html! { <span>{" (1/2 Message)"}</span> },
         "FI" => html! { <span>{format!(" (€{:.2} per message)", 0.15)}</span> },
@@ -133,7 +124,6 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
         "Other" => html! { <>{" ("}<a href="/bring-own-number">{"see pricing"}</a>{")"}</> },
         _ => html! {},
     };
-
     let call_extra: Html = match country {
         "US" => html! { <span>{" (1/2 Message)"}</span> },
         "FI" => html! { <span>{format!(" (€{:.2} per call)", 0.70)}</span> },
@@ -143,7 +133,6 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
         "Other" => html! { <>{" ("}<a href="/bring-own-number">{"see pricing"}</a>{")"}</> },
         _ => html! {},
     };
-
     html! {
         <>
             <style>
@@ -367,7 +356,8 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                                     <li>{"Hard legal/compliance deadline expiring in 2 hours or less"}</li>
                                     <li>{"The sender explicitly indicates it must be handled immediately (e.g., “ASAP”, “emergency”, “right now”) or gives a deadline of 2 hours or less"}</li>
                                 </ul>
-                                {"Everything else — like vague urgency, routine updates, or unclear requests — is not critical and will be handled in your next scheduled summary."}
+                                {"For group chats, only when someone has tagged you into the message will a group chat message be analyzed for criticality. Otherwise they will be ignored."}
+                                {"Everything else, like vague urgency, routine updates, or unclear requests are not critical and will be handled in your next scheduled summary."}
                             </li>
                         </ul>
                     </div>

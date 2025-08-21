@@ -306,7 +306,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                             }
                             <div class="button-group">
                                 <p class="service-description">
-                                    {"Send and receive WhatsApp messages through SMS or voice calls (direct messages only)."}
+                                    {"Send and receive WhatsApp messages through SMS or voice calls."}
                                 </p>
                                 <button onclick={
                                     let show_disconnect_modal = show_disconnect_modal.clone();
