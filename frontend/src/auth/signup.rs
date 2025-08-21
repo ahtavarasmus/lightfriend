@@ -1,14 +1,14 @@
 pub mod login {
-use yew::prelude::*;
-use web_sys::HtmlInputElement;
-use gloo_net::http::Request;
-use serde::{Deserialize, Serialize};
-use yew_router::prelude::*;
-use crate::Route;
-use crate::config;
-use gloo_timers::callback::Timeout;
-use wasm_bindgen_futures::spawn_local;
-use yew_hooks::prelude::*;
+    use yew::prelude::*;
+    use web_sys::HtmlInputElement;
+    use gloo_net::http::Request;
+    use serde::{Deserialize, Serialize};
+    use yew_router::prelude::*;
+    use crate::Route;
+    use crate::config;
+    use gloo_timers::callback::Timeout;
+    use wasm_bindgen_futures::spawn_local;
+    use yew_hooks::prelude::*;
     use gloo_console::log;
     #[derive(Serialize)]
     pub struct LoginRequest {
@@ -23,34 +23,31 @@ use yew_hooks::prelude::*;
     struct ErrorResponse {
         error: String,
     }
-
     #[function_component]
     pub fn Login() -> Html {
         let email= use_state(String::new);
         let password = use_state(String::new);
         let error = use_state(|| None::<String>);
         let success = use_state(|| None::<String>);
-
         let onsubmit = {
             let email = email.clone();
             let password = password.clone();
             let error_setter = error.clone();
             let success_setter = success.clone();
-            
+           
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
                 let email = (*email).clone();
                 let password = (*password).clone();
                 let error_setter = error_setter.clone();
                 let success_setter = success_setter.clone();
-
                 wasm_bindgen_futures::spawn_local(async move {
                     println!("Attempting login for email: {}", &email);
                     match Request::post(&format!("{}/api/login", config::get_backend_url()))
                         .json(&LoginRequest { email, password })
                         .unwrap()
                         .send()
-                        .await 
+                        .await
                     {
                         Ok(response) => {
                             if response.ok() {
@@ -63,7 +60,7 @@ use yew_hooks::prelude::*;
                                                 log!("Token stored successfully in localStorage");
                                                 error_setter.set(None);
                                                 success_setter.set(Some("Login successful! Redirecting...".to_string()));
-                                                
+                                               
                                                 // Redirect after a short delay to show the success message
                                                 let window_clone = window.clone();
                                                 wasm_bindgen_futures::spawn_local(async move {
@@ -99,9 +96,135 @@ use yew_hooks::prelude::*;
                 });
             })
         };
-
         html! {
-        <div class="min-h-screen gradient-bg">
+        <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem;">
+            <style>
+            {r#".login-container,
+.register-container {
+    background: rgba(30, 30, 30, 0.7); /* Darker container */
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    border-radius: 16px;
+    padding: 3rem;
+    width: 100%;
+    max-width: 480px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+.login-container h1,
+.register-container h1 {
+    font-size: 2rem;
+    margin-bottom: 1.5rem;
+    text-align: center;
+    background: linear-gradient(45deg, #fff, #7EB2FF);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+@media (max-width: 768px) {
+    .login-container,
+    .register-container {
+        padding: 2rem;
+        margin: 1rem;
+    }
+}
+.auth-redirect {
+    margin-top: 2rem;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.6); /* Dimmer text */
+    font-size: 0.9rem;
+}
+.auth-redirect a {
+    color: #1E90FF;
+    text-decoration: none;
+    transition: color 0.3s ease;
+    margin-left: 0.25rem;
+}
+.auth-redirect a:hover {
+    color: #7EB2FF;
+    text-decoration: underline;
+}
+/* Custom checkbox styling */
+#terms-checkbox-container {
+    margin: 15px 0;
+}
+#terms-checkbox-container label {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    cursor: pointer;
+    font-size: 0.9em;
+    color: rgba(255, 255, 255, 0.8);
+    line-height: 1.4;
+}
+#terms-checkbox-container input[type="checkbox"] {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    width: 1px !important;
+    height: 1px !important;
+    border: 2px solid rgba(30, 144, 255, 0.5) !important;
+    border-radius: 4px !important;
+    background: rgba(30, 30, 30, 0.7) !important;
+    cursor: pointer !important;
+    position: relative !important;
+    margin-top: 2px !important;
+    transition: all 0.2s ease !important;
+    display: inline-block !important;
+    vertical-align: middle !important;
+    transform: scale(0.6) !important;
+    transform-origin: left center !important;
+}
+#terms-checkbox-container input[type="checkbox"]:checked {
+    background: #1E90FF !important;
+    border-color: #1E90FF !important;
+}
+#terms-checkbox-container input[type="checkbox"]:checked::after {
+    content: "✓" !important;
+    position: absolute !important;
+    color: white !important;
+    font-size: 30px !important;
+    left: 2px !important;
+    top: -1px !important;
+    display: block !important;
+}
+#terms-checkbox-container input[type="checkbox"]:hover {
+    border-color: #1E90FF !important;
+}
+#terms-checkbox-container a {
+    color: #1E90FF;
+    text-decoration: none;
+    transition: color 0.3s ease;
+}
+#terms-checkbox-container a:hover {
+    color: #7EB2FF;
+    text-decoration: underline;
+}
+.hero-background {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100vh;
+        background-image: url('/assets/rain.gif');
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        opacity: 1;
+        z-index: -2;
+        pointer-events: none;
+    }
+    .hero-background::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 50%;
+        background: linear-gradient(to bottom,
+            rgba(26, 26, 26, 0) 0%,
+            rgba(26, 26, 26, 1) 100%
+        );
+    }"#}
+            </style>
+            <div class="hero-background"></div>
             <div class="login-container">
                 <h1>{"Login"}</h1>
                 {
@@ -156,9 +279,6 @@ use yew_hooks::prelude::*;
         }
     }
 }
-
-
-
 pub mod password_reset {
     use yew::prelude::*;
     use web_sys::HtmlInputElement;
@@ -168,19 +288,16 @@ pub mod password_reset {
     use yew_router::prelude::*;
     use crate::Route;
     use crate::config;
-
     #[derive(Serialize)]
     struct PasswordResetRequest {
         email: String,
     }
-
     #[derive(Serialize)]
     struct VerifyPasswordResetRequest {
         email: String,
         otp: String,
         new_password: String,
     }
-
     #[derive(Deserialize)]
     struct PasswordResetResponse {
         message: String,
@@ -194,26 +311,24 @@ pub mod password_reset {
         let error = use_state(|| None::<String>);
         let success = use_state(|| None::<String>);
         let otp_sent = use_state(|| false);
-
         let request_reset = {
             let email = email.clone();
             let error_setter = error.clone();
             let success_setter = success.clone();
             let otp_sent_setter = otp_sent.clone();
-            
+           
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
                 let email = (*email).clone();
                 let error_setter = error_setter.clone();
                 let success_setter = success_setter.clone();
                 let otp_sent_setter = otp_sent_setter.clone();
-
                 wasm_bindgen_futures::spawn_local(async move {
                     match Request::post(&format!("{}/api/password-reset/request", config::get_backend_url()))
                         .json(&PasswordResetRequest { email })
                         .unwrap()
                         .send()
-                        .await 
+                        .await
                     {
                         Ok(response) => {
                             if response.ok() {
@@ -245,7 +360,6 @@ pub mod password_reset {
                 });
             })
         };
-
         let verify_reset = {
             let email = email.clone();
             let otp = otp.clone();
@@ -253,7 +367,7 @@ pub mod password_reset {
             let error_setter = error.clone();
             let success_setter = success.clone();
             let navigator = navigator.clone();
-            
+           
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
                 let email = (*email).clone();
@@ -262,17 +376,16 @@ pub mod password_reset {
                 let error_setter = error_setter.clone();
                 let success_setter = success_setter.clone();
                 let navigator = navigator.clone();
-
                 wasm_bindgen_futures::spawn_local(async move {
                     match Request::post(&format!("{}/api/password-reset/verify", config::get_backend_url()))
-                        .json(&VerifyPasswordResetRequest { 
+                        .json(&VerifyPasswordResetRequest {
                             email,
                             otp,
                             new_password,
                         })
                         .unwrap()
                         .send()
-                        .await 
+                        .await
                     {
                         Ok(response) => {
                             if response.ok() {
@@ -281,7 +394,6 @@ pub mod password_reset {
                                         println!("Password reset successful, preparing to redirect");
                                         error_setter.set(None);
                                         success_setter.set(Some(resp.message.clone()));
-
                                         // Use setTimeout to delay navigation
                                         let navigator = navigator.clone();
                                         let success_message = resp.message.clone();
@@ -306,10 +418,135 @@ pub mod password_reset {
                 });
             })
         };
-
-
         html! {
-            <div class="min-h-screen gradient-bg">
+            <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem;">
+                <style>
+                {r#".login-container,
+.register-container {
+    background: rgba(30, 30, 30, 0.7); /* Darker container */
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    border-radius: 16px;
+    padding: 3rem;
+    width: 100%;
+    max-width: 480px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+.login-container h1,
+.register-container h1 {
+    font-size: 2rem;
+    margin-bottom: 1.5rem;
+    text-align: center;
+    background: linear-gradient(45deg, #fff, #7EB2FF);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+@media (max-width: 768px) {
+    .login-container,
+    .register-container {
+        padding: 2rem;
+        margin: 1rem;
+    }
+}
+.auth-redirect {
+    margin-top: 2rem;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.6); /* Dimmer text */
+    font-size: 0.9rem;
+}
+.auth-redirect a {
+    color: #1E90FF;
+    text-decoration: none;
+    transition: color 0.3s ease;
+    margin-left: 0.25rem;
+}
+.auth-redirect a:hover {
+    color: #7EB2FF;
+    text-decoration: underline;
+}
+/* Custom checkbox styling */
+#terms-checkbox-container {
+    margin: 15px 0;
+}
+#terms-checkbox-container label {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    cursor: pointer;
+    font-size: 0.9em;
+    color: rgba(255, 255, 255, 0.8);
+    line-height: 1.4;
+}
+#terms-checkbox-container input[type="checkbox"] {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    width: 1px !important;
+    height: 1px !important;
+    border: 2px solid rgba(30, 144, 255, 0.5) !important;
+    border-radius: 4px !important;
+    background: rgba(30, 30, 30, 0.7) !important;
+    cursor: pointer !important;
+    position: relative !important;
+    margin-top: 2px !important;
+    transition: all 0.2s ease !important;
+    display: inline-block !important;
+    vertical-align: middle !important;
+    transform: scale(0.6) !important;
+    transform-origin: left center !important;
+}
+#terms-checkbox-container input[type="checkbox"]:checked {
+    background: #1E90FF !important;
+    border-color: #1E90FF !important;
+}
+#terms-checkbox-container input[type="checkbox"]:checked::after {
+    content: "✓" !important;
+    position: absolute !important;
+    color: white !important;
+    font-size: 30px !important;
+    left: 2px !important;
+    top: -1px !important;
+    display: block !important;
+}
+#terms-checkbox-container input[type="checkbox"]:hover {
+    border-color: #1E90FF !important;
+}
+#terms-checkbox-container a {
+    color: #1E90FF;
+    text-decoration: none;
+    transition: color 0.3s ease;
+}
+#terms-checkbox-container a:hover {
+    color: #7EB2FF;
+    text-decoration: underline;
+}
+.hero-background {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100vh;
+        background-image: url('/assets/rain.gif');
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        opacity: 1;
+        z-index: -2;
+        pointer-events: none;
+    }
+    .hero-background::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 50%;
+        background: linear-gradient(to bottom,
+            rgba(26, 26, 26, 0) 0%,
+            rgba(26, 26, 26, 1) 100%
+        );
+    }"#}
+                </style>
+                <div class="hero-background"></div>
                 <div class="login-container">
                     <h1>{"Password Reset"}</h1>
                     {
@@ -379,7 +616,6 @@ pub mod password_reset {
         }
     }
 }
-
 pub mod register {
     use yew::prelude::*;
     use web_sys::HtmlInputElement;
@@ -389,58 +625,48 @@ pub mod register {
     use crate::Route;
     use crate::config;
     use crate::SelfHostingStatus;
-
     #[derive(Properties, PartialEq)]
     pub struct RegisterProps {
         #[prop_or(SelfHostingStatus::Normal)]
         pub self_hosting_status: SelfHostingStatus,
     }
-
     #[derive(Serialize)]
     pub struct RegisterRequest {
         email: String,
         password: String,
         phone_number: String,
     }
-
     #[derive(Serialize)]
     pub struct SelfHostedSignupRequest {
         pairing_code: String,
         password: Option<String>,
     }
-
     #[derive(PartialEq)]
     enum SelfHostedSignupStep {
         PairingCode,
         CreatePassword,
     }
-
     #[derive(Serialize)]
     pub struct SelfHostedLoginRequest {
         password: String,
     }
-
     #[derive(Deserialize)]
     pub struct RegisterResponse {
         message: String,
         token: String,
     }
-
     #[derive(Deserialize)]
     pub struct ErrorResponse {
         pub error: String,
     }
-
     fn is_valid_email(email: &str) -> bool {
         // Basic email validation
         email.contains('@') && email.contains('.')
     }
-
     fn is_valid_phone(phone: &str) -> bool {
         // Check if phone number starts with +
         phone.starts_with('+')
     }
-
     #[function_component]
     pub fn Register(props: &RegisterProps) -> Html {
         let email = use_state(String::new);
@@ -452,14 +678,13 @@ pub mod register {
         let email_valid = use_state(|| true); // Track email validity
         let terms_accepted = use_state(|| false); // Track terms acceptance
         let signup_step = use_state(|| SelfHostedSignupStep::PairingCode);
-
         let self_hosted_signup = {
             let pairing_code = pairing_code.clone();
             let password = password.clone();
             let error_setter = error.clone();
             let success_setter = success.clone();
             let signup_step = signup_step.clone();
-            
+           
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
                 let pairing_code = (*pairing_code).clone();
@@ -467,16 +692,15 @@ pub mod register {
                 let error_setter = error_setter.clone();
                 let success_setter = success_setter.clone();
                 let signup_step = signup_step.clone();
-
                 wasm_bindgen_futures::spawn_local(async move {
                     match Request::post(&format!("{}/api/self-hosted/signup", config::get_backend_url()))
-                        .json(&SelfHostedSignupRequest { 
+                        .json(&SelfHostedSignupRequest {
                             pairing_code: pairing_code.clone(),
                             password: if *signup_step == SelfHostedSignupStep::CreatePassword { Some(password) } else { None },
                         })
                         .unwrap()
                         .send()
-                        .await 
+                        .await
                     {
                         Ok(resp) => {
                             if resp.ok() {
@@ -494,7 +718,7 @@ pub mod register {
                                                 if storage.set_item("token", &resp.token).is_ok() {
                                                     error_setter.set(None);
                                                     success_setter.set(Some("Setup complete! Redirecting...".to_string()));
-                                                    
+                                                   
                                                     let window_clone = window.clone();
                                                     wasm_bindgen_futures::spawn_local(async move {
                                                         gloo_timers::future::TimeoutFuture::new(1_000).await;
@@ -526,24 +750,22 @@ pub mod register {
                 });
             })
         };
-
         let self_hosted_login = {
             let password = password.clone();
             let error_setter = error.clone();
             let success_setter = success.clone();
-            
+           
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
                 let password = (*password).clone();
                 let error_setter = error_setter.clone();
                 let success_setter = success_setter.clone();
-
                 wasm_bindgen_futures::spawn_local(async move {
                     match Request::post(&format!("{}/api/self-hosted/login", config::get_backend_url()))
                         .json(&SelfHostedLoginRequest { password })
                         .unwrap()
                         .send()
-                        .await 
+                        .await
                     {
                         Ok(resp) => {
                             if resp.ok() {
@@ -554,7 +776,7 @@ pub mod register {
                                             if storage.set_item("token", &resp.token).is_ok() {
                                                 error_setter.set(None);
                                                 success_setter.set(Some(resp.message));
-                                                
+                                               
                                                 let window_clone = window.clone();
                                                 wasm_bindgen_futures::spawn_local(async move {
                                                     gloo_timers::future::TimeoutFuture::new(1_000).await;
@@ -585,14 +807,13 @@ pub mod register {
                 });
             })
         };
-
         let onsubmit = {
             let email = email.clone();
             let password = password.clone();
             let phone_number = phone_number.clone();
             let error_setter = error.clone();
             let success_setter = success.clone();
-            
+           
             Callback::from(move |e: SubmitEvent| {
                 e.prevent_default();
                 let email = (*email).clone();
@@ -600,27 +821,24 @@ pub mod register {
                 let phone_number = (*phone_number).clone();
                 let error_setter = error_setter.clone();
                 let success_setter = success_setter.clone();
-
                 if !is_valid_email(&email) {
                     error_setter.set(Some("Please enter a valid email address".to_string()));
                     return;
                 }
-
                 if !is_valid_phone(&phone_number) {
                     error_setter.set(Some("Phone number must start with '+'".to_string()));
                     return;
                 }
-
                 wasm_bindgen_futures::spawn_local(async move {
                     match Request::post(&format!("{}/api/register", config::get_backend_url()))
-                        .json(&RegisterRequest { 
-                            email, 
+                        .json(&RegisterRequest {
+                            email,
                             password,
                             phone_number,
                         })
                         .unwrap()
                         .send()
-                        .await 
+                        .await
                     {
                         Ok(resp) => {
                             if resp.ok() {
@@ -631,7 +849,7 @@ pub mod register {
                                             if storage.set_item("token", &resp.token).is_ok() {
                                                 error_setter.set(None);
                                                 success_setter.set(Some(resp.message));
-                                                
+                                               
                                                 // Redirect to pricing page after a short delay
                                                 let window_clone = window.clone();
                                                 wasm_bindgen_futures::spawn_local(async move {
@@ -663,9 +881,135 @@ pub mod register {
                 });
             })
         };
-
         html! {
-            <div class="min-h-screen gradient-bg">
+            <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 2rem;">
+                <style>
+                {r#".login-container,
+.register-container {
+    background: rgba(30, 30, 30, 0.7); /* Darker container */
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    border-radius: 16px;
+    padding: 3rem;
+    width: 100%;
+    max-width: 480px;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+.login-container h1,
+.register-container h1 {
+    font-size: 2rem;
+    margin-bottom: 1.5rem;
+    text-align: center;
+    background: linear-gradient(45deg, #fff, #7EB2FF);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+@media (max-width: 768px) {
+    .login-container,
+    .register-container {
+        padding: 2rem;
+        margin: 1rem;
+    }
+}
+.auth-redirect {
+    margin-top: 2rem;
+    text-align: center;
+    color: rgba(255, 255, 255, 0.6); /* Dimmer text */
+    font-size: 0.9rem;
+}
+.auth-redirect a {
+    color: #1E90FF;
+    text-decoration: none;
+    transition: color 0.3s ease;
+    margin-left: 0.25rem;
+}
+.auth-redirect a:hover {
+    color: #7EB2FF;
+    text-decoration: underline;
+}
+/* Custom checkbox styling */
+#terms-checkbox-container {
+    margin: 15px 0;
+}
+#terms-checkbox-container label {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    cursor: pointer;
+    font-size: 0.9em;
+    color: rgba(255, 255, 255, 0.8);
+    line-height: 1.4;
+}
+#terms-checkbox-container input[type="checkbox"] {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    width: 1px !important;
+    height: 1px !important;
+    border: 2px solid rgba(30, 144, 255, 0.5) !important;
+    border-radius: 4px !important;
+    background: rgba(30, 30, 30, 0.7) !important;
+    cursor: pointer !important;
+    position: relative !important;
+    margin-top: 2px !important;
+    transition: all 0.2s ease !important;
+    display: inline-block !important;
+    vertical-align: middle !important;
+    transform: scale(0.6) !important;
+    transform-origin: left center !important;
+}
+#terms-checkbox-container input[type="checkbox"]:checked {
+    background: #1E90FF !important;
+    border-color: #1E90FF !important;
+}
+#terms-checkbox-container input[type="checkbox"]:checked::after {
+    content: "✓" !important;
+    position: absolute !important;
+    color: white !important;
+    font-size: 30px !important;
+    left: 2px !important;
+    top: -1px !important;
+    display: block !important;
+}
+#terms-checkbox-container input[type="checkbox"]:hover {
+    border-color: #1E90FF !important;
+}
+#terms-checkbox-container a {
+    color: #1E90FF;
+    text-decoration: none;
+    transition: color 0.3s ease;
+}
+#terms-checkbox-container a:hover {
+    color: #7EB2FF;
+    text-decoration: underline;
+}
+.hero-background {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100vh;
+        background-image: url('/assets/rain.gif');
+        background-size: cover;
+        background-position: center;
+        background-repeat: no-repeat;
+        opacity: 1;
+        z-index: -2;
+        pointer-events: none;
+    }
+    .hero-background::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 50%;
+        background: linear-gradient(to bottom,
+            rgba(26, 26, 26, 0) 0%,
+            rgba(26, 26, 26, 1) 100%
+        );
+    }"#}
+                </style>
+                <div class="hero-background"></div>
                 <div class="register-container">
                     {
                         match props.self_hosting_status {
@@ -841,15 +1185,15 @@ pub mod register {
                                                 />
                                                 <span>
                                                     {"By signing up you agree to our "}
-                                                    <a href="/terms" target="_blank" style="color: #007bff; text-decoration: underline;">{"terms of service"}</a>
+                                                    <a href="/terms" target="_blank">{"terms of service"}</a>
                                                     {" and "}
-                                                    <a href="/privacy" target="_blank" style="color: #007bff; text-decoration: underline;">{"privacy policy"}</a>
+                                                    <a href="/privacy" target="_blank">{"privacy policy"}</a>
                                                     {" and consent to receive automated SMS messages from Lightfriend. Message and data rates may apply. Message frequency varies. Reply STOP to opt out."}
                                                 </span>
                                             </label>
                                         </div>
-                                        <button 
-                                            type="submit" 
+                                        <button
+                                            type="submit"
                                             disabled={!*terms_accepted}
                                             style={if !*terms_accepted {
                                                 "opacity: 0.5; cursor: not-allowed;"
@@ -875,5 +1219,3 @@ pub mod register {
         }
     }
 }
-
-

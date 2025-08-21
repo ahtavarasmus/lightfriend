@@ -58,7 +58,7 @@ pub fn blog() -> Html {
                     left: 0;
                     width: 100%;
                     height: 100vh;
-                    background-image: url('/assets/field_asthetic.webp');
+                    background-image: url('/assets/rain.gif');
                     background-size: cover;
                     background-position: center;
                     background-repeat: no-repeat;

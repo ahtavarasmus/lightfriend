@@ -915,7 +915,7 @@ pub fn pricing_logged_in(props: &PricingProps) -> Html {
         left: 0;
         width: 100%;
         height: 100vh;
-        background-image: url('/assets/human_looking_at_field.webp');
+        background-image: url('/assets/rain.gif');
         background-size: cover;
         background-position: center;
         background-repeat: no-repeat;
@@ -1606,7 +1606,7 @@ pub fn pricing(props: &PricingProps) -> Html {
         left: 0;
         width: 100%;
         height: 100vh;
-        background-image: url('/assets/human_looking_at_field.webp');
+        background-image: url('/assets/rain.gif');
         background-size: cover;
         background-position: center;
         background-repeat: no-repeat;

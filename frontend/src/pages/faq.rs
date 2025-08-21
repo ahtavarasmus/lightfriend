@@ -479,7 +479,7 @@ pub fn faq() -> Html {
                     left: 0;
                     width: 100%;
                     height: 100vh;
-                    background-image: url('/assets/bicycle_field.webp');
+                    background-image: url('/assets/rain.gif');
                     background-size: cover;
                     background-position: center;
                     background-repeat: no-repeat;
@@ -505,10 +505,7 @@ pub fn faq() -> Html {
                 .faq-hero {
                     text-align: center;
                     padding: 6rem 2rem;
-                    background: rgba(26, 26, 26, 0.75);
-                    backdrop-filter: blur(5px);
                     margin-top: 2rem;
-                    border: 1px solid rgba(30, 144, 255, 0.1);
                     margin-bottom: 2rem;
                 }
 
