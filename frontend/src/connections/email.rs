@@ -4,14 +4,12 @@ use serde_json::json;
 use wasm_bindgen_futures::spawn_local;
 use gloo_net::http::Request;
 use crate::config;
-
 #[derive(Properties, PartialEq)]
 pub struct EmailProps {
     pub user_id: i32,
     pub sub_tier: Option<String>,
     pub discount: bool,
 }
-
 #[function_component(EmailConnect)]
 pub fn email_connect(props: &EmailProps) -> Html {
     let error = use_state(|| None::<String>);
@@ -22,7 +20,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
     let imap_server = use_state(|| String::new()); // For custom provider
     let imap_port = use_state(|| String::new()); // For custom provider
     let connected_email = use_state(|| None::<String>);
-
     // Predefined providers
     let providers = vec![
         ("gmail", "Gmail", "imap.gmail.com", "993"),
@@ -30,7 +27,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
         ("outlook", "Outlook", "imap-mail.outlook.com", "993"),
         ("custom", "Custom", "", ""), // Custom option with empty defaults
     ];
-
     // Check connection status on component mount
     {
         let imap_connected = imap_connected.clone();
@@ -70,7 +66,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
             (),
         );
     }
-
     // Handlers for input changes
     let onchange_imap_email = {
         let imap_email = imap_email.clone();
@@ -79,7 +74,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
             imap_email.set(input.value());
         })
     };
-
     let onchange_imap_password = {
         let imap_password = imap_password.clone();
         Callback::from(move |e: Event| {
@@ -87,7 +81,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
             imap_password.set(input.value());
         })
     };
-
     let onchange_imap_provider = {
         let imap_provider = imap_provider.clone();
         let imap_server = imap_server.clone();
@@ -107,7 +100,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
             }
         })
     };
-
     let onchange_imap_server = {
         let imap_server = imap_server.clone();
         Callback::from(move |e: Event| {
@@ -115,7 +107,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
             imap_server.set(input.value());
         })
     };
-
     let onchange_imap_port = {
         let imap_port = imap_port.clone();
         Callback::from(move |e: Event| {
@@ -123,7 +114,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
             imap_port.set(input.value());
         })
     };
-
     let onclick_imap_connect = {
         let imap_email_value = imap_email.clone();
         let imap_password_value = imap_password.clone();
@@ -192,7 +182,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
             }
         })
     };
-
     let onclick_imap_disconnect = {
         let imap_connected = imap_connected.clone();
         let error = error.clone();
@@ -235,7 +224,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
             }
         })
     };
-
     html! {
         <div class="service-item">
             <div class="service-header">
@@ -250,7 +238,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
                     {
                         let display = element.get_attribute("style")
                             .unwrap_or_else(|| "display: none".to_string());
-                       
+                      
                         if display.contains("none") {
                             let _ = element.set_attribute("style", "display: block");
                         } else {
@@ -523,6 +511,52 @@ pub fn email_connect(props: &EmailProps) -> Html {
                                     class="test-button"
                                 >
                                     {"Test Reply to Latest"}
+                                </button>
+                                <button
+                                    onclick={
+                                        let error = error.clone();
+                                        Callback::from(move |_: MouseEvent| {
+                                            let error = error.clone();
+                                            if let Some(window) = web_sys::window() {
+                                                if let Ok(Some(storage)) = window.local_storage() {
+                                                    if let Ok(Some(token)) = storage.get_item("token") {
+                                                        spawn_local(async move {
+                                                            let payload = json!({
+                                                                "to": "rasmus@ahtava.com",
+                                                                "subject": "test email subject",
+                                                                "body": "testing body here"
+                                                            });
+                                                            let request = Request::post(&format!("{}/api/imap/send", config::get_backend_url()))
+                                                                .header("Authorization", &format!("Bearer {}", token))
+                                                                .header("Content-Type", "application/json")
+                                                                .json(&payload)
+                                                                .unwrap()
+                                                                .send()
+                                                                .await;
+                                                            match request {
+                                                                Ok(response) => {
+                                                                    if response.status() == 200 {
+                                                                        web_sys::console::log_1(&"Successfully sent test email".into());
+                                                                    } else {
+                                                                        if let Ok(error_data) = response.json::<serde_json::Value>().await {
+                                                                            error.set(Some(format!("Failed to send email: {}",
+                                                                                error_data.get("error").and_then(|e| e.as_str()).unwrap_or("Unknown error"))));
+                                                                        }
+                                                                    }
+                                                                }
+                                                                Err(e) => {
+                                                                    error.set(Some(format!("Network error: {}", e)));
+                                                                }
+                                                            }
+                                                        });
+                                                    }
+                                                }
+                                            }
+                                        })
+                                    }
+                                    class="test-button"
+                                >
+                                    {"Test Send Email"}
                                 </button>
                             </>
                         }

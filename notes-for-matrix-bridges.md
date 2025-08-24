@@ -39,7 +39,7 @@ endif
 
 *in config.yaml*:
     // the following might differ with different bridges, but there should be an explanation in there
-    database: postgres://mw_<service_name>:password-for-the-mautrix-bridge@localhost/mw_<service_name>?sslmode=disable
+    database: postgres://mw_<service_name>:password-for-the-mautrix-bridge@localhost/mv_<service_name>?sslmode=disable
 
     homeserver->address->http://localhost:8008
     homeserver->domain->localhost
@@ -105,6 +105,22 @@ endif
 
         double_puppet->servers: {}
     )
+    (in instagram bridges:
+        network->mode: instagram
+        bridge->split_portals: true
+        bridge->cleanup_on_logout->enabled: true
+                                 ->manual: all delete
+                                 ->bad_credentials: all delete
+        appservice->username_template: instagram_{{.}}
+        matrix->federate_rooms: false
+        for double_puppeting:
+        double_puppet->secrets:
+            localhost: as_token:<as_token_from_double_puppet.yaml>:
+
+        double_puppet->servers: {}
+    )
+
+        
 
 endin
 

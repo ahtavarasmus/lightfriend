@@ -43,7 +43,6 @@ pub struct UserProfile {
     pub notification_type: Option<String>,
     pub sub_country: Option<String>,
     pub save_context: Option<i32>,
-    pub require_confirmation: bool,
     pub days_until_billing: Option<i32>,
     pub digests_reserved: i32,
     pub pairing_code: Option<String>,

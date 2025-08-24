@@ -223,6 +223,7 @@ pub async fn handle_fetch_calendar_events(
     }
 }
 
+
 pub async fn handle_create_calendar_event(
     state: &Arc<AppState>,
     user_id: i32,
@@ -230,10 +231,7 @@ pub async fn handle_create_calendar_event(
     user: &crate::models::user_models::User,
 ) -> Result<(axum::http::StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<crate::api::twilio_sms::TwilioResponse>), Box<dyn std::error::Error>> {
     let args: CalendarEventArgs = serde_json::from_str(args)?;
-
-    // Get user settings to check confirmation preference
-    let user_settings = state.user_core.get_user_settings(user_id)?;
-    let user_info= state.user_core.get_user_info(user_id)?;
+    let user_info = state.user_core.get_user_info(user_id)?;
     let timezone = user_info.timezone.unwrap_or_else(|| String::from("UTC"));
     
     // Parse the start time
@@ -248,133 +246,54 @@ pub async fn handle_create_calendar_event(
     // Format the date and time
     let formatted_time = local_time.format("%B %d at %I:%M %p %Z").to_string();
 
-    // If confirmation is not required, create the event directly
-    if !user_settings.require_confirmation {
-        let event_request = crate::handlers::google_calendar::CreateEventRequest {
-            start_time: start_time.with_timezone(&chrono::Utc),
-            duration_minutes: args.duration_minutes,
-            summary: args.summary.clone(),
-            description: args.description.clone(),
-            add_notification: args.add_notification.unwrap_or(true),
-        };
-
-        match crate::handlers::google_calendar::create_calendar_event(
-            axum::extract::State(state.clone()),
-            crate::handlers::auth_middleware::AuthUser { user_id, is_admin: false },
-            axum::Json(event_request)
-        ).await {
-            Ok(_) => {
-                let success_msg = format!("Calendar event '{}' created for {}", args.summary, formatted_time);
-                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                    &state,
-                    &success_msg,
-                    None,
-                    user,
-                ).await {
-                    eprintln!("Failed to send success message: {}", e);
-                }
-                return Ok((
-                    axum::http::StatusCode::OK,
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    axum::Json(crate::api::twilio_sms::TwilioResponse {
-                        message: success_msg,
-                    })
-                ));
-            }
-            Err((status, error_json)) => {
-                let error_msg = format!("Failed to create calendar event: {}", error_json.0.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error"));
-                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                    &state,
-                    &error_msg,
-                    None,
-                    user,
-                ).await {
-                    eprintln!("Failed to send error message: {}", e);
-                }
-                return Ok((
-                    axum::http::StatusCode::OK,
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    axum::Json(crate::api::twilio_sms::TwilioResponse {
-                        message: error_msg,
-                    })
-                ));
-            }
-        }
-    }
-    
-    // Format the confirmation message for cases where confirmation is required
-    let confirmation_msg = if let Some(ref desc) = args.description {
-        format!(
-            "Create event: '{}' starting {} for {} minutes with description: '{}' (yes-> send, no -> discard) (free reply)",
-            args.summary, formatted_time, args.duration_minutes, desc
-        )
-    } else {
-        format!(
-            "Create event: '{}' starting {} for {} minutes (yes-> send, no -> discard) (free reply)",
-            args.summary, formatted_time, args.duration_minutes
-        )
+    // Create the event directly
+    let event_request = crate::handlers::google_calendar::CreateEventRequest {
+        start_time: start_time.with_timezone(&chrono::Utc),
+        duration_minutes: args.duration_minutes,
+        summary: args.summary.clone(),
+        description: args.description.clone(),
+        add_notification: args.add_notification.unwrap_or(true),
     };
-
-    // Set the temporary variable for calendar event
-    if let Err(e) = state.user_core.set_temp_variable(
-        user_id,
-        Some("calendar"),
-        None,
-        Some(&args.summary),
-        Some(&args.description.unwrap_or_default()),
-        Some(&args.start_time),
-        Some(&args.duration_minutes.to_string()),
-        None,
-        None,
-    ) {
-        tracing::error!("Failed to set temporary variable: {}", e);
-        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-            &state,
-            "Failed to prepare calendar event creation. (not charged, contact rasmus@ahtava.com)",
-            None,
-            user,
-        ).await {
-            tracing::error!("Failed to send error message: {}", e);
-        }
-        return Ok((
-            axum::http::StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, "application/json")],
-            axum::Json(crate::api::twilio_sms::TwilioResponse {
-                message: "Failed to prepare calendar event creation".to_string(),
-            })
-        ));
-    }
-
-    // Send the confirmation message
-    match crate::api::twilio_utils::send_conversation_message(
-        &state,
-        &confirmation_msg,
-        None,
-        user,
+    match crate::handlers::google_calendar::create_calendar_event(
+        axum::extract::State(state.clone()),
+        crate::handlers::auth_middleware::AuthUser { user_id, is_admin: false },
+        axum::Json(event_request)
     ).await {
         Ok(_) => {
-            // Deduct credits for the confirmation message
-            if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
-                eprintln!("Failed to deduct user credits: {}", e);
+            let success_msg = format!("Calendar event '{}' created for {}", args.summary, formatted_time);
+            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                &state,
+                &success_msg,
+                None,
+                user,
+            ).await {
+                eprintln!("Failed to send success message: {}", e);
             }
-            Ok((
+            return Ok((
                 axum::http::StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
-                    message: "Calendar event confirmation sent".to_string(),
+                    message: success_msg,
                 })
-            ))
+            ));
         }
-        Err(e) => {
-            eprintln!("Failed to send confirmation message: {}", e);
-            Ok((
+        Err((status, error_json)) => {
+            let error_msg = format!("Failed to create calendar event: {}", error_json.0.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error"));
+            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                &state,
+                &error_msg,
+                None,
+                user,
+            ).await {
+                eprintln!("Failed to send error message: {}", e);
+            }
+            return Ok((
                 axum::http::StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 axum::Json(crate::api::twilio_sms::TwilioResponse {
-                    message: "Failed to send calendar event confirmation".to_string(),
+                    message: error_msg,
                 })
-            ))
+            ));
         }
     }
 }
-

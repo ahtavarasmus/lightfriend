@@ -30,7 +30,7 @@ pub fn blog() -> Html {
                         <img src="/assets/man_accidentally_reading_books.png" alt="How to Read Books Accidentally" loading="lazy" class="blog-preview-image" />
                         <h2>{"How to Read Books Accidentally"}</h2>
                         <p>{"How to Read More Without Willpower"}</p>
-                        <span class="blog-date">{"August 19, 2025"}</span>
+                        <span class="blog-date">{"August 21, 2025"}</span>
                     </Link<Route>>
                 </div>
                 <div class="blog-post-preview">

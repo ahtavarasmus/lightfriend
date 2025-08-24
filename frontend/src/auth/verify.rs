@@ -18,7 +18,6 @@ pub struct UpdatePhoneRequest {
     agent_language: String,
     notification_type: Option<String>,
     save_context: Option<i32>,
-    require_confirmation: bool,
     location: String,
     nearby_places: String,
 }
@@ -394,7 +393,6 @@ pub fn Verify() -> Html {
                                                                         agent_language: profile.agent_language.clone(),
                                                                         notification_type: profile.notification_type.clone(),
                                                                         save_context: profile.save_context.clone(),
-                                                                        require_confirmation: profile.require_confirmation.clone(),
                                                                         location: profile.location.clone().unwrap_or("".to_string()),
                                                                         nearby_places: profile.nearby_places.clone().unwrap_or("".to_string()),
                                                                     })

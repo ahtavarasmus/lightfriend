@@ -14,6 +14,8 @@ use crate::connections::tasks::TasksConnect;
 use crate::connections::telegram::TelegramConnect;
 use crate::connections::uber::UberConnect;
 use crate::connections::signal::SignalConnect;
+use crate::connections::messenger::MessengerConnect;
+use crate::connections::instagram::InstagramConnect;
 
 #[derive(Properties, PartialEq)]
 pub struct ConnectProps {
@@ -340,6 +342,26 @@ pub fn connect(props: &ConnectProps) -> Html {
                                 sub_tier={props.sub_tier.clone()} 
                                 discount={props.discount}
                             />
+                            {
+                                if props.user_id == 1 {
+                                    html! {
+                                        <>
+                                        <InstagramConnect
+                                            user_id={props.user_id} 
+                                            sub_tier={props.sub_tier.clone()} 
+                                            discount={props.discount}
+                                        />
+                                        <MessengerConnect
+                                            user_id={props.user_id} 
+                                            sub_tier={props.sub_tier.clone()} 
+                                            discount={props.discount}
+                                        />
+                                            </>
+                                    }
+                                } else {
+                                    html! {}
+                                }
+                            }
                             <UberConnect
                                 user_id={props.user_id} 
                                 sub_tier={props.sub_tier.clone()} 

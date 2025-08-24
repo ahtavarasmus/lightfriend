@@ -56,6 +56,8 @@ mod connections {
     pub mod signal;
     pub mod tasks;
     pub mod uber;
+    pub mod messenger;
+    pub mod instagram;
 }
 mod auth {
     pub mod connect;

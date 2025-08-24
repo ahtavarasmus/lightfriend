@@ -276,6 +276,93 @@ pub async fn process_sms(
         );
     }
     tracing::info!("Found user with ID: {} for phone number: {}", user.id, payload.from);
+
+    // Handle 'cancel' message specially
+    if payload.body.trim().to_lowercase() == "cancel" {
+        match crate::tool_call_utils::utils::cancel_pending_message(state, user.id).await {
+            Ok(canceled) => {
+                let response_msg = if canceled {
+                    "The message got discarded.".to_string()
+                } else {
+                    "Couldn't find a message to cancel".to_string()
+                };
+
+                let state_clone = state.clone();
+                let user_clone = user.clone();
+                let response_msg_clone = response_msg.clone();
+                let start_time_clone = start_time;
+
+                tokio::spawn(async move {
+                    match crate::api::twilio_utils::send_conversation_message(
+                        &state_clone,
+                        &response_msg_clone,
+                        None,
+                        &user_clone
+                    ).await {
+                        Ok(message_sid) => {
+                            // Log usage (similar to regular message)
+                            let processing_time_secs = start_time_clone.elapsed().as_secs();
+                            if let Err(e) = state_clone.user_repository.log_usage(
+                                user_clone.id,
+                                Some(message_sid.clone()),
+                                "sms".to_string(),
+                                None,
+                                Some(processing_time_secs as i32),
+                                Some(true), // Assume success for cancel
+                                Some("cancel handling".to_string()),
+                                None,
+                                None,
+                                None,
+                            ) {
+                                tracing::error!("Failed to log SMS usage for cancel: {}", e);
+                            }
+                            if let Err(e) = crate::utils::usage::deduct_user_credits(&state_clone, user_clone.id, "message", None) {
+                                tracing::error!("Failed to deduct user credits for cancel: {}", e);
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to send cancel response message: {}", e);
+                            // Log the failed attempt
+                            let processing_time_secs = start_time_clone.elapsed().as_secs();
+                            let error_status = format!("failed to send: {}", e);
+                            if let Err(log_err) = state_clone.user_repository.log_usage(
+                                user_clone.id,
+                                None,
+                                "sms".to_string(),
+                                None,
+                                Some(processing_time_secs as i32),
+                                Some(false), // Mark as unsuccessful
+                                Some("cancel handling".to_string()),
+                                Some(error_status),
+                                None,
+                                None,
+                            ) {
+                                tracing::error!("Failed to log SMS usage after send error for cancel: {}", log_err);
+                            }
+                        }
+                    }
+                });
+
+                return (
+                    StatusCode::OK,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    axum::Json(TwilioResponse {
+                        message: "Cancel processed successfully".to_string(),
+                    })
+                );
+            }
+            Err(e) => {
+                tracing::error!("Failed to cancel pending message: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    [(axum::http::header::CONTENT_TYPE, "application/json")],
+                    axum::Json(TwilioResponse {
+                        message: "Failed to process cancel request".to_string(),
+                    })
+                );
+            }
+        }
+    }
     
     // Log media information for admin user
     if user.id == 1 {
@@ -312,24 +399,6 @@ pub async fn process_sms(
         tracing::error!("Failed to store user message in history: {}", e);
     }
 
-    if user.confirm_send_event.is_some() {
-        // Handle confirmation logic
-        let confirmation_result = crate::tool_call_utils::confirm::handle_confirmation(
-            &state,
-            &user.clone(),
-            &user.clone().confirm_send_event.unwrap(),
-            &payload.body,
-            is_test.clone(),
-        ).await;
-
-        tracing::info!("Came back from handle_confirmation with should_continue as: {}", confirmation_result.should_continue);
-
-        if !confirmation_result.should_continue {
-            if let Some(response) = confirmation_result.response {
-                return response;
-            }
-        }
-    }
     
     // Get user settings to access timezone
     let user_settings = match state.user_core.get_user_settings(user.id) {
@@ -400,7 +469,7 @@ pub async fn process_sms(
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes. Always use all tools immidiately that you think will be needed to complete the user's query and base your response to those responses. IMPORTANT: For calendar events, you must return the exact output from the calendar tool without any modifications, additional text, or formatting. Never add bullet points, markdown formatting (like **, -, #), or any other special characters.\n\n### Tool Usage Guidelines:\n- Provide all relevant details in the response immediately. \n- Tools that involve sending or creating something, you can call them straight away using the available information without confirming with the user. These tools will send extra confirmation message to user anyways before doing anything.\n- Never recommend that the user check apps, websites, or services manually, as they may not have access (e.g., on a dumbphone). Instead, use tools like ask_perplexity to fetch the information yourself.\n\n### Date and Time Handling:\n- Always work with times in the user's timezone: {} with offset {}.\n- When user mentions times without dates, assume they mean the nearest future occurrence.\n- For time inputs to tools, convert to RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z').\n- For displaying times to users:\n - Use 12-hour format with AM/PM (e.g., '2:30 PM')\n - Include timezone-adjusted dates in a friendly format (e.g., 'today', 'tomorrow', or 'Jun 15')\n - Show full date only when it's not today/tomorrow\n- If no specific time is mentioned:\n - For calendar queries: Show today's events (and tomorrow's if after 6 PM)\n - For other time ranges: Use current time to 24 hours ahead\n- For queries about:\n - 'Today': Use 00:00 to 23:59 of the current day in user's timezone\n - 'Tomorrow': Use 00:00 to 23:59 of tomorrow in user's timezone\n - 'This week': Use remaining days of current week\n - 'Next week': Use Monday to Sunday of next week\n\n### Additional Guidelines:\n- Weather Queries: If no location is specified, assume the user's home location from user info.\n- Email Queries: For fetch_specific_email, provide the whole message body or a summary if too long—never just the subject.\n- WhatsApp/Telegram/Signal Fetching: Use the room name directly from the user's message/context without searching rooms.\n- Follow-up Questions: If the user asks a follow-up question and the previous tool call response doesn't contain the answer, use the ask_perplexity tool to find the answer if possible, and mention in your response that you queried Perplexity for it.\n\nNever use markdown, HTML, or any special formatting characters in responses. Return all information in plain text only. User information: {}. Always use tools to fetch the latest information before answering.", formatted_time, timezone_str, offset, user_given_info)),
+        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes. Always use all tools immidiately that you think will be needed to complete the user's query and base your response to those responses. IMPORTANT: For calendar events, you must return the exact output from the calendar tool without any modifications, additional text, or formatting. Never add bullet points, markdown formatting (like **, -, #), or any other special characters.\n\n### Tool Usage Guidelines:\n- Provide all relevant details in the response immediately. \n- Tools that involve sending or creating something, add the content to be sent into a queue which are automatically sent after 60 seconds unless user replies 'cancel'.\n- Never recommend that the user check apps, websites, or services manually, as they may not have access (e.g., on a dumbphone). Instead, use tools like ask_perplexity to fetch the information yourself.\n\n### Date and Time Handling:\n- Always work with times in the user's timezone: {} with offset {}.\n- When user mentions times without dates, assume they mean the nearest future occurrence.\n- For time inputs to tools, convert to RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z').\n- For displaying times to users:\n - Use 12-hour format with AM/PM (e.g., '2:30 PM')\n - Include timezone-adjusted dates in a friendly format (e.g., 'today', 'tomorrow', or 'Jun 15')\n - Show full date only when it's not today/tomorrow\n- If no specific time is mentioned:\n - For calendar queries: Show today's events (and tomorrow's if after 6 PM)\n - For other time ranges: Use current time to 24 hours ahead\n- For queries about:\n - 'Today': Use 00:00 to 23:59 of the current day in user's timezone\n - 'Tomorrow': Use 00:00 to 23:59 of tomorrow in user's timezone\n - 'This week': Use remaining days of current week\n - 'Next week': Use Monday to Sunday of next week\n\n### Additional Guidelines:\n- Weather Queries: If no location is specified, assume the user's home location from user info.\n- Email Queries: For fetch_specific_email, provide the whole message body or a summary if too long—never just the subject.\n- WhatsApp/Telegram/Signal Fetching: Use the room name directly from the user's message/context without searching rooms.\n- Follow-up Questions: If the user asks a follow-up question and the previous tool call response doesn't contain the answer, use the ask_perplexity tool to find the answer if possible, and mention in your response that you queried Perplexity for it.\n\nNever use markdown, HTML, or any special formatting characters in responses. Return all information in plain text only. User information: {}. Always use tools to fetch the latest information before answering.", formatted_time, timezone_str, offset, user_given_info)),
     }];
     
     // Process the message body to remove "forget" if it exists at the start
@@ -523,12 +592,14 @@ pub async fn process_sms(
 
     // Define tools
     let tools = vec![
-        crate::tool_call_utils::bridge::get_send_chat_message_tool(user.confirm_send_event.is_some()),
+        crate::tool_call_utils::bridge::get_send_chat_message_tool(),
         crate::tool_call_utils::bridge::get_fetch_chat_messages_tool(),
         crate::tool_call_utils::bridge::get_fetch_recent_messages_tool(),
         crate::tool_call_utils::bridge::get_search_chat_contacts_tool(), // idk if we need this
         crate::tool_call_utils::email::get_fetch_emails_tool(),
         crate::tool_call_utils::email::get_fetch_specific_email_tool(),
+        crate::tool_call_utils::email::get_send_email_tool(),
+        crate::tool_call_utils::email::get_respond_to_email_tool(),
         crate::tool_call_utils::calendar::get_fetch_calendar_event_tool(),
         crate::tool_call_utils::calendar::get_create_calendar_event_tool(),
         crate::tool_call_utils::tasks::get_fetch_tasks_tool(),
@@ -915,6 +986,76 @@ pub async fn process_sms(
                         },
                         Err(e) => {
                             tool_answers.insert(tool_call_id, "Failed to fetch the complete email".to_string());
+                        }
+                    }
+                } else if name == "send_email" {
+                    tracing::debug!("Executing send_email tool call");
+                    match crate::tool_call_utils::email::handle_send_email(
+                        &state,
+                        user.id,
+                        arguments,
+                        &user,
+                    ).await {
+                        Ok((status, headers, Json(twilio_response))) => {
+                            let history_entry = crate::models::user_models::NewMessageHistory {
+                                user_id: user.id,
+                                role: "assistant".to_string(),
+                                encrypted_content: twilio_response.message.clone(),
+                                tool_name: Some("send_email".to_string()),
+                                tool_call_id: Some(tool_call.id.clone()),
+                                tool_calls_json: None,
+                                created_at: chrono::Utc::now().timestamp() as i32,
+                                conversation_id: "".to_string(),
+                            };
+                            if let Err(e) = state.user_repository.create_message_history(&history_entry) {
+                                tracing::error!("Failed to store email tool message in history: {}", e);
+                            }
+                            return (status, headers, Json(twilio_response));
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to handle email sending: {}", e);
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                axum::Json(TwilioResponse {
+                                    message: "Failed to process email request".to_string(),
+                                })
+                            );
+                        }
+                    }
+                } else if name == "respond_to_email" {
+                    tracing::debug!("Executing respond_to_email tool call");
+                    match crate::tool_call_utils::email::handle_respond_to_email(
+                        &state,
+                        user.id,
+                        arguments,
+                        &user,
+                    ).await {
+                        Ok((status, headers, Json(twilio_response))) => {
+                            let history_entry = crate::models::user_models::NewMessageHistory {
+                                user_id: user.id,
+                                role: "assistant".to_string(),
+                                encrypted_content: twilio_response.message.clone(),
+                                tool_name: Some("respond_to_email".to_string()),
+                                tool_call_id: Some(tool_call.id.clone()),
+                                tool_calls_json: None,
+                                created_at: chrono::Utc::now().timestamp() as i32,
+                                conversation_id: "".to_string(),
+                            };
+                            if let Err(e) = state.user_repository.create_message_history(&history_entry) {
+                                tracing::error!("Failed to store respond_to_email tool message in history: {}", e);
+                            }
+                            return (status, headers, Json(twilio_response));
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to handle respond_to_email: {}", e);
+                            return (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                axum::Json(TwilioResponse {
+                                    message: "Failed to process respond_to_email request".to_string(),
+                                })
+                            );
                         }
                     }
                 } else if name == "create_waiting_check" {

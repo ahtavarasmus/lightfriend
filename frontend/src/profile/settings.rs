@@ -23,7 +23,6 @@ struct UpdateProfileRequest {
     agent_language: String,
     notification_type: Option<String>,
     save_context: Option<i32>,
-    require_confirmation: bool,
     location: String,
     nearby_places: String,
 }
@@ -48,7 +47,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         use_state(|| initial_value.or(Some("sms".to_string())))
     };
     let save_context = use_state(|| (*user_profile).save_context.unwrap_or(0));
-    let require_confirmation = use_state(|| (*user_profile).require_confirmation);
     let location = use_state(|| (*user_profile).location.clone().unwrap_or_default());
     let nearby_places = use_state(|| (*user_profile).nearby_places.clone().unwrap_or_default());
     let error = use_state(|| None::<String>);
@@ -149,7 +147,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
         let user_profile = user_profile.clone();
         let save_context = save_context.clone();
         let props = props.clone();
-        let require_confirmation = require_confirmation.clone();
         let location = location.clone();
         let nearby_places = nearby_places.clone();
         Callback::from(move |_e: MouseEvent| {
@@ -167,7 +164,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
             let user_profile = user_profile.clone();
             let notification_type = notification_type.clone();
             let save_context = save_context.clone();
-            let require_confirmation = require_confirmation.clone();
             let location = location.clone();
             let nearby_places = nearby_places.clone();
             // Check authentication first
@@ -201,7 +197,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                             agent_language: (*agent_language).clone(),
                             notification_type: (*notification_type).clone(),
                             save_context: Some(*save_context),
-                            require_confirmation: *require_confirmation,
                             location: (*location).clone(),
                             nearby_places: (*nearby_places).clone(),
                         })
@@ -245,7 +240,6 @@ pub fn SettingsPage(props: &SettingsPageProps) -> Html {
                                     notify: (*user_profile).notify,
                                     sub_country: (*user_profile).sub_country.clone(),
                                     save_context: Some(*save_context),
-                                    require_confirmation: (*user_profile).require_confirmation,
                                     days_until_billing: (*user_profile).days_until_billing.clone(),
                                     digests_reserved: (*user_profile).digests_reserved,
                                     pairing_code: (*user_profile).pairing_code.clone(),
@@ -764,7 +758,7 @@ let on_timezone_update = {
                     <div class="tooltip">
                         <span class="tooltip-icon">{"?"}</span>
                         <span class="tooltip-text">
-                            {"Choose how many back-and-forth messages Lightfriend remembers in SMS conversations. A value of 0 means no history is kept. The conversation history is securely encrypted when not in use, and only the specified number of recent exchanges is retained. More history means better context and no history means lightfriend responds to every query like it was the first one. One exception to this is when making outbound event like creating/sending something, lightfriend will retain the proposed content to be confirmed by you until the next confirmation message."}
+                            {"Choose how many back-and-forth messages Lightfriend remembers in SMS conversations. A value of 0 means no history is kept. The conversation history is securely encrypted when not in use, and only the specified number of recent exchanges is retained. More history means better context and no history means lightfriend responds to every query like it was the first one."}
                         </span>
                     </div>
                 </div>
@@ -802,43 +796,6 @@ let on_timezone_update = {
                                         Some(n) => format!("{} {}", n, if n == 1 { "message" } else { "messages" }).to_string()
                                     }
                                 }
-                            </span>
-                        }
-                    }
-                }
-            </div>
-            <div class="profile-field">
-                <div class="field-label-group">
-                    <span class="field-label">{"Require Confirmation"}</span>
-                    <div class="tooltip">
-                        <span class="tooltip-icon">{"?"}</span>
-                        <span class="tooltip-text">
-                            {"When enabled, Lightfriend will ask for your confirmation before executing any actions that create or modify something. This adds an extra layer of control over the AI's actions."}
-                        </span>
-                    </div>
-                </div>
-                {
-                    if *is_editing {
-                        html! {
-                            <div class="checkbox-wrapper">
-                                <label class="custom-checkbox">
-                                    <input
-                                        type="checkbox"
-                                        checked={*require_confirmation}
-                                        onchange={let require_confirmation = require_confirmation.clone(); move |e: Event| {
-                                            let input: HtmlInputElement = e.target_unchecked_into();
-                                            require_confirmation.set(input.checked());
-                                        }}
-                                    />
-                                    <span class="checkmark"></span>
-                                    {"Ask for confirmation before taking actions"}
-                                </label>
-                            </div>
-                        }
-                    } else {
-                        html! {
-                            <span class="field-value">
-                                {if *require_confirmation { "Enabled" } else { "Disabled" }}
                             </span>
                         }
                     }

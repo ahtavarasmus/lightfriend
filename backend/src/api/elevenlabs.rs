@@ -1326,7 +1326,7 @@ pub async fn handle_email_search_tool_call(
     }
 }
 
-pub async fn handle_confirm_send_chat_message(
+pub async fn handle_send_chat_message(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     Json(payload): Json<ChatConfirmPayload>,
@@ -1376,68 +1376,41 @@ pub async fn handle_confirm_send_chat_message(
             ));
         }
     };
-    // Get user settings to check confirmation preference
-    let user_settings = match state.user_core.get_user_settings(user_id) {
-        Ok(settings) => settings,
+    let capitalized_platform = platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &platform[1..];
+    // Check bridge connection
+    let bridge = match state.user_repository.get_bridge(user_id, &platform) {
+        Ok(bridge) => bridge,
         Err(e) => {
-            error!("Failed to get user settings: {}", e);
+            error!("Failed to get bridge: {}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
-                    "error": "Failed to get user settings"
+                    "error": "Failed to get bridge"
                 }))
             ));
         }
     };
-    let capitalized_platform = platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &platform[1..];
-    // If confirmation is not required, send the message directly using the provided chat_name
-    if !user_settings.require_confirmation {
-        let exact_name = payload.chat_name.clone();
-      
-        // Send the message directly
-        match crate::utils::bridge::send_bridge_message(
-            &platform,
+    if bridge.map(|b| b.status != "connected").unwrap_or(true) {
+        let error_msg = format!("Failed to find contact. Please make sure you're connected to {} bridge.", capitalized_platform);
+        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
             &state,
-            user_id,
-            &exact_name,
-            &payload.message,
-            None, // No image URL in this case
+            &error_msg,
+            None,
+            &user,
         ).await {
-            Ok(_) => {
-                let sent_msg = format!("{} message sent to '{}'", capitalized_platform, exact_name);
-                Ok(Json(json!({
-                    "status": "success",
-                    "message": sent_msg,
-                    "room_name": exact_name,
-                })))
-            }
-            Err(e) => {
-                error!("Failed to send {} message: {}", capitalized_platform, e);
-                Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({
-                        "error": format!("Failed to send {} message", capitalized_platform),
-                        "details": e.to_string()
-                    }))
-                ))
-            }
+            error!("Failed to send error message: {}", e);
         }
-    } else {
-        // If confirmation is required, check bridge connection
-        let bridge = match state.user_repository.get_bridge(user_id, &platform) {
-            Ok(bridge) => bridge,
-            Err(e) => {
-                error!("Failed to get bridge: {}", e);
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({
-                        "error": "Failed to get bridge"
-                    }))
-                ));
-            }
-        };
-        if bridge.map(|b| b.status != "connected").unwrap_or(true) {
-            let error_msg = format!("Failed to find contact. Please make sure you're connected to {} bridge.", capitalized_platform);
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({
+                "error": error_msg
+            }))
+        ));
+    }
+    let client = match crate::utils::matrix_auth::get_cached_client(user_id, &state).await {
+        Ok(client) => client,
+        Err(e) => {
+            let error_msg = format!("Failed to get client: {}", e);
             if let Err(e) = crate::api::twilio_utils::send_conversation_message(
                 &state,
                 &error_msg,
@@ -1453,137 +1426,123 @@ pub async fn handle_confirm_send_chat_message(
                 }))
             ));
         }
-        let client = match crate::utils::matrix_auth::get_cached_client(user_id, &state).await {
-            Ok(client) => client,
-            Err(e) => {
-                let error_msg = format!("Failed to get client: {}", e);
-                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                    &state,
-                    &error_msg,
-                    None,
-                    &user,
-                ).await {
-                    error!("Failed to send error message: {}", e);
-                }
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({
-                        "error": error_msg
-                    }))
-                ));
+    };
+    // Fetch rooms
+    let rooms = match crate::utils::bridge::get_service_rooms(&client, &platform).await {
+        Ok(rooms) => rooms,
+        Err(e) => {
+            let error_msg = format!("Failed to fetch {} rooms: {}", capitalized_platform, e);
+            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                &state,
+                &error_msg,
+                None,
+                &user,
+            ).await {
+                error!("Failed to send error message: {}", e);
             }
-        };
-        // Fetch rooms
-        let rooms = match crate::utils::bridge::get_service_rooms(&client, &platform).await {
-            Ok(rooms) => rooms,
-            Err(e) => {
-                let error_msg = format!("Failed to fetch {} rooms: {}", capitalized_platform, e);
-                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                    &state,
-                    &error_msg,
-                    None,
-                    &user,
-                ).await {
-                    error!("Failed to send error message: {}", e);
-                }
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({
-                        "error": error_msg
-                    }))
-                ));
-            }
-        };
-        let best_match = crate::utils::bridge::search_best_match(&rooms, &payload.chat_name);
-        let best_match = match best_match {
-            Some(room) => room,
-            None => {
-                let error_msg = format!("No {} contacts found matching '{}'.", capitalized_platform, payload.chat_name);
-                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                    &state,
-                    &error_msg,
-                    None,
-                    &user,
-                ).await {
-                    error!("Failed to send error message: {}", e);
-                }
-                return Err((
-                    StatusCode::NOT_FOUND,
-                    Json(json!({
-                        "error": error_msg
-                    }))
-                ));
-            }
-        };
-        // Get the exact name
-        let exact_name = crate::utils::bridge::remove_bridge_suffix(&best_match.display_name);
-        // Set the temporary variable for the message
-        if let Err(e) = state.user_core.set_temp_variable(
-            user_id,
-            Some(&platform),
-            Some(&exact_name),
-            None,
-            Some(&payload.message),
-            None,
-            None,
-            None,
-            None,
-        ) {
-            tracing::error!("Failed to set temporary variable: {}", e);
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
-                    "error": format!("Failed to prepare {} message", capitalized_platform),
-                    "details": e.to_string()
+                    "error": error_msg
                 }))
             ));
         }
-        // Create confirmation message
-        let confirmation_message = format!(
-            "Send {} to '{}' with content: '{}' (yes-> send, no -> discard) (free reply)",
-            capitalized_platform,
-            exact_name,
-            payload.message
-        );
-        // Send the confirmation SMS
-        match crate::api::twilio_utils::send_conversation_message(
-            &state,
-            &confirmation_message,
-            None,
-            &user,
-        ).await {
-            Ok(message_sid) => {
-                // Deduct credits for the confirmation message
-                if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
-                    error!("Failed to deduct user credits: {}", e);
-                }
-                Ok(Json(json!({
-                    "status": "success",
-                    "message": format!("{} confirmation message sent", capitalized_platform),
-                    "room_name": exact_name,
-                    "message_sid": message_sid
-                })))
+    };
+    let best_match = crate::utils::bridge::search_best_match(&rooms, &payload.chat_name);
+    let best_match = match best_match {
+        Some(room) => room,
+        None => {
+            let error_msg = format!("No {} contacts found matching '{}'.", capitalized_platform, payload.chat_name);
+            if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                &state,
+                &error_msg,
+                None,
+                &user,
+            ).await {
+                error!("Failed to send error message: {}", e);
             }
-            Err(e) => {
-                error!("Failed to send confirmation SMS: {}", e);
-                Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({
-                        "error": "Failed to send confirmation message",
-                        "details": e.to_string()
-                    }))
-                ))
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": error_msg
+                }))
+            ));
+        }
+    };
+    // Get the exact name
+    let exact_name = crate::utils::bridge::remove_bridge_suffix(&best_match.display_name);
+    // Format the queued message
+    let queued_msg = format!(
+        "Will send {} to '{}' with '{}' in 60s. Reply 'cancel' to discard.",
+        capitalized_platform, exact_name, payload.message
+    );
+    // Create cancellation channel
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    // Spawn the delayed send task
+    let cloned_state = state.clone();
+    let cloned_user_id = user_id;
+    let cloned_user = user.clone();
+    let cloned_platform = platform.clone();
+    let cloned_capitalized_platform = capitalized_platform.clone();
+    let cloned_exact_name = exact_name.clone();
+    let cloned_message = payload.message.clone();
+    tokio::spawn(async move {
+        let reason = tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => "timeout",
+            _ = cancel_rx => "cancel",
+        };
+        if reason == "timeout" {
+            match crate::utils::bridge::send_bridge_message(
+                &cloned_platform,
+                &cloned_state,
+                cloned_user_id,
+                &cloned_exact_name,
+                &cloned_message,
+                None, // No image URL
+            ).await {
+                Ok(_) => {
+                    // No additional success message
+                }
+                Err(e) => {
+                    let error_msg = format!("Failed to send {} message: {}", cloned_capitalized_platform, e);
+                    if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                        &cloned_state,
+                        &error_msg,
+                        None,
+                        &cloned_user,
+                    ).await {
+                        error!("Failed to send error message: {}", e);
+                    }
+                }
             }
         }
+        // Remove from map
+        let mut senders = cloned_state.pending_message_senders.lock().await;
+        senders.remove(&cloned_user_id);
+    });
+    // Store the cancel sender in the map
+    {
+        let mut senders = state.pending_message_senders.lock().await;
+        senders.insert(user_id, cancel_tx);
     }
+    Ok(Json(json!({
+        "status": "success",
+        "message": format!("{} message queued", capitalized_platform),
+        "room_name": exact_name,
+        "notification": queued_msg
+    })))
 }
 
-pub async fn handle_calendar_event_confirm(
+#[derive(Debug, Deserialize)]
+pub struct RespondToEmailArgs {
+    pub email_id: String,
+    pub response_text: String,
+}
+pub async fn handle_respond_to_email(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-    Json(payload): Json<CalendarEventConfirmPayload>,
+    Json(payload): Json<RespondToEmailArgs>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-
     // Extract user_id from query parameters
     let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
         Some(id) => id,
@@ -1596,7 +1555,6 @@ pub async fn handle_calendar_event_confirm(
             ));
         }
     };
-
     // Get user from database
     let user = match state.user_core.find_by_id(user_id) {
         Ok(Some(user)) => user,
@@ -1618,130 +1576,138 @@ pub async fn handle_calendar_event_confirm(
             ));
         }
     };
-
-    // Get user settings to check confirmation preference
-    let user_settings = match state.user_core.get_user_settings(user_id) {
-        Ok(settings) => settings,
-        Err(e) => {
-            error!("Failed to get user settings: {}", e);
+    // Fetch the email details to get the subject
+    let email_details = match crate::imap_handlers::fetch_single_imap_email(
+        State(state.clone()),
+        crate::handlers::auth_middleware::AuthUser { user_id, is_admin: false },
+        axum::extract::Path(payload.email_id.clone()),
+    ).await {
+        Ok(details) => details,
+        Err((status, error_json)) => {
+            let error_msg = format!("Failed to fetch email details: {}", error_json.0.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error"));
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({
-                    "error": "Failed to get user settings"
+                    "error": error_msg
                 }))
             ));
         }
     };
-
-    // If confirmation is not required, create the calendar event directly
-    if !user_settings.require_confirmation {
-        // Parse the start time
-        let start_time = match chrono::DateTime::parse_from_rfc3339(&payload.start_time) {
-            Ok(dt) => dt.with_timezone(&chrono::Utc),
-            Err(_) => {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({
-                        "error": "Invalid start_time format. Please use RFC3339 format."
-                    }))
-                ));
-            }
+    let subject = email_details.0.get("email")
+        .and_then(|e| e.get("subject"))
+        .and_then(|s| s.as_str())
+        .unwrap_or("Unknown subject")
+        .to_string();
+    // Format the queued message using the subject
+    let queued_msg = format!(
+        "Will respond to email '{}' with '{}' in 60s. Reply 'cancel' to discard.",
+        subject, payload.response_text
+    );
+    // Create cancellation channel
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    // Spawn the delayed send task
+    let cloned_state = state.clone();
+    let cloned_user_id = user_id;
+    let cloned_user = user.clone();
+    let cloned_email_id = payload.email_id.clone();
+    let cloned_response_text = payload.response_text.clone();
+    tokio::spawn(async move {
+        let reason = tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => "timeout",
+            _ = cancel_rx => "cancel",
         };
-
-        // Calculate end time
-        let end_time = start_time + chrono::Duration::minutes(payload.duration_minutes as i64);
-
-        // Create the event request
-        let event_request = crate::handlers::google_calendar::CreateEventRequest {
-            summary: payload.summary.clone(),
-            description: payload.description.clone(),
-            start_time,
-            duration_minutes: payload.duration_minutes.clone(),
-            add_notification: payload.add_notification.unwrap_or(false),
-        };
-
-        // Create the event directly
-        match crate::handlers::google_calendar::create_calendar_event(State(state.clone()), crate::handlers::auth_middleware::AuthUser { user_id, is_admin: false }, Json(event_request)).await {
-            Ok(response) => {
-                Ok(Json(json!({
-                    "status": "success",
-                    "message": "Calendar event created successfully",
-                    "event": response.0
-                })))
-            }
-            Err(e) => {
-                error!("Failed to create calendar event: {:?}", e);
-                Err(e)
+        if reason == "timeout" {
+            let request = crate::imap_handlers::EmailResponseRequest {
+                email_id: cloned_email_id,
+                response_text: cloned_response_text,
+            };
+            match crate::imap_handlers::respond_to_email(
+                State(cloned_state.clone()),
+                crate::handlers::auth_middleware::AuthUser { user_id: cloned_user_id, is_admin: false },
+                Json(request)
+            ).await {
+                Ok(_) => {
+                    // No need to send success message
+                }
+                Err((status, error_json)) => {
+                    let error_msg = format!("Failed to respond to email: {}", error_json.0.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error"));
+                    if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                        &cloned_state,
+                        &error_msg,
+                        None,
+                        &cloned_user,
+                    ).await {
+                        eprintln!("Failed to send error message: {}", e);
+                    }
+                }
             }
         }
-    } else {
+        // Remove from map
+        let mut senders = cloned_state.pending_message_senders.lock().await;
+        senders.remove(&cloned_user_id);
+    });
+    // Store the cancel sender in the map
+    {
+        let mut senders = state.pending_message_senders.lock().await;
+        senders.insert(user_id, cancel_tx);
+    }
+    Ok(Json(json!({
+        "status": "success",
+        "message": "Email response queued",
+        "notification": queued_msg
+    })))
+}
 
-        // Format the confirmation message
-        let confirmation_message = if let Some(ref desc) = payload.description {
-            format!(
-                "Create calendar event: '{}' starting at '{}' for {} minutes with description: '{}' (yes-> send, no -> discard) (free reply)",
-                payload.summary, payload.start_time, payload.duration_minutes, desc
-            )
-        } else {
-            format!(
-                "Create calendar event: '{}' starting at '{}' for {} minutes (yes-> send, no -> discard) (free reply)",
-                payload.summary, payload.start_time, payload.duration_minutes
-            )
-        };
 
-        // Set the temporary variable for calendar event
-        if let Err(e) = state.user_core.set_temp_variable(
-            user_id,
-            Some("calendar"),
-            None,
-            Some(&payload.summary),
-            Some(&payload.description.unwrap_or_default()),
-            Some(&payload.start_time),
-            Some(&payload.duration_minutes.to_string()),
-            None,
-            None,
-        ) {
-            error!("Failed to set temporary variable: {}", e);
+pub async fn handle_calendar_event_creation(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    Json(payload): Json<CalendarEventConfirmPayload>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Extract user_id from query parameters
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
             return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
+                StatusCode::BAD_REQUEST,
                 Json(json!({
-                    "error": "Failed to prepare calendar event",
-                    "details": e.to_string()
+                    "error": "Missing or invalid user_id"
                 }))
             ));
         }
-
-        // Send the confirmation SMS
-        match crate::api::twilio_utils::send_conversation_message(
-            &state,
-            &confirmation_message,
-            None,
-            &user,
-        ).await {
-            Ok(message_sid) => {
-
-                // Deduct credits for the confirmation message
-                if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
-                    error!("Failed to deduct user credits: {}", e);
-                }
-
-                Ok(Json(json!({
-                    "status": "success",
-                    "message": "Calendar event confirmation sent",
-                    "event_summary": payload.summary,
-                    "message_sid": message_sid
-                })))
-            }
-            Err(e) => {
-                error!("Failed to send confirmation SMS: {}", e);
-                Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({
-                        "error": "Failed to send confirmation message",
-                        "details": e.to_string()
-                    }))
-                ))
-            }
+    };
+    // Parse the start time
+    let start_time = match chrono::DateTime::parse_from_rfc3339(&payload.start_time) {
+        Ok(dt) => dt.with_timezone(&chrono::Utc),
+        Err(_) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Invalid start_time format. Please use RFC3339 format."
+                }))
+            ));
+        }
+    };
+    // Create the event request
+    let event_request = crate::handlers::google_calendar::CreateEventRequest {
+        summary: payload.summary.clone(),
+        description: payload.description.clone(),
+        start_time,
+        duration_minutes: payload.duration_minutes.clone(),
+        add_notification: payload.add_notification.unwrap_or(false),
+    };
+    // Create the event directly
+    match crate::handlers::google_calendar::create_calendar_event(State(state.clone()), crate::handlers::auth_middleware::AuthUser { user_id, is_admin: false }, Json(event_request)).await {
+        Ok(response) => {
+            Ok(Json(json!({
+                "status": "success",
+                "message": "Calendar event created successfully",
+                "event": response.0
+            })))
+        }
+        Err(e) => {
+            error!("Failed to create calendar event: {:?}", e);
+            Err(e)
         }
     }
 }
@@ -1990,146 +1956,6 @@ pub async fn handle_fetch_recent_messages_tool_call(
                 Json(json!({
                     "error": format!("Failed to fetch {} messages", capitalized_platform),
                     "details": e.to_string()
-                }))
-            ))
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct EmailResponsePayload {
-    pub email_id: String,
-    pub response_text: String,
-}
-// this is not used at the moment since it didn't work and not a priority rn
-pub async fn handle_email_response_tool_call(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
-    Json(payload): Json<EmailResponsePayload>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-    tracing::debug!("Starting email response confirmation for email ID: {}", payload.email_id);
-
-    // Extract user_id from query parameters
-    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
-        Some(id) => id,
-        None => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(json!({
-                    "error": "Missing or invalid user_id"
-                }))
-            ));
-        }
-    };
-
-    // Get user from database
-    let user = match state.user_core.find_by_id(user_id) {
-        Ok(Some(user)) => user,
-        Ok(None) => {
-            return Err((
-                StatusCode::NOT_FOUND,
-                Json(json!({
-                    "error": "User not found"
-                }))
-            ));
-        }
-        Err(e) => {
-            error!("Error fetching user: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": "Failed to fetch user"
-                }))
-            ));
-        }
-    };
-
-    // Verify user has sufficient credits for email response
-    if let Err(msg) = crate::utils::usage::check_user_credits(&state, &user, "message", None).await {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "error": "Insufficient credits",
-                "message": msg
-            }))
-        ));
-    }
-
-    // Fetch the email details to include in confirmation message
-    match crate::handlers::imap_handlers::fetch_single_email_imap(&state, user_id, &payload.email_id).await {
-        Ok(email) => {
-            let subject = email.subject.unwrap_or_else(|| "No subject".to_string());
-
-            // Set the temporary variable for email response
-            if let Err(e) = state.user_core.set_temp_variable(
-                user_id,
-                Some("email"),
-                None,
-                Some(&subject),
-                Some(&payload.response_text),
-                None,
-                None,
-                Some(&payload.email_id),
-                None,
-            ) {
-                tracing::error!("Failed to set temporary variable: {}", e);
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({
-                        "error": "Failed to prepare email response",
-                        "details": e.to_string()
-                    }))
-                ));
-            }
-
-            // Create confirmation message
-            let confirmation_message = format!(
-                "Send email response '{}' regarding '{}' (yes-> send, no -> discard) (free reply)",
-                payload.response_text,
-                subject
-            );
-
-            // Send the confirmation SMS
-            match crate::api::twilio_utils::send_conversation_message(
-                &state,
-                &confirmation_message,
-                None,
-                &user,
-            ).await {
-                Ok(message_sid) => {
-                    // we should add here the call to save the message to history then if this is used
-                    // Deduct credits for the confirmation message
-                    if let Err(e) = crate::utils::usage::deduct_user_credits(&state, user_id, "message", None) {
-                        tracing::error!("Failed to deduct user credits: {}", e);
-                        // Continue execution even if credit deduction fails
-                    }
-                    
-                    Ok(Json(json!({
-                        "status": "success",
-                        "message": "Email response confirmation sent",
-                        "email_id": payload.email_id,
-                        "message_sid": message_sid
-                    })))
-                }
-                Err(e) => {
-                    error!("Failed to send confirmation SMS: {}", e);
-                    Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({
-                            "error": "Failed to send confirmation message",
-                            "details": e.to_string()
-                        }))
-                    ))
-                }
-            }
-        },
-        Err(e) => {
-            error!("Failed to fetch email details: {:?}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": "Failed to fetch email details",
-                    "details": format!("{:?}", e)
                 }))
             ))
         }

@@ -217,7 +217,6 @@ diesel::table! {
         day_digest -> Nullable<Text>,
         evening_digest -> Nullable<Text>,
         number_of_digests_locked -> Integer,
-        require_confirmation -> Bool,
         critical_enabled -> Nullable<Text>,
         encrypted_twilio_account_sid -> Nullable<Text>,
         encrypted_twilio_auth_token -> Nullable<Text>,

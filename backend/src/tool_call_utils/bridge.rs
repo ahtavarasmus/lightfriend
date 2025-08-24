@@ -129,7 +129,7 @@ pub fn get_fetch_recent_messages_tool() -> openai_api_rs::v1::chat_completion::T
     }
 }
 
-pub fn get_send_chat_message_tool(confirmation: bool) -> openai_api_rs::v1::chat_completion::Tool {
+pub fn get_send_chat_message_tool() -> openai_api_rs::v1::chat_completion::Tool {
     use openai_api_rs::v1::{chat_completion, types};
     use std::collections::HashMap;
     let mut properties = HashMap::new();
@@ -146,11 +146,7 @@ pub fn get_send_chat_message_tool(confirmation: bool) -> openai_api_rs::v1::chat
         "chat_name".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::String),
-            description: if confirmation {
-                Some("The chat name or room name to send the message to. Doesn't have to be exact since fuzzy search is used.".to_string())
-            } else {
-                Some("The chat name or room name to send the message to. Must be exact.".to_string())
-            },
+            description: Some("The chat name or room name to send the message to. Doesn't have to be exact since fuzzy search is used.".to_string()),
             ..Default::default()
         }),
     );
@@ -166,22 +162,13 @@ pub fn get_send_chat_message_tool(confirmation: bool) -> openai_api_rs::v1::chat
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("send_chat_message"),
-            description: if confirmation {
+            description: 
                 Some(String::from(
                     "Sends a message to a specific chat on the specified platform. \
                     Use this when the user asks to send a message to a contact or group on Telegram, WhatsApp or Signal. \
-                    This tool will fuzzy search for the chat_name, confirm with the user, and require their confirmation before sending.
-                    Only use this tool if the user has explicitly mentioned the message content or it is obviously clear what content they want to send; otherwise, ask the user to specify the message content before calling the tool."
-                ))
-            } else {
-                Some(String::from(
-                    "Sends a message to a specific chat on the specified platform if the chat_name is an exact match. \
-                    Use this when the user asks to send a message to a contact or group on Telegram, WhatsApp or Signal. \
-                    If the chat_name is not exact, this tool will perform a fuzzy search and return suggestions for the user to choose from. \
-                    After user confirmation, call this tool again with the exact selected chat_name to send the message.
-                    Only use this tool if the user has explicitly mentioned the message content or it is obviously clear what content they want to send; otherwise, ask the user to specify the message content before calling the tool."
-                ))
-            },
+                    This tool will fuzzy search for the chat_name, add the message to the sending queue and unless user replies cancel the message will be sent after 60 seconds.
+                    Only use this tool if the user has explicitly mentioned the message content or it is obviously clear what content they want to send; otherwise, ask the user to specify the message content, recipient and platform before calling the tool."
+                )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(properties),
@@ -220,62 +207,7 @@ pub async fn handle_send_chat_message(
     image_url: Option<&str>
 ) -> Result<(StatusCode, [(HeaderName, &'static str); 1], Json<TwilioResponse>), Box<dyn std::error::Error>> {
     let args: SendChatMessageArgs = serde_json::from_str(args)?;
- 
-    // Get user settings to check confirmation preference
-    let user_settings = state.user_core.get_user_settings(user_id)?;
     let capitalized_platform = args.platform.chars().next().map(|c| c.to_uppercase().collect::<String>()).unwrap_or_default() + &args.platform[1..];
-    println!("confirmation: {}", user_settings.require_confirmation);
-    // If confirmation is not required, send the message directly using the provided chat_name
-    if !user_settings.require_confirmation {
-        let exact_name = args.chat_name.clone();
-        let message = args.message.clone();
-        match crate::utils::bridge::send_bridge_message(
-            &args.platform,
-            state,
-            user_id,
-            &exact_name,
-            &message,
-            image_url.map(|url| url.to_string()),
-        ).await {
-            Ok(_) => {
-                let success_msg = format!("{} message: '{}' sent to '{}'", capitalized_platform, message ,exact_name);
-                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                    state,
-                    &success_msg,
-                    None,
-                    user,
-                ).await {
-                    eprintln!("Failed to send success message: {}", e);
-                }
-                return Ok((
-                    StatusCode::OK,
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    Json(TwilioResponse {
-                        message: success_msg,
-                    })
-                ));
-            }
-            Err(e) => {
-                let error_msg = format!("Failed to send {} message: {}", capitalized_platform, e);
-                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-                    state,
-                    &error_msg,
-                    None,
-                    user,
-                ).await {
-                    eprintln!("Failed to send error message: {}", e);
-                }
-                return Ok((
-                    StatusCode::OK,
-                    [(axum::http::header::CONTENT_TYPE, "application/json")],
-                    Json(TwilioResponse {
-                        message: error_msg,
-                    })
-                ));
-            }
-        }
-    }
-    // If confirmation is required, search for the chat room first (fuzzy match)
     let bridge = state.user_repository.get_bridge(user_id, &args.platform)?;
     if bridge.map(|b| b.status != "connected").unwrap_or(true) {
         let error_msg = format!("Failed to find contact. Please make sure you're connected to {} bridge.", capitalized_platform);
@@ -341,79 +273,97 @@ pub async fn handle_send_chat_message(
     };
     // Get the best match
     let exact_name = crate::utils::bridge::remove_bridge_suffix(&best_match.display_name);
-    // Set the temporary variable for WhatsApp message
-    if let Err(e) = state.user_core.set_temp_variable(
-        user_id,
-        Some(&args.platform),
-        Some(&exact_name),
-        None,
-        Some(&args.message),
-        None,
-        None,
-        None,
-        image_url,
-    ) {
-        tracing::error!("Failed to set temporary variable: {}", e);
-        if let Err(e) = crate::api::twilio_utils::send_conversation_message(
-            state,
-            format!("Failed to prepare {} message sending. (contact rasmus@ahtava.com)", capitalized_platform).as_str(),
-            None,
-            user,
-        ).await {
-            tracing::error!("Failed to send error message: {}", e);
-        }
-        return Ok((
-            StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, "application/json")],
-            Json(TwilioResponse {
-                message: "Failed to prepare message sending".to_string(),
-            })
-        ));
-    }
-    tracing::info!("Successfully set temporary variable");
-    // Format the confirmation message with the found contact name and image if present
-    let confirmation_msg = if image_url.is_some() {
+    tracing::info!("Message will be sent to {}", exact_name);
+    // Format the queued message with the found contact name and image if present
+    let queued_msg = if image_url.is_some() {
         format!(
-            "Send {} to '{}' with the above image and a caption '{}' (reply 'Yes' to confirm, otherwise it will be discarded)",
+            "Will send {} to '{}' with image and caption '{}' in 60s. Reply 'cancel' to discard.",
             capitalized_platform, exact_name, args.message
         )
     } else {
         format!(
-            "Send {} to '{}' with content: '{}' (reply 'Yes' to confirm, otherwise it will be discarded)",
+            "Will send {} to '{}' with content '{}' in 60s. Reply 'cancel' to discard.",
             capitalized_platform, exact_name, args.message
         )
     };
-    // Send the confirmation message
+    // Send the queued message
     match crate::api::twilio_utils::send_conversation_message(
         state,
-        &confirmation_msg,
+        &queued_msg,
         None,
         user,
     ).await {
         Ok(_) => {
-            // Deduct credits for the confirmation message
+            // Deduct credits for the queued message
             if let Err(e) = crate::utils::usage::deduct_user_credits(state, user_id, "message", None) {
                 tracing::error!("Failed to deduct user credits: {}", e);
             }
-            Ok((
-                StatusCode::OK,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
-                Json(TwilioResponse {
-                    message: "Message confirmation sent".to_string(),
-                })
-            ))
         }
         Err(e) => {
-            eprintln!("Failed to send confirmation message: {}", e);
-            Ok((
+            eprintln!("Failed to send queued message: {}", e);
+            return Ok((
                 StatusCode::OK,
                 [(axum::http::header::CONTENT_TYPE, "application/json")],
                 Json(TwilioResponse {
-                    message: "Failed to send message confirmation".to_string(),
+                    message: "Failed to send message queue notification".to_string(),
                 })
-            ))
+            ));
         }
     }
+    // Create cancellation channel
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    // Spawn the delayed send task after sending the message
+    let cloned_state = state.clone();
+    let cloned_user_id = user_id;
+    let cloned_user = user.clone();
+    let cloned_capitalized_platform = capitalized_platform.clone();
+    let cloned_platform = args.platform.clone();
+    let cloned_exact_name = exact_name.clone();
+    let cloned_message = args.message.clone();
+    let cloned_image_url = image_url.map(|s| s.to_string());
+    tokio::spawn(async move {
+        let reason = tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => "timeout",
+            _ = cancel_rx => "cancel",
+        };
+        if reason == "timeout" {
+            // Proceed with send using captured variables
+            println!("sending message now");
+            if let Err(e) = crate::utils::bridge::send_bridge_message(
+                &cloned_platform,
+                &cloned_state,
+                cloned_user_id,
+                &cloned_exact_name,
+                &cloned_message,
+                cloned_image_url,
+            ).await {
+                let error_msg = format!("Failed to send {} message: {}", cloned_capitalized_platform, e);
+                if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                    &cloned_state,
+                    &error_msg,
+                    None,
+                    &cloned_user,
+                ).await {
+                    eprintln!("Failed to send error message: {}", e);
+                }
+            }
+        }
+        // Remove from map
+        let mut senders = cloned_state.pending_message_senders.lock().await;
+        senders.remove(&cloned_user_id);
+    });
+    // Store the cancel sender in the map
+    {
+        let mut senders = state.pending_message_senders.lock().await;
+        senders.insert(user_id, cancel_tx);
+    }
+    Ok((
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/json")],
+        Json(TwilioResponse {
+            message: "Message queued".to_string(),
+        })
+    ))
 }
 
 #[derive(Deserialize)]

@@ -325,7 +325,7 @@ impl UserCore {
     }
 
     // Update user's profile
-    pub fn update_profile(&self, user_id: i32, email: &str, phone_number: &str, nickname: &str, info: &str, timezone: &str, timezone_auto: &bool, notification_type: Option<&str>, save_context: Option<i32>, require_confirmation: bool, location: &str, nearby_places: &str) -> Result<(), DieselError> {
+    pub fn update_profile(&self, user_id: i32, email: &str, phone_number: &str, nickname: &str, info: &str, timezone: &str, timezone_auto: &bool, notification_type: Option<&str>, save_context: Option<i32>, location: &str, nearby_places: &str) -> Result<(), DieselError> {
         use crate::schema::users;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         println!("Repository: Updating user {} with notification type: {:?}", user_id, notification_type);
@@ -377,7 +377,6 @@ impl UserCore {
                     user_settings::timezone_auto.eq(timezone_auto),
                     user_settings::notification_type.eq(notification_type.map(|s| s.to_string())),
                     user_settings::save_context.eq(save_context),
-                    user_settings::require_confirmation.eq(require_confirmation),
                 ))
                 .execute(conn)?;
             // Update user info
@@ -439,75 +438,6 @@ impl UserCore {
             .execute(&mut conn)?;
             
         Ok(())
-    }
-
-    pub fn set_free_reply(&self, user_id: i32, free_reply: bool) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(users::table.find(user_id))
-            .set(users::free_reply.eq(free_reply))
-            .execute(&mut conn)?;
-        Ok(())
-    }
-
-    pub fn set_temp_variable(&self, user_id: i32, event_type: Option<&str>, recipient: Option<&str>, subject: Option<&str>, 
-        content: Option<&str>, start_time: Option<&str>, duration: Option<&str>, event_id: Option<&str>, image_url: Option<&str>) -> Result<(), DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-
-        // Start a transaction
-        conn.transaction(|conn| {
-            // First set the confirm_send_event flag to true
-            diesel::update(users::table.find(user_id))
-                .set(users::confirm_send_event.eq(event_type))
-                .execute(conn)?;
-
-            // Delete any existing temp variables for this user
-            diesel::delete(temp_variables::table.filter(temp_variables::user_id.eq(user_id)))
-                .execute(conn)?;
-
-            // Create new temp variable
-            let new_temp_var = NewTempVariable {
-                user_id,
-                confirm_send_event_type: event_type.unwrap().to_string(),
-                confirm_send_event_recipient: recipient.map(|s| s.to_string()),
-                confirm_send_event_subject: subject.map(|s| s.to_string()),
-                confirm_send_event_content: content.map(|s| s.to_string()),
-                confirm_send_event_start_time: start_time.map(|s| s.to_string()),
-                confirm_send_event_duration: duration.map(|s| s.to_string()),
-                confirm_send_event_id: event_id.map(|s| s.to_string()),
-                confirm_send_event_image_url: image_url.map(|s| s.to_string()),
-            };
-
-            // Insert the new temp variable
-            diesel::insert_into(temp_variables::table)
-                .values(&new_temp_var)
-                .execute(conn)?;
-
-            Ok(())
-        })
-    }
-
-
-    pub fn get_temp_variable(&self, user_id: i32, service_type: &str) -> Result<Option<(Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>)>, DieselError> {
-        let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
-        let temp_var = temp_variables::table
-            .filter(temp_variables::user_id.eq(user_id))
-            .filter(temp_variables::confirm_send_event_type.eq(service_type))
-            .first::<TempVariable>(&mut conn)
-            .optional()?;
-            
-        match temp_var {
-            Some(var) => Ok(Some((
-                var.confirm_send_event_recipient, 
-                var.confirm_send_event_subject, 
-                var.confirm_send_event_content, 
-                var.confirm_send_event_start_time, 
-                var.confirm_send_event_duration, 
-                var.confirm_send_event_id, 
-                var.confirm_send_event_image_url
-            ))),
-            None => Ok(None)
-        }
     }
 
 

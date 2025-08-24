@@ -95,6 +95,19 @@ pub fn create_clarify_properties() -> HashMap<String, Box<types::JSONSchemaDefin
     clarify_properties
 }
 
+pub async fn cancel_pending_message(
+    state: &Arc<AppState>,
+    user_id: i32,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let mut senders = state.pending_message_senders.lock().await;
+    if let Some(sender) = senders.remove(&user_id) {
+        let _ = sender.send(());
+        Ok(true)  // Cancellation occurred
+    } else {
+        Ok(false)  // No pending message to cancel
+    }
+}
+
 // Helper function for boolean deserialization
 #[derive(Deserialize)]
 #[serde(untagged)]

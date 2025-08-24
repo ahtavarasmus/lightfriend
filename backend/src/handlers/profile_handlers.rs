@@ -49,7 +49,6 @@ pub struct UpdateProfileRequest {
     agent_language: String,
     notification_type: Option<String>,
     save_context: Option<i32>,
-    require_confirmation: bool,
     location: String,
     nearby_places: String,
 }
@@ -88,7 +87,6 @@ pub struct ProfileResponse {
     notification_type: Option<String>,
     sub_country: Option<String>,
     save_context: Option<i32>,
-    require_confirmation: bool,
     days_until_billing: Option<i32>,
     digests_reserved: i32,
     pairing_code: Option<String>,
@@ -275,7 +273,6 @@ pub async fn get_profile(
                 notification_type: user_settings.notification_type,
                 sub_country: user_settings.sub_country,
                 save_context: user_settings.save_context,
-                require_confirmation: user_settings.require_confirmation,
                 days_until_billing: days_until_billing,
                 digests_reserved: digests_reserved,
                 pairing_code: user_settings.server_instance_id,
@@ -849,7 +846,6 @@ pub async fn update_profile(
         &update_req.timezone_auto,
         update_req.notification_type.as_deref(),
         update_req.save_context,
-        update_req.require_confirmation,
         &update_req.location,
         &update_req.nearby_places,
     ) {
