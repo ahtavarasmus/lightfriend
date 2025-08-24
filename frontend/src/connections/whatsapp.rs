@@ -273,7 +273,7 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         <li>{"Fetch WhatsApp Messages: Get recent WhatsApp messages from a specific time period"}</li>
                         <li>{"Fetch Chat Messages: Get messages from a specific WhatsApp chat or contact"}</li>
                         <li>{"Search Contacts: Search for WhatsApp contacts or chat rooms by name"}</li>
-                        <li>{"Send Message: Give message content and recipient name and lightfriend will confirm with you the message to be sent. Reply with yes or no to send or discard the suggestion. Voice call will also confirm the suggestion through SMS first."}</li>
+                        <li>{"Send Message: Give platform, message content and recipient name and lightfriend will send the message. Message will only be sent 60 seconds later so if you or assistant made a mistake just type 'cancel' with sms or say 'cancel the message' with voice calls to discard the sent event."}</li>
                     </ul>
                 </div>
                 <div class="info-subsection security-notice">

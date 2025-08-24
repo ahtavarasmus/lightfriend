@@ -270,6 +270,8 @@ pub fn email_connect(props: &EmailProps) -> Html {
                     <ul>
                         <li>{"Fetch specific number of Email Previews: Fetches a given number of latest emails previews from your inbox."}</li>
                         <li>{"Search specific Email: Searches for specific email based on a given query(sender, subject, content, time, etc)."}</li>
+                        <li>{"Send Email: Give recipient name email address, subject and content and lightfriend send the email. Email will only be sent 60 seconds later so if you or assistant made a mistake just type 'cancel' with sms or say 'cancel the message' with voice calls."}</li>
+                        <li>{"Reply to an Email: If you have asked about your emails or lightfriend is making a notification call about a specific email, then you can ask to reply to specific one by mentioning your reply content and which email to send reply to. Reply will only be sent 60 seconds later so if you or assistant made a mistake just type 'cancel' with sms or say 'cancel the message' with voice calls."}</li>
                     </ul>
                 </div>
                 <div class="info-subsection">

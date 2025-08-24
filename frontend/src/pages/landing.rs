@@ -282,7 +282,7 @@ pub fn landing() -> Html {
                         </li>
                         <li>
                             <details>
-                                <summary><i class="fas fa-envelope"></i>{"Fetch and Monitor Emails"}</summary>
+                                <summary><i class="fas fa-envelope"></i>{"Fetch, Send, Reply and Monitor Emails"}</summary>
                                 <div class="feature-desc">
                                     <p>{"Integrate your email (Gmail, Outlook, etc.) in the settings. Fetch recent emails (e.g., 'Check email'), find specific email ('Can you find the Delta Airlines reservation number from email?') and monitor for important ones with AI-filtered notifications sent to your phone via SMS or make it call you."}</p>
                                     // <iframe class="feature-video" src="https://www.youtube.com/embed/VIDEO_ID" allowfullscreen=true></iframe>

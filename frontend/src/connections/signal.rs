@@ -249,7 +249,7 @@ pub fn signal_connect(props: &SignalProps) -> Html {
                         <li>{"Fetch Signal Messages: Get recent Signal messages from a specific time period"}</li>
                         <li>{"Fetch Chat Messages: Get messages from a specific Signal chat or contact"}</li>
                         <li>{"Search Contacts: Search for Signal contacts or chat rooms by name"}</li>
-                        <li>{"Send Message: Send a Signal message to a specific recipient (will ask for confirmation before sending)"}</li>
+                        <li>{"Send Message: Send a Signal message to a specific recipient. Message will only be sent 60 seconds later so if you or assistant made a mistake just type 'cancel' with sms or say 'cancel the message' with voice calls to discard the sent event."}</li>
                     </ul>
                 </div>
                 <div class="info-subsection security-notice">
