@@ -1982,7 +1982,7 @@ pub async fn handle_cancel_pending_message_tool_call(
     // Verify user exists
     match state.user_core.find_by_id(user_id) {
         Ok(Some(_user)) => {
-            match cancel_pending_message(&state, user_id).await {
+            match crate::tool_call_utils::utils::cancel_pending_message(&state, user_id).await {
                 Ok(true) => {
                     tracing::debug!("Successfully cancelled pending message for user: {}",
                         user_id);
