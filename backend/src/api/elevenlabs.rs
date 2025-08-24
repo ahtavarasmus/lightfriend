@@ -1962,6 +1962,79 @@ pub async fn handle_fetch_recent_messages_tool_call(
     }
 }
 
+pub async fn handle_cancel_pending_message_tool_call(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Extract and parse user_id from query params
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Invalid or missing user_id parameter"
+                }))
+            ));
+        }
+    };
+    tracing::debug!("Received cancel pending message request for user: {}", user_id);
+    // Verify user exists
+    match state.user_core.find_by_id(user_id) {
+        Ok(Some(_user)) => {
+            match cancel_pending_message(&state, user_id).await {
+                Ok(true) => {
+                    tracing::debug!("Successfully cancelled pending message for user: {}",
+                        user_id);
+                    Ok(Json(json!({
+                        "response": "Pending message cancelled.",
+                        "status": "success",
+                        "user_id": user_id,
+                    })))
+                },
+                Ok(false) => {
+                    tracing::debug!("No pending message to cancel for user: {}",
+                        user_id);
+                    Ok(Json(json!({
+                        "response": "No pending message to cancel.",
+                        "status": "success",
+                        "user_id": user_id,
+                    })))
+                },
+                Err(e) => {
+                    error!("Failed to cancel pending message: {}", e);
+                    Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({
+                            "error": "Failed to cancel pending message",
+                            "details": e.to_string()
+                        }))
+                    ))
+                }
+            }
+        },
+        Ok(None) => {
+            tracing::error!("User not found: {}", user_id);
+            Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": "User not found"
+                }))
+            ))
+        },
+        Err(e) => {
+            error!("Error fetching user: {}", e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to fetch user",
+                    "details": e.to_string()
+                }))
+            ))
+        }
+    }
+}
+
 pub async fn make_notification_call(
     state: &Arc<AppState>,
     content_type: String,

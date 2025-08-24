@@ -268,6 +268,7 @@ async fn main() {
         .route("/api/call/email/respond", post(elevenlabs::handle_respond_to_email))
         .route("/api/call/waiting_check", post(elevenlabs::handle_create_waiting_check_tool_call))
         .route("/api/call/monitoring-status", post(elevenlabs::handle_update_monitoring_status_tool_call))
+        .route("/api/call/cancel-message", get(elevenlabs::handle_cancel_pending_message_tool_call))
         .route("/api/call/tasks", get(elevenlabs::handle_tasks_fetching_tool_call))
         .route("/api/call/tasks/create", post(elevenlabs::handle_tasks_creation_tool_call))
         .route("/api/call/fetch-recent-messages", get(elevenlabs::handle_fetch_recent_messages_tool_call))
