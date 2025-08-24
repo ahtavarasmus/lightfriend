@@ -26,6 +26,10 @@ pub fn changelog() -> Html {
             <section class="changelog-list-section">
 
                 <div class="changelog-entry">
+                    <blockquote class="twitter-tweet"><p lang="en" dir="ltr">{"today i changed how sending emails and chat messages works on lightfriend. instead of having to confirm with a back and forth message each time when sending something, now it just adds the leaving message into a queue for 60seconds and if user is okay with the message and don't…"}</p>{"&mdash; rasmus (@ahtavarasm_us) "}<a href="https://twitter.com/ahtavarasm_us/status/1959684038676934768?ref_src=twsrc%5Etfw">{"August 24, 2025"}</a></blockquote> <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+
+                </div>
+                <div class="changelog-entry">
                     <blockquote class="twitter-tweet"><p lang="en" dir="ltr">{"Signal messenger now also works on lightfriend along with whatsapp and telegram! i fixed the bug with message sending with confirmation setting on so you can now send messages to those platforms using voice calls and text messages. "}<a href="https://t.co/NOUNLaHBmN">{"pic.twitter.com/NOUNLaHBmN"}</a></p>{"&mdash; rasmus (@ahtavarasm_us) "}<a href="https://twitter.com/ahtavarasm_us/status/1957743131882893332?ref_src=twsrc%5Etfw">{"August 19, 2025"}</a></blockquote> <script src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
                 </div>
                 <div class="changelog-entry">
