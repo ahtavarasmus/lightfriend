@@ -762,7 +762,6 @@ pub async fn handle_bridge_message(
         }
     };
     // Check if this is a group room (more than 2 members)
-    // Check if this is a group room (more than 2 members)
     let members = match room.members(RoomMemberships::JOIN).await {
         Ok(m) => m,
         Err(e) => {
@@ -771,6 +770,10 @@ pub async fn handle_bridge_message(
         }
     };
     let member_count = members.len() as u64;
+
+    if user_id == 1 {
+        println!("members: {}", member_count);
+    }
     if member_count > 3 {
         let is_mentioned = event.content.mentions.as_ref()
             .map(|m| m.user_ids.contains(&matrix_user_id))
@@ -790,6 +793,9 @@ pub async fn handle_bridge_message(
         }
     };
     let sender_prefix = get_sender_prefix(&service);
+    if user_id == 1 {
+        println!("sender_prefix: {}", sender_prefix);
+    }
     if !sender_localpart.starts_with(&sender_prefix) {
         tracing::info!("Skipping non-{} sender", service);
         return;

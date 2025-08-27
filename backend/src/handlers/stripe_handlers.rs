@@ -1,3 +1,4 @@
+
 use stripe::{
     Client,
     Customer,
@@ -116,10 +117,10 @@ pub async fn create_unified_subscription_checkout(
     })?;
     let domain_url = std::env::var("FRONTEND_URL").expect("FRONTEND_URL not set");
     // Select price ID based on subscription type and user's phone number country
+    let country = user.phone_number_country.as_deref().unwrap_or("OTHER");
+    println!("country: {}", country);
     let base_price_id = match body.subscription_type {
         SubscriptionType::Hosted => {
-            let country = user.phone_number_country.as_deref().unwrap_or("OTHER");
-            println!("country: {}", country);
             if country == "US" || country == "CA" {
                 std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_US")
             } else if country == "FI" {
@@ -186,27 +187,30 @@ pub async fn create_unified_subscription_checkout(
     };
     // Handle metadata if needed (removed cold_turkey)
     let mut metadata = std::collections::HashMap::new();
+    let mut sub_data = stripe::CreateCheckoutSessionSubscriptionData {
+        ..Default::default()
+    };
     let success_url1 = format!("{}/billing?subscription=changed", domain_url);
     if let Some(current_subscription) = existing_subscription.data.first() {
         println!("Found existing subscription: {}", current_subscription.id);
-    
+   
         // Create metadata to track the subscription change
         metadata.insert("replacing_subscription".to_string(), current_subscription.id.to_string());
         metadata.insert("plan_change".to_string(), "true".to_string());
         metadata.insert("user_id".to_string(), user_id.to_string());
-    
-        create_params.subscription_data = Some(stripe::CreateCheckoutSessionSubscriptionData {
-            metadata: Some(metadata.clone()),
-            ..Default::default()
-        });
+   
+        sub_data.metadata = Some(metadata.clone());
         // Update success URL to indicate plan change
         create_params.success_url = Some(&success_url1);
-    } else if !metadata.is_empty() {
-        create_params.subscription_data = Some(stripe::CreateCheckoutSessionSubscriptionData {
-            metadata: Some(metadata),
-            ..Default::default()
-        });
+        // No trial for upgrades
+    } else if body.subscription_type == SubscriptionType::Hosted && (country == "US" || country == "CA") {
+        // Add trial only for new Hosted subscriptions in US/CA
+        sub_data.trial_period_days = Some(7);
+        if !metadata.is_empty() {
+            sub_data.metadata = Some(metadata);
+        }
     }
+    create_params.subscription_data = Some(sub_data);
     // If physical shipping addons are selected, enable shipping address collection
     if body.addons.as_ref().map_or(false, |a| a.iter().any(|ad| ad.ends_with("_ship"))) {
         create_params.shipping_address_collection = Some(stripe::CreateCheckoutSessionShippingAddressCollection {
@@ -236,6 +240,7 @@ pub async fn create_unified_subscription_checkout(
         "message": "Redirecting to Stripe Checkout for subscription"
     })))
 }
+
 
 pub async fn create_customer_portal_session(
     State(state): State<Arc<AppState>>,
@@ -297,6 +302,7 @@ create_session,
         "message": "Redirecting to Stripe Customer Portal"
     })))
 }
+
 pub async fn create_checkout_session(
     State(state): State<Arc<AppState>>,
     _auth_user: AuthUser,

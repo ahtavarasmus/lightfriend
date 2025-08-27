@@ -593,7 +593,6 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                                     <div class="upgrade-prompt">
                                         <div class="upgrade-content">
                                             <h3>{"Upgrade to Enable WhatsApp Integration"}</h3>
-                                            <p>{"WhatsApp integration is available for Espace Plan subscribers. Upgrade your plan to connect your WhatsApp account and enjoy seamless message forwarding through SMS and voice calls."}</p>
                                             <a href="/pricing" class="upgrade-button">
                                                 {"View Pricing Plans"}
                                             </a>

@@ -338,7 +338,6 @@ pub fn tasks_connect(props: &TasksConnectProps) -> Html {
                         <div class="upgrade-prompt">
                             <div class="upgrade-content">
                                 <h3>{"Upgrade to Enable Tasks Integration"}</h3>
-                                <p>{"Google Tasks integration is available for premium plan subscribers. Upgrade your plan to connect your tasks and manage them through SMS and voice calls."}</p>
                                 <a href="/pricing" class="upgrade-button">
                                     {"View Pricing Plans"}
                                 </a>

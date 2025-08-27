@@ -1534,6 +1534,113 @@ pub async fn handle_send_chat_message(
 }
 
 #[derive(Debug, Deserialize)]
+pub struct SendEmailArgs {
+    pub to: String,
+    pub subject: String,
+    pub body: String,
+}
+
+pub async fn handle_email_send(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    Json(payload): Json<SendEmailArgs>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Extract user_id from query parameters
+    let user_id = match params.get("user_id").and_then(|id| id.parse::<i32>().ok()) {
+        Some(id) => id,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({
+                    "error": "Missing or invalid user_id"
+                }))
+            ));
+        }
+    };
+    // Get user from database
+    let user = match state.user_core.find_by_id(user_id) {
+        Ok(Some(user)) => user,
+        Ok(None) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(json!({
+                    "error": "User not found"
+                }))
+            ));
+        }
+        Err(e) => {
+            error!("Error fetching user: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({
+                    "error": "Failed to fetch user"
+                }))
+            ));
+        }
+    };
+    // Format the queued message
+    let queued_msg = format!(
+        "Will send email to {} with subject '{}' and body '{}' in 60s. Use cancel_message tool to discard.",
+        payload.to, payload.subject, payload.body
+    );
+    // Create cancellation channel
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    // Spawn the delayed send task
+    let cloned_state = state.clone();
+    let cloned_user_id = user_id;
+    let cloned_user = user.clone();
+    let cloned_to = payload.to.clone();
+    let cloned_subject = payload.subject.clone();
+    let cloned_body = payload.body.clone();
+    tokio::spawn(async move {
+        let reason = tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => "timeout",
+            _ = cancel_rx => "cancel",
+        };
+        if reason == "timeout" {
+            let email_request = crate::handlers::imap_handlers::SendEmailRequest {
+                to: cloned_to,
+                subject: cloned_subject,
+                body: cloned_body,
+            };
+            match crate::handlers::imap_handlers::send_email(
+                State(cloned_state.clone()),
+                crate::handlers::auth_middleware::AuthUser { user_id: cloned_user_id, is_admin: false },
+                Json(email_request)
+            ).await {
+                Ok(_) => {
+                    // No need to send success message
+                }
+                Err((status, error_json)) => {
+                    let error_msg = format!("Failed to send email: {}", error_json.0.get("error").and_then(|v| v.as_str()).unwrap_or("Unknown error"));
+                    if let Err(e) = crate::api::twilio_utils::send_conversation_message(
+                        &cloned_state,
+                        &error_msg,
+                        None,
+                        &cloned_user,
+                    ).await {
+                        eprintln!("Failed to send error message: {}", e);
+                    }
+                }
+            }
+        }
+        // Remove from map
+        let mut senders = cloned_state.pending_message_senders.lock().await;
+        senders.remove(&cloned_user_id);
+    });
+    // Store the cancel sender in the map
+    {
+        let mut senders = state.pending_message_senders.lock().await;
+        senders.insert(user_id, cancel_tx);
+    }
+    Ok(Json(json!({
+        "status": "success",
+        "message": "Email queued",
+        "notification": queued_msg
+    })))
+}
+
+#[derive(Debug, Deserialize)]
 pub struct RespondToEmailArgs {
     pub email_id: String,
     pub response_text: String,

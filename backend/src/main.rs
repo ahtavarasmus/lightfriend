@@ -266,6 +266,7 @@ async fn main() {
         .route("/api/call/email", get(elevenlabs::handle_email_fetch_tool_call))
         .route("/api/call/email/specific", post(elevenlabs::handle_email_search_tool_call))
         .route("/api/call/email/respond", post(elevenlabs::handle_respond_to_email))
+        .route("/api/call/email/send", post(elevenlabs::handle_email_send))
         .route("/api/call/waiting_check", post(elevenlabs::handle_create_waiting_check_tool_call))
         .route("/api/call/monitoring-status", post(elevenlabs::handle_update_monitoring_status_tool_call))
         .route("/api/call/cancel-message", get(elevenlabs::handle_cancel_pending_message_tool_call))

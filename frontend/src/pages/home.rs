@@ -29,7 +29,7 @@ fn render_notification_settings(profile: Option<&UserProfile>) -> Html {
                                                 Callback::from(move |e: Event| {
                                                     let input: HtmlInputElement = e.target_unchecked_into();
                                                     let notify = input.checked();
-                                                  
+                                                
                                                     if let Some(token) = window()
                                                         .and_then(|w| w.local_storage().ok())
                                                         .flatten()
@@ -135,95 +135,6 @@ pub fn MonthlyCredits(props: &Props) -> Html {
 pub struct Props {
     pub profile: UserProfile,
 }
-#[derive(Properties, PartialEq)]
-pub struct PairingCodeProps {
-    pub profile_data: UseStateHandle<Option<UserProfile>>,
-    pub show_confirm_modal: UseStateHandle<bool>,
-}
-#[function_component]
-pub fn PairingCodeSection(props: &PairingCodeProps) -> Html {
-    let profile_data = props.profile_data.clone();
-    let show_confirm_modal = props.show_confirm_modal.clone();
-    html! {
-        <>
-            <div class="pairing-code-section">
-                <button
-                    class="generate-code-btn"
-                    onclick={{
-                        let show_confirm_modal = show_confirm_modal.clone();
-                        Callback::from(move |_| show_confirm_modal.set(true))
-                    }}
-                >
-                    {"Generate New Pairing Code"}
-                </button>
-                <p class="warning-note">{"Note: Generating a new code will disconnect any existing server instance."}</p>
-            </div>
-            if *show_confirm_modal {
-                <div class="modal-overlay" onclick={{
-                    let show_confirm_modal = show_confirm_modal.clone();
-                    Callback::from(move |_| show_confirm_modal.set(false))
-                }}>
-                    <div class="modal-content" onclick={{
-                        Callback::from(|e: MouseEvent| {
-                            e.stop_propagation();
-                        })
-                    }}>
-                        <h3>{"Confirm New Pairing Code"}</h3>
-                        <p>{"Are you sure you want to generate a new pairing code? This will disconnect any existing server instance and it will stop working."}</p>
-                        <div class="modal-buttons">
-                            <button
-                                class="cancel-btn"
-                                onclick={{
-                                    let show_confirm_modal = show_confirm_modal.clone();
-                                    Callback::from(move |_| show_confirm_modal.set(false))
-                                }}
-                            >
-                                {"Cancel"}
-                            </button>
-                            <button
-                                class="confirm-btn"
-                                onclick={{
-                                    let profile_data = profile_data.clone();
-                                    let show_confirm_modal = show_confirm_modal.clone();
-                                    Callback::from(move |_| {
-                                        let profile_data = profile_data.clone();
-                                        if let Some(token) = window()
-                                            .and_then(|w| w.local_storage().ok())
-                                            .flatten()
-                                            .and_then(|storage| storage.get_item("token").ok())
-                                            .flatten()
-                                        {
-                                            wasm_bindgen_futures::spawn_local(async move {
-                                                let response = Request::post(&format!("{}/api/profile/generate-pairing-code", config::get_backend_url()))
-                                                    .header("Authorization", &format!("Bearer {}", token))
-                                                    .send()
-                                                    .await;
-                                              
-                                                if let Ok(response) = response {
-                                                    if let Ok(json) = response.json::<serde_json::Value>().await {
-                                                        if let Some(new_code) = json.get("pairing_code").and_then(|v| v.as_str()) {
-                                                            if let Some(mut current_profile) = (*profile_data).clone() {
-                                                                current_profile.pairing_code = Some(new_code.to_string());
-                                                                profile_data.set(Some(current_profile));
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            });
-                                        }
-                                        show_confirm_modal.set(false);
-                                    })
-                                }}
-                            >
-                                {"Generate New Code"}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            }
-        </>
-    }
-}
 #[function_component]
 pub fn Home() -> Html {
     let logged_in = is_logged_in();
@@ -232,14 +143,13 @@ pub fn Home() -> Html {
     let error = use_state(|| None::<String>);
     let is_expanded = use_state(|| false);
     let active_tab = use_state(|| DashboardTab::Connections);
-    let show_confirm_modal = use_state(|| false);
     let navigator = use_navigator().unwrap();
     // Single profile fetch effect
     {
         let profile_data = profile_data.clone();
         let user_verified = user_verified.clone();
         let error = error.clone();
-      
+    
         use_effect_with_deps(move |_| {
             let profile_data = profile_data.clone();
             let user_verified = user_verified.clone();
@@ -266,7 +176,7 @@ pub fn Home() -> Html {
                                 }
                                 return;
                             }
-                          
+                        
                             match response.json::<UserProfile>().await {
                                 Ok(profile) => {
                                     user_verified.set(profile.verified);
@@ -284,7 +194,7 @@ pub fn Home() -> Html {
                     }
                 }
             });
-          
+        
             || ()
         }, ());
     }
@@ -325,35 +235,72 @@ pub fn Home() -> Html {
                                             if let Some(ref tier) = profile.sub_tier {
                                                 match tier.as_str() {
                                                     "self_hosted" => html! {
-                                                        <div class="credit-item" tabindex="0">
-                                                            <span class="credit-label">{"Self-Hosted Instance"}</span>
-                                                            <HostInstructionsButton />
-                                                        </div>
-                                                    },
-                                                    "tier 3" => html! {
-                                                        <div class="credit-item" tabindex="0">
+                                                        <>
                                                             {
-                                                                if let Some(ref code) = &profile.pairing_code {
-                                                                    if code.len() > 10 {
-                                                                        html! {
-                                                                            <span class="credit-label">{"Server Instance Connected"}</span>
-                                                                        }
-                                                                    } else {
-                                                                        html! {
-                                                                            <>
-                                                                                <span class="credit-label">{"Pairing Code"}</span>
-                                                                                <span class="credit-value">{code}</span>
-                                                                            </>
-                                                                        }
-                                                                    }
-                                                                } else {
+                                                                if profile.days_until_billing.is_some() {
                                                                     html! {
-                                                                        <span class="credit-label">{"Server Instance"}</span>
+                                                                        <MonthlyCredits profile={profile.clone()} />
                                                                     }
+                                                                } else if profile.credits_left > 0.0 {
+                                                                    html! { <MonthlyCredits profile={profile.clone()} /> }
+                                                                } else {
+                                                                    html! {}
                                                                 }
                                                             }
-                                                            <HostInstructionsButton />
-                                                        </div>
+                                                            {
+                                                                if profile.credits > 0.00 {
+                                                                    html! {
+                                                                        <div class="credit-item" tabindex="0">
+                                                                            <span class="credit-label">{"Message Credits"}</span>
+                                                                            <span class="credit-value">{format!("{:.2}€", profile.credits)}</span>
+                                                                            <div class="credit-tooltip">
+                                                                                {"Your message credits. Checkout how they are used in the pricing page under 'Message Costs (Credits)'."}
+                                                                            </div>
+                                                                        </div>
+                                                                    }
+                                                                } else {
+                                                                    html! {}
+                                                                }
+                                                            }
+                                                            <div class="credit-item" tabindex="0">
+                                                                <span class="credit-label">{"Self-Hosted Instance"}</span>
+                                                                <HostInstructionsButton />
+                                                            </div>
+                                                        </>
+                                                    },
+                                                    "tier 3" => html! {
+                                                        <>
+                                                            {
+                                                                if profile.days_until_billing.is_some() {
+                                                                    html! {
+                                                                        <MonthlyCredits profile={profile.clone()} />
+                                                                    }
+                                                                } else if profile.credits_left > 0.0 {
+                                                                    html! { <MonthlyCredits profile={profile.clone()} /> }
+                                                                } else {
+                                                                    html! {}
+                                                                }
+                                                            }
+                                                            {
+                                                                if profile.credits > 0.00 {
+                                                                    html! {
+                                                                        <div class="credit-item" tabindex="0">
+                                                                            <span class="credit-label">{"Message Credits"}</span>
+                                                                            <span class="credit-value">{format!("{:.2}€", profile.credits)}</span>
+                                                                            <div class="credit-tooltip">
+                                                                                {"Your message credits. Checkout how they are used in the pricing page under 'Message Costs (Credits)'."}
+                                                                            </div>
+                                                                        </div>
+                                                                    }
+                                                                } else {
+                                                                    html! {}
+                                                                }
+                                                            }
+                                                            <div class="credit-item" tabindex="0">
+                                                                <span class="credit-label">{"Server Instance"}</span>
+                                                                <HostInstructionsButton />
+                                                            </div>
+                                                        </>
                                                     },
                                                     _ => {
                                                         html! {
@@ -365,22 +312,14 @@ pub fn Home() -> Html {
                                                                                 <>
                                                                                     <MonthlyCredits profile={profile.clone()} />
                                                                                     {
-                                                                                        if profile.credits_left <= 0.0 {
+                                                                                        if profile.credits > 0.00 {
                                                                                             html! {
-                                                                                                <div class="credit-warning">
-                                                                                                    {
-                                                                                                        if let Some(days) = profile.days_until_billing {
-                                                                                                            if days == 0 {
-                                                                                                                "Monthly quota used. Credits reset today!".to_string()
-                                                                                                            } else if days == 1 {
-                                                                                                                "Monthly quota used. Credits reset in 1 day.".to_string()
-                                                                                                            } else {
-                                                                                                                format!("Monthly quota used. Credits reset in {} days.", days)
-                                                                                                            }
-                                                                                                        } else {
-                                                                                                            "Monthly quota used. Wait for next month or buy overage credits.".to_string()
-                                                                                                        }
-                                                                                                    }
+                                                                                                <div class="credit-item" tabindex="0">
+                                                                                                    <span class="credit-label">{"Message Credits"}</span>
+                                                                                                    <span class="credit-value">{format!("{:.2}€", profile.credits)}</span>
+                                                                                                    <div class="credit-tooltip">
+                                                                                                        {"Your message credits. Checkout how they are used in the pricing page under 'Message Costs (Credits)'."}
+                                                                                                    </div>
                                                                                                 </div>
                                                                                             }
                                                                                         } else {
@@ -389,68 +328,94 @@ pub fn Home() -> Html {
                                                                                     }
                                                                                 </>
                                                                             }
-                                                                        } else if profile.credits == 0.00 {
-                                                                            html! {
-                                                                                <div class="subscription-promo">
-                                                                                    <Link<Route> to={Route::Billing} classes="promo-link">
-                                                                                        {"Purchase Credits →"}
-                                                                                    </Link<Route>>
-                                                                                </div>
-                                                                            }
                                                                         } else {
                                                                             html! {
                                                                                 <>
-                                                                                <div class="credit-item" tabindex="0">
-                                                                                    <span class="credit-label">{"Message Credits"}</span>
-                                                                                    <span class="credit-value">{format!("{:.2}€", profile.credits)}</span>
-                                                                                    <div class="credit-tooltip">
-                                                                                        {"Your message credits. Checkout how they are used in the pricing page under 'Message Costs (Credits)'."}
-                                                                                    </div>
-                                                                                </div>
-                                                                                {
-                                                                                    if profile.credits < 1.00 {
-                                                                                        html! {
-                                                                                        <div class="subscription-promo">
-                                                                                            <Link<Route> to={Route::Billing} classes="promo-link">
-                                                                                                {"Purchase Credits →"}
-                                                                                            </Link<Route>>
-                                                                                        </div>
+                                                                                    {
+                                                                                        if profile.days_until_billing.is_some() {
+                                                                                            html! {
+                                                                                                <MonthlyCredits profile={profile.clone()} />
+                                                                                            }
+                                                                                        } else if profile.credits_left > 0.0 {
+                                                                                            html! { <MonthlyCredits profile={profile.clone()} /> }
+                                                                                        } else {
+                                                                                            html! {}
                                                                                         }
-                                                                                    } else {
-                                                                                        html! {}
                                                                                     }
-                                                                                }
+                                                                                    {
+                                                                                        if profile.credits > 0.00 {
+                                                                                            html! {
+                                                                                                <div class="credit-item" tabindex="0">
+                                                                                                    <span class="credit-label">{"Message Credits"}</span>
+                                                                                                    <span class="credit-value">{format!("{:.2}€", profile.credits)}</span>
+                                                                                                    <div class="credit-tooltip">
+                                                                                                        {"Your message credits. Checkout how they are used in the pricing page under 'Message Costs (Credits)'."}
+                                                                                                    </div>
+                                                                                                </div>
+                                                                                            }
+                                                                                        } else {
+                                                                                            html! {}
+                                                                                        }
+                                                                                    }
                                                                                 </>
                                                                             }
                                                                         }
                                                                     } else {
                                                                         let twilio_setup_complete = profile.twilio_sid.is_some() && profile.twilio_token.is_some();
                                                                         html! {
-                                                                            <div class="credit-item" tabindex="0">
-                                                                                <span class="credit-label">{"Twilio Setup"}</span>
+                                                                            <>
                                                                                 {
-                                                                                    if twilio_setup_complete {
+                                                                                    if profile.days_until_billing.is_some() {
                                                                                         html! {
-                                                                                            <>
-                                                                                                <span class="credit-value">{"Ready"}</span>
-                                                                                                <div class="small-button-container">
-                                                                                                    <Link<Route> to={Route::TwilioHostedInstructions} classes="small-promo-link">
-                                                                                                        {"Change Twilio Settings"}
-                                                                                                    </Link<Route>>
-                                                                                                </div>
-                                                                                            </>
+                                                                                            <MonthlyCredits profile={profile.clone()} />
                                                                                         }
+                                                                                    } else if profile.credits_left > 0.0 {
+                                                                                        html! { <MonthlyCredits profile={profile.clone()} /> }
                                                                                     } else {
-                                                                                        html! {
-                                                                                            <div class="subscription-promo">
-                                                                                                <Link<Route> to={Route::TwilioHostedInstructions} classes="promo-link">
-                                                                                                    {"Bring Your Own Number →"}
-                                                                                                </Link<Route>>
-                                                                                            </div>
-                                                                                        }
+                                                                                        html! {}
                                                                                     }
                                                                                 }
-                                                                            </div>
+                                                                                {
+                                                                                    if profile.credits > 0.00 {
+                                                                                        html! {
+                                                                                            <div class="credit-item" tabindex="0">
+                                                                                                <span class="credit-label">{"Message Credits"}</span>
+                                                                                                <span class="credit-value">{format!("{:.2}€", profile.credits)}</span>
+                                                                                                <div class="credit-tooltip">
+                                                                                                    {"Your message credits. Checkout how they are used in the pricing page under 'Message Costs (Credits)'."}
+                                                                                                </div>
+                                                                                            </div>
+                                                                                        }
+                                                                                    } else {
+                                                                                        html! {}
+                                                                                    }
+                                                                                }
+                                                                                <div class="credit-item" tabindex="0">
+                                                                                    <span class="credit-label">{"Twilio Setup"}</span>
+                                                                                    {
+                                                                                        if twilio_setup_complete {
+                                                                                            html! {
+                                                                                                <>
+                                                                                                    <span class="credit-value">{"Ready"}</span>
+                                                                                                    <div class="small-button-container">
+                                                                                                        <Link<Route> to={Route::TwilioHostedInstructions} classes="small-promo-link">
+                                                                                                            {"Change Twilio Settings"}
+                                                                                                        </Link<Route>>
+                                                                                                    </div>
+                                                                                                </>
+                                                                                            }
+                                                                                        } else {
+                                                                                            html! {
+                                                                                                <div class="subscription-promo">
+                                                                                                    <Link<Route> to={Route::TwilioHostedInstructions} classes="promo-link">
+                                                                                                        {"Bring Your Own Number →"}
+                                                                                                    </Link<Route>>
+                                                                                                </div>
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                </div>
+                                                                            </>
                                                                         }
                                                                     }
                                                                 }
@@ -460,21 +425,40 @@ pub fn Home() -> Html {
                                                 }
                                             } else {
                                                 html! {
-                                                    <div class="subscription-promo">
-                                                        <Link<Route> to={Route::Pricing} classes="promo-link">
-                                                            {"Subscribe to start →"}
-                                                        </Link<Route>>
-                                                    </div>
+                                                    <>
+                                                        {
+                                                            if profile.days_until_billing.is_some() {
+                                                                html! {
+                                                                    <MonthlyCredits profile={profile.clone()} />
+                                                                }
+                                                            } else if profile.credits_left > 0.0 {
+                                                                html! { <MonthlyCredits profile={profile.clone()} /> }
+                                                            } else {
+                                                                html! {}
+                                                            }
+                                                        }
+                                                        {
+                                                            if profile.credits > 0.00 {
+                                                                html! {
+                                                                    <div class="credit-item" tabindex="0">
+                                                                        <span class="credit-label">{"Message Credits"}</span>
+                                                                        <span class="credit-value">{format!("{:.2}€", profile.credits)}</span>
+                                                                        <div class="credit-tooltip">
+                                                                            {"Your message credits. Checkout how they are used in the pricing page under 'Message Costs (Credits)'."}
+                                                                        </div>
+                                                                    </div>
+                                                                }
+                                                            } else {
+                                                                html! {}
+                                                            }
+                                                        }
+                                                        <div class="subscription-promo">
+                                                            <Link<Route> to={Route::Pricing} classes="promo-link">
+                                                                {"Subscribe to start →"}
+                                                            </Link<Route>>
+                                                        </div>
+                                                    </>
                                                 }
-                                            }
-                                        }
-                                        {
-                                            if profile.sub_tier == Some("tier 3".to_string()) {
-                                                html! {
-                                                    <PairingCodeSection profile_data={profile_data.clone()} show_confirm_modal={show_confirm_modal.clone()} />
-                                                }
-                                            } else {
-                                                html! {}
                                             }
                                         }
                                     </div>
@@ -548,8 +532,8 @@ pub fn Home() -> Html {
                             html! {}
                         }
                     }
-                  
-                  
+                
+                
                     <br/>
                     <br/>
                     <div class="dashboard-tabs">
@@ -835,114 +819,6 @@ pub fn Home() -> Html {
                             color: #7EB2FF;
                             background: rgba(30, 144, 255, 0.1);
                             transform: translateY(-2px);
-                        }
-                        .pairing-code-section {
-                            margin-top: 1rem;
-                            display: flex;
-                            flex-direction: column;
-                            align-items: center;
-                            gap: 0.5rem;
-                        }
-                        .generate-code-btn {
-                            background: linear-gradient(45deg, #1E90FF, #4169E1);
-                            color: white;
-                            border: none;
-                            padding: 0.75rem 1.5rem;
-                            border-radius: 8px;
-                            cursor: pointer;
-                            font-size: 0.9rem;
-                            transition: all 0.3s ease;
-                            box-shadow: 0 2px 8px rgba(30, 144, 255, 0.2);
-                        }
-                        .generate-code-btn:hover {
-                            transform: translateY(-2px);
-                            box-shadow: 0 4px 12px rgba(30, 144, 255, 0.3);
-                            background: linear-gradient(45deg, #4169E1, #1E90FF);
-                        }
-                        .warning-note {
-                            color: #ff6b6b;
-                            font-size: 0.8rem;
-                            text-align: center;
-                            max-width: 250px;
-                            margin: 0.5rem 0;
-                        }
-                        .modal-overlay {
-                            position: fixed;
-                            top: 0;
-                            left: 0;
-                            right: 0;
-                            bottom: 0;
-                            background: rgba(0, 0, 0, 0.85);
-                            display: flex;
-                            justify-content: center;
-                            align-items: center;
-                            z-index: 1000;
-                            backdrop-filter: blur(5px);
-                        }
-                        .modal-content {
-                            background: #1a1a1a;
-                            border: 1px solid rgba(30, 144, 255, 0.2);
-                            border-radius: 12px;
-                            padding: 2rem;
-                            max-width: 500px;
-                            width: 90%;
-                            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
-                            animation: modalFadeIn 0.3s ease;
-                        }
-                        @keyframes modalFadeIn {
-                            from {
-                                opacity: 0;
-                                transform: translateY(-20px);
-                            }
-                            to {
-                                opacity: 1;
-                                transform: translateY(0);
-                            }
-                        }
-                        .modal-content h3 {
-                            color: #fff;
-                            margin: 0 0 1rem 0;
-                            font-size: 1.5rem;
-                        }
-                        .modal-content p {
-                            color: #999;
-                            margin: 0 0 1.5rem 0;
-                            line-height: 1.5;
-                        }
-                        .modal-buttons {
-                            display: flex;
-                            gap: 1rem;
-                            justify-content: flex-end;
-                        }
-                        .cancel-btn {
-                            background: transparent;
-                            border: 1px solid rgba(255, 255, 255, 0.2);
-                            color: #999;
-                            padding: 0.75rem 1.5rem;
-                            border-radius: 8px;
-                            cursor: pointer;
-                            font-size: 0.9rem;
-                            transition: all 0.3s ease;
-                        }
-                        .cancel-btn:hover {
-                            background: rgba(255, 255, 255, 0.1);
-                            color: #fff;
-                        }
-                        .confirm-btn {
-                            background: linear-gradient(45deg, #ff4444, #ff6b6b);
-                            color: white;
-                            border: none;
-                            padding: 0.75rem 1.5rem;
-                            border-radius: 8px;
-                            cursor: pointer;
-                            font-size: 0.9rem;
-                            transition: all 0.3s ease;
-                            box-shadow: 0 2px 8px rgba(255, 68, 68, 0.2);
-                        }
-                        .confirm-btn:hover {
-                            transform: translateY(-2px);
-                            box-shadow: 0 4px 12px rgba(255, 68, 68, 0.3);
-                            background: linear-gradient(45deg, #ff6b6b, #ff4444);
                         }
                         .phone-selector {
                             margin: 1.5rem 0;

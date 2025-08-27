@@ -627,7 +627,6 @@ pub fn email_connect(props: &EmailProps) -> Html {
             <div class="upgrade-prompt">
                 <div class="upgrade-content">
                     <h3>{"Upgrade to Enable Email Integration"}</h3>
-                    <p>{"Email integration is available for premium plan subscribers. Upgrade your plan to connect your email account and manage your emails through SMS and voice calls."}</p>
                     <a href="/pricing" class="upgrade-button">
                         {"View Pricing Plans"}
                     </a>

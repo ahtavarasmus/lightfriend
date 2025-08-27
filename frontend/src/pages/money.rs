@@ -67,13 +67,14 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
         let subscription_type = subscription_type.clone();
         let selected_country = selected_country.clone();
         let selected_addons = selected_addons.clone();
-   
+  
         Callback::from(move |e: MouseEvent| {
             e.prevent_default();
             let user_id = user_id.clone();
             let subscription_type = subscription_type.clone();
             let selected_addons = selected_addons.clone();
-       
+            let selected_country = selected_country.clone();
+      
             if subscription_type != "basic" && subscription_type != "oracle" && selected_country == "Other" {
                 if let Some(window) = web_sys::window() {
                     if !window.confirm_with_message(
@@ -85,7 +86,7 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
                     }
                 }
             }
-       
+      
             wasm_bindgen_futures::spawn_local(async move {
                 if let Some(token) = window()
                     .and_then(|w| w.local_storage().ok())
@@ -101,6 +102,7 @@ pub fn checkout_button(props: &CheckoutButtonProps) -> Html {
                             _ => "Hosted" // Default to Hosted if unknown
                         },
                         "addons": selected_addons,
+                        "trial_days": if selected_country == "US" || selected_country == "CA" { 7 } else { 0 },
                     });
                     let response = Request::post(&endpoint)
                         .header("Authorization", &format!("Bearer {}", token))
@@ -357,6 +359,18 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
         position: absolute;
         top: -15px;
         right: 20px;
+        background: linear-gradient(45deg, #00FFFF, #00CED1);
+        color: white;
+        padding: 0.5rem 1rem;
+        border-radius: 20px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        z-index: 4;
+    }
+    .trial-tag {
+        position: absolute;
+        top: -15px;
+        left: 20px;
         background: linear-gradient(45deg, #00FFFF, #00CED1);
         color: white;
         padding: 0.5rem 1rem;
@@ -644,7 +658,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
             flex: 0 1 calc(50% - 1rem);
         }
     }
-
 .learn-more-section {
     text-align: center;
     margin-top: 1.5rem;
@@ -676,6 +689,13 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     html! {}
                 }
             }
+            {
+                if props.is_trial {
+                    html! { <div class="trial-tag">{"7-Day Free Trial"}</div> }
+                } else {
+                    html! {}
+                }
+            }
             <div class="header-background" style={format!("background-image: url({});", image_url)}>
                 <h3>{props.plan_name.clone()}</h3>
             </div>
@@ -688,7 +708,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     { if props.subscription_type == "hosted" {
                         html! {
                             <p class="billing-note">
-                                {format!("Billed monthly at {}{:.2}", props.currency, props.price)}
+                                {if props.is_trial {"7-day free trial, then "} else {""} }{format!("billed monthly at {}{:.2}", props.currency, props.price)}
                             </p>
                         }
                     } else if props.subscription_type == "guaranteed" {
@@ -704,7 +724,6 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     <div class="learn-more-section">
                         <a href="/how-to-switch-to-dumbphone" class="learn-more-link">{"How to switch to a dumbphone and what you'll need"}</a>
                     </div>
-
                 <div class="includes">
                     <ul class="quota-list">
                         { for props.features.iter().flat_map(|feature| {
@@ -1449,7 +1468,7 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                     subscription_type={"hosted"}
                     is_popular={true}
                     is_premium={false}
-                    is_trial={false}
+                    is_trial={props.selected_country == "US" || props.selected_country == "CA"}
                     user_id={props.user_id}
                     user_email={props.user_email.clone()}
                     is_logged_in={props.is_logged_in}
@@ -1532,6 +1551,10 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                     <details>
                         <summary>{"Is it available in my country?"}</summary>
                         <p>{"Available globally. US/CA everything is included. FI/UK/AU/NL include a number but message are bought separately. Elsewhere bring your own number (guided setup, costs vary ~€0.05-0.50/text or free if you have extra android phone laying around with a another phone plan). Contact rasmus@ahtava.com for more details."}</p>
+                    </details>
+                    <details>
+                        <summary>{"Why do the plan offering differ per country?"}</summary>
+                        <p>{"Different countries have vastly different SMS costs - in the US and Canada, messages cost about 10x less, while in other countries they can cost up to $1 per message. To keep pricing fair and affordable, messages are included only in US/CA plans. For other countries, you can buy message credits as needed, giving you more control over costs."}</p>
                     </details>
                 </div>
             </div>
