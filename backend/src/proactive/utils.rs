@@ -251,23 +251,9 @@ pub async fn check_message_importance(
     raw_content: &str,
 ) -> Result<(bool, Option<String>, Option<String>), Box<dyn std::error::Error>> {
     // Special case for WhatsApp incoming calls
-    if service == "whatsapp" && raw_content == "Incoming call. Use the WhatsApp app to answer." {
+    if raw_content.contains("Incoming call") {
         // Trim for SMS
-        let prefix = "WhatsApp from ".to_string();
-        let separator = ": ";
-        let max_len = 157;
-        let static_len = prefix.len() + separator.len();
-        let mut remaining = max_len - static_len;
-        let mut sender_trimmed = chat_name.chars().take(30).collect::<String>();
-        if chat_name.len() > sender_trimmed.len() {
-            sender_trimmed.push('…');
-        }
-        remaining = remaining.saturating_sub(sender_trimmed.len());
-        let mut content_trimmed = raw_content.chars().take(remaining).collect::<String>();
-        if raw_content.len() > content_trimmed.len() {
-            content_trimmed.push('…');
-        }
-        let what_to_inform = format!("{}{}{}{}", prefix, sender_trimmed, separator, content_trimmed);
+        let what_to_inform= format!("You have an incoming {} call from {}", service, chat_name);
         let first_message = format!("Hello, you have an incoming WhatsApp call from {}.", chat_name);
         return Ok((true, Some(what_to_inform), Some(first_message)));
     }

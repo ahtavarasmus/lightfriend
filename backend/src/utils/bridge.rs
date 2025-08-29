@@ -866,7 +866,7 @@ pub async fn handle_bridge_message(
     if running_environment == "development".to_string() {
         return;
     }
-        // FAST CHECKS SECOND - Check priority senders if active
+    // FAST CHECKS SECOND - Check priority senders if active
     for priority_sender in &priority_senders {
         let clean_priority_sender = remove_bridge_suffix(priority_sender.sender.as_str());
         if chat_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) ||
@@ -963,7 +963,13 @@ pub async fn handle_bridge_message(
         tracing::debug!("Critical message checking disabled for user {}", user_id);
         return;
     }
-    if let Ok((is_critical, message, first_message)) = crate::proactive::utils::check_message_importance(&state, &format!("{} from {}: {}", service_cap, chat_name, content), service.as_str(), chat_name.as_str(), content.as_str()).await {
+    if user_id == 1 {
+        println!("service: {}", service);
+        println!("chat_name: {}", chat_name);
+        println!("content: {}", content);
+        println!("content contains call: {}", content.contains("Incoming call"));
+    }
+    if let Ok((is_critical, message, first_message)) = crate::proactive::utils::check_message_importance(&state, &format!("{} from {}: {}", service_cap, chat_name, content), service_cap.as_str(), chat_name.as_str(), content.as_str()).await {
         if is_critical {
             let message = message.unwrap_or(format!("Critical {} message found, failed to get content, but you can check your {} to see it.", service_cap, service));
             let first_message = first_message.unwrap_or(format!("Hey, I found some critical {} message.", service_cap));
