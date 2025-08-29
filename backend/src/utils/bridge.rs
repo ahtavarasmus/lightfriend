@@ -761,29 +761,6 @@ pub async fn handle_bridge_message(
             return;
         }
     };
-    // Check if this is a group room (more than 2 members)
-    let members = match room.members(RoomMemberships::JOIN).await {
-        Ok(m) => m,
-        Err(e) => {
-            tracing::error!("Failed to fetch room members: {}", e);
-            return;
-        }
-    };
-    let member_count = members.len() as u64;
-
-    if user_id == 1 {
-        println!("members: {}", member_count);
-    }
-    if member_count > 3 {
-        let is_mentioned = event.content.mentions.as_ref()
-            .map(|m| m.user_ids.contains(&matrix_user_id))
-            .unwrap_or(false);
-        if !is_mentioned {
-            tracing::info!("Skipping message from group room ({} members) since user wasn't mentioned", member_count);
-            return;
-        }
-        tracing::info!("User {} is mentioned in message (event ID: {})", user_id, event.event_id);
-    }
     let sender_localpart = event.sender.localpart().to_string();
     let service = match infer_service(&room_name, &sender_localpart) {
         Some(s) => s,
@@ -825,6 +802,30 @@ pub async fn handle_bridge_message(
     };
     if user_id == 1 { // if admin for debugging
         println!("message: {}", content);
+    }
+
+    // Check if this is a group room (more than 2 members)
+    let members = match room.members(RoomMemberships::JOIN).await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!("Failed to fetch room members: {}", e);
+            return;
+        }
+    };
+    let member_count = members.len() as u64;
+
+    if user_id == 1 {
+        println!("members: {}", member_count);
+    }
+    if member_count > 3 {
+        let is_mentioned = event.content.mentions.as_ref()
+            .map(|m| m.user_ids.contains(&matrix_user_id))
+            .unwrap_or(false);
+        if !is_mentioned {
+            tracing::info!("Skipping message from group room ({} members) since user wasn't mentioned", member_count);
+            return;
+        }
+        tracing::info!("User {} is mentioned in message (event ID: {})", user_id, event.event_id);
     }
     // Skip error messages
     if content.contains("Failed to bridge media") ||
@@ -962,7 +963,7 @@ pub async fn handle_bridge_message(
         tracing::debug!("Critical message checking disabled for user {}", user_id);
         return;
     }
-    if let Ok((is_critical, message, first_message)) = crate::proactive::utils::check_message_importance(&state, &format!("{} from {}: {}", service_cap, chat_name, content)).await {
+    if let Ok((is_critical, message, first_message)) = crate::proactive::utils::check_message_importance(&state, &format!("{} from {}: {}", service_cap, chat_name, content), service.as_str(), chat_name.as_str(), content.as_str()).await {
         if is_critical {
             let message = message.unwrap_or(format!("Critical {} message found, failed to get content, but you can check your {} to see it.", service_cap, service));
             let first_message = first_message.unwrap_or(format!("Hey, I found some critical {} message.", service_cap));

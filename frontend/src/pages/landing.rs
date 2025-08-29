@@ -192,10 +192,10 @@ pub fn landing() -> Html {
                     <ul>
                         <li>
                             <details>
-                                <summary><i class="fas fa-phone"></i>{"Voice calling interface"}</summary>
+                            <summary><i class="fas fa-phone"></i>{"Voice calling interface"}</summary>
                                 <div class="feature-desc">
                                     <p>{"Access all of Lightfriend's features through natural voice calls. Simply dial and have a conversation with your AI assistant. No smartphone or internet connection needed - works with any basic phone that can make calls."}</p>
-                                    // <iframe class="feature-video" src="https://www.youtube.com/embed/VIDEO_ID" allowfullscreen=true></iframe>
+                                    <video class="feature-video" src="/assets/voice-showcase.mp4" controls=true autoplay=true loop=false muted=false></video>
                                 </div>
                             </details>
                         </li>

@@ -290,7 +290,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     }
 
                                     // Check message importance based on criticality
-                                    match crate::proactive::utils::check_message_importance(&state, &emails_content).await {
+                                    match crate::proactive::utils::check_message_importance(&state, &emails_content, "", "", "").await {
                                         Ok((is_critical, message, first_message)) => {
                                             if is_critical {
                                                 let message = message.unwrap_or("Critical email found, check email to see it (failed to fetch actual content, pls report)".to_string());

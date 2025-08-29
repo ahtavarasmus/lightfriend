@@ -246,11 +246,33 @@ pub struct MatchResponse {
 pub async fn check_message_importance(
     state: &Arc<AppState>,
     message: &str,
+    service: &str,
+    chat_name: &str,
+    raw_content: &str,
 ) -> Result<(bool, Option<String>, Option<String>), Box<dyn std::error::Error>> {
+    // Special case for WhatsApp incoming calls
+    if service == "whatsapp" && raw_content == "Incoming call. Use the WhatsApp app to answer." {
+        // Trim for SMS
+        let prefix = "WhatsApp from ".to_string();
+        let separator = ": ";
+        let max_len = 157;
+        let static_len = prefix.len() + separator.len();
+        let mut remaining = max_len - static_len;
+        let mut sender_trimmed = chat_name.chars().take(30).collect::<String>();
+        if chat_name.len() > sender_trimmed.len() {
+            sender_trimmed.push('…');
+        }
+        remaining = remaining.saturating_sub(sender_trimmed.len());
+        let mut content_trimmed = raw_content.chars().take(remaining).collect::<String>();
+        if raw_content.len() > content_trimmed.len() {
+            content_trimmed.push('…');
+        }
+        let what_to_inform = format!("{}{}{}{}", prefix, sender_trimmed, separator, content_trimmed);
+        let first_message = format!("Hello, you have an incoming WhatsApp call from {}.", chat_name);
+        return Ok((true, Some(what_to_inform), Some(first_message)));
+    }
     // Build the chat payload ----------------------------------------------
     let client = create_openai_client(&state)?;
-
-
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
@@ -270,7 +292,6 @@ pub async fn check_message_importance(
             tool_call_id: None,
         },
     ];
-
     // JSON schema for the structured output -------------------------------
     let mut properties = std::collections::HashMap::new();
     properties.insert(
@@ -297,7 +318,6 @@ pub async fn check_message_importance(
             ..Default::default()
         }),
     );
-
     let tools = vec![chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
@@ -310,7 +330,6 @@ pub async fn check_message_importance(
             },
         },
     }];
-
     let request = chat_completion::ChatCompletionRequest::new(
         GPT4_O.to_string(),
         messages)
@@ -319,7 +338,6 @@ pub async fn check_message_importance(
         // Lower temperature for more deterministic classification
         .temperature(0.2)
         .max_tokens(200);
-
     // ---------------------------------------------------------------------
     match client.chat_completion(request).await {
         Ok(result) => {
@@ -333,7 +351,7 @@ pub async fn check_message_importance(
                             }
                             Err(e) => {
                                 tracing::error!("Failed to parse message analysis response: {}", e);
-                                Ok((false,  None, None))
+                                Ok((false, None, None))
                             }
                         }
                     } else {
