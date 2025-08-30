@@ -4,11 +4,9 @@ use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
 use yew_router::components::Link;
-
 #[function_component(Landing)]
 pub fn landing() -> Html {
     let dim_opacity = use_state(|| 0.0);
-
     // Scroll to top only on initial mount
     {
         use_effect_with_deps(
@@ -21,7 +19,6 @@ pub fn landing() -> Html {
             (),
         );
     }
-
     // Add scroll listener for dimming
     {
         let dim_opacity = dim_opacity.clone();
@@ -45,13 +42,11 @@ pub fn landing() -> Html {
                             callback.as_ref().unchecked_ref(),
                         )
                         .unwrap();
-
                     // Initial call
                     if let Ok(scroll_y) = window.scroll_y() {
                         let factor = (scroll_y / 500.0).min(1.0);
                         dim_opacity.set(factor * 0.6);
                     }
-
                     Box::new(move || {
                         if let Some(win) = web_sys::window() {
                             win.remove_event_listener_with_callback(
@@ -71,7 +66,6 @@ pub fn landing() -> Html {
             (),
         );
     }
-
     let feature_css = r#"
         .feature-list {
             padding: 4rem 2rem;
@@ -123,7 +117,6 @@ pub fn landing() -> Html {
             }
         }
     "#;
-
     html! {
         <div class="landing-page">
             <head>
@@ -155,19 +148,7 @@ pub fn landing() -> Html {
                 </div>
             </header>
             <section class="story-section">
-                <div class="story-grid">
-                    <div class="story-item">
-                        <img src="/assets/lightfriend-robot-scene-3.png" alt="Lightfriend AI notifying user on dumbphone" loading="lazy" />
-                        <p class="story-text">
-                            {"Lightfriend enhances your dumbphone with connections to important apps as well as monitors them for you."}
-                            {" If it matters, you will receive a call. "}
-                        </p>
-                    </div>
-                    <div class="story-item">
-                        <img src="/assets/lightfriend-robot-scene-4.png" alt="Ask whenever whatever" loading="lazy" />
-                        <p>{"Enjoy the freedom knowing everything is just a call or text away."}</p>
-                    </div>
-                </div>
+                <img src="/assets/rasmus-story.png" alt="Rasmus story" loading="lazy" />
             </section>
             <div class="filter-concept">
                 <div class="filter-content">
@@ -432,7 +413,6 @@ pub fn landing() -> Html {
         gap: 1rem;
         padding-right: 0; /* No extra padding, arrow will be in its own space */
     }
-
     summary::after {
         content: '▶';
         font-size: 0.8rem;
@@ -441,23 +421,19 @@ pub fn landing() -> Html {
         flex-shrink: 0; /* Prevent arrow from moving when content changes */
         transition: transform 0.3s ease;
     }
-
     details summary {
         display: flex;
         align-items: center;
         cursor: pointer;
     }
-
     details summary::after {
         content: "▶";
         margin-left: 8px;
         transition: transform 0.2s;
     }
-
     details[open] summary::after {
         transform: rotate(90deg);
     }
-
     .feature-desc {
         padding: 1rem;
         background: rgba(0, 0, 0, 0.2);
@@ -654,7 +630,6 @@ pub fn landing() -> Html {
         line-height: 1.8;
         font-weight: 400;
     }
-
     .comparison-table {
         margin-top: 2rem;
         overflow-x: auto;
@@ -1320,6 +1295,12 @@ pub fn landing() -> Html {
         position: relative;
         z-index: 2;
     }
+    .story-section img {
+        max-width: 100%;
+        height: auto;
+        border-radius: 12px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
     .story-grid {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
@@ -1351,7 +1332,6 @@ pub fn landing() -> Html {
         margin: 0;
         text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
     }
-
     .story-text {
         color: #ddd;
         font-size: 1.2rem;
