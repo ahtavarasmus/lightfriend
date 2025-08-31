@@ -382,7 +382,6 @@ fn hours_since(current_hour: u32, previous_hour: u32) -> u32 {
 pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result<(), Box<dyn std::error::Error>> {
     // Get the user's digest settings and timezone
     let (morning_digest, day_digest, evening_digest) = state.user_core.get_digests(user_id)?;
-    let user_settings = state.user_core.get_user_settings(user_id)?;
     let user_info = state.user_core.get_user_info(user_id)?;
     
     // If morning digest is enabled (Some value) and we have a timezone, check the time
@@ -1200,23 +1199,19 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
     Ok(())
 }
 
-// Prompt for generating an SMS digest
-const DIGEST_PROMPT: &str = r#"You are an AI called lightfriend that creates concise SMS digests of messages and calendar events. Your goal is to help users stay on top of unread messages and upcoming calendar events without needing to open their apps. Highlight the existence of important items to prompt user follow-ups, but avoid revealing full content—provide just enough clues (e.g., sender, topic hint, or urgency) so users can ask for more details. Prioritize critical or actionable items, mention less urgent ones briefly, and group similar items to keep it short. Not all details need inclusion; focus on teasers that inform without overwhelming.
-
+const DIGEST_PROMPT: &str = r#"You are an AI called lightfriend that creates concise SMS digests of messages and calendar events. Your goal is to help users stay on top of unread messages and upcoming calendar events without needing to open their apps. Group items by platform (e.g., WHATSAPP:, EMAIL:, CALENDAR:), starting each group on a new line. Within each group, provide clear teasers for critical or prioritized items (e.g., sender, topic hint, timestamp in parentheses), separating them with commas or '+' for brevity. Summarize less urgent or grouped items at the end of the group with '+' (e.g., '+ other routine items from xai, claude, ..'). Adjust detail based on overall content: if low volume or mostly low-criticality, expand critical items with fuller, detailed teasers (e.g., key excerpts or actions) to avoid follow-ups. For high volume or non-critical items, use minimal teasers. Highlight critical/actionable items with more specific hints to reduce follow-ups, but avoid full content. Cover all items concisely without omissions.
 Rules
 • Absolute length limit: 480 characters.
 • Do NOT use markdown (no *, **, _, links, or backticks).
 • Do NOT use emojis or emoticons.
 • Plain text only.
-• Start each item on a new line; you may prefix items with a hyphen (“-”) if helpful, but keep the newline.
-• Put truly critical or actionable items first.
-• Mention the platform (EMAIL / WHATSAPP / TELEGRAM / SIGNAL / CALENDAR) only when it adds essential context.
-• Add timestamp to messages when it makes sense.
-• For calendar, include only events starting in the next few hours; mention next-day events if relevant, with brief clues about what they involve.
-• Tease information to encourage follow-ups, e.g., "Email from boss re: project deadline" instead of full message body.
-
+• Start each platform group on a new line, followed by ': ' and the teasers/summaries.
+• Put critical or prioritized items first within each group.
+• Include timestamps in parentheses (e.g., '(yesterday 8pm)') for relevance.
+• For calendar, include events in the next 24 hours with start time and brief hint.
+• Tease naturally, e.g., 'Mom suggested dinner in family chat (yesterday 8pm)'.
 Return JSON with a single field:
-• `digest` – the plain-text SMS message, with newlines separating items.
+• `digest` – the plain-text SMS message, with newlines separating groups.
 "#;
 
 pub async fn generate_digest(

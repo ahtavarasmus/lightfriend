@@ -255,6 +255,8 @@ pub async fn fetch_bridge_room_messages(
     }
 }
 
+use matrix_sdk::notification_settings::RoomNotificationMode;
+
 pub async fn fetch_bridge_messages(
     service: &str,
     state: &Arc<AppState>,
@@ -263,7 +265,7 @@ pub async fn fetch_bridge_messages(
     unread_only: bool,
 ) -> Result<Vec<BridgeMessage>> {
     tracing::info!("Fetching {} messages for user {}", service, user_id);
-   
+  
     let user_info= state.user_core.get_user_info(user_id)?;
     // Get Matrix client and check bridge status (use cached version for better performance)
     let client = crate::utils::matrix_auth::get_cached_client(user_id, &state).await?;
@@ -279,6 +281,9 @@ pub async fn fetch_bridge_messages(
             Err(_) => continue,
         };
         let Some(room) = client.get_room(&room_id) else { continue; };
+        if room.user_defined_notification_mode().await == Some(RoomNotificationMode::Mute) {
+            continue;
+        }
         if unread_only && room.unread_notification_counts().notification_count == 0 {
             continue;
         }
@@ -564,57 +569,10 @@ pub async fn handle_bridge_message(
     state: Arc<AppState>,
 ) {
     tracing::debug!("Entering bridge message handler");
-    /*
-
-    let notification_settings = match client.notification_settings() {
-        Ok(settings) => settings,
-        Err(e) => {
-            tracing::error!("Failed to get notification settings: {}", e);
-            return; // Or handle as needed; e.g., assume not muted to proceed
-        }
-    };
-
-    let room_id = room.room_id();
-    let user_defined_mode = match notification_settings.get_user_defined_room_notification_mode(room_id).await {
-        Ok(mode) => mode,
-        Err(e) => {
-            tracing::error!("Failed to get user-defined notification mode: {}", e);
-            None
-        }
-    };
-
-    let effective_mode = if let Some(mode) = user_defined_mode {
-        mode
-    } else {
-        // Fall back to default; determine room properties
-        let is_encrypted = match room.is_encrypted().await {
-            Ok(val) => val,
-            Err(e) => {
-                tracing::error!("Failed to check if room is encrypted: {}", e);
-                false // Default assumption; adjust as needed
-            }
-        };
-        let is_one_to_one = match room.is_direct().await {
-            Ok(val) => val,
-            Err(e) => {
-                tracing::error!("Failed to check if room is direct: {}", e);
-                false // Default assumption; adjust as needed
-            }
-        };
-        match notification_settings.get_default_room_notification_mode(is_encrypted, is_one_to_one).await {
-            Ok(mode) => mode,
-            Err(e) => {
-                tracing::error!("Failed to get default notification mode: {}", e);
-                return; // Or assume not muted
-            }
-        }
-    };
-
-    if effective_mode == matrix_sdk::notification_settings::RoomNotificationMode::Mute {
-        tracing::debug!("Skipping message from muted room: {}", room.room_id());
+    if room.user_defined_notification_mode().await == Some(RoomNotificationMode::Mute) {
+        tracing::info!("Skipping message from a muted room");
         return;
     }
-    */
     // Check message age
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -624,7 +582,7 @@ pub async fn handle_bridge_message(
     let age_ms = now.saturating_sub(message_ts.into()); // Use saturating_sub to handle any potential clock skew
     const HALF_HOUR_MS: u64 = 30 * 60 * 1000;
     if age_ms > HALF_HOUR_MS {
-        tracing::debug!(
+        tracing::info!(
             "Skipping old message: age {} ms (event ID: {})",
             age_ms,
             event.event_id
