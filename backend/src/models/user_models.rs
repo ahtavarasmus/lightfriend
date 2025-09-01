@@ -486,6 +486,8 @@ pub struct UserSettings {
     pub encrypted_textbee_api_key: Option<String>,
     pub elevenlabs_phone_number_id: Option<String>, // used to make outbound calls(we get this from elevenlabs api call when adding the phone number)
     pub proactive_agent_on: bool, // whether the user wants to receive any kinds of notifications
+    pub notify_about_calls: bool, // if call comes in to any chat networks should we notify the user about it?
+
 }
 
 #[derive(Insertable)]
@@ -501,6 +503,7 @@ pub struct NewUserSettings {
     pub number_of_digests_locked: i32,
     pub critical_enabled: Option<String>,
     pub proactive_agent_on: bool,
+    pub notify_about_calls: bool, 
 }
 
 

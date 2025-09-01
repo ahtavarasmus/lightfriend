@@ -17,17 +17,6 @@ pub struct ProactiveAgentEnabledResponse {
     enabled: bool,
 }
 
-#[derive(Deserialize)]
-pub struct CriticalEnabledRequest {
-    enabled: Option<String>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct CriticalEnabledResponse {
-    enabled: Option<String>,
-    average_critical_per_day: f32,
-    estimated_monthly_price: f32,
-}
 
 #[derive(Deserialize)]
 pub struct TimezoneUpdateRequest {
@@ -1107,25 +1096,38 @@ pub async fn update_digests(
     }
 }
 
-pub async fn update_critical_enabled(
+#[derive(Deserialize)]
+pub struct CriticalEnabledRequest {
+    enabled: Option<Option<String>>,
+    call_notify: Option<bool>,
+}
+
+pub async fn update_critical_settings(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
     Json(request): Json<CriticalEnabledRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
-
-    // Update critical enabled setting
-    match state.user_core.update_critical_enabled(auth_user.user_id, request.enabled) {
-        Ok(_) => Ok(Json(json!({
-            "message": "Critical enabled setting updated successfully"
-        }))),
-        Err(e) => {
+    if let Some(enabled) = request.enabled {
+        if let Err(e) = state.user_core.update_critical_enabled(auth_user.user_id, enabled) {
             tracing::error!("Failed to update critical enabled setting: {}", e);
-            Err((
+            return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({"error": format!("Failed to update critical enabled setting: {}", e)}))
-            ))
+            ));
         }
     }
+    if let Some(call_notify) = request.call_notify {
+        if let Err(e) = state.user_core.update_call_notify(auth_user.user_id, call_notify) {
+            tracing::error!("Failed to update call notify setting: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to update call notify setting: {}", e)}))
+            ));
+        }
+    }
+    Ok(Json(json!({
+        "message": "Critical settings updated successfully"
+    })))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1133,9 +1135,10 @@ pub struct CriticalNotificationInfo {
     pub enabled: Option<String>,
     pub average_critical_per_day: f32,
     pub estimated_monthly_price: f32,
+    pub call_notify: bool,
 }
 
-pub async fn get_critical_enabled(
+pub async fn get_critical_settings(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
 ) -> Result<Json<CriticalNotificationInfo>, (StatusCode, Json<serde_json::Value>)> {

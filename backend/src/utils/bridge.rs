@@ -927,7 +927,7 @@ pub async fn handle_bridge_message(
         println!("content: {}", content);
         println!("content contains call: {}", content.contains("Incoming call"));
     }
-    if let Ok((is_critical, message, first_message)) = crate::proactive::utils::check_message_importance(&state, &format!("{} from {}: {}", service_cap, chat_name, content), service_cap.as_str(), chat_name.as_str(), content.as_str()).await {
+    if let Ok((is_critical, message, first_message)) = crate::proactive::utils::check_message_importance(&state, user_id, &format!("{} from {}: {}", service_cap, chat_name, content), service_cap.as_str(), chat_name.as_str(), content.as_str()).await {
         if is_critical {
             let message = message.unwrap_or(format!("Critical {} message found, failed to get content, but you can check your {} to see it.", service_cap, service));
             let first_message = first_message.unwrap_or(format!("Hey, I found some critical {} message.", service_cap));

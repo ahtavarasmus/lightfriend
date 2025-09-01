@@ -245,6 +245,7 @@ pub struct MatchResponse {
 /// Returns `(is_critical, what_to_inform, first_message)`.
 pub async fn check_message_importance(
     state: &Arc<AppState>,
+    user_id: i32,
     message: &str,
     service: &str,
     chat_name: &str,
@@ -252,10 +253,15 @@ pub async fn check_message_importance(
 ) -> Result<(bool, Option<String>, Option<String>), Box<dyn std::error::Error>> {
     // Special case for WhatsApp incoming calls
     if raw_content.contains("Incoming call") {
-        // Trim for SMS
-        let what_to_inform= format!("You have an incoming {} call from {}", service, chat_name);
-        let first_message = format!("Hello, you have an incoming WhatsApp call from {}.", chat_name);
-        return Ok((true, Some(what_to_inform), Some(first_message)));
+        let call_notify = state.user_core.get_call_notify(user_id).unwrap_or(true);
+        if call_notify {
+            // Trim for SMS
+            let what_to_inform= format!("You have an incoming {} call from {}", service, chat_name);
+            let first_message = format!("Hello, you have an incoming WhatsApp call from {}.", chat_name);
+            return Ok((true, Some(what_to_inform), Some(first_message)));
+        } else {
+            return Ok((false, None, None));
+        }
     }
     // Build the chat payload ----------------------------------------------
     let client = create_openai_client(&state)?;

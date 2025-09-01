@@ -179,6 +179,7 @@ impl UserCore {
                     number_of_digests_locked: 0,
                     critical_enabled: Some("sms".to_string()),
                     proactive_agent_on: true,
+                    notify_about_calls: true,
                 };
                 
                 diesel::insert_into(user_settings::table)
@@ -217,6 +218,7 @@ impl UserCore {
                 number_of_digests_locked: 0,
                 critical_enabled: Some("sms".to_string()),
                 proactive_agent_on: true,
+                notify_about_calls: true,
             };
             
             diesel::insert_into(user_settings::table)
@@ -559,45 +561,56 @@ impl UserCore {
     pub fn update_critical_enabled(&self, user_id: i32, enabled: Option<String>) -> Result<(), DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        
+       
         // Ensure user settings exist
         self.ensure_user_settings_exist(user_id)?;
-
         // Update the critical_enabled setting
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
             .set(user_settings::critical_enabled.eq(enabled))
             .execute(&mut conn)?;
-
         Ok(())
     }
 
-    pub fn get_critical_enabled(&self, user_id: i32) -> Result<Option<String>, DieselError> {
+    pub fn get_call_notify(&self, user_id: i32) -> Result<bool, DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         
         // Ensure user settings exist
         self.ensure_user_settings_exist(user_id)?;
 
-        // Get the critical_enabled setting
-        let critical_enabled = user_settings::table
+        // Get the setting
+        let proactive_agent_on= user_settings::table
             .filter(user_settings::user_id.eq(user_id))
-            .select(user_settings::critical_enabled)
-            .first::<Option<String>>(&mut conn)?;
+            .select(user_settings::notify_about_calls)
+            .first::<bool>(&mut conn)?;
 
-        Ok(critical_enabled)
+        Ok(proactive_agent_on)
     }
 
+    pub fn update_call_notify(&self, user_id: i32, call_notify: bool) -> Result<(), DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+       
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+        // Update the call_notify setting
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::notify_about_calls.eq(call_notify))
+            .execute(&mut conn)?;
+        Ok(())
+    }
 
     pub fn get_critical_notification_info(&self, user_id: i32) -> Result<crate::handlers::profile_handlers::CriticalNotificationInfo, diesel::result::Error> {
             use crate::schema::{user_settings, usage_logs};
             let mut conn = self.pool.get().expect("Failed to get DB connection");
             // Ensure user settings exist
             self.ensure_user_settings_exist(user_id)?;
-            // Get the critical_enabled setting
-            let enabled = user_settings::table
+            // Get the critical_enabled and call_notify settings
+            let (enabled, call_notify) = user_settings::table
                 .filter(user_settings::user_id.eq(user_id))
-                .select(user_settings::critical_enabled)
-                .first::<Option<String>>(&mut conn)?;
+                .select((user_settings::critical_enabled, user_settings::notify_about_calls.nullable()))
+                .first::<(Option<String>, Option<bool>)>(&mut conn)?;
+            let call_notify = call_notify.unwrap_or(true); // Default to true if not set
             // Get average critical notifications per day
             let average_critical_per_day = {
                 let now: i64 = SystemTime::now()
@@ -683,9 +696,9 @@ impl UserCore {
                 enabled,
                 average_critical_per_day,
                 estimated_monthly_price,
+                call_notify,
             })
         }
-
             pub fn get_priority_notification_info(&self, user_id: i32) -> Result<crate::handlers::filter_handlers::PriorityNotificationInfo, diesel::result::Error> {
         use crate::schema::{usage_logs};
         let mut conn = self.pool.get().expect("Failed to get DB connection");

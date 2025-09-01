@@ -5,32 +5,41 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::window;
 use serde::{Deserialize, Serialize};
 use crate::config;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CriticalResponse {
     enabled: Option<String>,
     average_critical_per_day: f32,
     estimated_monthly_price: f32,
+    call_notify: bool,
 }
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UpdateCriticalRequest {
-    enabled: Option<String>,
+    enabled: Option<Option<String>>,
+    call_notify: Option<bool>,
 }
+
 #[derive(Properties, PartialEq)]
 pub struct CriticalSectionProps {
     pub phone_number: String,
 }
+
 #[function_component(CriticalSection)]
 pub fn critical_section(props: &CriticalSectionProps) -> Html {
     let critical_enabled = use_state(|| None::<String>);
     let average_critical = use_state(|| 0.0);
     let estimated_price = use_state(|| 0.0);
+    let call_notify = use_state(|| true);
     let show_info = use_state(|| false);
     let is_saving = use_state(|| false);
+
     // Load critical notification settings when component mounts
     {
         let critical_enabled = critical_enabled.clone();
         let average_critical = average_critical.clone();
         let estimated_price = estimated_price.clone();
+        let call_notify = call_notify.clone();
         use_effect_with_deps(
             move |_| {
                 if let Some(token) = window()
@@ -53,6 +62,7 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                                 critical_enabled.set(critical.enabled);
                                 average_critical.set(critical.average_critical_per_day);
                                 estimated_price.set(critical.estimated_monthly_price);
+                                call_notify.set(critical.call_notify);
                             }
                         }
                     });
@@ -62,6 +72,7 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
             (),
         );
     }
+
     let handle_option_change = {
         let critical_enabled = critical_enabled.clone();
         let is_saving = is_saving.clone();
@@ -77,7 +88,8 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                 is_saving.set(true);
                 spawn_local(async move {
                     let request = UpdateCriticalRequest {
-                        enabled: new_value,
+                        enabled: Some(new_value),
+                        call_notify: None,
                     };
                     let result = Request::post(&format!(
                         "{}/api/profile/critical",
@@ -93,6 +105,40 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
             }
         })
     };
+
+    let handle_call_notify_change = {
+        let call_notify = call_notify.clone();
+        let is_saving = is_saving.clone();
+        Callback::from(move |new_value: bool| {
+            let is_saving = is_saving.clone();
+            call_notify.set(new_value);
+            if let Some(token) = window()
+                .and_then(|w| w.local_storage().ok())
+                .flatten()
+                .and_then(|s| s.get_item("token").ok())
+                .flatten()
+            {
+                is_saving.set(true);
+                spawn_local(async move {
+                    let request = UpdateCriticalRequest {
+                        enabled: None,
+                        call_notify: Some(new_value),
+                    };
+                    let result = Request::post(&format!(
+                        "{}/api/profile/critical",
+                        config::get_backend_url(),
+                    ))
+                    .header("Authorization", &format!("Bearer {}", token))
+                    .json(&request)
+                    .unwrap()
+                    .send()
+                    .await;
+                    is_saving.set(false);
+                });
+            }
+        })
+    };
+
     let phone_number = props.phone_number.clone();
     let country = if phone_number.starts_with("+1") {
         "US"
@@ -345,7 +391,38 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                         <p>{"We handle incoming communications as follows to ensure you never miss truly urgent matters:"}</p>
                         <ul>
                             <li>
-                                <i class="fa-solid fa-gears"></i>{" Incoming calls on any messaging platform: You will be notified every time about the call. (Rule-based)"}
+                                <i class="fa-solid fa-gears"></i>{" Incoming calls on any messaging platform: If enabled, you will be notified every time about the call. (Rule-based)"}
+
+                                <div class="radio-group">
+                                    <label class="radio-option" onclick={
+                                        let handle_call_notify_change = handle_call_notify_change.clone();
+                                        Callback::from(move |_| handle_call_notify_change.emit(true))
+                                    }>
+                                        <input
+                                            type="radio"
+                                            name="call-notifications"
+                                            checked={*call_notify}
+                                        />
+                                        <div class="radio-label">
+                                            {"Enabled"}
+                                            <div class="radio-description">{"Get notified immediately about incoming calls on messaging platforms"}</div>
+                                        </div>
+                                    </label>
+                                    <label class="radio-option" onclick={
+                                        let handle_call_notify_change = handle_call_notify_change.clone();
+                                        Callback::from(move |_| handle_call_notify_change.emit(false))
+                                    }>
+                                        <input
+                                            type="radio"
+                                            name="call-notifications"
+                                            checked={!*call_notify}
+                                        />
+                                        <div class="radio-label">
+                                            {"Disabled"}
+                                            <div class="radio-description">{"Do not notify about incoming calls; handle in next summary"}</div>
+                                        </div>
+                                    </label>
+                                </div>
                             </li>
                             <li>
                                 <i class="fa-solid fa-hat-wizard"></i>{" Incoming messages: Analyzed by AI to determine if critical. The AI looks for situations where delaying action beyond 2 hours risks:"}

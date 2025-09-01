@@ -231,6 +231,7 @@ diesel::table! {
         encrypted_textbee_api_key -> Nullable<Text>,
         elevenlabs_phone_number_id -> Nullable<Text>,
         proactive_agent_on -> Bool,
+        notify_about_calls -> Bool,
     }
 }
 

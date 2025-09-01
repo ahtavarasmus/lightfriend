@@ -348,6 +348,7 @@ pub fn landing() -> Html {
             <section class="trust-proof">
                 <div class="section-intro">
                     <h2>{"Why I'm Building Lightfriend"}</h2>
+                    <img src="/assets/rasmus-pfp.png" alt="Rasmus, the developer" loading="lazy" style="max-width: 200px; border-radius: 50%; margin: 0 auto 1.5rem; display: block;"/>
                     <p>{"Hi, I'm Rasmus, a solo developer behind this project and honestly, I have very low willpower. I work in bursts of inspiration, but that’s not always enough when things have deadlines. Smartphones were stealing my time and focus. I knew I needed to engineer my environment to work for me, not against me. Tried blockers, detox apps, everything. But I always found a way around them."}</p>
                     <p>{"Before all this, I was a full-time athlete who had just started studying Computer Science. My first semester was brutal. I had to be sharp in every short study session I had between training. But scrolling wrecked my focus and stole what little time I had."}</p>
                     <p>{"That’s when I switched to a dumbphone. Everything changed. I could finally focus. I wasn’t always behind anymore. I stopped saying no to friends because I actually got my school work done. I had time and energy again, and the freedom to say yes to things I actually wanted to do."}</p>
