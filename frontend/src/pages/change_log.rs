@@ -24,6 +24,12 @@ pub fn changelog() -> Html {
                 <p>{"Latest updates and changes for Lightfriend"}</p>
             </section>
             <section class="changelog-list-section">
+                <div class="changelog-entry">
+                                <div class="changelog-entry">
+                                                <blockquote class="twitter-tweet"><p lang="en" dir="ltr">{"today i made lightfriend also ignore messages coming from chat rooms that have been muted in app already. \nAlso improved digest generation format to be more easy to read and grouped messages from same chat network to same line in the sms message. \nAlso added toggle for critical… "}<a href="https://t.co/oLC9WLODky">{"pic.twitter.com/oLC9WLODky"}</a></p>{"&mdash; rasmus (@ahtavarasm_us) "}<a href="https://twitter.com/ahtavarasm_us/status/1962589533448306725?ref_src=twsrc%5Etfw">{"September 1, 2025"}</a></blockquote> <script src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
+                </div>
+
+                </div>
 
                 <div class="changelog-entry">
                 <blockquote class="twitter-tweet"><p lang="en" dir="ltr">{"forgot to mention that now with lightfriend you can also send new emails and reply to existing emails using sms and voice calls "}<a href="https://t.co/XJ1OIS1TZG">{"https://t.co/XJ1OIS1TZG"}</a></p>{"&mdash; rasmus (@ahtavarasm_us) "}<a href="https://twitter.com/ahtavarasm_us/status/1959690290593230945?ref_src=twsrc%5Etfw">{"August 24, 2025"}</a></blockquote> <script src="https://platform.twitter.com/widgets.js" charset="utf-8"></script> 
