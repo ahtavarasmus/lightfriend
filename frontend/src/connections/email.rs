@@ -229,7 +229,7 @@ pub fn email_connect(props: &EmailProps) -> Html {
             <div class="service-header">
                 <div class="service-name">
                     <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%234285f4' d='M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48H48zM0 176V384c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V176L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z'/%3E%3C/svg%3E" alt="IMAP" width="24" height="24"/>
-                    {"IMAP Email"}
+                    {"Email"}
                 </div>
                 <button class="info-button" onclick={Callback::from(|_| {
                     if let Some(element) = web_sys::window()
@@ -649,6 +649,369 @@ pub fn email_connect(props: &EmailProps) -> Html {
                 }
             }
         }
+            <style>
+
+                {r#"
+                    .service-item {
+                        background: rgba(0, 0, 0, 0.2);
+                        border: 1px solid rgba(0, 136, 204, 0.2);
+                        border-radius: 12px;
+                        width: 100%;
+                        padding: 1.5rem;
+                        margin: 1rem 0;
+                        transition: all 0.3s ease;
+                        color: #fff;
+                    }
+                    .service-item:hover {
+                        transform: translateY(-2px);
+                        border-color: rgba(0, 136, 204, 0.4);
+                        box-shadow: 0 4px 20px rgba(0, 136, 204, 0.1);
+                    }
+                    .service-header {
+                        display: flex;
+                        align-items: center;
+                        gap: 1rem;
+                        flex-wrap: wrap;
+                    }
+                    .service-name {
+                        flex: 1;
+                        min-width: 150px;
+                    }
+                    .service-status {
+                        white-space: nowrap;
+                    }
+                    .service-name {
+                        display: flex;
+                        align-items: center;
+                        gap: 0.5rem;
+                    }
+                    .service-name img {
+                        width: 24px !important;
+                        height: 24px !important;
+                    }
+                    .service-status {
+                        color: #4CAF50;
+                        font-weight: 500;
+                    }
+                    .info-button {
+                        background: none;
+                        border: none;
+                        color: #0088cc;
+                        font-size: 1.2rem;
+                        cursor: pointer;
+                        padding: 0.5rem;
+                        border-radius: 50%;
+                        width: 2rem;
+                        height: 2rem;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        transition: all 0.3s ease;
+                        margin-left: auto;
+                    }
+                    .info-button:hover {
+                        background: rgba(0, 136, 204, 0.1);
+                        transform: scale(1.1);
+                    }
+                    .auth-form-container {
+                        margin: 1.5rem 0;
+                    }
+                    .auth-instructions {
+                        color: #CCC;
+                        margin-bottom: 1rem;
+                        padding-left: 1.5rem;
+                    }
+                    .auth-instructions li {
+                        margin-bottom: 0.5rem;
+                    }
+                    .curl-textarea {
+                        width: 100%;
+                        height: 150px;
+                        background: rgba(0, 0, 0, 0.3);
+                        border: 1px solid rgba(255, 255, 255, 0.1);
+                        border-radius: 8px;
+                        color: #fff;
+                        padding: 1rem;
+                        font-family: monospace;
+                        margin-bottom: 1rem;
+                    }
+                    .submit-button {
+                        background: #0088cc;
+                        color: white;
+                        border: none;
+                        padding: 0.8rem 1.5rem;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        width: 100%;
+                    }
+                    .submit-button:hover {
+                        background: #0077b3;
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 12px rgba(0, 136, 204, 0.3);
+                    }
+                    .auth-note {
+                        color: #999;
+                        font-size: 0.9rem;
+                        margin-top: 1rem;
+                    }
+                    .loading-container {
+                        text-align: center;
+                        margin: 2rem 0;
+                    }
+                    .loading-spinner {
+                        display: inline-block;
+                        width: 40px;
+                        height: 40px;
+                        border: 4px solid rgba(0, 136, 204, 0.1);
+                        border-radius: 50%;
+                        border-top-color: #0088cc;
+                        animation: spin 1s ease-in-out infinite;
+                        margin: 1rem auto;
+                    }
+                    .button-group {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 1rem;
+                        margin-bottom: 1rem;
+                    }
+                    @media (min-width: 768px) {
+                        .button-group {
+                            flex-direction: row;
+                        }
+                    }
+                    .resync-button {
+                        background: linear-gradient(45deg, #0088cc, #0099dd);
+                        color: white;
+                        border: none;
+                        padding: 0.8rem 1.5rem;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        flex: 1;
+                    }
+                    .resync-button:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 20px rgba(0, 136, 204, 0.3);
+                    }
+                    .connect-button, .disconnect-button {
+                        background: #0088cc;
+                        color: white;
+                        border: none;
+                        padding: 0.8rem 1.5rem;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        margin-top: 1rem;
+                    }
+                    .disconnect-button {
+                        background: transparent;
+                        border: 1px solid rgba(255, 99, 71, 0.3);
+                        color: #FF6347;
+                    }
+                    .disconnect-button:hover {
+                        background: rgba(255, 99, 71, 0.1);
+                        border-color: rgba(255, 99, 71, 0.5);
+                        transform: translateY(-2px);
+                    }
+                    .connect-button:hover {
+                        background: #0077b3;
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 12px rgba(0, 136, 204, 0.3);
+                    }
+                    .error-message {
+                        color: #FF4B4B;
+                        background: rgba(255, 75, 75, 0.1);
+                        border: 1px solid rgba(255, 75, 75, 0.2);
+                        border-radius: 8px;
+                        padding: 1rem;
+                        margin-top: 1rem;
+                    }
+                    .sync-indicator {
+                        display: flex;
+                        align-items: center;
+                        background: rgba(0, 136, 204, 0.1);
+                        border-radius: 8px;
+                        padding: 1rem;
+                        margin-bottom: 1rem;
+                        color: #0088cc;
+                    }
+                    .sync-spinner {
+                        display: inline-block;
+                        width: 20px;
+                        height: 20px;
+                        border: 3px solid rgba(0, 136, 204, 0.1);
+                        border-radius: 50%;
+                        border-top-color: #0088cc;
+                        animation: spin 1s ease-in-out infinite;
+                        margin-right: 10px;
+                    }
+                    .test-button {
+                        background: linear-gradient(45deg, #4CAF50, #45a049);
+                        color: white;
+                        border: none;
+                        width: 100%;
+                        padding: 1rem;
+                        border-radius: 8px;
+                        font-size: 1rem;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                        margin-top: 1rem;
+                    }
+                    .test-button:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 20px rgba(76, 175, 80, 0.3);
+                    }
+                    .test-send-button {
+                        background: linear-gradient(45deg, #FF8C00, #FFA500);
+                        margin-top: 0.5rem;
+                    }
+                    .test-send-button:hover {
+                        box-shadow: 0 4px 20px rgba(255, 140, 0, 0.3);
+                    }
+                    .test-search-button {
+                        background: linear-gradient(45deg, #9C27B0, #BA68C8);
+                        margin-top: 0.5rem;
+                    }
+                    .test-search-button:hover {
+                        box-shadow: 0 4px 20px rgba(156, 39, 176, 0.3);
+                    }
+                    .upgrade-prompt {
+                        background: rgba(0, 136, 204, 0.05);
+                        border: 1px solid rgba(0, 136, 204, 0.1);
+                        border-radius: 12px;
+                        padding: 1.8rem;
+                        text-align: center;
+                        margin: 0.8rem 0;
+                    }
+                    .upgrade-content h3 {
+                        color: #0088cc;
+                        margin-bottom: 1rem;
+                        font-size: 1.2rem;
+                    }
+                    .upgrade-button {
+                        display: inline-block;
+                        background: #0088cc;
+                        color: white;
+                        text-decoration: none;
+                        padding: 1rem 2rem;
+                        border-radius: 8px;
+                        font-weight: bold;
+                        transition: all 0.3s ease;
+                        margin-top: 1rem;
+                    }
+                    .upgrade-button:hover {
+                        background: #0077b3;
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 12px rgba(0, 136, 204, 0.3);
+                    }
+                    @keyframes spin {
+                        to { transform: rotate(360deg); }
+                    }
+                    .security-notice {
+                        background: rgba(0, 136, 204, 0.1);
+                        padding: 1.2rem;
+                        border-radius: 8px;
+                        border: 1px solid rgba(0, 136, 204, 0.2);
+                    }
+                    .security-notice p {
+                        margin: 0 0 1rem 0;
+                        color: #CCC;
+                    }
+                    .security-recommendation {
+                        font-style: italic;
+                        color: #999 !important;
+                        margin-top: 1rem !important;
+                        font-size: 0.9rem;
+                        padding-top: 1rem;
+                        border-top: 1px solid rgba(0, 136, 204, 0.1);
+                    }
+                    .modal-overlay {
+                        position: fixed;
+                        top: 0;
+                        left: 0;
+                        right: 0;
+                        bottom: 0;
+                        background: rgba(0, 0, 0, 0.85);
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        z-index: 1000;
+                    }
+                    .modal-content {
+                        background: #1a1a1a;
+                        border: 1px solid rgba(0, 136, 204, 0.2);
+                        border-radius: 12px;
+                        padding: 2rem;
+                        max-width: 500px;
+                        width: 90%;
+                        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+                    }
+                    .modal-content h3 {
+                        color: #FF6347;
+                        margin-bottom: 1rem;
+                    }
+                    .modal-content p {
+                        color: #CCC;
+                        margin-bottom: 1rem;
+                    }
+                    .modal-content ul {
+                        margin-bottom: 2rem;
+                        padding-left: 1.5rem;
+                    }
+                    .modal-content li {
+                        color: #999;
+                        margin-bottom: 0.5rem;
+                    }
+                    .modal-buttons {
+                        display: flex;
+                        gap: 1rem;
+                        justify-content: flex-end;
+                    }
+                    .cancel-button {
+                        background: transparent;
+                        border: 1px solid rgba(204, 204, 204, 0.3);
+                        color: #CCC;
+                        padding: 0.8rem 1.5rem;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                    }
+                    .cancel-button:hover {
+                        background: rgba(204, 204, 204, 0.1);
+                        transform: translateY(-2px);
+                    }
+                    .confirm-disconnect-button {
+                        background: linear-gradient(45deg, #FF6347, #FF4500);
+                        color: white;
+                        border: none;
+                        padding: 0.8rem 1.5rem;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                    }
+                    .confirm-disconnect-button:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 4px 12px rgba(255, 99, 71, 0.3);
+                    }
+                    .button-spinner {
+                        display: inline-block;
+                        width: 16px;
+                        height: 16px;
+                        border: 2px solid rgba(255, 255, 255, 0.3);
+                        border-radius: 50%;
+                        border-top-color: #fff;
+                        animation: spin 1s ease-in-out infinite;
+                        margin-right: 8px;
+                        vertical-align: middle;
+                    }
+                    .disconnecting-message {
+                        color: #0088cc;
+                        margin: 1rem 0;
+                        font-weight: bold;
+                    }
+                "#}
+            </style>
         </div>
     }
 }

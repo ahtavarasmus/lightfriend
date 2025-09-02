@@ -5,7 +5,6 @@ use wasm_bindgen_futures::spawn_local;
 use web_sys::window;
 use serde::{Deserialize, Serialize};
 use crate::config;
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CriticalResponse {
     enabled: Option<String>,
@@ -13,18 +12,15 @@ pub struct CriticalResponse {
     estimated_monthly_price: f32,
     call_notify: bool,
 }
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UpdateCriticalRequest {
     enabled: Option<Option<String>>,
     call_notify: Option<bool>,
 }
-
 #[derive(Properties, PartialEq)]
 pub struct CriticalSectionProps {
     pub phone_number: String,
 }
-
 #[function_component(CriticalSection)]
 pub fn critical_section(props: &CriticalSectionProps) -> Html {
     let critical_enabled = use_state(|| None::<String>);
@@ -33,7 +29,6 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
     let call_notify = use_state(|| true);
     let show_info = use_state(|| false);
     let is_saving = use_state(|| false);
-
     // Load critical notification settings when component mounts
     {
         let critical_enabled = critical_enabled.clone();
@@ -72,7 +67,6 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
             (),
         );
     }
-
     let handle_option_change = {
         let critical_enabled = critical_enabled.clone();
         let is_saving = is_saving.clone();
@@ -105,7 +99,6 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
             }
         })
     };
-
     let handle_call_notify_change = {
         let call_notify = call_notify.clone();
         let is_saving = is_saving.clone();
@@ -138,7 +131,6 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
             }
         })
     };
-
     let phone_number = props.phone_number.clone();
     let country = if phone_number.starts_with("+1") {
         "US"
@@ -388,11 +380,10 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                 <div class="info-section" style={if *show_info { "display: block" } else { "display: none" }}>
                     <h4>{"How It Works"}</h4>
                     <div class="info-subsection">
-                        <p>{"We handle incoming communications as follows to ensure you never miss truly urgent matters:"}</p>
+                        <p>{"We check your calls and messages to make sure you know about super important ones right away. Here's how:"}</p>
                         <ul>
                             <li>
-                                <i class="fa-solid fa-gears"></i>{" Incoming calls on any messaging platform: If enabled, you will be notified every time about the call. (Rule-based)"}
-
+                                <i class="fa-solid fa-gears"></i>{" Calls that come in: If you turn this on, we tell you about every call right away. It's like a simple alarm for calls."}
                                 <div class="radio-group">
                                     <label class="radio-option" onclick={
                                         let handle_call_notify_change = handle_call_notify_change.clone();
@@ -425,18 +416,19 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                                 </div>
                             </li>
                             <li>
-                                <i class="fa-solid fa-hat-wizard"></i>{" Incoming messages: Analyzed by AI to determine if critical. The AI looks for situations where delaying action beyond 2 hours risks:"}
+                                <i class="fa-solid fa-hat-wizard"></i>{" Messages that come in: A smart computer checks if the message is really urgent. It looks to see if waiting more than 2 hours could cause big problems like:"}
                                 <ul>
-                                    <li>{"Direct harm to people"}</li>
-                                    <li>{"Severe data loss or major financial loss"}</li>
-                                    <li>{"Production system outage or security breach"}</li>
-                                    <li>{"Hard legal/compliance deadline expiring in 2 hours or less"}</li>
-                                    <li>{"The sender explicitly indicates it must be handled immediately (e.g., “ASAP”, “emergency”, “right now”) or gives a deadline of 2 hours or less"}</li>
+                                    <li>{"Someone getting hurt"}</li>
+                                    <li>{"Losing important stuff or a lot of money"}</li>
+                                    <li>{"Important computers breaking or getting hacked"}</li>
+                                    <li>{"Missing a super important rule or law in 2 hours or less"}</li>
+                                    <li>{"The person says it's an emergency (words like “ASAP”, “emergency”, “right now”) or sets a deadline of 2 hours or less"}</li>
                                 </ul>
-                                {"For group chats, only when someone has tagged you into the message will a group chat message be analyzed for criticality. Otherwise they will be ignored."}
-                                {"Everything else, like vague urgency, routine updates, or unclear requests are not critical and will be handled in your next scheduled summary."}
+                                {"In group chats, we only check messages if someone tags you (like @yourname). If not, we skip them."}
+                                {"Other messages that aren't super clear emergencies, like normal updates or vague asks, wait for your next summary report. We don't bother you right away."}
                             </li>
                         </ul>
+                        <p>{"If something is super important (critical), we tell you right away using the way you picked below: no notification, text message, or phone call."}</p>
                     </div>
                 </div>
             </div>

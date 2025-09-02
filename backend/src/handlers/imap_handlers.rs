@@ -851,6 +851,7 @@ pub async fn fetch_single_email_imap(
         attachments,
     })
 }
+
 #[derive(Debug, Deserialize)]
 pub struct SendEmailRequest {
     pub to: String,

@@ -106,6 +106,50 @@ pub async fn update_preferred_number_admin(
     })))
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UnsubscribeParams {
+    pub email: String,
+}
+
+use axum::extract::Query;
+use axum::response::Html;
+
+pub async fn unsubscribe(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<UnsubscribeParams>,
+) -> Result<Html<String>, (StatusCode, String)> {
+    match state.user_core.find_by_email(&params.email) {
+        Ok(Some(user)) => {
+            match state.user_core.update_notify(user.id, false) {
+                Ok(_) => {
+                    tracing::info!("User {} unsubscribed from notifications", user.id);
+                    Ok(Html("<h1>You have been unsubscribed!</h1>".to_string()))
+                }
+                Err(e) => {
+                    tracing::error!("Failed to update notify for user {}: {}", user.id, e);
+                    Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Failed to unsubscribe. Sorry about this, send email to rasmus@ahtava.com".to_string(),
+                    ))
+                }
+            }
+        }
+        Ok(None) => {
+            tracing::warn!("No user found for email: {}", params.email);
+            Err((
+                StatusCode::BAD_REQUEST,
+                "Invalid email.".to_string(),
+            ))
+        }
+        Err(e) => {
+            tracing::error!("Failed to find user by email {}: {}", params.email, e);
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to process request.".to_string(),
+            ))
+        }
+    }
+}
 
 pub async fn broadcast_email(
     State(state): State<Arc<AppState>>,
@@ -127,38 +171,12 @@ pub async fn broadcast_email(
         )
     })?;
 
-    let resend_api_key = match std::env::var("RESEND_EMAIL_API_KEY") {
-        Ok(key) => key,
-        Err(e) => {
-            tracing::error!("Failed to get RESEND_EMAIL_API_KEY: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": "Email service configuration error"}))
-            ));
-        }
-    };
-
-    let resend = Resend::new(&resend_api_key);
-    let from = "info@updates.lightfriend.ai";
-    let reply_to = "rasmus@ahtava.com";
-
+    let auth_user = crate::handlers::auth_middleware::AuthUser { user_id: 1, is_admin: false}; // Hardcode user_id to 1
     let mut success_count = 0;
     let mut failed_count = 0;
     let mut error_details = Vec::new();
 
     for user in users {
-        // Get user settings
-        let user_settings = match state.user_core.get_user_settings(user.id) {
-            Ok(settings) if !settings.notify => {
-                tracing::debug!("Skipping user {} - notifications disabled", user.email);
-                continue;
-            },
-            Ok(_) => (), // Continue if notify is true or no settings exist
-            Err(e) => {
-                tracing::error!("Failed to get user settings for {}: {}", user.email, e);
-                continue;
-            }
-        };
 
         // Skip users with invalid or empty email addresses
         if user.email.is_empty() || !user.email.contains('@') || !user.email.contains('.') {
@@ -166,20 +184,36 @@ pub async fn broadcast_email(
             continue;
         }
 
-        let to = vec![user.email.as_str()];
-        let email = CreateEmailBaseOptions::new(from, to, &request.subject)
-            .with_text(&request.message)
-            .with_reply(reply_to)
-            .with_html(&request.message); // Add HTML version for better formatting
+        // Prepare the unsubscribe link
+        let encoded_email = urlencoding::encode(&user.email);
+        let unsubscribe_link = format!("https://lightfriend.ai/unsubscribe?email={}", encoded_email);
 
-        match resend.emails.send(email).await {
+        // Prepare plain text body with unsubscribe
+        let plain_body = format!(
+            "{}\n\nTo unsubscribe from these feature updates/fixes, click here: {}",
+            request.message, unsubscribe_link
+        );
+
+        // Prepare the email request for the send_email handler
+        let email_request = crate::handlers::imap_handlers::SendEmailRequest {
+            to: user.email.clone(),
+            subject: request.subject.clone(),
+            body: plain_body,
+        };
+
+        // Call the existing send_email handler
+        match crate::handlers::imap_handlers::send_email(
+            State(state.clone()),
+            auth_user.clone(),
+            Json(email_request)
+        ).await {
             Ok(_) => {
                 success_count += 1;
                 tracing::info!("Successfully sent email to {}", user.email);
             }
-            Err(e) => {
+            Err((status, err)) => {
                 failed_count += 1;
-                let error_msg = format!("Failed to send to {}: {}", user.email, e);
+                let error_msg = format!("Failed to send to {}: {:?}", user.email, err);
                 tracing::error!("{}", error_msg);
                 error_details.push(error_msg);
             }
@@ -213,6 +247,7 @@ pub async fn broadcast_email(
         "error_details": error_details
     })))
 }
+
 
 pub async fn broadcast_message(
     State(state): State<Arc<AppState>>,

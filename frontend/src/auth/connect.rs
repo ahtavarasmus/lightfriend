@@ -1,12 +1,10 @@
 use yew::prelude::*;
-use web_sys::{MouseEvent, HtmlInputElement};
-use serde_json::json;
+use web_sys::{MouseEvent};
 use wasm_bindgen_futures::spawn_local;
 use wasm_bindgen::JsValue;
 use crate::config;
 use gloo_net::http::Request;
 use web_sys::UrlSearchParams;
-use web_sys::js_sys::Date;
 use crate::connections::whatsapp::WhatsappConnect;
 use crate::connections::calendar::CalendarConnect;
 use crate::connections::email::EmailConnect;
@@ -16,6 +14,8 @@ use crate::connections::uber::UberConnect;
 use crate::connections::signal::SignalConnect;
 use crate::connections::messenger::MessengerConnect;
 use crate::connections::instagram::InstagramConnect;
+use serde_json::Value;
+
 #[derive(Properties, PartialEq)]
 pub struct ConnectProps {
     pub user_id: i32,
@@ -33,13 +33,16 @@ struct ServiceGroupState {
 #[function_component(Connect)]
 pub fn connect(props: &ConnectProps) -> Html {
     let error = use_state(|| None::<String>);
-    let connecting = use_state(|| false);
     let calendar_connected = use_state(|| false);
     let memory_connected = use_state(|| false);
     let email_connected = use_state(|| false);
     let whatsapp_connected = use_state(|| false);
     let telegram_connected = use_state(|| false);
     let signal_connected = use_state(|| false);
+    let instagram_connected = use_state(|| false);
+    let messenger_connected = use_state(|| false);
+    let uber_connected = use_state(|| false);
+    let selected_app = use_state(|| None::<String>);
     {
         let calendar_connected = calendar_connected.clone();
         let memory_connected = memory_connected.clone();
@@ -47,6 +50,9 @@ pub fn connect(props: &ConnectProps) -> Html {
         let whatsapp_connected = whatsapp_connected.clone();
         let telegram_connected= telegram_connected.clone();
         let signal_connected= signal_connected.clone();
+        let instagram_connected = instagram_connected.clone();
+        let messenger_connected = messenger_connected.clone();
+        let uber_connected = uber_connected.clone();
         use_effect_with_deps(
             move |_| {
                 if let Some(window) = web_sys::window() {
@@ -62,7 +68,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         .send()
                                         .await
                                     {
-                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                        if let Ok(data) = response.json::<Value>().await {
                                             if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
                                                 calendar_connected.set(connected);
                                             }
@@ -80,7 +86,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         .send()
                                         .await
                                     {
-                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                        if let Ok(data) = response.json::<Value>().await {
                                             if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
                                                 memory_connected.set(connected);
                                             }
@@ -98,7 +104,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         .send()
                                         .await
                                     {
-                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                        if let Ok(data) = response.json::<Value>().await {
                                             if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
                                                 email_connected.set(connected);
                                             }
@@ -116,7 +122,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         .send()
                                         .await
                                     {
-                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                        if let Ok(data) = response.json::<Value>().await {
                                             if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
                                                 whatsapp_connected.set(connected);
                                             }
@@ -134,7 +140,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         .send()
                                         .await
                                     {
-                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                        if let Ok(data) = response.json::<Value>().await {
                                             if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
                                                 telegram_connected.set(connected);
                                             }
@@ -152,9 +158,63 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         .send()
                                         .await
                                     {
-                                        if let Ok(data) = response.json::<serde_json::Value>().await {
+                                        if let Ok(data) = response.json::<Value>().await {
                                             if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
                                                 signal_connected.set(connected);
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                            // instagram status check
+                            spawn_local({
+                                let instagram_connected = instagram_connected.clone();
+                                let token = token.clone();
+                                async move {
+                                    if let Ok(response) = Request::get(&format!("{}/api/auth/instagram/status", config::get_backend_url()))
+                                        .header("Authorization", &format!("Bearer {}", token))
+                                        .send()
+                                        .await
+                                    {
+                                        if let Ok(data) = response.json::<Value>().await {
+                                            if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                                instagram_connected.set(connected);
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                            // messenger status check
+                            spawn_local({
+                                let messenger_connected = messenger_connected.clone();
+                                let token = token.clone();
+                                async move {
+                                    if let Ok(response) = Request::get(&format!("{}/api/auth/messenger/status", config::get_backend_url()))
+                                        .header("Authorization", &format!("Bearer {}", token))
+                                        .send()
+                                        .await
+                                    {
+                                        if let Ok(data) = response.json::<Value>().await {
+                                            if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                                messenger_connected.set(connected);
+                                            }
+                                        }
+                                    }
+                                }
+                            });
+                            // uber status check
+                            spawn_local({
+                                let uber_connected = uber_connected.clone();
+                                let token = token.clone();
+                                async move {
+                                    if let Ok(response) = Request::get(&format!("{}/api/auth/uber/status", config::get_backend_url()))
+                                        .header("Authorization", &format!("Bearer {}", token))
+                                        .send()
+                                        .await
+                                    {
+                                        if let Ok(data) = response.json::<Value>().await {
+                                            if let Some(connected) = data.get("connected").and_then(|v| v.as_bool()) {
+                                                uber_connected.set(connected);
                                             }
                                         }
                                     }
@@ -168,15 +228,12 @@ pub fn connect(props: &ConnectProps) -> Html {
             (),
         );
     }
-  
     let group_states = use_state(|| {
         let mut map = std::collections::HashMap::new();
-        map.insert("tools", ServiceGroupState { expanded: false, service_count: 4, connected_count: 2 });
-        map.insert("apps", ServiceGroupState { expanded: false, service_count: 4, connected_count: 0 });
+        map.insert("tools", ServiceGroupState { expanded: false, service_count: 4, connected_count: 0 });
         map.insert("proactive", ServiceGroupState { expanded: false, service_count: 4, connected_count: 0 });
         map
     });
-  
     // Check token on component mount
     use_effect_with_deps(
         |_| {
@@ -224,116 +281,111 @@ pub fn connect(props: &ConnectProps) -> Html {
     } else {
         "$"
     };
+    let details = if let Some(app) = &*selected_app {
+        match app.as_str() {
+            "calendar" => html! { <CalendarConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
+            "tasks" => html! { <TasksConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
+            "email" => html! { <EmailConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
+            "whatsapp" => html! { <WhatsappConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
+            "telegram" => html! { <TelegramConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
+            "signal" => html! { <SignalConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
+            "instagram" => html! { <InstagramConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
+            "messenger" => html! { <MessengerConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
+            "uber" => html! { <UberConnect user_id={props.user_id} sub_tier={props.sub_tier.clone()} discount={props.discount} /> },
+            _ => html! {},
+        }
+    } else {
+        html! {}
+    };
             html! {
                 <div class="connect-section">
                     // Apps
-                    <div class="service-group">
-                        <h3 class="service-group-title"
-                            onclick={
-                                let group_states = group_states.clone();
-                                Callback::from(move |_| {
-                                    let mut new_states = (*group_states).clone();
-                                    if let Some(state) = new_states.get_mut("apps") {
-                                        state.expanded = !state.expanded;
-                                    }
-                                    group_states.set(new_states);
-                                })
-                            }
+                    <div class="apps-icons-row">
+                        <button
+                            class={classes!("app-icon", if *calendar_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "calendar") { "selected" } else { "" })}
+                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                selected_app.set(if *selected_app == Some("calendar".to_string()) { None } else { Some("calendar".to_string()) });
+                            })}
                         >
-                            <i class="fa-solid fa-plug"></i>
-                            {"Apps"}
-                            <div class="group-summary">
-                                <span class="service-count">
-                                    {format!("{}/6 Connected",
-                                        (if *calendar_connected { 1 } else { 0 }) +
-                                        (if *memory_connected { 1 } else { 0 }) +
-                                        (if *email_connected { 1 } else { 0 }) +
-                                        (if *whatsapp_connected { 1 } else { 0 }) +
-                                        (if *telegram_connected { 1 } else { 0 }) +
-                                        (if *signal_connected { 1 } else { 0 })
-                                    )}
-                                </span>
-                                <i class={if group_states.get("apps").map(|s| s.expanded).unwrap_or(false) {
-                                    "fas fa-chevron-up"
-                                } else {
-                                    "fas fa-chevron-down"
-                                }}></i>
-                            </div>
-                        </h3>
-                        <div class={classes!(
-                            "service-list",
-                            if group_states.get("apps").map(|s| s.expanded).unwrap_or(false) {
-                                "expanded"
-                            } else {
-                                "collapsed"
-                            }
-                        )}>
-                            <CalendarConnect
-                                user_id={props.user_id}
-                                sub_tier={props.sub_tier.clone()}
-                                discount={props.discount}
-                                on_connection_change={{
-                                    let group_states = group_states.clone();
-                                    Some(Callback::from(move |connected: bool| {
-                                        let mut new_states = (*group_states).clone();
-                                        if let Some(state) = new_states.get_mut("calendar") {
-                                            state.connected_count = if connected { 1 } else { 0 };
-                                        }
-                                        group_states.set(new_states);
-                                    }))
-                                }}
-                            />
-                            <TasksConnect
-                                user_id={props.user_id}
-                                sub_tier={props.sub_tier.clone()}
-                                discount={props.discount}
-                            />
-                            <EmailConnect
-                                user_id={props.user_id}
-                                sub_tier={props.sub_tier.clone()}
-                                discount={props.discount}
-                            />
-                            <WhatsappConnect
-                                user_id={props.user_id}
-                                sub_tier={props.sub_tier.clone()}
-                                discount={props.discount}
-                            />
-                            <TelegramConnect
-                                user_id={props.user_id}
-                                sub_tier={props.sub_tier.clone()}
-                                discount={props.discount}
-                            />
-                            <SignalConnect
-                                user_id={props.user_id}
-                                sub_tier={props.sub_tier.clone()}
-                                discount={props.discount}
-                            />
-                            {
-                                if props.user_id == 1 {
-                                    html! {
-                                        <>
-                                        <InstagramConnect
-                                            user_id={props.user_id}
-                                            sub_tier={props.sub_tier.clone()}
-                                            discount={props.discount}
-                                        />
-                                        <MessengerConnect
-                                            user_id={props.user_id}
-                                            sub_tier={props.sub_tier.clone()}
-                                            discount={props.discount}
-                                        />
-                                            </>
-                                    }
-                                } else {
-                                    html! {}
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg" alt="Google Calendar" width="24" height="24"/>
+                        </button>
+                        <button
+                            class={classes!("app-icon", if *memory_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "tasks") { "selected" } else { "" })}
+                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                selected_app.set(if *selected_app == Some("tasks".to_string()) { None } else { Some("tasks".to_string()) });
+                            })}
+                        >
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/5/5b/Google_Tasks_2021.svg" alt="Google Tasks" width="24" height="24"/>
+                        </button>
+                        <button
+                            class={classes!("app-icon", if *email_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "email") { "selected" } else { "" })}
+                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                selected_app.set(if *selected_app == Some("email".to_string()) { None } else { Some("email".to_string()) });
+                            })}
+                        >
+                            <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%234285f4' d='M48 64C21.5 64 0 85.5 0 112c0 15.1 7.1 29.3 19.2 38.4L236.8 313.6c11.4 8.5 27 8.5 38.4 0L492.8 150.4c12.1-9.1 19.2-23.3 19.2-38.4c0-26.5-21.5-48-48-48H48zM0 176V384c0 35.3 28.7 64 64 64H448c35.3 0 64-28.7 64-64V176L294.4 339.2c-22.8 17.1-54 17.1-76.8 0L0 176z'/%3E%3C/svg%3E" alt="IMAP" width="24" height="24"/>
+                        </button>
+                        <button
+                            class={classes!("app-icon", if *whatsapp_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "whatsapp") { "selected" } else { "" })}
+                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                selected_app.set(if *selected_app == Some("whatsapp".to_string()) { None } else { Some("whatsapp".to_string()) });
+                            })}
+                        >
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/6/6b/WhatsApp.svg" alt="WhatsApp" width="24" height="24"/>
+                        </button>
+                        <button
+                            class={classes!("app-icon", if *telegram_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "telegram") { "selected" } else { "" })}
+                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                selected_app.set(if *selected_app == Some("telegram".to_string()) { None } else { Some("telegram".to_string()) });
+                            })}
+                        >
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" alt="Telegram" width="24" height="24"/>
+                        </button>
+                        <button
+                            class={classes!("app-icon", if *signal_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "signal") { "selected" } else { "" })}
+                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                selected_app.set(if *selected_app == Some("signal".to_string()) { None } else { Some("signal".to_string()) });
+                            })}
+                        >
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/6/60/Signal-Logo-Ultramarine_%282024%29.svg" alt="Signal Logo" width="24" height="24"/>
+                        </button>
+                        {
+                            if props.user_id == 1 {
+                                html! {
+                                    <>
+                                        <button
+                                            class={classes!("app-icon", if *instagram_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "instagram") { "selected" } else { "" })}
+                                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                                selected_app.set(if *selected_app == Some("instagram".to_string()) { None } else { Some("instagram".to_string()) });
+                                            })}
+                                        >
+                                            <img src="https://upload.wikimedia.org/wikipedia/commons/e/e7/Instagram_logo_2016.svg" alt="Instagram Logo" width="24" height="24"/>
+                                        </button>
+                                        <button
+                                            class={classes!("app-icon", if *messenger_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "messenger") { "selected" } else { "" })}
+                                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                                selected_app.set(if *selected_app == Some("messenger".to_string()) { None } else { Some("messenger".to_string()) });
+                                            })}
+                                        >
+                                            <img src="https://upload.wikimedia.org/wikipedia/commons/6/63/Facebook_Messenger_logo_2025.svg" alt="Messenger Logo" width="24" height="24" />
+                                        </button>
+                                        <button
+                                            class={classes!("app-icon", if *uber_connected { "connected" } else { "" }, if selected_app.as_ref().map_or(false, |s| s == "uber") { "selected" } else { "" })}
+                                            onclick={let selected_app = selected_app.clone(); Callback::from(move |_: MouseEvent| {
+                                                selected_app.set(if *selected_app == Some("uber".to_string()) { None } else { Some("uber".to_string()) });
+                                            })}
+                                        >
+                                            <img src="https://upload.wikimedia.org/wikipedia/commons/c/cc/Uber_logo_2018.svg" alt="Uber" width="24" height="24"/>
+                                        </button>
+                                    </>
                                 }
+                            } else {
+                                html! {}
                             }
-                            <UberConnect
-                                user_id={props.user_id}
-                                sub_tier={props.sub_tier.clone()}
-                                discount={props.discount}
-                            />
-                        </div>
+                        }
+                    </div>
+                    <div class="app-details">
+                        { details }
                     </div>
                     // Proactive Services
                     <div class="service-group">
@@ -391,33 +443,27 @@ pub fn connect(props: &ConnectProps) -> Html {
                                 }
                             }
                         </div>
-                            // Critical Section
+                        <h4 class="flow-title">{"Proactive Monitoring Flow"}</h4>
+                            // Monitored Contacts Section
                             <div class={classes!(
-                                "service-item"
+                                "service-item",
+                                "flow-step"
                             )}>
                                 {
                                     html! {
-                                        <crate::proactive::critical::CriticalSection
+                                        <crate::proactive::constant_monitoring::MonitoredContactsSection
+                                            service_type={"email".to_string()}
+                                            contacts={Vec::new()}
+                                            on_change={Callback::from(|_| ())}
                                             phone_number={props.phone_number.clone()}
-                                            />
-                                    }
-                                }
-                            </div>
-                            // Digest Section
-                            <div class={classes!(
-                                "service-item"
-                            )}>
-                                {
-                                    html! {
-                                        <crate::proactive::digest::DigestSection
-                                            phone_number={props.phone_number.clone()}
-                                            />
+                                        />
                                     }
                                 }
                             </div>
                             // Waiting Checks Section
                             <div class={classes!(
-                                "service-item"
+                                "service-item",
+                                "flow-step"
                             )}>
                                 {
                                     html! {
@@ -430,18 +476,30 @@ pub fn connect(props: &ConnectProps) -> Html {
                                     }
                                 }
                             </div>
-                            // Monitored Contacts Section
+                            // Critical Section
+                            <div class={classes!(
+                                "service-item",
+                                "flow-step"
+                            )}>
+                                {
+                                    html! {
+                                        <crate::proactive::critical::CriticalSection
+                                            phone_number={props.phone_number.clone()}
+                                            />
+                                    }
+                                }
+                            </div>
+                            <p class="flow-description">{"If a match is found in any of the above steps, a notification message will be sent to you. Otherwise, no message will be sent."}</p>
+                            <br/>
+                            // Digest Section
                             <div class={classes!(
                                 "service-item"
                             )}>
                                 {
                                     html! {
-                                        <crate::proactive::constant_monitoring::MonitoredContactsSection
-                                            service_type={"email".to_string()}
-                                            contacts={Vec::new()}
-                                            on_change={Callback::from(|_| ())}
+                                        <crate::proactive::digest::DigestSection
                                             phone_number={props.phone_number.clone()}
-                                        />
+                                            />
                                     }
                                 }
                             </div>
@@ -530,7 +588,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         {
                                             let display = element.get_attribute("style")
                                                 .unwrap_or_else(|| "display: none".to_string());
-                                          
+                                      
                                             if display.contains("none") {
                                                 let _ = element.set_attribute("style", "display: block");
                                             } else {
@@ -569,7 +627,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         {
                                             let display = element.get_attribute("style")
                                                 .unwrap_or_else(|| "display: none".to_string());
-                                          
+                                      
                                             if display.contains("none") {
                                                 let _ = element.set_attribute("style", "display: block");
                                             } else {
@@ -607,7 +665,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         {
                                             let display = element.get_attribute("style")
                                                 .unwrap_or_else(|| "display: none".to_string());
-                                          
+                                      
                                             if display.contains("none") {
                                                 let _ = element.set_attribute("style", "display: block");
                                             } else {
@@ -644,7 +702,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         {
                                             let display = element.get_attribute("style")
                                                 .unwrap_or_else(|| "display: none".to_string());
-                                          
+                                      
                                             if display.contains("none") {
                                                 let _ = element.set_attribute("style", "display: block");
                                             } else {
@@ -692,18 +750,13 @@ pub fn connect(props: &ConnectProps) -> Html {
     border-radius: 12px;
     font-size: 0.8rem;
 }
-/* Apps */
-.service-group:nth-child(1) .service-count {
-    background: rgba(96, 165, 250, 0.1);
-    color: #60A5FA;
-}
 /* Monitoring */
-.service-group:nth-child(2) .service-count {
+.service-group:nth-child(1) .service-count {
     background: rgba(52, 211, 153, 0.1);
     color: #34D399;
 }
 /* Tools */
-.service-group:nth-child(3) .service-count {
+.service-group:nth-child(2) .service-count {
     background: rgba(169, 169, 169, 0.1);
     color: #A9A9A9;
 }
@@ -768,25 +821,18 @@ pub fn connect(props: &ConnectProps) -> Html {
     cursor: pointer;
     transition: all 0.3s ease;
 }
-/* Apps - Blue */
+/* Monitoring - Green */
 .service-group:nth-child(1) .service-group-title {
-    color: #60A5FA;
+    color: #34D399;
 }
 .service-group:nth-child(1) .service-group-title:hover {
-    background: rgba(96, 165, 250, 0.1);
-}
-/* Monitoring - Green */
-.service-group:nth-child(2) .service-group-title {
-    color: #34D399; /* Adjusted to a green shade to match the hover rgba(52, 211, 153, 0.1) */
-}
-.service-group:nth-child(2) .service-group-title:hover {
     background: rgba(52, 211, 153, 0.1);
 }
 /* Tools - Silver */
-.service-group:nth-child(3) .service-group-title {
+.service-group:nth-child(2) .service-group-title {
     color: #A9A9A9;
 }
-.service-group:nth-child(3) .service-group-title:hover {
+.service-group:nth-child(2) .service-group-title:hover {
     background: rgba(169, 169, 169, 0.1);
 }
 .service-group-title:hover {
@@ -799,6 +845,7 @@ pub fn connect(props: &ConnectProps) -> Html {
     padding: 1.5rem;
     margin-bottom: 1rem;
     transition: all 0.3s ease;
+    position: relative;
 }
 .service-item:last-child {
     margin-bottom: 0;
@@ -827,6 +874,64 @@ pub fn connect(props: &ConnectProps) -> Html {
     line-height: 1.5;
     margin-bottom: 1rem;
 }
+.flow-title {
+    font-size: 1.2rem;
+    color: #34D399;
+    text-align: center;
+    margin-bottom: 1rem;
+}
+.flow-description {
+    text-align: center;
+    color: #999;
+    font-style: italic;
+    margin: 1.5rem 0;
+}
+.flow-step:not(:last-of-type)::after {
+    content: '↓';
+    position: absolute;
+    left: 50%;
+    bottom: -2rem;
+    transform: translateX(-50%);
+    font-size: 3rem;
+    color: #fff;
+    opacity: 0.5;
+}
+.apps-icons-row {
+    display: flex;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 1.5rem;
+    margin: 1.5rem;
+    flex-wrap: wrap;
+}
+.app-icon {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0.5rem;
+    border-radius: 50%;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: #fff;
+}
+.app-icon:hover {
+    background: rgba(30, 144, 255, 0.1);
+}
+.app-icon.selected {
+    background: rgba(30, 144, 255, 0.2);
+    box-shadow: 0 0 10px rgba(30, 144, 255, 0.3);
+}
+.app-icon.connected {
+    background: rgba(52, 211, 153, 0.2);
+    box-shadow: 0 0 10px rgba(52, 211, 153, 0.5);
+}
+.app-details {
+    width: 100%;
+}
 {"
 .connect-section {
     max-width: 800px;
@@ -850,24 +955,20 @@ pub fn connect(props: &ConnectProps) -> Html {
         padding: 1rem;
         margin-bottom: 1.5rem;
     }
-  
     .service-item {
         padding: 1rem;
     }
-  
     .service-header {
         flex-direction: column;
         align-items: flex-start;
         gap: 0.5rem;
     }
-  
     .service-status-container {
         width: 100%;
         display: flex;
         flex-direction: column;
         gap: 0.25rem;
     }
-  
     .imap-form input,
     .imap-form select {
         width: 100%;
@@ -895,9 +996,8 @@ pub fn connect(props: &ConnectProps) -> Html {
 .info-section li {
     margin: 0.5rem 0;
 }
-.fas.fa-cloud-sun,
-.fas.fa-qrcode,
-.fas.fa-search {
+.fas.fa-directions,
+.fas.fa-qrcode {
     display: inline-block;
     width: 24px;
     text-align: center;
@@ -1003,18 +1103,6 @@ pub fn connect(props: &ConnectProps) -> Html {
     margin-top: 1rem;
     font-size: 0.9rem;
 }
-.coming-soon {
-    opacity: 0.5;
-    pointer-events: none;
-}
-.coming-soon-tag {
-    background: rgba(30, 144, 255, 0.1);
-    color: #1E90FF;
-    font-size: 0.8rem;
-    padding: 0.25rem 0.75rem;
-    border-radius: 12px;
-    margin-left: 0.75rem;
-}
 .pro-tag {
     background: linear-gradient(45deg, #FFD700, #FFA500);
     color: #000;
@@ -1041,412 +1129,400 @@ pub fn connect(props: &ConnectProps) -> Html {
     border-color: rgba(76, 175, 80, 0.4);
 }
 .calendar-connect-options {
-                            display: flex;
-                            flex-direction: column;
-                            gap: 10px;
-                            margin-top: 10px;
-                        }
-                        .calendar-checkbox {
-                            display: flex;
-                            align-items: center;
-                            gap: 8px;
-                            font-size: 14px;
-                            color: #666;
-                            cursor: pointer;
-                        }
-                        .calendar-checkbox input[type='checkbox'] {
-                            width: 16px;
-                            height: 16px;
-                            cursor: pointer;
-                        }
-                        .service-status-container {
-                            display: flex;
-                            align-items: center;
-                            gap: 8px;
-                        }
-                        .connected-email {
-                            font-size: 0.9em;
-                            color: #666;
-                            font-style: italic;
-                        }
-                        .gmail-controls {
-                            display: flex;
-                            gap: 10px;
-                            margin-top: 10px;
-                        }
-                        .test-button {
-                            background-color: #4CAF50;
-                            color: white;
-                            padding: 8px 16px;
-                            border: none;
-                            border-radius: 4px;
-                            cursor: pointer;
-                            margin-left: 10px;
-                            font-size: 14px;
-                        }
-                        .test-button:hover {
-                            background-color: #45a049;
-                        }
-                        .service-group {
-                            margin-bottom: 2rem;
-                        }
-                        .service-group:last-child {
-                            margin-bottom: 0;
-                        }
-                        .service-group-title {
-                            color: #7EB2FF;
-                            font-size: 1.2rem;
-                            margin-bottom: 1rem;
-                            display: flex;
-                            align-items: center;
-                            gap: 0.5rem;
-                        }
-                        .service-group-title i {
-                            font-size: 1.1rem;
-                        }
-                        .service-list {
-                            display: grid;
-                            gap: 1rem;
-                        }
-                        .service-item {
-                            background: rgba(0, 0, 0, 0.2);
-                            border: 1px solid rgba(30, 144, 255, 0.2);
-                            border-radius: 8px;
-                            padding: 1.5rem;
-                            transition: all 0.3s ease;
-                        }
-                        .service-item:hover {
-                            border-color: rgba(30, 144, 255, 0.4);
-                            transform: translateY(-2px);
-                        }
-                        .service-header {
-                            display: flex;
-                            align-items: center;
-                            justify-content: space-between;
-                            margin-bottom: 1rem;
-                        }
-                        .service-name {
-                            display: flex;
-                            align-items: center;
-                            gap: 0.75rem;
-                            color: #fff;
-                            font-size: 1.1rem;
-                        }
-                        .service-name img {
-                            width: 24px;
-                            height: 24px;
-                        }
-                        .service-status {
-                            font-size: 0.9rem;
-                            color: #666;
-                        }
-                        .service-description {
-                            color: #999;
-                            font-size: 0.9rem;
-                            margin-bottom: 1.5rem;
-                            line-height: 1.4;
-                        }
-                        .connect-button {
-                            background: linear-gradient(45deg, #1E90FF, #4169E1);
-                            color: white;
-                            border: none;
-                            padding: 0.75rem 1.5rem;
-                            border-radius: 6px;
-                            font-size: 0.9rem;
-                            cursor: pointer;
-                            transition: all 0.3s ease;
-                            display: inline-flex;
-                            align-items: center;
-                            gap: 0.5rem;
-                            width: 100%;
-                            justify-content: center;
-                        }
-                        .connect-button:hover {
-                            transform: translateY(-2px);
-                            box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
-                        }
-                        .connect-button.connected {
-                            background: rgba(30, 144, 255, 0.1);
-                            border: 1px solid rgba(30, 144, 255, 0.3);
-                            color: #1E90FF;
-                        }
-                        .connect-button.connected:hover {
-                            background: rgba(30, 144, 255, 0.15);
-                        }
-                        .disconnect-button {
-                            background: transparent;
-                            border: 1px solid rgba(255, 99, 71, 0.3);
-                            color: #FF6347;
-                            padding: 0.75rem 1.5rem;
-                            border-radius: 6px;
-                            font-size: 0.9rem;
-                            cursor: pointer;
-                            transition: all 0.3s ease;
-                            margin-top: 0.5rem;
-                            width: 100%;
-                        }
-                        .disconnect-button:hover {
-                            background: rgba(255, 99, 71, 0.1);
-                            border-color: rgba(255, 99, 71, 0.5);
-                        }
-                        .coming-soon {
-                            opacity: 0.5;
-                            pointer-events: none;
-                        }
-                        .coming-soon-tag {
-                            background: rgba(30, 144, 255, 0.1);
-                            color: #1E90FF;
-                            font-size: 0.8rem;
-                            padding: 0.25rem 0.5rem;
-                            border-radius: 4px;
-                            margin-left: 0.5rem;
-                        }
-                        .error-message {
-                            color: #FF6347;
-                            font-size: 0.9rem;
-                            margin-top: 1rem;
-                            padding: 0.75rem;
-                            background: rgba(255, 99, 71, 0.1);
-                            border-radius: 6px;
-                            border: 1px solid rgba(255, 99, 71, 0.2);
-                        }
-                        /* Waiting Checks Section Styles */
-                        .filter-section {
-                            background: rgba(0, 0, 0, 0.2);
-                            border: 1px solid rgba(30, 144, 255, 0.2);
-                            border-radius: 12px;
-                            padding: 1.5rem;
-                            margin-bottom: 1rem;
-                        }
-                        .filter-section.inactive {
-                            opacity: 0.7;
-                        }
-                        .filter-header {
-                            display: flex;
-                            align-items: center;
-                            justify-content: space-between;
-                            margin-bottom: 1rem;
-                        }
-                        .filter-header h3 {
-                            margin: 0;
-                            color: #F59E0B;
-                            font-size: 1.1rem;
-                        }
-                        .waiting-check-input {
-                            display: flex;
-                            gap: 1rem;
-                            margin-bottom: 1rem;
-                        }
-                        .waiting-check-fields {
-                            flex: 1;
-                            display: flex;
-                            gap: 1rem;
-                            align-items: center;
-                        }
-                        .waiting-check-fields input[type="text"] {
-                            flex: 1;
-                            padding: 0.75rem;
-                            border-radius: 8px;
-                            border: 1px solid rgba(30, 144, 255, 0.2);
-                            background: rgba(0, 0, 0, 0.2);
-                            color: #fff;
-                        }
-                        .date-label {
-                            display: flex;
-                            flex-direction: column;
-                            gap: 0.25rem;
-                        }
-                        .date-label span {
-                            font-size: 0.8rem;
-                            color: #999;
-                        }
-                        .date-label input[type="date"] {
-                            padding: 0.75rem;
-                            border-radius: 8px;
-                            border: 1px solid rgba(30, 144, 255, 0.2);
-                            background: rgba(0, 0, 0, 0.2);
-                            color: #fff;
-                        }
-                        .waiting-check-input button {
-                            padding: 0.75rem 1.5rem;
-                            border-radius: 8px;
-                            border: none;
-                            background: linear-gradient(45deg, #F59E0B, #D97706);
-                            color: white;
-                            cursor: pointer;
-                            transition: all 0.3s ease;
-                        }
-                        .waiting-check-input button:hover {
-                            transform: translateY(-2px);
-                            box-shadow: 0 4px 20px rgba(245, 158, 11, 0.3);
-                        }
-                        .filter-list {
-                            list-style: none;
-                            padding: 0;
-                            margin: 0;
-                        }
-                        .filter-list li {
-                            display: flex;
-                            align-items: center;
-                            justify-content: space-between;
-                            padding: 0.75rem;
-                            background: rgba(0, 0, 0, 0.2);
-                            border: 1px solid rgba(30, 144, 255, 0.1);
-                            border-radius: 8px;
-                            margin-bottom: 0.5rem;
-                            color: #fff;
-                        }
-                        .filter-list li:last-child {
-                            margin-bottom: 0;
-                        }
-                        .filter-list .due-date {
-                            font-size: 0.9rem;
-                            color: #999;
-                            margin-left: 1rem;
-                        }
-                        .filter-list .remove-when-found {
-                            font-size: 0.8rem;
-                            color: #F59E0B;
-                            margin-left: 1rem;
-                        }
-                        .filter-list .delete-btn {
-                            background: none;
-                            border: none;
-                            color: #FF6347;
-                            font-size: 1.2rem;
-                            cursor: pointer;
-                            padding: 0.25rem 0.5rem;
-                            border-radius: 4px;
-                            transition: all 0.3s ease;
-                        }
-                        .filter-list .delete-btn:hover {
-                            background: rgba(255, 99, 71, 0.1);
-                        }
-                        .toggle-container {
-                            display: flex;
-                            align-items: center;
-                            gap: 0.75rem;
-                        }
-                        .toggle-label {
-                            font-size: 0.9rem;
-                            color: #999;
-                        }
-                        .switch {
-                            position: relative;
-                            display: inline-block;
-                            width: 48px;
-                            height: 24px;
-                        }
-                        .switch input {
-                            opacity: 0;
-                            width: 0;
-                            height: 0;
-                        }
-                        .slider {
-                            position: absolute;
-                            cursor: pointer;
-                            top: 0;
-                            left: 0;
-                            right: 0;
-                            bottom: 0;
-                            background-color: rgba(0, 0, 0, 0.2);
-                            transition: .4s;
-                            border: 1px solid rgba(30, 144, 255, 0.2);
-                        }
-                        .slider:before {
-                            position: absolute;
-                            content: "";
-                            height: 16px;
-                            width: 16px;
-                            left: 4px;
-                            bottom: 3px;
-                            background-color: white;
-                            transition: .4s;
-                        }
-                        input:checked + .slider {
-                            background-color: #F59E0B;
-                        }
-                        input:checked + .slider:before {
-                            transform: translateX(24px);
-                        }
-                        .slider.round {
-                            border-radius: 24px;
-                        }
-                        .slider.round:before {
-                            border-radius: 50%;
-                        }
-                        /* Feature Section Styles */
-                        .feature-section {
-                            position: relative;
-                            background: rgba(30, 30, 30, 0.7);
-                            border: 1px solid rgba(30, 144, 255, 0.1);
-                            border-radius: 16px;
-                            padding: 2rem;
-                            margin-bottom: 2rem;
-                            backdrop-filter: blur(10px);
-                            transition: all 0.3s ease;
-                        }
-                        .feature-section.inactive {
-                            opacity: 0.7;
-                            filter: grayscale(50%);
-                        }
-                        .feature-overlay {
-                            position: absolute;
-                            top: 0;
-                            left: 0;
-                            right: 0;
-                            bottom: 0;
-                            background: rgba(0, 0, 0, 0.7);
-                            backdrop-filter: blur(4px);
-                            border-radius: 16px;
-                            color: #999;
-                            font-size: 0.9rem;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                            z-index: 10;
-                        }
-                        .overlay-content {
-                            text-align: center;
-                            color: #999;
-                            font-size: 0.9rem;
-                            padding: 2rem;
-                        }
-                        .overlay-content i {
-                            font-size: 2rem;
-                            color: #999 !important;
-                            margin-bottom: 1rem;
-                        }
-                        .overlay-content p {
-                            font-size: 1.1rem;
-                            margin: 0;
-                            color: #999 !important;
-                        }
-                        @media (max-width: 768px) {
-                            .connect-section {
-                                padding: 0;
-                                margin: 0;
-                            }
-                            .service-list {
-                                grid-template-columns: 1fr;
-                            }
-                            .service-item {
-                                padding: 1rem;
-                            }
-                            .feature-section {
-                                padding: 1rem;
-                            }
-                            .overlay-content {
-                                padding: 1rem;
-                            }
-                            .overlay-content i {
-                                font-size: 1.5rem;
-                            }
-                            .overlay-content p {
-                                font-size: 1rem;
-                            }
-                        }
-                        "#}
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 10px;
+}
+.calendar-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: #666;
+    cursor: pointer;
+}
+.calendar-checkbox input[type='checkbox'] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+.service-status-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.connected-email {
+    font-size: 0.9em;
+    color: #666;
+    font-style: italic;
+}
+.gmail-controls {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+.test-button {
+    background-color: #4CAF50;
+    color: white;
+    padding: 8px 16px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-left: 10px;
+    font-size: 14px;
+}
+.test-button:hover {
+    background-color: #45a049;
+}
+.service-group {
+    margin-bottom: 2rem;
+}
+.service-group:last-child {
+    margin-bottom: 0;
+}
+.service-group-title {
+    color: #7EB2FF;
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.service-group-title i {
+    font-size: 1.1rem;
+}
+.service-list {
+    display: grid;
+    gap: 1rem;
+}
+.service-item {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    border-radius: 8px;
+    padding: 1.5rem;
+    transition: all 0.3s ease;
+}
+.service-item:hover {
+    border-color: rgba(30, 144, 255, 0.4);
+    transform: translateY(-2px);
+}
+.service-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+}
+.service-name {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: #fff;
+    font-size: 1.1rem;
+}
+.service-name img {
+    width: 24px;
+    height: 24px;
+}
+.service-status {
+    font-size: 0.9rem;
+    color: #666;
+}
+.service-description {
+    color: #999;
+    font-size: 0.9rem;
+    margin-bottom: 1.5rem;
+    line-height: 1.4;
+}
+.connect-button {
+    background: linear-gradient(45deg, #1E90FF, #4169E1);
+    color: white;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    justify-content: center;
+}
+.connect-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(30, 144, 255, 0.3);
+}
+.connect-button.connected {
+    background: rgba(30, 144, 255, 0.1);
+    border: 1px solid rgba(30, 144, 255, 0.3);
+    color: #1E90FF;
+}
+.connect-button.connected:hover {
+    background: rgba(30, 144, 255, 0.15);
+}
+.disconnect-button {
+    background: transparent;
+    border: 1px solid rgba(255, 99, 71, 0.3);
+    color: #FF6347;
+    padding: 0.75rem 1.5rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin-top: 0.5rem;
+    width: 100%;
+}
+.disconnect-button:hover {
+    background: rgba(255, 99, 71, 0.1);
+    border-color: rgba(255, 99, 71, 0.5);
+}
+.error-message {
+    color: #FF6347;
+    font-size: 0.9rem;
+    margin-top: 1rem;
+    padding: 0.75rem;
+    background: rgba(255, 99, 71, 0.1);
+    border-radius: 6px;
+    border: 1px solid rgba(255, 99, 71, 0.2);
+}
+/* Waiting Checks Section Styles */
+.filter-section {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+}
+.filter-section.inactive {
+    opacity: 0.7;
+}
+.filter-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+}
+.filter-header h3 {
+    margin: 0;
+    color: #F59E0B;
+    font-size: 1.1rem;
+}
+.waiting-check-input {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+.waiting-check-fields {
+    flex: 1;
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+.waiting-check-fields input[type="text"] {
+    flex: 1;
+    padding: 0.75rem;
+    border-radius: 8px;
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    background: rgba(0, 0, 0, 0.2);
+    color: #fff;
+}
+.date-label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+.date-label span {
+    font-size: 0.8rem;
+    color: #999;
+}
+.date-label input[type="date"] {
+    padding: 0.75rem;
+    border-radius: 8px;
+    border: 1px solid rgba(30, 144, 255, 0.2);
+    background: rgba(0, 0, 0, 0.2);
+    color: #fff;
+}
+.waiting-check-input button {
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    border: none;
+    background: linear-gradient(45deg, #F59E0B, #D97706);
+    color: white;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+.waiting-check-input button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(245, 158, 11, 0.3);
+}
+.filter-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+.filter-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+    color: #fff;
+}
+.filter-list li:last-child {
+    margin-bottom: 0;
+}
+.filter-list .due-date {
+    font-size: 0.9rem;
+    color: #999;
+    margin-left: 1rem;
+}
+.filter-list .remove-when-found {
+    font-size: 0.8rem;
+    color: #F59E0B;
+    margin-left: 1rem;
+}
+.filter-list .delete-btn {
+    background: none;
+    border: none;
+    color: #FF6347;
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    transition: all 0.3s ease;
+}
+.filter-list .delete-btn:hover {
+    background: rgba(255, 99, 71, 0.1);
+}
+.toggle-container {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+.toggle-label {
+    font-size: 0.9rem;
+    color: #999;
+}
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 48px;
+    height: 24px;
+}
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.2);
+    transition: .4s;
+    border: 1px solid rgba(30, 144, 255, 0.2);
+}
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 4px;
+    bottom: 3px;
+    background-color: white;
+    transition: .4s;
+}
+input:checked + .slider {
+    background-color: #F59E0B;
+}
+input:checked + .slider:before {
+    transform: translateX(24px);
+}
+.slider.round {
+    border-radius: 24px;
+}
+.slider.round:before {
+    border-radius: 50%;
+}
+/* Feature Section Styles */
+.feature-section {
+    position: relative;
+    background: rgba(30, 30, 30, 0.7);
+    border: 1px solid rgba(30, 144, 255, 0.1);
+    border-radius: 16px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    backdrop-filter: blur(10px);
+    transition: all 0.3s ease;
+}
+.feature-section.inactive {
+    opacity: 0.7;
+    filter: grayscale(50%);
+}
+.feature-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    border-radius: 16px;
+    color: #999;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+.overlay-content {
+    text-align: center;
+    color: #999;
+    font-size: 0.9rem;
+    padding: 2rem;
+}
+.overlay-content i {
+    font-size: 2rem;
+    color: #999 !important;
+    margin-bottom: 1rem;
+}
+.overlay-content p {
+    font-size: 1.1rem;
+    margin: 0;
+    color: #999 !important;
+}
+@media (max-width: 768px) {
+    .connect-section {
+        padding: 0;
+        margin: 0;
+    }
+    .service-list {
+        grid-template-columns: 1fr;
+    }
+    .service-item {
+        padding: 1rem;
+    }
+    .feature-section {
+        padding: 1rem;
+    }
+    .overlay-content {
+        padding: 1rem;
+    }
+    .overlay-content i {
+        font-size: 1.5rem;
+    }
+    .overlay-content p {
+        font-size: 1rem;
+    }
+}
+"#}
                     </style>
                 </div>
             }

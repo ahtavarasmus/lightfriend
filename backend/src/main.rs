@@ -291,6 +291,7 @@ async fn main() {
     // Public routes that don't need authentication. there's ratelimiting though
     let public_routes = Router::new()
         .route("/api/health", get(health_check))
+        .route("/unsubscribe", get(admin_handlers::unsubscribe))
         .route("/api/login", post(auth_handlers::login))
         .route("/api/register", post(auth_handlers::register))
         .route("/api/password-reset/request", post(auth_handlers::request_password_reset))
