@@ -15,7 +15,6 @@ use crate::connections::signal::SignalConnect;
 use crate::connections::messenger::MessengerConnect;
 use crate::connections::instagram::InstagramConnect;
 use serde_json::Value;
-
 #[derive(Properties, PartialEq)]
 pub struct ConnectProps {
     pub user_id: i32,
@@ -29,6 +28,11 @@ struct ServiceGroupState {
     expanded: bool,
     service_count: usize,
     connected_count: usize,
+}
+#[derive(Clone, PartialEq)]
+enum MonitoringTab {
+    ForEachMessage,
+    Scheduled,
 }
 #[function_component(Connect)]
 pub fn connect(props: &ConnectProps) -> Html {
@@ -297,6 +301,7 @@ pub fn connect(props: &ConnectProps) -> Html {
     } else {
         html! {}
     };
+    let active_monitoring_tab = use_state(|| MonitoringTab::ForEachMessage);
             html! {
                 <div class="connect-section">
                     // Apps
@@ -406,15 +411,11 @@ pub fn connect(props: &ConnectProps) -> Html {
                             <span class="monitoring-cost">
                                 {
                                     if props.phone_number.starts_with("+1") {
-                                        html! {
-                                            format!("Est. {:.2} Messages/mo", props.estimated_monitoring_cost)
-                                        }
+                                        format!("Est. {:.2} Messages/mo", props.estimated_monitoring_cost)
                                     } else if props.phone_number.starts_with("+358") || props.phone_number.starts_with("+44") || props.phone_number.starts_with("+61") {
-                                        html! {
-                                            format!("Est. {}{:.2}/mo", currency, props.estimated_monitoring_cost)
-                                        }
+                                        format!("Est. {}{:.2}/mo", currency, props.estimated_monitoring_cost)
                                     } else {
-                                        html! {}
+                                        "".to_string()
                                     }
                                 }
                             </span>
@@ -426,83 +427,100 @@ pub fn connect(props: &ConnectProps) -> Html {
                         </div>
                     </h3>
                         <div class={classes!(
-                            "service-list",
+                            "monitoring-content",
                             if group_states.get("proactive").map(|s| s.expanded).unwrap_or(false) {
                                 "expanded"
                             } else {
                                 "collapsed"
                             }
                         )}>
-                        // Proactive Agent Section
-                        <div class={classes!(
-                            "service-item"
-                        )}>
+                        <div class="monitoring-tabs">
+                            <button
+                                class={classes!("tab-button", (*active_monitoring_tab == MonitoringTab::ForEachMessage).then(|| "active"))}
+                                onclick={{
+                                    let active_monitoring_tab = active_monitoring_tab.clone();
+                                    Callback::from(move |_| active_monitoring_tab.set(MonitoringTab::ForEachMessage))
+                                }}
+                            >
+                                {"For each message"}
+                            </button>
+                            <button
+                                class={classes!("tab-button", (*active_monitoring_tab == MonitoringTab::Scheduled).then(|| "active"))}
+                                onclick={{
+                                    let active_monitoring_tab = active_monitoring_tab.clone();
+                                    Callback::from(move |_| active_monitoring_tab.set(MonitoringTab::Scheduled))
+                                }}
+                            >
+                                {"Scheduled"}
+                            </button>
+                        </div>
+                        <div class="service-list">
                             {
-                                html! {
-                                    <crate::proactive::agent_on::ProactiveAgentSection/>
+                                match *active_monitoring_tab {
+                                    MonitoringTab::ForEachMessage => html! {
+                                        <>
+                                            <div class={classes!("service-item")}>
+                                                {
+                                                    html! {
+                                                        <crate::proactive::agent_on::ProactiveAgentSection/>
+                                                    }
+                                                }
+                                            </div>
+                                            <h4 class="flow-title">{"Proactive Monitoring Flow"}</h4>
+                                                // Monitored Contacts Section
+                                                <div class={classes!("service-item", "flow-step")}>
+                                                    {
+                                                        html! {
+                                                            <crate::proactive::constant_monitoring::MonitoredContactsSection
+                                                                service_type={"email".to_string()}
+                                                                contacts={Vec::new()}
+                                                                on_change={Callback::from(|_| ())}
+                                                                phone_number={props.phone_number.clone()}
+                                                            />
+                                                        }
+                                                    }
+                                                </div>
+                                                // Waiting Checks Section
+                                                <div class={classes!("service-item", "flow-step")}>
+                                                    {
+                                                        html! {
+                                                            <crate::proactive::waiting_checks::WaitingChecksSection
+                                                                service_type={"messaging".to_string()}
+                                                                checks={Vec::new()}
+                                                                on_change={Callback::from(|_| ())}
+                                                                phone_number={props.phone_number.clone()}
+                                                            />
+                                                        }
+                                                    }
+                                                </div>
+                                                // Critical Section
+                                                <div class={classes!("service-item", "flow-step")}>
+                                                    {
+                                                        html! {
+                                                            <crate::proactive::critical::CriticalSection
+                                                                phone_number={props.phone_number.clone()}
+                                                                />
+                                                        }
+                                                    }
+                                                </div>
+                                                <p class="flow-description">{"If a match is found in any of the above steps, a notification message will be sent to you. Otherwise, no message will be sent."}</p>
+                                                <br/>
+                                        </>
+                                    },
+                                    MonitoringTab::Scheduled => html! {
+                                        <div class={classes!("service-item")}>
+                                            {
+                                                html! {
+                                                    <crate::proactive::digest::DigestSection
+                                                        phone_number={props.phone_number.clone()}
+                                                        />
+                                                }
+                                            }
+                                        </div>
+                                    }
                                 }
                             }
                         </div>
-                        <h4 class="flow-title">{"Proactive Monitoring Flow"}</h4>
-                            // Monitored Contacts Section
-                            <div class={classes!(
-                                "service-item",
-                                "flow-step"
-                            )}>
-                                {
-                                    html! {
-                                        <crate::proactive::constant_monitoring::MonitoredContactsSection
-                                            service_type={"email".to_string()}
-                                            contacts={Vec::new()}
-                                            on_change={Callback::from(|_| ())}
-                                            phone_number={props.phone_number.clone()}
-                                        />
-                                    }
-                                }
-                            </div>
-                            // Waiting Checks Section
-                            <div class={classes!(
-                                "service-item",
-                                "flow-step"
-                            )}>
-                                {
-                                    html! {
-                                        <crate::proactive::waiting_checks::WaitingChecksSection
-                                            service_type={"messaging".to_string()}
-                                            checks={Vec::new()}
-                                            on_change={Callback::from(|_| ())}
-                                            phone_number={props.phone_number.clone()}
-                                        />
-                                    }
-                                }
-                            </div>
-                            // Critical Section
-                            <div class={classes!(
-                                "service-item",
-                                "flow-step"
-                            )}>
-                                {
-                                    html! {
-                                        <crate::proactive::critical::CriticalSection
-                                            phone_number={props.phone_number.clone()}
-                                            />
-                                    }
-                                }
-                            </div>
-                            <p class="flow-description">{"If a match is found in any of the above steps, a notification message will be sent to you. Otherwise, no message will be sent."}</p>
-                            <br/>
-                            // Digest Section
-                            <div class={classes!(
-                                "service-item"
-                            )}>
-                                {
-                                    html! {
-                                        <crate::proactive::digest::DigestSection
-                                            phone_number={props.phone_number.clone()}
-                                            />
-                                    }
-                                }
-                            </div>
                         </div>
                     </div>
                     // Tools
@@ -588,7 +606,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         {
                                             let display = element.get_attribute("style")
                                                 .unwrap_or_else(|| "display: none".to_string());
-                                      
+                                     
                                             if display.contains("none") {
                                                 let _ = element.set_attribute("style", "display: block");
                                             } else {
@@ -627,7 +645,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         {
                                             let display = element.get_attribute("style")
                                                 .unwrap_or_else(|| "display: none".to_string());
-                                      
+                                     
                                             if display.contains("none") {
                                                 let _ = element.set_attribute("style", "display: block");
                                             } else {
@@ -665,7 +683,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         {
                                             let display = element.get_attribute("style")
                                                 .unwrap_or_else(|| "display: none".to_string());
-                                      
+                                     
                                             if display.contains("none") {
                                                 let _ = element.set_attribute("style", "display: block");
                                             } else {
@@ -702,7 +720,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                         {
                                             let display = element.get_attribute("style")
                                                 .unwrap_or_else(|| "display: none".to_string());
-                                      
+                                     
                                             if display.contains("none") {
                                                 let _ = element.set_attribute("style", "display: block");
                                             } else {
@@ -784,17 +802,17 @@ pub fn connect(props: &ConnectProps) -> Html {
 .service-group-title:hover i.fa-chevron-down {
     transform: translateY(-2px);
 }
-.service-list {
+.service-list, .monitoring-content {
     transition: all 0.3s ease-in-out;
     overflow: hidden;
 }
-.service-list.collapsed {
+.service-list.collapsed, .monitoring-content.collapsed {
     max-height: 0;
     opacity: 0;
     margin: 0;
     padding: 0;
 }
-.service-list.expanded {
+.service-list.expanded, .monitoring-content.expanded {
     max-height: 5000px;
     opacity: 1;
     margin-top: 1.5rem;
@@ -818,7 +836,6 @@ pub fn connect(props: &ConnectProps) -> Html {
     gap: 0.75rem;
     padding: 0.5rem;
     border-radius: 8px;
-    cursor: pointer;
     transition: all 0.3s ease;
 }
 /* Monitoring - Green */
@@ -932,7 +949,6 @@ pub fn connect(props: &ConnectProps) -> Html {
 .app-details {
     width: 100%;
 }
-{"
 .connect-section {
     max-width: 800px;
     margin: 0;
@@ -1521,6 +1537,46 @@ input:checked + .slider:before {
     .overlay-content p {
         font-size: 1rem;
     }
+}
+.monitoring-tabs {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    border-bottom: 1px solid rgba(30, 144, 255, 0.1);
+    padding-bottom: 1rem;
+    flex-wrap: wrap;
+}
+.tab-button {
+    background: transparent;
+    border: none;
+    color: #999;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+    position: relative;
+    white-space: nowrap;
+    flex: 1;
+    min-width: fit-content;
+}
+.tab-button::after {
+    content: '';
+    position: absolute;
+    bottom: -1rem;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: transparent;
+    transition: background-color 0.3s ease;
+}
+.tab-button.active {
+    color: white;
+}
+.tab-button.active::after {
+    background: #1E90FF;
+}
+.tab-button:hover {
+    color: #7EB2FF;
 }
 "#}
                     </style>
