@@ -45,46 +45,56 @@ const WAITING_CHECK_PROMPT: &str = r#"You are an AI that determines whether an i
 "#;
 
 const CRITICAL_PROMPT: &str = r#"You are an AI that decides whether an incoming user message is **critical** — i.e. it must be surfaced within **two hours** and cannot wait for the next scheduled summary.
-
 A message is **critical** if delaying action beyond 2 h risks:
-• Direct harm to people  
-• Severe data loss or major financial loss  
-• Production system outage or security breach  
-• Hard legal/compliance deadline expiring in ≤ 2 h  
+• Direct harm to people
+• Severe data loss or major financial loss
+• Production system outage or security breach
+• Hard legal/compliance deadline expiring in ≤ 2 h
 • The sender explicitly says it must be handled immediately (e.g. “ASAP”, “emergency”, “right now”) or gives a ≤ 2 h deadline.
-
-Everything else — vague urgency, routine updates, or unclear requests — is **NOT** critical.  
+• Time-sensitive personal or social requests/opportunities with an implied or stated window of ≤2 hours (e.g., invitations for immediate events like lunch, or quick decisions needed right now).
+Everything else — vague urgency, routine updates, or unclear requests — is **NOT** critical.
 If unsure, choose **not critical**.
-
 ---
-
 ### Process
-1. Detect the message language; translate internally to English before reasoning.  
-2. Apply the criteria **strictly**.  
-3. Produce JSON with these fields (do **not** add others):
-
+1. Detect the message language; translate internally to English before reasoning.
+2. Identify any explicit or implied time windows (e.g., "now," "soon," "today at noon," or contexts like being at a location requiring immediate input).
+3. Apply the criteria **strictly**.
+4. Produce JSON with these fields (do **not** add others):
 | Field | Required? | Max chars | Content rules |
 |-------|-----------|-----------|---------------|
 | `is_critical` | always | — | Boolean. |
-| `what_to_inform` | *only when* `is_critical==true` | 160 | **One SMS sentence** that:<br>  • Briefly summarizes the core problem/ask (who/what/when).<br>  • States the single most urgent next action the recipient must take within 2 h. Remember to include the sender or the Chat the message is from. |
+| `what_to_inform` | *only when* `is_critical==true` | 160 | **One SMS sentence** that:<br> • Briefly summarizes the core problem/ask (who/what/when).<br> • States the single most urgent next action the recipient must take within 2 h. Remember to include the sender or the Chat the message is from. |
 | `first_message` | *only when* `is_critical==true` | 100 | **Voice-assistant opener** that grabs attention and repeats the required action in imperative form. |
-
 If `is_critical` is false, leave the other two fields empty strings.
-
 ---
-
 #### Examples
-
-**Incoming:**  
-“I'm at the store should I buy eggs or do we have some still?”  
-
-**Output:**  
-```json
+**Incoming:**
+“I'm at the store should I buy eggs or do we have some still?”
+**Output:**
 {
   "is_critical": true,
   "what_to_inform": "Rasmus is asking on WhatsApp if he needs to buy eggs as well",
   "first_message": "Hey, Rasmus needs more information about the shopping list"
-}"#;
+}
+
+**Incoming**:
+"Hey, want to grab lunch? I'm free until 1 PM."
+**Output**:
+{
+  "is_critical": true,
+  "what_to_inform": "Alex is inviting you to lunch on WhatsApp",
+  "first_message": "Alex is asking if you want to crab lunch!"
+}
+
+**Incoming**:
+"Weekly team update: Project is on track."
+**Output**:
+{
+  "is_critical": false,
+  "what_to_inform": "",
+  "first_message": ""
+}
+"#;
 
 
 #[derive(Debug, Serialize, Deserialize)]
