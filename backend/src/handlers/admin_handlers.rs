@@ -118,8 +118,11 @@ pub async fn unsubscribe(
     State(state): State<Arc<AppState>>,
     Query(params): Query<UnsubscribeParams>,
 ) -> Result<Html<String>, (StatusCode, String)> {
+    tracing::info!("Unsubscribe request received for raw email param: {}", params.email);
+
     match state.user_core.find_by_email(&params.email) {
         Ok(Some(user)) => {
+            tracing::info!("Found user {} for email: {}", user.id, params.email);
             match state.user_core.update_notify(user.id, false) {
                 Ok(_) => {
                     tracing::info!("User {} unsubscribed from notifications", user.id);
@@ -178,6 +181,21 @@ pub async fn broadcast_email(
 
     for user in users {
 
+        // Get user settings
+        let user_settings = match state.user_core.get_user_settings(user.id) {
+            Ok(settings) => settings,
+            Err(e) => {
+                tracing::error!("Failed to get settings for user {}: {}", user.id, e);
+                failed_count += 1;
+                error_details.push(format!("Failed to get settings for {}: {}", user.email, e));
+                continue;
+            }
+        };
+        if !user_settings.notify {
+            tracing::info!("skipping user since they don't have notify on");
+            continue;
+        }
+
         // Skip users with invalid or empty email addresses
         if user.email.is_empty() || !user.email.contains('@') || !user.email.contains('.') {
             tracing::warn!("Skipping invalid email address: {}", user.email);
@@ -186,11 +204,12 @@ pub async fn broadcast_email(
 
         // Prepare the unsubscribe link
         let encoded_email = urlencoding::encode(&user.email);
-        let unsubscribe_link = format!("https://lightfriend.ai/unsubscribe?email={}", encoded_email);
+        let server_url = std::env::var("SERVER_URL").expect("SERVER_URL not set");
+        let unsubscribe_link = format!("{}/api/unsubscribe?email={}", server_url, encoded_email);
 
         // Prepare plain text body with unsubscribe
         let plain_body = format!(
-            "{}\n\nTo unsubscribe from these feature updates/fixes, click here: {}",
+            "{}\n\nTo unsubscribe from these feature updates/fixes, click here:\n{}",
             request.message, unsubscribe_link
         );
 
