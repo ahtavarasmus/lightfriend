@@ -1473,7 +1473,7 @@ pub async fn handle_send_chat_message(
     let exact_name = crate::utils::bridge::remove_bridge_suffix(&best_match.display_name);
     // Format the queued message
     let queued_msg = format!(
-        "Will send {} to '{}' with '{}' in 60s. Reply 'cancel' to discard.",
+        "Will send {} to '{}' with '{}' in 60s. Use cancel_message tool to discard.",
         capitalized_platform, exact_name, payload.message
     );
     // Create cancellation channel
@@ -1707,7 +1707,7 @@ pub async fn handle_respond_to_email(
         .to_string();
     // Format the queued message using the subject
     let queued_msg = format!(
-        "Will respond to email '{}' with '{}' in 60s. Reply 'cancel' to discard.",
+        "Will respond to email '{}' with '{}' in 60s. Use cancel_message to discard.",
         subject, payload.response_text
     );
     // Create cancellation channel

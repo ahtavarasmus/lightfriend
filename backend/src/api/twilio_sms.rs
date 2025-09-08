@@ -29,7 +29,6 @@ use openai_api_rs::v1::{
     chat_completion,
     types,
     api::OpenAIClient,
-    common::GPT4_O,
 };
 
 
@@ -278,7 +277,7 @@ pub async fn process_sms(
     tracing::info!("Found user with ID: {} for phone number: {}", user.id, payload.from);
 
     // Handle 'cancel' message specially
-    if payload.body.trim().to_lowercase() == "cancel" {
+    if payload.body.trim().to_lowercase() == "c" {
         match crate::tool_call_utils::utils::cancel_pending_message(state, user.id).await {
             Ok(canceled) => {
                 let response_msg = if canceled {
@@ -469,7 +468,34 @@ pub async fn process_sms(
     // Start with the system message
     let mut chat_messages: Vec<ChatMessage> = vec![ChatMessage {
         role: "system".to_string(),
-        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes. Always use all tools immidiately that you think will be needed to complete the user's query and base your response to those responses. IMPORTANT: For calendar events, you must return the exact output from the calendar tool without any modifications, additional text, or formatting. Never add bullet points, markdown formatting (like **, -, #), or any other special characters.\n\n### Tool Usage Guidelines:\n- Provide all relevant details in the response immediately. \n- Tools that involve sending or creating something, add the content to be sent into a queue which are automatically sent after 60 seconds unless user replies 'cancel'.\n- Never recommend that the user check apps, websites, or services manually, as they may not have access (e.g., on a dumbphone). Instead, use tools like ask_perplexity to fetch the information yourself.\n\n### Date and Time Handling:\n- Always work with times in the user's timezone: {} with offset {}.\n- When user mentions times without dates, assume they mean the nearest future occurrence.\n- For time inputs to tools, convert to RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z').\n- For displaying times to users:\n - Use 12-hour format with AM/PM (e.g., '2:30 PM')\n - Include timezone-adjusted dates in a friendly format (e.g., 'today', 'tomorrow', or 'Jun 15')\n - Show full date only when it's not today/tomorrow\n- If no specific time is mentioned:\n - For calendar queries: Show today's events (and tomorrow's if after 6 PM)\n - For other time ranges: Use current time to 24 hours ahead\n- For queries about:\n - 'Today': Use 00:00 to 23:59 of the current day in user's timezone\n - 'Tomorrow': Use 00:00 to 23:59 of tomorrow in user's timezone\n - 'This week': Use remaining days of current week\n - 'Next week': Use Monday to Sunday of next week\n\n### Additional Guidelines:\n- Weather Queries: If no location is specified, assume the user's home location from user info.\n- Email Queries: For fetch_specific_email, provide the whole message body or a summary if too long—never just the subject.\n- WhatsApp/Telegram/Signal Fetching: Use the room name directly from the user's message/context without searching rooms.\n- Follow-up Questions: If the user asks a follow-up question and the previous tool call response doesn't contain the answer, use the ask_perplexity tool to find the answer if possible, and mention in your response that you queried Perplexity for it.\n\nNever use markdown, HTML, or any special formatting characters in responses. Return all information in plain text only. User information: {}. Always use tools to fetch the latest information before answering.", formatted_time, timezone_str, offset, user_given_info)),
+        content: chat_completion::Content::Text(format!("You are a direct and efficient AI assistant named lightfriend. The current date is {}. You must provide extremely concise responses (max 400 characters) while being accurate and helpful. Since users pay per message, always provide all available information immediately without asking follow-up questions unless confirming details for actions that involve sending information or making changes. Always use all tools immediately that you think will be needed to complete the user's query and base your response to those responses. IMPORTANT: For calendar events, you must return the exact output from the calendar tool without any modifications, additional text, or formatting. Never add bullet points, markdown formatting (like **, -, #), or any other special characters.
+
+### Tool Usage Guidelines:
+- Provide all relevant details in the response immediately. 
+- Tools that involve sending or creating something, add the content to be sent into a queue which are automatically sent after 60 seconds unless user replies 'cancel'.
+- Never recommend that the user check apps, websites, or services manually, as they may not have access (e.g., on a dumbphone). Instead, use tools like ask_perplexity to fetch the information yourself.
+- When invoking a tool, always output the arguments as a flat JSON object directly matching the tool's parameters (e.g., {{\"query\": \"your value\"}} for ask_perplexity). Do NOT nest arguments inside an \"arguments\" key or any other wrapper—keep it simple and direct.
+
+### Date and Time Handling:
+- Always work with times in the user's timezone: {} with offset {}.
+- When user mentions times without dates, assume they mean the nearest future occurrence.
+- For time inputs to tools, convert to RFC3339 format in UTC (e.g., '2024-03-23T14:30:00Z').
+- For displaying times to users:
+  - Use 12-hour format with AM/PM (e.g., '2:30 PM')
+  - Include timezone-adjusted dates in a friendly format (e.g., 'today', 'tomorrow', or 'Jun 15')
+  - Show full date only when it's not today/tomorrow
+- If no specific time is mentioned:
+  - For calendar queries: Show today's events (and tomorrow's if after 6 PM)
+  - For other time ranges: Use current time to 24 hours ahead
+- For queries about:
+  - 'Today': Use 00:00 to 23:59 of the current day in user's timezone
+  - 'Tomorrow': Use 00:00 to 23:59 of tomorrow in user's timezone
+  - 'This week': Use remaining days of current week
+  - 'Next week': Use Monday to Sunday of next week
+
+Never use markdown, HTML, or any special formatting characters in responses. Return all information in plain text only. User information: {}. Always use tools to fetch the latest information before answering.", formatted_time, timezone_str, offset, user_given_info)),
+        tool_calls: None,
+        tool_call_id: None,
     }];
     
     // Process the message body to remove "forget" if it exists at the start
@@ -517,7 +543,6 @@ pub async fn process_sms(
             
             // Process messages in chronological order
             for msg in history.into_iter().rev() {
-                let content = chat_completion::Content::Text(msg.encrypted_content);
                 let role = match msg.role.as_str() {
                     "user" => "user",
                     "assistant" => "assistant",
@@ -527,8 +552,30 @@ pub async fn process_sms(
                 
                 let mut chat_msg = ChatMessage {
                     role: role.to_string(),
-                    content,
+                    content: chat_completion::Content::Text(msg.encrypted_content.clone()),
+                    tool_calls: None,
+                    tool_call_id: None,
                 };
+                if msg.role == "assistant" && msg.tool_calls_json.is_some() {
+                    // Parse tool_calls_json into Vec<ToolCall>
+                    if let Some(json_str) = &msg.tool_calls_json {
+                        match serde_json::from_str::<Vec<chat_completion::ToolCall>>(json_str) {
+                            Ok(tool_calls) => {
+                                chat_msg.tool_calls = Some(tool_calls);
+                                // Set content to empty for tool-calling assistants to avoid confusion
+                                chat_msg.content = chat_completion::Content::Text(String::new());
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to parse tool_calls_json: {:?}", e);
+                                // Fallback: skip or handle error (e.g., set to None)
+                            }
+                        }
+                    }
+                } else if msg.role == "tool" {
+                    // For tool responses, set tool_call_id if present
+                    chat_msg.tool_call_id = msg.tool_call_id.clone();
+                    // tool_name can be used for validation if needed, but not directly set on ChatMessage
+                }
                 
                 context_messages.push(chat_msg);
             }
@@ -565,6 +612,8 @@ pub async fn process_sms(
                         }),
                     },
                 ]),
+                tool_calls: None,
+                tool_call_id: None,
 
             });
 
@@ -573,6 +622,8 @@ pub async fn process_sms(
                 chat_messages.push(ChatMessage {
                     role: "user".to_string(),
                     content: chat_completion::Content::Text(format!("Text accompanying the image: {}", processed_body)),
+                    tool_calls: None,
+                    tool_call_id: None,
                 });
             }
         } else {
@@ -580,6 +631,8 @@ pub async fn process_sms(
             chat_messages.push(ChatMessage {
                 role: "user".to_string(),
                 content: chat_completion::Content::Text(processed_body),
+                tool_calls: None,
+                tool_call_id: None,
             });
         }
     } else {
@@ -587,6 +640,8 @@ pub async fn process_sms(
         chat_messages.push(ChatMessage {
             role: "user".to_string(),
             content: chat_completion::Content::Text(processed_body),
+            tool_calls: None,
+            tool_call_id: None,
         });
     }
 
@@ -639,44 +694,14 @@ pub async fn process_sms(
             },
             content: msg.content.clone(),
             name: None,
-            tool_calls: None,
-            tool_call_id: None,
+            tool_calls: msg.tool_calls.clone(),
+            tool_call_id: msg.tool_call_id.clone(),
         })
         .collect();
 
-    // right before you convert to ChatCompletionMessage
-    for (idx, msg) in chat_messages.iter().enumerate() {
-        match &msg.content {
-            chat_completion::Content::Text(t) if t.trim().is_empty() => {
-                tracing::error!(
-                    "⚠️ empty TEXT content at index {idx}; role={}",
-                    msg.role
-                );
-            }
-            chat_completion::Content::ImageUrl(urls) => {
-                // helpful if an image-only message dropped its text
-                if urls.iter().all(|u| u.text.as_deref().unwrap_or("").trim().is_empty()) {
-                    tracing::error!("⚠️ image-only message with no text at index {idx}");
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // If you still want the assert afterwards, leave it here
-    /*
-    assert!(
-        chat_messages.iter().all(|m| match &m.content {
-            chat_completion::Content::Text(t) => !t.trim().is_empty(),
-            _ => true,
-        }),
-        "Found at least one empty content item – see previous log lines"
-    );
-    */
-
 
     let result = match client.chat_completion(chat_completion::ChatCompletionRequest::new(
-        GPT4_O.to_string(),
+        "openai/gpt-5".to_string(),
         completion_messages.clone(),
     )
     .tools(tools)
@@ -695,7 +720,6 @@ pub async fn process_sms(
         }
     };
 
-    // TODO remove
     if user.id == 1 {
         println!("result: {:#?}", result);
     }
@@ -731,6 +755,29 @@ pub async fn process_sms(
                 }
             };
 
+            let assistant_resp_time= std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as i32;
+
+            let tool_calls_json = serde_json::to_string(&tool_calls).unwrap();
+
+            let history_entry = crate::models::user_models::NewMessageHistory {
+                user_id: user.id,
+                role: "assistant".to_string(),
+                // Store the entire tool-call JSON so it can be replayed later
+                encrypted_content: "".to_string(),
+                tool_name: None,
+                tool_call_id: None,
+                tool_calls_json: Some(tool_calls_json),
+                created_at: assistant_resp_time,
+                conversation_id: "".to_string(),
+            };
+
+            if let Err(e) = state.user_repository.create_message_history(&history_entry) {
+                tracing::error!("Failed to store tool-call message in history: {e}");
+            }
+
             for tool_call in tool_calls {
                 let tool_call_id = tool_call.id.clone();
                 tracing::debug!("Processing tool call: {:?} with id: {:?}", tool_call, tool_call_id);
@@ -744,32 +791,6 @@ pub async fn process_sms(
                         continue;
                     },
                 };
-
-                let tool_call_time= std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i32;
-
-                let history_entry = crate::models::user_models::NewMessageHistory {
-                    user_id: user.id,
-                    role: "tool".to_string(),
-                    // Store the entire tool-call JSON so it can be replayed later
-                    encrypted_content: serde_json::to_string(tool_call)
-                        .unwrap_or_else(|_| "{}".to_string()),
-                    tool_name: Some(tool_call
-                        .function
-                        .name
-                        .clone()
-                        .unwrap_or_else(|| "_tool_call".to_string())),
-                    tool_call_id: Some(tool_call.id.clone()),
-                    tool_calls_json: None,
-                    created_at: tool_call_time,
-                    conversation_id: "".to_string(),
-                };
-
-                if let Err(e) = state.user_repository.create_message_history(&history_entry) {
-                    tracing::error!("Failed to store tool-call message in history: {e}");
-                }
 
                 // Check if user has access to this tool
                 if crate::tool_call_utils::utils::requires_subscription(name, user.sub_tier.clone(), user.discount) {
@@ -1259,7 +1280,7 @@ pub async fn process_sms(
 
             tracing::debug!("Making follow-up request to model with tool call answers");
             let follow_up_req = chat_completion::ChatCompletionRequest::new(
-                GPT4_O.to_string(),
+                "openai/gpt-5".to_string(),
                 follow_up_messages,
             )
             .max_tokens(100); // Consistent token limit for follow-up messages

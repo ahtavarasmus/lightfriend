@@ -69,7 +69,7 @@ pub fn get_create_tasks_tool() -> openai_api_rs::v1::chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("create_task"),
-            description: Some(String::from("Creates a new Google Task. Use this when user wants to add a task, reminder, or idea.")),
+            description: Some(String::from("Creates a new Google Task. Invoke this tool immediately without extra confirmation if the user has explicitly provided the required parameters (title). If any required parameters are missing or unclear, ask the user for clarification in a follow-up response, then call the tool once the information is obtained. Only include optional parameters like description or due_time if the user specifies them.")),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(create_task_properties),

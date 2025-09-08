@@ -151,7 +151,7 @@ pub async fn handle_send_email(
     let args: SendEmailArgs = serde_json::from_str(args)?;
     // Format the queued message
     let queued_msg = format!(
-        "Will send email to {} with subject '{}' and body '{}' in 60s. Reply 'cancel' to discard.",
+        "Will send email to {} with subject '{}' and body '{}' in 60s. Reply 'C' to discard.",
         args.to, args.subject, args.body
     );
     // Send the queued message
@@ -343,7 +343,7 @@ pub async fn handle_respond_to_email(
         .to_string();
     // Format the queued message using the subject
     let queued_msg = format!(
-        "Will respond to email '{}' with '{}' in 60s. Reply 'cancel' to discard.",
+        "Will respond to email '{}' with '{}' in 60s. Reply 'C' to discard.",
         subject, args.response_text
     );
     // Send the queued message

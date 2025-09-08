@@ -68,7 +68,7 @@ pub fn get_create_calendar_event_tool() -> openai_api_rs::v1::chat_completion::T
     calendar_event_properties.insert(
         "duration_minutes".to_string(),
         Box::new(types::JSONSchemaDefine {
-            schema_type: Some(types::JSONSchemaType::Number),
+            schema_type: Some(types::JSONSchemaType::String),
             description: Some("Duration of the event in minutes".to_string()),
             ..Default::default()
         }),
@@ -95,7 +95,7 @@ pub fn get_create_calendar_event_tool() -> openai_api_rs::v1::chat_completion::T
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
             name: String::from("create_calendar_event"),
-            description: Some(String::from("Creates a new Google Calendar event. Use this when user wants to schedule or add an event to their calendar. This tool will first make a confirmation message for the user, which they can then confirm or not.")),
+            description: Some(String::from("Creates a new Google Calendar event. Invoke this tool immediately without extra confirmation if the user has explicitly provided the required parameters (summary, start_time, and duration_minutes). If any required parameters are missing or unclear, ask the user for clarification in a follow-up response, then call the tool once the information is obtained. Only include optional parameters like description or add_notification if the user specifies them.")),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,
                 properties: Some(calendar_event_properties),
@@ -111,14 +111,6 @@ pub struct CalendarTimeFrame {
     pub end: String,
 }
 
-#[derive(Deserialize)]
-pub struct CalendarEventArgs {
-    pub summary: String,
-    pub start_time: String,
-    pub duration_minutes: i32,
-    pub description: Option<String>,
-    pub add_notification: Option<bool>,
-}
 
 pub async fn handle_fetch_calendar_events(
     state: &Arc<AppState>,
@@ -224,32 +216,45 @@ pub async fn handle_fetch_calendar_events(
 }
 
 
+#[derive(Deserialize)]
+struct CalendarEventArgs {
+    summary: String,
+    start_time: String,
+    duration_minutes: String,  // Changed to String to handle quoted numbers
+    description: Option<String>,
+    add_notification: Option<bool>,
+}
+
 pub async fn handle_create_calendar_event(
     state: &Arc<AppState>,
     user_id: i32,
     args: &str,
     user: &crate::models::user_models::User,
 ) -> Result<(axum::http::StatusCode, [(axum::http::HeaderName, &'static str); 1], axum::Json<crate::api::twilio_sms::TwilioResponse>), Box<dyn std::error::Error>> {
-    let args: CalendarEventArgs = serde_json::from_str(args)?;
+    let mut args: CalendarEventArgs = serde_json::from_str(args)?;
+    
+    // Parse duration_minutes from String to i32
+    let duration_minutes: i32 = args.duration_minutes.parse().map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+    args.duration_minutes = duration_minutes.to_string();  // Optional: store back as string if needed, but not necessary
+    
     let user_info = state.user_core.get_user_info(user_id)?;
     let timezone = user_info.timezone.unwrap_or_else(|| String::from("UTC"));
-    
+   
     // Parse the start time
     let start_time = chrono::DateTime::parse_from_rfc3339(&args.start_time)
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
-    
+   
     // Convert to user's timezone
     let user_tz: chrono_tz::Tz = timezone.parse()
         .unwrap_or(chrono_tz::UTC);
     let local_time = start_time.with_timezone(&user_tz);
-    
+   
     // Format the date and time
     let formatted_time = local_time.format("%B %d at %I:%M %p %Z").to_string();
-
     // Create the event directly
     let event_request = crate::handlers::google_calendar::CreateEventRequest {
         start_time: start_time.with_timezone(&chrono::Utc),
-        duration_minutes: args.duration_minutes,
+        duration_minutes,
         summary: args.summary.clone(),
         description: args.description.clone(),
         add_notification: args.add_notification.unwrap_or(true),
@@ -297,3 +302,4 @@ pub async fn handle_create_calendar_event(
         }
     }
 }
+

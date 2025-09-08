@@ -277,12 +277,12 @@ pub async fn handle_send_chat_message(
     // Format the queued message with the found contact name and image if present
     let queued_msg = if image_url.is_some() {
         format!(
-            "Will send {} to '{}' with image and caption '{}' in 60s. Reply 'cancel' to discard.",
+            "Will send {} to '{}' with image and caption '{}' in 60s. Reply 'C' to discard.",
             capitalized_platform, exact_name, args.message
         )
     } else {
         format!(
-            "Will send {} to '{}' with content '{}' in 60s. Reply 'cancel' to discard.",
+            "Will send {} to '{}' with content '{}' in 60s. Reply 'C' to discard.",
             capitalized_platform, exact_name, args.message
         )
     };

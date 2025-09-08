@@ -14,6 +14,8 @@ use std::sync::Arc;
 pub struct ChatMessage {
     pub role: String,
     pub content: chat_completion::Content,
+    pub tool_calls: Option<Vec<chat_completion::ToolCall>>,
+    pub tool_call_id: Option<String>,
 }
 
 // Function to create OpenAI client

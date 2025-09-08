@@ -80,7 +80,7 @@ impl UserRepository {
         for mut msg in encrypted_messages {
             match encryption::decrypt(&msg.encrypted_content) {
                 Ok(decrypted_content) => {
-                    if msg.role == "assistant" && decrypted_content.is_empty() {
+                    if msg.role == "assistant" && decrypted_content.is_empty() && msg.tool_calls_json.is_none() {
                         // Skip empty assistant messages
                         continue;
                     }

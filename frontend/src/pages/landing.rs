@@ -4,6 +4,7 @@ use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
 use yew_router::components::Link;
+
 #[function_component(Landing)]
 pub fn landing() -> Html {
     let dim_opacity = use_state(|| 0.0);
@@ -358,6 +359,16 @@ pub fn landing() -> Html {
                     <p>{"I posted the first version on Reddit. It only had voice-activated AI search. The number one request was WhatsApp integration. Then email. Then calendar. Then QR code reader. I realized I could help other people too."}</p>
                     <p>{"I use Lightfriend daily and rely on it to stay updated. I wouldn't go back to a smartphone, not even close. When you make scrolling physically impossible, you can finally relax. You don't have to fight the addiction anymore. It's such an insane feeling when you experience it. The phone had been draining my brain like an anti-virus software slowing down a computer. Books started to feel entertaining again. I want others to experience it too."}</p>
                     <p>{"I recently switched from usage-based pricing with over 100 users to a subscription model. The project is open-source, and 55 developers have starred it on GitHub. I'm trying to make it better every day and I'm always open to feedback. You can reach me at rasmus@ahtava.com."}</p>
+                </div>
+            </section>
+            <section class="testimonials-section">
+                <div class="testimonials-content">
+                    <h2>{"What Users Are Saying"}</h2>
+                    <div class="testimonial">
+                        <blockquote>
+                            {"Lightfriend proactively alerted me of a security alert in my email when my notifications were disabled making me aware of a threat which I then took care of before anything permanent damage could be done. Thanks to lightfriend monitoring, the issue was resolved and I could go back to work swiftly."}
+                        </blockquote>
+                    </div>
                 </div>
             </section>
             <div class="filter-concept">
@@ -1361,6 +1372,44 @@ pub fn landing() -> Html {
         }
         .spacer-headline {
             font-size: 1.75rem;
+        }
+    }
+    .testimonials-section {
+        padding: 4rem 2rem;
+        max-width: 800px;
+        margin: 0 auto;
+        text-align: center;
+        position: relative;
+        z-index: 2;
+    }
+    .testimonials-section h2 {
+        font-size: 2.5rem;
+        margin-bottom: 1.5rem;
+        background: linear-gradient(45deg, #fff, #7EB2FF);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 700;
+        text-shadow: 0 0 20px rgba(30, 144, 255, 0.2);
+    }
+    .testimonial {
+        background: rgba(0, 0, 0, 0.2);
+        border-radius: 12px;
+        padding: 2rem;
+        margin: 1rem 0;
+    }
+    .testimonial blockquote {
+        font-size: 1.2rem;
+        color: #ddd;
+        line-height: 1.6;
+        margin: 0;
+        font-style: italic;
+    }
+    @media (max-width: 768px) {
+        .testimonials-section h2 {
+            font-size: 2rem;
+        }
+        .testimonial blockquote {
+            font-size: 1.1rem;
         }
     }
                 "#}
