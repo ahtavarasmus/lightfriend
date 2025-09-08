@@ -702,7 +702,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
 
     let result = match client.chat_completion(chat_completion::ChatCompletionRequest::new(
-        GPT4_O.to_string(),
+        "qwen/qwen3-coder".to_string(),
         completion_messages.clone(),
     )
     .tools(tools)
@@ -720,10 +720,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             );
         }
     };
-    let current_time = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i32;
 
     if user.id == 1 {
         println!("result: {:#?}", result);
@@ -1107,7 +1103,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                                 tool_name: Some("respond_to_email".to_string()),
                                 tool_call_id: Some(tool_call.id.clone()),
                                 tool_calls_json: None,
-                                created_at: current_time,
+                                created_at: current_time+1,
                                 conversation_id: "".to_string(),
                             };
                             if let Err(e) = state.user_repository.create_message_history(&tool_message) {
@@ -1388,7 +1384,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     tool_name: None, // We could store this if needed
                     tool_call_id: Some(tool_call_id.clone()),
                     tool_calls_json: None,
-                    created_at: current_time,
+                    created_at: current_time+1,
                     conversation_id: "".to_string(),
                 };
 
@@ -1400,7 +1396,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
             tracing::debug!("Making follow-up request to model with tool call answers");
             let follow_up_req = chat_completion::ChatCompletionRequest::new(
-                GPT4_O.to_string(),
+        "qwen/qwen3-coder".to_string(),
                 follow_up_messages,
             )
             .max_tokens(100); // Consistent token limit for follow-up messages

@@ -35,7 +35,7 @@ impl UserRepository {
         Self { pool }
     }
 
-    pub fn get_conversation_history(
+        pub fn get_conversation_history(
         &self,
         user_id: i32,
         limit: i64,
@@ -96,6 +96,7 @@ impl UserRepository {
         }
         Ok(decrypted_messages)
     }
+
 
     pub fn create_message_history(&self, new_message: &crate::models::user_models::NewMessageHistory) -> Result<(), DieselError> {
         use crate::schema::message_history;
