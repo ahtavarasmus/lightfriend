@@ -607,7 +607,7 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
             </div>
             <div class="critical-option">
                 <div style="display: flex; align-items: center; gap: 0.5rem;">
-                    <span class="critical-label">{"Action on Critical Message"}</span>
+                    <span class="critical-label">{"Action on Critical Message (this feature is coming soon, you will be notified by email when ready! also you can tell me your thoughts about it rasmus@ahtava.com)"}</span>
                     <button class="info-button" onclick={toggle_action_info.clone()}>
                         {"ⓘ"}
                     </button>
