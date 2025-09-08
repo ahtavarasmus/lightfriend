@@ -29,6 +29,7 @@ use openai_api_rs::v1::{
     chat_completion,
     types,
     api::OpenAIClient,
+    common::GPT4_O,
 };
 
 
@@ -701,7 +702,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
 
     let result = match client.chat_completion(chat_completion::ChatCompletionRequest::new(
-        "openai/gpt-5".to_string(),
+        GPT4_O.to_string(),
         completion_messages.clone(),
     )
     .tools(tools)
@@ -719,6 +720,10 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             );
         }
     };
+    let current_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
 
     if user.id == 1 {
         println!("result: {:#?}", result);
@@ -1031,10 +1036,38 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                             if let Err(e) = state.user_repository.create_message_history(&history_entry) {
                                 tracing::error!("Failed to store email tool message in history: {}", e);
                             }
+                            // Store the matching "tool" response history before returning
+                            let tool_message = crate::models::user_models::NewMessageHistory {
+                                user_id: user.id,
+                                role: "tool".to_string(),
+                                encrypted_content: twilio_response.message.clone(),  // Or "Email sent successfully" if you want a standard msg
+                                tool_name: Some("send_email".to_string()),
+                                tool_call_id: Some(tool_call.id.clone()),
+                                tool_calls_json: None,
+                                created_at: current_time,
+                                conversation_id: "".to_string(),
+                            };
+                            if let Err(e) = state.user_repository.create_message_history(&tool_message) {
+                                tracing::error!("Failed to store tool response for send_email: {}", e);
+                            }
                             return (status, headers, Json(twilio_response));
                         }
                         Err(e) => {
                             tracing::error!("Failed to handle email sending: {}", e);
+                            let error_msg = "Failed to send email".to_string();
+                            let tool_message = crate::models::user_models::NewMessageHistory {
+                                user_id: user.id,
+                                role: "tool".to_string(),
+                                encrypted_content: error_msg.clone(),
+                                tool_name: Some("send_email".to_string()),
+                                tool_call_id: Some(tool_call.id.clone()),
+                                tool_calls_json: None,
+                                created_at: current_time,
+                                conversation_id: "".to_string(),
+                            };
+                            if let Err(store_e) = state.user_repository.create_message_history(&tool_message) {
+                                tracing::error!("Failed to store tool error response for send_email: {}", store_e);
+                            }
                             return (
                                 StatusCode::INTERNAL_SERVER_ERROR,
                                 [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -1066,10 +1099,39 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                             if let Err(e) = state.user_repository.create_message_history(&history_entry) {
                                 tracing::error!("Failed to store respond_to_email tool message in history: {}", e);
                             }
+                            // Store the matching "tool" response history before returning
+                            let tool_message = crate::models::user_models::NewMessageHistory {
+                                user_id: user.id,
+                                role: "tool".to_string(),
+                                encrypted_content: twilio_response.message.clone(),  // Or "Email sent successfully" if you want a standard msg
+                                tool_name: Some("respond_to_email".to_string()),
+                                tool_call_id: Some(tool_call.id.clone()),
+                                tool_calls_json: None,
+                                created_at: current_time,
+                                conversation_id: "".to_string(),
+                            };
+                            if let Err(e) = state.user_repository.create_message_history(&tool_message) {
+                                tracing::error!("Failed to store tool response for send_email: {}", e);
+                            }
                             return (status, headers, Json(twilio_response));
                         }
                         Err(e) => {
                             tracing::error!("Failed to handle respond_to_email: {}", e);
+                            // OPTIONAL NEW: Store error as "tool" response for consistency
+                            let error_msg = "Failed to send email".to_string();
+                            let tool_message = crate::models::user_models::NewMessageHistory {
+                                user_id: user.id,
+                                role: "tool".to_string(),
+                                encrypted_content: error_msg.clone(),
+                                tool_name: Some("respond_to_email".to_string()),
+                                tool_call_id: Some(tool_call.id.clone()),
+                                tool_calls_json: None,
+                                created_at: current_time,
+                                conversation_id: "".to_string(),
+                            };
+                            if let Err(store_e) = state.user_repository.create_message_history(&tool_message) {
+                                tracing::error!("Failed to store tool error response for send_email: {}", store_e);
+                            }
                             return (
                                 StatusCode::INTERNAL_SERVER_ERROR,
                                 [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -1124,11 +1186,40 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                             if let Err(e) = state.user_repository.create_message_history(&history_entry) {
                                 tracing::error!("Failed to store calendar tool message in history: {}", e);
                             }
+                            // Store the matching "tool" response history before returning
+                            let tool_message = crate::models::user_models::NewMessageHistory {
+                                user_id: user.id,
+                                role: "tool".to_string(),
+                                encrypted_content: twilio_response.message.clone(),  
+                                tool_name: Some("create_calendar_event".to_string()),
+                                tool_call_id: Some(tool_call.id.clone()),
+                                tool_calls_json: None,
+                                created_at: current_time,
+                                conversation_id: "".to_string(),
+                            };
+                            if let Err(e) = state.user_repository.create_message_history(&tool_message) {
+                                tracing::error!("Failed to store tool response for create_calendar_event: {}", e);
+                            }
 
                             return (status, headers, Json(twilio_response));
                         }
                         Err(e) => {
                             tracing::error!("Failed to handle calendar event creation: {}", e);
+                            // Store error as "tool" response for consistency
+                            let error_msg = "Failed to create_calendar event".to_string();
+                            let tool_message = crate::models::user_models::NewMessageHistory {
+                                user_id: user.id,
+                                role: "tool".to_string(),
+                                encrypted_content: error_msg.clone(),
+                                tool_name: Some("create_calendar_event".to_string()),
+                                tool_call_id: Some(tool_call.id.clone()),
+                                tool_calls_json: None,
+                                created_at: current_time,
+                                conversation_id: "".to_string(),
+                            };
+                            if let Err(store_e) = state.user_repository.create_message_history(&tool_message) {
+                                tracing::error!("Failed to store tool error response for create_calendar_event: {}", store_e);
+                            }
                             return (
                                 StatusCode::INTERNAL_SERVER_ERROR,
                                 [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -1193,10 +1284,39 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                             if let Err(e) = state.user_repository.create_message_history(&history_entry) {
                                 tracing::error!("Failed to store send chat message tool message in history: {}", e);
                             }
+                            // Store the matching "tool" response history before returning
+                            let tool_message = crate::models::user_models::NewMessageHistory {
+                                user_id: user.id,
+                                role: "tool".to_string(),
+                                encrypted_content: twilio_response.message.clone(), 
+                                tool_name: Some("send_chat_message".to_string()),
+                                tool_call_id: Some(tool_call.id.clone()),
+                                tool_calls_json: None,
+                                created_at: current_time,
+                                conversation_id: "".to_string(),
+                            };
+                            if let Err(e) = state.user_repository.create_message_history(&tool_message) {
+                                tracing::error!("Failed to store tool response for send_chat_message: {}", e);
+                            }
                             return (status, headers, Json(twilio_response));
                         }
                         Err(e) => {
                             tracing::error!("Failed to handle chat message sending: {}", e);
+                            // Store error as "tool" response for consistency
+                            let error_msg = "Failed to send chat message".to_string();
+                            let tool_message = crate::models::user_models::NewMessageHistory {
+                                user_id: user.id,
+                                role: "tool".to_string(),
+                                encrypted_content: error_msg.clone(),
+                                tool_name: Some("send_chat_message".to_string()),
+                                tool_call_id: Some(tool_call.id.clone()),
+                                tool_calls_json: None,
+                                created_at: current_time,
+                                conversation_id: "".to_string(),
+                            };
+                            if let Err(store_e) = state.user_repository.create_message_history(&tool_message) {
+                                tracing::error!("Failed to store tool error response for send_chat_message: {}", store_e);
+                            }
                             return (
                                 StatusCode::INTERNAL_SERVER_ERROR,
                                 [(axum::http::header::CONTENT_TYPE, "application/json")],
@@ -1280,7 +1400,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
             tracing::debug!("Making follow-up request to model with tool call answers");
             let follow_up_req = chat_completion::ChatCompletionRequest::new(
-                "openai/gpt-5".to_string(),
+                GPT4_O.to_string(),
                 follow_up_messages,
             )
             .max_tokens(100); // Consistent token limit for follow-up messages
