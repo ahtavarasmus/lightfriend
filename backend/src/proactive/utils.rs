@@ -1445,18 +1445,6 @@ pub async fn send_notification(
                     tracing::debug!("Successfully initiated call notification for user {}", user.id);
                     
                     // Store notification in message history
-                    let first_msg = first_message.unwrap_or("Hello, I have a critical notification to tell you about".to_string());
-                    let assistant_first_message = crate::models::user_models::NewMessageHistory {
-                        user_id: user.id,
-                        role: "assistant".to_string(),
-                        encrypted_content: first_msg,
-                        tool_name: None,
-                        tool_call_id: None,
-                        tool_calls_json: None,
-                        created_at: current_time,
-                        conversation_id: "".to_string(),
-                    };
-                    
                     let assistant_notification = crate::models::user_models::NewMessageHistory {
                         user_id: user.id,
                         role: "assistant".to_string(),
@@ -1468,10 +1456,6 @@ pub async fn send_notification(
                         conversation_id: "".to_string(),
                     };
 
-                    // Store messages in history
-                    if let Err(e) = state.user_repository.create_message_history(&assistant_first_message) {
-                        tracing::error!("Failed to store first message in history: {}", e);
-                    }
                     if let Err(e) = state.user_repository.create_message_history(&assistant_notification) {
                         tracing::error!("Failed to store notification in history: {}", e);
                     }
@@ -1525,6 +1509,9 @@ pub async fn send_notification(
             if let Err(e) = crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await {
                 tracing::warn!("User {} has insufficient credits: {}", user.id, e);
                 return;
+            }
+            if user.id == 1 {
+                println!("sending noti: {}", notification);
             }
             match crate::api::twilio_utils::send_conversation_message(
                 &state,

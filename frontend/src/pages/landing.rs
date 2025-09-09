@@ -4,7 +4,6 @@ use wasm_bindgen::prelude::Closure;
 use wasm_bindgen::JsCast;
 use yew::prelude::*;
 use yew_router::components::Link;
-
 #[function_component(Landing)]
 pub fn landing() -> Html {
     let dim_opacity = use_state(|| 0.0);
@@ -368,6 +367,12 @@ pub fn landing() -> Html {
                         <blockquote>
                             {"Lightfriend proactively alerted me of a security alert in my email when my notifications were disabled making me aware of a threat which I then took care of before anything permanent damage could be done. Thanks to lightfriend monitoring, the issue was resolved and I could go back to work swiftly."}
                         </blockquote>
+                    </div>
+                    <div class="testimonial">
+                        <blockquote>
+                            {"lightfriend fills in the gaps that the LP3(light phone 3) is missing, without making me want to use my iphone. Also I love that I can talk to Perplexity while I'm out"}
+                        </blockquote>
+                        <p class="testimonial-author">{"- Max"}</p>
                     </div>
                 </div>
             </section>
@@ -1403,6 +1408,12 @@ pub fn landing() -> Html {
         line-height: 1.6;
         margin: 0;
         font-style: italic;
+    }
+    .testimonial-author {
+        text-align: right;
+        font-size: 1rem;
+        color: #bbb;
+        margin-top: 1rem;
     }
     @media (max-width: 768px) {
         .testimonials-section h2 {

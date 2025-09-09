@@ -1095,10 +1095,6 @@ pub async fn handle_bridge_message(
         format!("{}{}{}{}", prefix, sender_trimmed, separator, content_trimmed)
     }
     let service_cap = capitalize(&service);
-    let running_environment = std::env::var("ENVIRONMENT").unwrap();
-    if running_environment == "development".to_string() {
-        return;
-    }
     // FAST CHECKS SECOND - Check priority senders if active
     for priority_sender in &priority_senders {
         let clean_priority_sender = remove_bridge_suffix(priority_sender.sender.as_str());
@@ -1201,18 +1197,27 @@ pub async fn handle_bridge_message(
         println!("chat_name: {}", chat_name);
         println!("content: {}", content);
         println!("content contains call: {}", content.contains("Incoming call"));
+
+            let action = user_settings.action_on_critical_message.as_ref().map(|s| s.as_str()).unwrap_or("notify");
+            println!("action: {}", action);
     }
     if let Ok((is_critical, message_opt, first_message_opt)) = crate::proactive::utils::check_message_importance(&state, user_id, &format!("{} from {}: {}", service_cap, chat_name, content), service_cap.as_str(), chat_name.as_str(), content.as_str()).await {
+        println!("is critical: {}", is_critical);
         if is_critical {
+            let is_family = false;
+            /* TODO have to add field to priority senders which is either "focus" or "all" depending on if we want them in family or in family + send all their messages
             let is_family = priority_senders.iter().any(|ps| {
                 let clean_priority_sender = remove_bridge_suffix(&ps.sender);
                 chat_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) ||
                 sender_name.to_lowercase().contains(&clean_priority_sender.to_lowercase())
             });
+            */
+            println!("is_family: {}", is_family);
             let action = user_settings.action_on_critical_message.as_ref().map(|s| s.as_str()).unwrap_or("notify");
             let prompt = "Hi, I'm Lightfriend, your friend's AI assistant. This message looks time-sensitive—since they're not currently on their computer, would you like me to send them a notification about it? Reply \"yes\" or \"no.\"".to_string();
             let mut should_notify = false;
             let mut should_ask = false;
+            println!("action: {}", action);
             match action {
                 "ask_sender" => {
                     should_ask = true;

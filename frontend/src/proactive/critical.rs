@@ -635,9 +635,9 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                             {"Critical: Can't wait 2hrs (e.g., emergencies, lunch invites)."}
                             <ul>
                                 <li>{"Notify All: Alert for any critical message, regardless of sender."}</li>
-                                <li>{"Family Only: Alert only if sender is in your family contacts."}</li>
-                                <li>{"Ask Sender: Lightfriend asks sender the following: \"Hi, I'm Lightfriend, your friend's AI assistant. This message looks time-sensitive—since they're not currently on their computer, would you like me to send them a notification about it? Reply \"yes\" or \"no.\""}</li>
-                                <li>{"Always Notify Family: For family senders, notify without follow-up question (only when 'Ask Sender' is selected)."}</li>
+                                <li>{"Contacts Only: Alert only if sender is in your contacts. Does not apply to email which will always follow the notify all setting."}</li>
+                                <li>{"Ask Sender: Lightfriend asks sender the following: \"Hi, I'm Lightfriend, your friend's AI assistant. This message looks time-sensitive—since they're not currently on their computer, would you like me to send them a notification about it? Reply \"yes\" or \"no.\"\". Does not apply to email which will always follow the notify all setting."}</li>
+                                <li>{"Always Notify Contacts: For senders who are in your contacts, notify without follow-up question (only when 'Ask Sender' is selected)."}</li>
                             </ul>
                         </div>
                     }
