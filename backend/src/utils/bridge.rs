@@ -212,6 +212,225 @@ pub fn get_best_matches(
         .collect();
     matches.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
     matches.into_iter().take(5).map(|(_, name)| name).collect()
+
+}
+
+const AI_PROMPT_TEXT: &str = "Hi, I'm Lightfriend, your friend's AI assistant. This message looks time-sensitive—since they're not currently on their computer, would you like me to send them a notification about it? Reply \"yes\" or \"no.\"";
+
+pub async fn get_triggering_message_in_room(
+    service: &str,
+    state: &Arc<AppState>,
+    user_id: i32,
+    room_id_str: &str,
+) -> Result<Option<BridgeMessage>> {
+    tracing::info!(
+        "Fetching triggering message in {} - User: {}, room_id: {}",
+        capitalize(service),
+        user_id,
+        room_id_str
+    );
+
+    // Validate bridge connection
+    if let Some(bridge) = state.user_repository.get_bridge(user_id, service)? {
+        if bridge.status != "connected" {
+            return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(service)));
+        }
+    } else {
+        return Err(anyhow!("{} bridge not found", capitalize(service)));
+    }
+
+    // Get Matrix client
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
+
+    // Get user info for timezone
+    let user_info = state.user_core.get_user_info(user_id)?;
+
+    // Get the room
+    let room_id = matrix_sdk::ruma::OwnedRoomId::try_from(room_id_str)?;
+    let room = client.get_room(&room_id).ok_or(anyhow!("Room not found"))?;
+
+    // Fetch room display name
+    let room_display_name = room.display_name().await?.to_string();
+    let cleaned_room_name = remove_bridge_suffix(&room_display_name);
+
+    // Fetch messages backward (latest first)
+    let mut options = MessagesOptions::backward();
+    options.limit = matrix_sdk::ruma::UInt::new(100).unwrap(); // Limit to avoid fetching too many; increase if needed
+
+    let response = room.messages(options).await?;
+
+    // Sender prefix for bridge bots (incoming messages start with this)
+    let sender_prefix = get_sender_prefix(service);
+
+    // User's Matrix user ID (for sent messages)
+    let user_matrix_id = client.user_id().ok_or(anyhow!("User ID not available"))?;
+
+    // Iterate through messages from latest to oldest
+    let mut found_prompt = false;
+    for event in response.chunk {
+        if let Ok(AnySyncTimelineEvent::MessageLike(
+            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
+        )) = event.raw().deserialize() {
+            if let SyncRoomMessageEvent::Original(e) = msg {
+                let sender_localpart = e.sender.localpart().to_string();
+
+                if !found_prompt {
+                    // Look for the AI prompt sent by the user
+                    if e.sender == user_matrix_id && !sender_localpart.starts_with(&sender_prefix) {
+                        let body = match e.content.msgtype {
+                            MessageType::Text(ref t) => t.body.clone(),
+                            _ => continue,
+                        };
+                        if body.contains(AI_PROMPT_TEXT) {
+                            found_prompt = true;
+                            continue; // Skip to the next message (older)
+                        }
+                    }
+                } else {
+                    // After finding the prompt, look for the next incoming message
+                    if sender_localpart.starts_with(&sender_prefix) {
+                        let timestamp = i64::from(e.origin_server_ts.0) / 1000;
+
+                        // Extract message type and body
+                        let (msgtype, body) = match e.content.msgtype {
+                            MessageType::Text(t) => ("text", t.body),
+                            MessageType::Notice(n) => ("notice", n.body),
+                            MessageType::Image(i) => ("image", if i.body.is_empty() { "📎 IMAGE".into() } else { i.body }),
+                            MessageType::Video(v) => ("video", if v.body.is_empty() { "📎 VIDEO".into() } else { v.body }),
+                            MessageType::File(f) => ("file", if f.body.is_empty() { "📎 FILE".into() } else { f.body }),
+                            MessageType::Audio(a) => ("audio", if a.body.is_empty() { "📎 AUDIO".into() } else { a.body }),
+                            MessageType::Location(l) => ("location", "📍 LOCATION".into()),
+                            MessageType::Emote(t) => ("emote", t.body),
+                            _ => continue,
+                        };
+
+                        // Skip error-like messages
+                        if body.contains("Failed to bridge media") ||
+                           body.contains("media no longer available") ||
+                           body.contains("Decrypting message from WhatsApp failed") ||
+                           body.starts_with("* Failed to") {
+                            continue;
+                        }
+
+                        return Ok(Some(BridgeMessage {
+                            sender: e.sender.to_string(),
+                            sender_display_name: sender_localpart,
+                            content: body,
+                            timestamp,
+                            formatted_timestamp: format_timestamp(timestamp, user_info.timezone.clone()),
+                            message_type: msgtype.to_string(),
+                            room_name: cleaned_room_name,
+                            media_url: None,
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    // If no triggering message found after the prompt
+    tracing::info!("No triggering incoming message found before the AI prompt in room '{}'", room_id_str);
+    Ok(None)
+}
+
+
+pub async fn get_latest_sent_message_in_room(
+    service: &str,
+    state: &Arc<AppState>,
+    user_id: i32,
+    room_id_str: &str,
+) -> Result<Option<BridgeMessage>> {
+    tracing::info!(
+        "Fetching latest sent message in {} - User: {}, room_id: {}",
+        capitalize(service),
+        user_id,
+        room_id_str
+    );
+
+    // Validate bridge connection
+    if let Some(bridge) = state.user_repository.get_bridge(user_id, service)? {
+        if bridge.status != "connected" {
+            return Err(anyhow!("{} bridge is not connected. Please log in first.", capitalize(service)));
+        }
+    } else {
+        return Err(anyhow!("{} bridge not found", capitalize(service)));
+    }
+
+    // Get Matrix client
+    let client = crate::utils::matrix_auth::get_cached_client(user_id, state).await?;
+
+    // Get user info for timezone
+    let user_info = state.user_core.get_user_info(user_id)?;
+
+    // Get the room
+    let room_id = matrix_sdk::ruma::OwnedRoomId::try_from(room_id_str)?;
+    let room = client.get_room(&room_id).ok_or(anyhow!("Room not found"))?;
+
+    // Fetch room display name
+    let room_display_name = room.display_name().await?.to_string();
+    let cleaned_room_name = remove_bridge_suffix(&room_display_name);
+
+    // Fetch messages backward (latest first)
+    let mut options = MessagesOptions::backward();
+    options.limit = matrix_sdk::ruma::UInt::new(100).unwrap(); // Limit to avoid fetching too many; increase if needed
+
+    let response = room.messages(options).await?;
+
+    // Sender prefix for bridge bots (to exclude incoming messages)
+    let sender_prefix = get_sender_prefix(service);
+
+    // User's Matrix user ID
+    let user_matrix_id = client.user_id().ok_or(anyhow!("User ID not available"))?;
+
+    for event in response.chunk {
+        if let Ok(AnySyncTimelineEvent::MessageLike(
+            matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(msg)
+        )) = event.raw().deserialize() {
+            if let SyncRoomMessageEvent::Original(e) = msg {
+                let sender_localpart = e.sender.localpart().to_string();
+                // Check if sender is the user (matches user_matrix_id and not a bridge bot prefix)
+                if e.sender == user_matrix_id && !sender_localpart.starts_with(&sender_prefix) {
+                    let timestamp = i64::from(e.origin_server_ts.0) / 1000;
+
+                    // Extract message type and body
+                    let (msgtype, body) = match e.content.msgtype {
+                        MessageType::Text(t) => ("text", t.body),
+                        MessageType::Notice(n) => ("notice", n.body),
+                        MessageType::Image(i) => ("image", if i.body.is_empty() { "📎 IMAGE".into() } else { i.body }),
+                        MessageType::Video(v) => ("video", if v.body.is_empty() { "📎 VIDEO".into() } else { v.body }),
+                        MessageType::File(f) => ("file", if f.body.is_empty() { "📎 FILE".into() } else { f.body }),
+                        MessageType::Audio(a) => ("audio", if a.body.is_empty() { "📎 AUDIO".into() } else { a.body }),
+                        MessageType::Location(l) => ("location", "📍 LOCATION".into()),
+                        MessageType::Emote(t) => ("emote", t.body),
+                        _ => continue,
+                    };
+
+                    // Skip error-like messages if needed (adapted from existing logic)
+                    if body.contains("Failed to bridge media") ||
+                       body.contains("media no longer available") ||
+                       body.contains("Decrypting message from WhatsApp failed") ||
+                       body.starts_with("* Failed to") {
+                        continue;
+                    }
+
+                    return Ok(Some(BridgeMessage {
+                        sender: "You".to_string(),
+                        sender_display_name: "You".to_string(),
+                        content: body,
+                        timestamp,
+                        formatted_timestamp: format_timestamp(timestamp, user_info.timezone.clone()),
+                        message_type: msgtype.to_string(),
+                        room_name: cleaned_room_name,
+                        media_url: None,
+                    }));
+                }
+            }
+        }
+    }
+
+    // If no user-sent message found within the limit
+    tracing::info!("No sent message found in the last 100 messages for room '{}'", room_id_str);
+    Ok(None)
 }
 
 pub async fn fetch_bridge_room_messages(
@@ -620,7 +839,7 @@ pub async fn handle_bridge_message(
             tracing::debug!("Skipping disconnection check during initial connection for {}", bridge.bridge_type);
             return;
         }
-       
+      
         // Get the bridge bot ID for this service
         let bridge_bot_var = match bridge.bridge_type.as_str() {
             "signal" => "SIGNAL_BRIDGE_BOT",
@@ -642,13 +861,13 @@ pub async fn handle_bridge_message(
                 return;
             }
         };
-       
+      
         // Check if sender is the bridge bot
         if event.sender != bot_user_id {
             tracing::debug!("Message not from bridge bot, skipping");
             return;
         }
-       
+      
         // Extract message content
         let content = match event.content.msgtype {
             MessageType::Text(t) => t.body,
@@ -661,7 +880,7 @@ pub async fn handle_bridge_message(
         if user_id == 1 {
             println!("bridge bot management room content: {}", content);
         }
-       
+      
         // Define disconnection patterns (customize per bridge if needed)
         let disconnection_patterns = vec![
             "disconnected",
@@ -677,12 +896,12 @@ pub async fn handle_bridge_message(
         let lower_content = content.to_lowercase();
         if disconnection_patterns.iter().any(|p| lower_content.contains(p)) {
             tracing::info!("Detected disconnection in {} bridge for user {}: {}", bridge.bridge_type, user_id, content);
-           
+          
             // Delete the bridge record
             if let Err(e) = state.user_repository.delete_bridge(user_id, &bridge.bridge_type) {
                 tracing::error!("Failed to delete {} bridge: {}", bridge.bridge_type, e);
             }
-           
+          
             // Check if there are any remaining active bridges
             let has_active_bridges = match state.user_repository.has_active_bridges(user_id) {
                 Ok(has) => has,
@@ -706,7 +925,7 @@ pub async fn handle_bridge_message(
         } else {
             tracing::debug!("No disconnection detected in management room message");
         }
-       
+      
         // Return early since this is not a portal message
         return;
     }
@@ -761,8 +980,7 @@ pub async fn handle_bridge_message(
     if user_id == 1 { // if admin for debugging
         println!("message: {}", content);
     }
-
-    // Check if this is a group room (more than 2 members)
+    // Check if this is a group room (more than 3 members)
     let members = match room.members(RoomMemberships::JOIN).await {
         Ok(m) => m,
         Err(e) => {
@@ -771,7 +989,6 @@ pub async fn handle_bridge_message(
         }
     };
     let member_count = members.len() as u64;
-
     if user_id == 1 {
         println!("members: {}", member_count);
     }
@@ -793,8 +1010,66 @@ pub async fn handle_bridge_message(
         tracing::debug!("Skipping error message because content contained error messages");
         return;
     }
+    // New logic for handling "yes" responses in non-group chats
+    if member_count <= 3 {
+        let lowered_content = content.trim().to_lowercase();
+        if lowered_content == "yes" || lowered_content == "y" {
+            // Fetch the latest sent message
+            let room_id_str = room.room_id().as_str();
+            match get_latest_sent_message_in_room(&service, &state, user_id, room_id_str).await {
+                Ok(Some(prev_msg)) => {
+                    if prev_msg.content.contains("Hi, I'm Lightfriend, your friend's AI assistant. This message looks time-sensitive—since they're not currently on their computer, would you like me to send them a notification about it? Reply \"yes\" or \"no.\"") {
+                        // Fetch the triggering message
+                        match get_triggering_message_in_room(&service, &state, user_id, room_id_str).await {
+                            Ok(Some(triggering_msg)) => {
+                                let service_cap = capitalize(&service);
+                                let chat_name = remove_bridge_suffix(&room_name);
+                                let message = format!("{} from {}: {}", service_cap, chat_name, triggering_msg.content);
+                                let first_message = format!("Hey, someone confirmed a time-sensitive {} message.", service_cap);
+                                
+                                // Spawn a new task for sending critical message notification
+                                let state_clone = state.clone();
+                                let notification_type = format!("{}_critical", service);
+                                tokio::spawn(async move {
+                                    crate::proactive::utils::send_notification(
+                                        &state_clone,
+                                        user_id,
+                                        &message,
+                                        notification_type,
+                                        Some(first_message),
+                                    ).await;
+                                });
+                                return;
+                            }
+                            Ok(None) => {
+                                tracing::info!("No triggering message found for 'yes' response");
+                                return;
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to fetch triggering message: {}", e);
+                                return;
+                            }
+                        }
+                    } else {
+                        // Ignore the message if previous doesn't match
+                        tracing::debug!("Ignoring 'yes' message as previous sent message does not match the expected prompt");
+                        return;
+                    }
+                }
+                Ok(None) => {
+                    // Ignore if no previous sent message found
+                    tracing::debug!("Ignoring 'yes' message as no previous sent message found");
+                    return;
+                }
+                Err(e) => {
+                    tracing::error!("Failed to fetch latest sent message: {}", e);
+                    // Proceed to normal handling on error
+                }
+            }
+        }
+    }
     let chat_name = remove_bridge_suffix(room_name.as_str());
-  
+ 
     let sender_name = sender_localpart
         .strip_prefix(&sender_prefix)
         .unwrap_or(&sender_localpart)
@@ -829,14 +1104,14 @@ pub async fn handle_bridge_message(
         let clean_priority_sender = remove_bridge_suffix(priority_sender.sender.as_str());
         if chat_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) ||
            sender_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) {
-         
+        
             // Determine suffix based on noti_type
             let suffix = match priority_sender.noti_type.as_ref().map(|s| s.as_str()) {
                 Some("call") => "_call",
                 _ => "_sms",
             };
             let notification_type = format!("{}_priority{}", service, suffix);
-         
+        
             // Check if user has enough credits for notification
             match crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await {
                 Ok(()) => {
@@ -845,7 +1120,7 @@ pub async fn handle_bridge_message(
                     let content_clone = content.clone();
                     let message = trim_for_sms(&service, &priority_sender.sender, &content_clone);
                     let first_message = format!("Hello, you have an important {} message from {}.", service_cap, priority_sender.sender);
-                 
+                
                     // Spawn a new task for sending notification
                     tokio::spawn(async move {
                         // Send the notification
@@ -856,7 +1131,7 @@ pub async fn handle_bridge_message(
                             notification_type,
                             Some(first_message),
                         ).await;
-                     
+                    
                     });
                     return;
                 }
@@ -876,7 +1151,7 @@ pub async fn handle_bridge_message(
             if let Some(check_id) = check_id_option {
                 let message = message.unwrap_or(format!("Waiting check matched in {}, but failed to get content", service).to_string());
                 let first_message = first_message.unwrap_or(format!("Hey, I found a match for one of your waiting checks in {}.", service_cap));
-             
+            
                 // Find the matched waiting check to determine noti_type
                 let matched_waiting_check = waiting_checks.iter().find(|wc| wc.id == Some(check_id)).cloned();
                 let suffix = if let Some(wc) = matched_waiting_check {
@@ -888,12 +1163,12 @@ pub async fn handle_bridge_message(
                     "_sms"
                 };
                 let notification_type = format!("{}_waiting_check{}", service, suffix);
-             
+            
                 // Delete the matched waiting check
                 if let Err(e) = state.user_repository.delete_waiting_check_by_id(user_id, check_id) {
                     tracing::error!("Failed to delete waiting check {}: {}", check_id, e);
                 }
-             
+            
                 // Send notification
                 let state_clone = state.clone();
                 tokio::spawn(async move {
@@ -927,23 +1202,69 @@ pub async fn handle_bridge_message(
         println!("content: {}", content);
         println!("content contains call: {}", content.contains("Incoming call"));
     }
-    if let Ok((is_critical, message, first_message)) = crate::proactive::utils::check_message_importance(&state, user_id, &format!("{} from {}: {}", service_cap, chat_name, content), service_cap.as_str(), chat_name.as_str(), content.as_str()).await {
+    if let Ok((is_critical, message_opt, first_message_opt)) = crate::proactive::utils::check_message_importance(&state, user_id, &format!("{} from {}: {}", service_cap, chat_name, content), service_cap.as_str(), chat_name.as_str(), content.as_str()).await {
         if is_critical {
-            let message = message.unwrap_or(format!("Critical {} message found, failed to get content, but you can check your {} to see it.", service_cap, service));
-            let first_message = first_message.unwrap_or(format!("Hey, I found some critical {} message.", service_cap));
-          
-            // Spawn a new task for sending critical message notification
-            let state_clone = state.clone();
-            let notification_type = format!("{}_critical", service);
-            tokio::spawn(async move {
-                crate::proactive::utils::send_notification(
-                    &state_clone,
-                    user_id,
-                    &message,
-                    notification_type,
-                    Some(first_message),
-                ).await;
+            let is_family = priority_senders.iter().any(|ps| {
+                let clean_priority_sender = remove_bridge_suffix(&ps.sender);
+                chat_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) ||
+                sender_name.to_lowercase().contains(&clean_priority_sender.to_lowercase())
             });
+            let action = user_settings.action_on_critical_message.as_ref().map(|s| s.as_str()).unwrap_or("notify");
+            let prompt = "Hi, I'm Lightfriend, your friend's AI assistant. This message looks time-sensitive—since they're not currently on their computer, would you like me to send them a notification about it? Reply \"yes\" or \"no.\"".to_string();
+            let mut should_notify = false;
+            let mut should_ask = false;
+            match action {
+                "ask_sender" => {
+                    should_ask = true;
+                }
+                "ask_sender_exclude_family" => {
+                    if !is_family {
+                        should_ask = true;
+                    } else {
+                        should_notify = true;
+                    }
+                }
+                "notify_family" => {
+                    if is_family {
+                        should_notify = true;
+                    }
+                }
+                _ => { // includes "notify_call" and default
+                    should_notify = true;
+                }
+            }
+            if should_ask {
+                if member_count <= 3 {
+                    let state_clone = state.clone();
+                    let service_clone = service.clone();
+                    let chat_name_clone = chat_name.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = send_bridge_message(&service_clone, &state_clone, user_id, &chat_name_clone, &prompt, None).await {
+                            tracing::error!("Failed to send AI prompt: {}", e);
+                        }
+                    });
+                    return;
+                } else {
+                    should_notify = true;
+                }
+            }
+            if should_notify {
+                let message = message_opt.unwrap_or(format!("Critical {} message found, failed to get content, but you can check your {} to see it.", service_cap, service));
+                let first_message = first_message_opt.unwrap_or(format!("Hey, I found some critical {} message.", service_cap));
+             
+                // Spawn a new task for sending critical message notification
+                let state_clone = state.clone();
+                let notification_type = format!("{}_critical", service);
+                tokio::spawn(async move {
+                    crate::proactive::utils::send_notification(
+                        &state_clone,
+                        user_id,
+                        &message,
+                        notification_type,
+                        Some(first_message),
+                    ).await;
+                });
+            }
         }
     }
 }

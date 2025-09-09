@@ -13,16 +13,14 @@ pub struct CriticalResponse {
     average_critical_per_day: f32,
     estimated_monthly_price: f32,
     call_notify: bool,
-    message_critical_mode: String,
-    family_no_followup: bool,
+    action_on_critical_message: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UpdateCriticalRequest {
     enabled: Option<Option<String>>,
     call_notify: Option<bool>,
-    message_critical_mode: Option<String>,
-    family_no_followup: Option<bool>,
+    action_on_critical_message: Option<Option<String>>,
 }
 
 #[derive(Properties, PartialEq)]
@@ -37,20 +35,18 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
     let estimated_price = use_state(|| 0.0);
     let call_notify = use_state(|| true);
     let is_saving = use_state(|| false);
-    let message_mode = use_state(|| "all".to_string());
+    let mode = use_state(|| "all".to_string());
     let family_no_followup = use_state(|| false);
-
     // States for info toggles
     let show_message_info = use_state(|| false);
     let show_action_info = use_state(|| false);
-
     // Load critical notification settings when component mounts
     {
         let critical_enabled = critical_enabled.clone();
         let average_critical = average_critical.clone();
         let estimated_price = estimated_price.clone();
         let call_notify = call_notify.clone();
-        let message_mode = message_mode.clone();
+        let mode = mode.clone();
         let family_no_followup = family_no_followup.clone();
         use_effect_with_deps(
             move |_| {
@@ -75,8 +71,28 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                                 average_critical.set(critical.average_critical_per_day);
                                 estimated_price.set(critical.estimated_monthly_price);
                                 call_notify.set(critical.call_notify);
-                                message_mode.set(critical.message_critical_mode);
-                                family_no_followup.set(critical.family_no_followup);
+                                match critical.action_on_critical_message {
+                                    None => {
+                                        mode.set("all".to_string());
+                                        family_no_followup.set(false);
+                                    },
+                                    Some(ref val) if val == "notify_family" => {
+                                        mode.set("family".to_string());
+                                        family_no_followup.set(false);
+                                    },
+                                    Some(ref val) if val == "ask_sender" => {
+                                        mode.set("ask".to_string());
+                                        family_no_followup.set(false);
+                                    },
+                                    Some(ref val) if val == "ask_sender_exclude_family" => {
+                                        mode.set("ask".to_string());
+                                        family_no_followup.set(true);
+                                    },
+                                    _ => {
+                                        mode.set("all".to_string());
+                                        family_no_followup.set(false);
+                                    },
+                                }
                             }
                         }
                     });
@@ -86,7 +102,6 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
             (),
         );
     }
-
     let handle_option_change = {
         let critical_enabled = critical_enabled.clone();
         let is_saving = is_saving.clone();
@@ -104,8 +119,7 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                     let request = UpdateCriticalRequest {
                         enabled: Some(new_value),
                         call_notify: None,
-                        message_critical_mode: None,
-                        family_no_followup: None,
+                        action_on_critical_message: None,
                     };
                     let result = Request::post(&format!(
                         "{}/api/profile/critical",
@@ -121,7 +135,6 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
             }
         })
     };
-
     let handle_call_notify_change = {
         let call_notify = call_notify.clone();
         let is_saving = is_saving.clone();
@@ -139,8 +152,7 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                     let request = UpdateCriticalRequest {
                         enabled: None,
                         call_notify: Some(new_value),
-                        message_critical_mode: None,
-                        family_no_followup: None,
+                        action_on_critical_message: None,
                     };
                     let result = Request::post(&format!(
                         "{}/api/profile/critical",
@@ -156,13 +168,14 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
             }
         })
     };
-
-    let handle_message_mode_change = {
-        let message_mode = message_mode.clone();
+    let handle_mode_change = {
+        let mode = mode.clone();
+        let family_no_followup = family_no_followup.clone();
         let is_saving = is_saving.clone();
-        Callback::from(move |new_value: String| {
+        Callback::from(move |new_mode: String| {
             let is_saving = is_saving.clone();
-            message_mode.set(new_value.clone());
+            let family_no_followup = family_no_followup.clone();
+            mode.set(new_mode.clone());
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
                 .flatten()
@@ -170,12 +183,17 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                 .flatten()
             {
                 is_saving.set(true);
+                let new_value: Option<String> = match new_mode.as_str() {
+                    "all" => None,
+                    "family" => Some("notify_family".to_string()),
+                    "ask" => Some(if *family_no_followup { "ask_sender_exclude_family".to_string() } else { "ask_sender".to_string() }),
+                    _ => None,
+                };
                 spawn_local(async move {
                     let request = UpdateCriticalRequest {
                         enabled: None,
                         call_notify: None,
-                        message_critical_mode: Some(new_value),
-                        family_no_followup: None,
+                        action_on_critical_message: Some(new_value),
                     };
                     let result = Request::post(&format!(
                         "{}/api/profile/critical",
@@ -191,42 +209,44 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
             }
         })
     };
-
     let handle_family_no_followup_change = {
         let family_no_followup = family_no_followup.clone();
+        let mode = mode.clone();
         let is_saving = is_saving.clone();
         Callback::from(move |new_value: bool| {
             let is_saving = is_saving.clone();
-            family_no_followup.set(new_value);
-            if let Some(token) = window()
-                .and_then(|w| w.local_storage().ok())
-                .flatten()
-                .and_then(|s| s.get_item("token").ok())
-                .flatten()
-            {
-                is_saving.set(true);
-                spawn_local(async move {
-                    let request = UpdateCriticalRequest {
-                        enabled: None,
-                        call_notify: None,
-                        message_critical_mode: None,
-                        family_no_followup: Some(new_value),
-                    };
-                    let result = Request::post(&format!(
-                        "{}/api/profile/critical",
-                        config::get_backend_url(),
-                    ))
-                    .header("Authorization", &format!("Bearer {}", token))
-                    .json(&request)
-                    .unwrap()
-                    .send()
-                    .await;
-                    is_saving.set(false);
-                });
+            let mode = mode.clone();
+            if *mode == "ask" {
+                family_no_followup.set(new_value);
+                if let Some(token) = window()
+                    .and_then(|w| w.local_storage().ok())
+                    .flatten()
+                    .and_then(|s| s.get_item("token").ok())
+                    .flatten()
+                {
+                    is_saving.set(true);
+                    let new_action: Option<String> = Some(if new_value { "ask_sender_exclude_family".to_string() } else { "ask_sender".to_string() });
+                    spawn_local(async move {
+                        let request = UpdateCriticalRequest {
+                            enabled: None,
+                            call_notify: None,
+                            action_on_critical_message: Some(new_action),
+                        };
+                        let result = Request::post(&format!(
+                            "{}/api/profile/critical",
+                            config::get_backend_url(),
+                        ))
+                        .header("Authorization", &format!("Bearer {}", token))
+                        .json(&request)
+                        .unwrap()
+                        .send()
+                        .await;
+                        is_saving.set(false);
+                    });
+                }
             }
         })
     };
-
     let phone_number = props.phone_number.clone();
     let country = if phone_number.starts_with("+1") {
         "US"
@@ -267,17 +287,14 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
         "Other" => html! { <>{" ("}<a href="/bring-own-number">{"see pricing"}</a>{")"}</> },
         _ => html! {},
     };
-
     let toggle_message_info = {
         let show_message_info = show_message_info.clone();
         Callback::from(move |_| show_message_info.set(!*show_message_info))
     };
-
     let toggle_action_info = {
         let show_action_info = show_action_info.clone();
         Callback::from(move |_| show_action_info.set(!*show_action_info))
     };
-
     html! {
         <>
             <style>
@@ -629,39 +646,39 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                 }}
                 <div class="radio-group">
                     <label class="radio-option" onclick={
-                        let handle_message_mode_change = handle_message_mode_change.clone();
-                        Callback::from(move |_| handle_message_mode_change.emit("all".to_string()))
+                        let handle_mode_change = handle_mode_change.clone();
+                        Callback::from(move |_| handle_mode_change.emit("all".to_string()))
                     }>
                         <input
                             type="radio"
                             name="message-critical-mode"
-                            checked={*message_mode == "all"}
+                            checked={*mode == "all"}
                         />
                         <div class="radio-label">
                             {"Notify All"}
                         </div>
                     </label>
                     <label class="radio-option" onclick={
-                        let handle_message_mode_change = handle_message_mode_change.clone();
-                        Callback::from(move |_| handle_message_mode_change.emit("family".to_string()))
+                        let handle_mode_change = handle_mode_change.clone();
+                        Callback::from(move |_| handle_mode_change.emit("family".to_string()))
                     }>
                         <input
                             type="radio"
                             name="message-critical-mode"
-                            checked={*message_mode == "family"}
+                            checked={*mode == "family"}
                         />
                         <div class="radio-label">
                             {"Family Only"}
                         </div>
                     </label>
                     <label class="radio-option" onclick={
-                        let handle_message_mode_change = handle_message_mode_change.clone();
-                        Callback::from(move |_| handle_message_mode_change.emit("none".to_string()))
+                        let handle_mode_change = handle_mode_change.clone();
+                        Callback::from(move |_| handle_mode_change.emit("ask".to_string()))
                     }>
                         <input
                             type="radio"
                             name="message-critical-mode"
-                            checked={*message_mode == "none"}
+                            checked={*mode == "ask"}
                         />
                         <div class="radio-label">
                             {"Ask Sender"}
@@ -671,12 +688,12 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                         <input
                             type="checkbox"
                             checked={*family_no_followup}
-                            disabled={*message_mode != "none"}
+                            disabled={*mode != "ask"}
                             onchange={Callback::from({
                                 let handle_family_no_followup_change = handle_family_no_followup_change.clone();
-                                let message_mode = message_mode.clone();
+                                let mode = mode.clone();
                                 move |e: Event| {
-                                    if *message_mode == "none" {
+                                    if *mode == "ask" {
                                         if let Some(input) = e.target().and_then(|t| t.dyn_into::<HtmlInputElement>().ok()) {
                                             handle_family_no_followup_change.emit(input.checked());
                                         }

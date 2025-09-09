@@ -35,6 +35,16 @@ diesel::table! {
 }
 
 diesel::table! {
+    critical_categories (id) {
+        id -> Nullable<Integer>,
+        user_id -> Integer,
+        category_name -> Text,
+        definition -> Nullable<Text>,
+        active -> Bool,
+    }
+}
+
+diesel::table! {
     email_judgments (id) {
         id -> Nullable<Integer>,
         user_id -> Integer,
@@ -232,6 +242,7 @@ diesel::table! {
         elevenlabs_phone_number_id -> Nullable<Text>,
         proactive_agent_on -> Bool,
         notify_about_calls -> Bool,
+        action_on_critical_message -> Nullable<Text>,
     }
 }
 
@@ -296,6 +307,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     bridges,
     calendar_notifications,
     conversations,
+    critical_categories,
     email_judgments,
     google_calendar,
     google_tasks,

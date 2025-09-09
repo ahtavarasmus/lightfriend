@@ -1097,15 +1097,16 @@ pub async fn update_digests(
 }
 
 #[derive(Deserialize)]
-pub struct CriticalEnabledRequest {
+pub struct UpdateCriticalRequest {
     enabled: Option<Option<String>>,
     call_notify: Option<bool>,
+    action_on_critical_message: Option<Option<String>>,
 }
 
 pub async fn update_critical_settings(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
-    Json(request): Json<CriticalEnabledRequest>,
+    Json(request): Json<UpdateCriticalRequest>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
     if let Some(enabled) = request.enabled {
         if let Err(e) = state.user_core.update_critical_enabled(auth_user.user_id, enabled) {
@@ -1125,6 +1126,15 @@ pub async fn update_critical_settings(
             ));
         }
     }
+    if let Some(action) = request.action_on_critical_message {
+        if let Err(e) = state.user_core.update_action_on_critical_message(auth_user.user_id, action) {
+            tracing::error!("Failed to update action on critical message setting: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({"error": format!("Failed to update action on critical message setting: {}", e)}))
+            ));
+        }
+    }
     Ok(Json(json!({
         "message": "Critical settings updated successfully"
     })))
@@ -1136,6 +1146,7 @@ pub struct CriticalNotificationInfo {
     pub average_critical_per_day: f32,
     pub estimated_monthly_price: f32,
     pub call_notify: bool,
+    pub action_on_critical_message: Option<String>,
 }
 
 pub async fn get_critical_settings(

@@ -528,6 +528,18 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
         }
     }
 
+    fn generate_tool_summary(tool_calls: &Vec<chat_completion::ToolCall>, msg: &crate::models::user_models::MessageHistory) -> String {
+        // Logic to summarize: iterate over tool_calls, extract action names/queries, and perhaps fetch related tool responses if stored
+        // For simplicity, assume you have access to tool response data via another query or embedded in msg
+        let mut summary = String::new();
+        for call in tool_calls {
+            summary.push_str(&format!("Called {:?} with args {:?}; ", call.function.name, call.function.arguments));
+        }
+        // Append high-level outcome if available (e.g., from a separate tool response lookup)
+        summary.push_str("processed results to inform response.");
+        summary
+    }
+
     // Only include conversation history if message doesn't start with "forget"
     if !payload.body.to_lowercase().starts_with("forget") {
 
@@ -548,9 +560,6 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             
             // Process messages in chronological order
             for msg in history.into_iter().rev() {
-                if msg.role == "tool" || (msg.role == "assistant" && msg.tool_calls_json.is_some()) {
-                    continue; // Skip tool calls and responses to avoid validation errors
-                }
                 let role = match msg.role.as_str() {
                     "user" => "user",
                     "assistant" => "assistant",
@@ -569,20 +578,21 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
                     if let Some(json_str) = &msg.tool_calls_json {
                         match serde_json::from_str::<Vec<chat_completion::ToolCall>>(json_str) {
                             Ok(tool_calls) => {
-                                chat_msg.tool_calls = Some(tool_calls);
+                                chat_msg.tool_calls = None;
                                 // Set content to empty for tool-calling assistants to avoid confusion
-                                chat_msg.content = chat_completion::Content::Text(String::new());
+                                let original_content = msg.encrypted_content.clone(); // Assuming this is the final response content
+                                let tool_summary = generate_tool_summary(&tool_calls, &msg); // Implement this function to create a text summary
+                                let modified_content = format!("{}\n\n[Tool Summary: {}]", original_content, tool_summary);
+                                println!("here with {}", modified_content);
+                                chat_msg.content = chat_completion::Content::Text(modified_content);
                             }
                             Err(e) => {
                                 tracing::error!("Failed to parse tool_calls_json: {:?}", e);
-                                // Fallback: skip or handle error (e.g., set to None)
+                                // Fallback: use original content without summary
+                                chat_msg.content = chat_completion::Content::Text(msg.encrypted_content.clone());
                             }
                         }
                     }
-                } else if msg.role == "tool" {
-                    // For tool responses, set tool_call_id if present
-                    chat_msg.tool_call_id = msg.tool_call_id.clone();
-                    // tool_name can be used for validation if needed, but not directly set on ChatMessage
                 }
                 
                 context_messages.push(chat_msg);

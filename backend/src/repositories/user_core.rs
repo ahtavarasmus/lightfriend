@@ -561,12 +561,25 @@ impl UserCore {
     pub fn update_critical_enabled(&self, user_id: i32, enabled: Option<String>) -> Result<(), DieselError> {
         use crate::schema::user_settings;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-       
+      
         // Ensure user settings exist
         self.ensure_user_settings_exist(user_id)?;
         // Update the critical_enabled setting
         diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
             .set(user_settings::critical_enabled.eq(enabled))
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+    pub fn update_action_on_critical_message(&self, user_id: i32, action: Option<String>) -> Result<(), DieselError> {
+        use crate::schema::user_settings;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+      
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+        // Update the action_on_critical_message setting
+        diesel::update(user_settings::table.filter(user_settings::user_id.eq(user_id)))
+            .set(user_settings::action_on_critical_message.eq(action))
             .execute(&mut conn)?;
         Ok(())
     }
@@ -601,105 +614,107 @@ impl UserCore {
     }
 
     pub fn get_critical_notification_info(&self, user_id: i32) -> Result<crate::handlers::profile_handlers::CriticalNotificationInfo, diesel::result::Error> {
-            use crate::schema::{user_settings, usage_logs};
-            let mut conn = self.pool.get().expect("Failed to get DB connection");
-            // Ensure user settings exist
-            self.ensure_user_settings_exist(user_id)?;
-            // Get the critical_enabled and call_notify settings
-            let (enabled, call_notify) = user_settings::table
-                .filter(user_settings::user_id.eq(user_id))
-                .select((user_settings::critical_enabled, user_settings::notify_about_calls.nullable()))
-                .first::<(Option<String>, Option<bool>)>(&mut conn)?;
-            let call_notify = call_notify.unwrap_or(true); // Default to true if not set
-            // Get average critical notifications per day
-            let average_critical_per_day = {
-                let now: i64 = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .expect("Time went backwards")
-                    .as_secs() as i64;
-                let thirty_days_ago: i64 = now - 2_592_000; // 30 * 86_400
-                let active_days_count: i64 = usage_logs::table
-                    .select(sql::<BigInt>("COUNT(DISTINCT created_at / 86400)"))
+        use crate::schema::{user_settings, usage_logs};
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        // Ensure user settings exist
+        self.ensure_user_settings_exist(user_id)?;
+        // Get the critical_enabled and call_notify settings
+        let (enabled, call_notify, action_on_critical_message) = user_settings::table
+            .filter(user_settings::user_id.eq(user_id))
+            .select((user_settings::critical_enabled, user_settings::notify_about_calls.nullable(), user_settings::action_on_critical_message))
+            .first::<(Option<String>, Option<bool>, Option<String>)>(&mut conn)?;
+        let call_notify = call_notify.unwrap_or(true); // Default to true if not set
+        // Get average critical notifications per day
+        let average_critical_per_day = {
+            let now: i64 = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("Time went backwards")
+                .as_secs() as i64;
+            let thirty_days_ago: i64 = now - 2_592_000; // 30 * 86_400
+            let active_days_count: i64 = usage_logs::table
+                .select(sql::<BigInt>("COUNT(DISTINCT created_at / 86400)"))
+                .filter(crate::schema::usage_logs::user_id.eq(user_id))
+                .filter(usage_logs::created_at.ge(thirty_days_ago as i32))
+                .first(&mut conn)?;
+            if active_days_count < 3 {
+                1.0
+            } else {
+                let oldest_day: i64 = usage_logs::table
+                    .select(sql::<BigInt>("MIN(created_at / 86400)"))
                     .filter(crate::schema::usage_logs::user_id.eq(user_id))
                     .filter(usage_logs::created_at.ge(thirty_days_ago as i32))
                     .first(&mut conn)?;
-                if active_days_count < 3 {
+                let current_day: i64 = now / 86_400;
+                let num_days = (current_day - oldest_day + 1) as i64;
+                if num_days <= 0 {
                     1.0
                 } else {
-                    let oldest_day: i64 = usage_logs::table
-                        .select(sql::<BigInt>("MIN(created_at / 86400)"))
+                    let start_timestamp: i64 = oldest_day * 86_400;
+                    let end_timestamp: i64 = (current_day + 1) * 86_400;
+                    let total_critical: i64 = usage_logs::table
                         .filter(crate::schema::usage_logs::user_id.eq(user_id))
-                        .filter(usage_logs::created_at.ge(thirty_days_ago as i32))
-                        .first(&mut conn)?;
-                    let current_day: i64 = now / 86_400;
-                    let num_days = (current_day - oldest_day + 1) as i64;
-                    if num_days <= 0 {
+                        .filter(usage_logs::activity_type.like("%_critical"))
+                        .filter(usage_logs::created_at.ge(start_timestamp as i32))
+                        .filter(usage_logs::created_at.lt(end_timestamp as i32))
+                        .count()
+                        .get_result(&mut conn)?;
+                    if total_critical == 0 {
                         1.0
                     } else {
-                        let start_timestamp: i64 = oldest_day * 86_400;
-                        let end_timestamp: i64 = (current_day + 1) * 86_400;
-                        let total_critical: i64 = usage_logs::table
-                            .filter(crate::schema::usage_logs::user_id.eq(user_id))
-                            .filter(usage_logs::activity_type.like("%_critical"))
-                            .filter(usage_logs::created_at.ge(start_timestamp as i32))
-                            .filter(usage_logs::created_at.lt(end_timestamp as i32))
-                            .count()
-                            .get_result(&mut conn)?;
-                        if total_critical == 0 {
-                            1.0
-                        } else {
-                            total_critical as f32 / num_days as f32
-                        }
+                        total_critical as f32 / num_days as f32
                     }
                 }
-            };
-            println!("average per day: {}", average_critical_per_day);
-            // Get user's phone number to determine country
-            let phone_number = self
-                .find_by_id(user_id)?
-                .map(|user| user.phone_number)
-                .ok_or_else(|| diesel::result::Error::NotFound)?;
-            // Determine country based on phone number
-            let country = if phone_number.starts_with("+1") {
-                "US"
-            } else if phone_number.starts_with("+358") {
-                "FI"
-            } else if phone_number.starts_with("+31") {
-                "NL"
-            } else if phone_number.starts_with("+44") {
-                "UK"
-            } else if phone_number.starts_with("+61") {
-                "AU"
-            } else {
-                "Other"
-            };
-            // Calculate estimated monthly price based on country and notification method
-            let estimated_monthly_price = if enabled.is_none() {
-                0.0
-            } else {
-                let notifications_per_month = average_critical_per_day * 30.0; // Assume 30 days per month
-                match (country, enabled.as_deref()) {
-                    ("US", Some("sms")) => notifications_per_month * 0.5, // 1/2 message cost
-                    ("US", Some("call")) => notifications_per_month * 0.5, // 1/2 message cost
-                    ("FI", Some("sms")) => notifications_per_month * 0.15,
-                    ("FI", Some("call")) => notifications_per_month * 0.70,
-                    ("NL", Some("sms")) => notifications_per_month * 0.15,
-                    ("NL", Some("call")) => notifications_per_month * 0.45,
-                    ("UK", Some("sms")) => notifications_per_month * 0.15,
-                    ("UK", Some("call")) => notifications_per_month * 0.15,
-                    ("AU", Some("sms")) => notifications_per_month * 0.15,
-                    ("AU", Some("call")) => notifications_per_month * 0.15,
-                    _ => 0.0, // No pricing for "Other" or disabled
-                }
-            };
-            Ok(crate::handlers::profile_handlers::CriticalNotificationInfo {
-                enabled,
-                average_critical_per_day,
-                estimated_monthly_price,
-                call_notify,
-            })
-        }
-            pub fn get_priority_notification_info(&self, user_id: i32) -> Result<crate::handlers::filter_handlers::PriorityNotificationInfo, diesel::result::Error> {
+            }
+        };
+        println!("average per day: {}", average_critical_per_day);
+        // Get user's phone number to determine country
+        let phone_number = self
+            .find_by_id(user_id)?
+            .map(|user| user.phone_number)
+            .ok_or_else(|| diesel::result::Error::NotFound)?;
+        // Determine country based on phone number
+        let country = if phone_number.starts_with("+1") {
+            "US"
+        } else if phone_number.starts_with("+358") {
+            "FI"
+        } else if phone_number.starts_with("+31") {
+            "NL"
+        } else if phone_number.starts_with("+44") {
+            "UK"
+        } else if phone_number.starts_with("+61") {
+            "AU"
+        } else {
+            "Other"
+        };
+        // Calculate estimated monthly price based on country and notification method
+        let estimated_monthly_price = if enabled.is_none() {
+            0.0
+        } else {
+            let notifications_per_month = average_critical_per_day * 30.0; // Assume 30 days per month
+            match (country, enabled.as_deref()) {
+                ("US", Some("sms")) => notifications_per_month * 0.5, // 1/2 message cost
+                ("US", Some("call")) => notifications_per_month * 0.5, // 1/2 message cost
+                ("FI", Some("sms")) => notifications_per_month * 0.15,
+                ("FI", Some("call")) => notifications_per_month * 0.70,
+                ("NL", Some("sms")) => notifications_per_month * 0.15,
+                ("NL", Some("call")) => notifications_per_month * 0.45,
+                ("UK", Some("sms")) => notifications_per_month * 0.15,
+                ("UK", Some("call")) => notifications_per_month * 0.15,
+                ("AU", Some("sms")) => notifications_per_month * 0.15,
+                ("AU", Some("call")) => notifications_per_month * 0.15,
+                _ => 0.0, // No pricing for "Other" or disabled
+            }
+        };
+        Ok(crate::handlers::profile_handlers::CriticalNotificationInfo {
+            enabled,
+            average_critical_per_day,
+            estimated_monthly_price,
+            call_notify,
+            action_on_critical_message,
+        })
+    }
+
+    pub fn get_priority_notification_info(&self, user_id: i32) -> Result<crate::handlers::filter_handlers::PriorityNotificationInfo, diesel::result::Error> {
         use crate::schema::{usage_logs};
         let mut conn = self.pool.get().expect("Failed to get DB connection");
         // Get average priority notifications per day
