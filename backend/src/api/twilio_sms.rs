@@ -86,7 +86,7 @@ pub struct TextBeeWebhookPayload {
 }
 
 pub fn get_model() -> String {
-    "qwen/qwen3-max".to_string()
+    "google/gemini-2.0-flash-001".to_string()
 }
 
 pub async fn handle_textbee_sms(
