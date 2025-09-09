@@ -85,6 +85,10 @@ pub struct TextBeeWebhookPayload {
     pub body: String,
 }
 
+pub fn get_model() -> String {
+    "qwen/qwen3-max".to_string()
+}
+
 pub async fn handle_textbee_sms(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<TextBeeWebhookPayload>,
@@ -544,6 +548,9 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
             
             // Process messages in chronological order
             for msg in history.into_iter().rev() {
+                if msg.role == "tool" || (msg.role == "assistant" && msg.tool_calls_json.is_some()) {
+                    continue; // Skip tool calls and responses to avoid validation errors
+                }
                 let role = match msg.role.as_str() {
                     "user" => "user",
                     "assistant" => "assistant",
@@ -702,7 +709,7 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
 
     let result = match client.chat_completion(chat_completion::ChatCompletionRequest::new(
-        "qwen/qwen3-coder".to_string(),
+            get_model(),
         completion_messages.clone(),
     )
     .tools(tools)
@@ -1395,8 +1402,9 @@ Never use markdown, HTML, or any special formatting characters in responses. Ret
 
 
             tracing::debug!("Making follow-up request to model with tool call answers");
+            let model = get_model();
             let follow_up_req = chat_completion::ChatCompletionRequest::new(
-        "qwen/qwen3-coder".to_string(),
+                model,
                 follow_up_messages,
             )
             .max_tokens(100); // Consistent token limit for follow-up messages

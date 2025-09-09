@@ -493,11 +493,23 @@ pub fn Home() -> Html {
                                         <div class="preferred-number-display">
                                             {
                                                 if let Some((_, hardcoded_number)) = phone_prefix {
-                                                    html! {
-                                                        <span class="preferred-number-label configured">
-                                                            {format!("Your lightfriend's Number: {}", hardcoded_number)}
-                                                        </span>
-                                                    }
+                                                    if profile.id == 1 {
+                                                        html! {
+                                                            <>
+                                                            <span class="preferred-number-label configured">
+                                                                {format!("Your lightfriend's Number: {}", hardcoded_number)}
+                                                            </span>
+                                                            <a href="/admin">{"admin page"}</a>
+                                                            </>
+                                                        }
+                                                     } else {
+                                                        html! {
+                                                            <span class="preferred-number-label configured">
+                                                                {format!("Your lightfriend's Number: {}", hardcoded_number)}
+                                                            </span>
+                                                        }
+                                                     }
+
                                                 } else {
                                                     if twilio_setup_complete {
                                                         if let Some(twilio_number) = &profile.preferred_number {
