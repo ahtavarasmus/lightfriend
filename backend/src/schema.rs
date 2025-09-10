@@ -130,6 +130,7 @@ diesel::table! {
         sender -> Text,
         service_type -> Text,
         noti_type -> Nullable<Text>,
+        noti_mode -> Text,
     }
 }
 

@@ -427,6 +427,7 @@ pub struct PrioritySender {
     pub sender: String,
     pub service_type: String, // like email, whatsapp, .. 
     pub noti_type: Option<String>, // "sms", "call"
+    pub noti_mode: String, // "all" to notify about every msg, "focus" to pay extra attention on digests and eligible for family on different monitoring settings
 }
 
 #[derive(Insertable)]
@@ -436,6 +437,7 @@ pub struct NewPrioritySender {
     pub sender: String,
     pub service_type: String, 
     pub noti_type: Option<String>, 
+    pub noti_mode: String,
 }
 
 #[derive(Queryable, Selectable, Insertable)]

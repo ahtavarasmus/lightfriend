@@ -18,12 +18,14 @@ pub struct MonitoredContact {
     pub sender: String,
     pub service_type: String,
     pub noti_type: Option<String>,
+    pub noti_mode: Option<String>,
 }
 #[derive(Deserialize, Serialize)]
 pub struct MonitoredContactRequest {
     sender: String,
     service_type: String,
     noti_type: Option<String>,
+    noti_mode: String,
 }
 #[derive(Properties, PartialEq, Clone)]
 pub struct MonitoredContactsProps {
@@ -66,6 +68,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
     let new_contact = use_state(|| String::new());
     let selected_service = use_state(|| "".to_string());
     let selected_noti_type = use_state(|| "sms".to_string());
+    let is_all_mode = use_state(|| false);
     let contacts_local = use_state(|| props.contacts.clone());
     let error_message = use_state(|| None::<String>);
     let show_info = use_state(|| false);
@@ -74,6 +77,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
     let is_searching = use_state(|| false);
     let average_per_day = use_state(|| 0.0);
     let estimated_monthly_price = use_state(|| 0.0);
+    let current_tab = use_state(|| "whatsapp".to_string());
     let hide_suggestions = {
         let show_suggestions = show_suggestions.clone();
         Callback::from(move |_| {
@@ -113,7 +117,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                 let show_suggestions = show_suggestions.clone();
                 let is_searching = is_searching.clone();
                 is_searching.set(true);
-             
+            
                 spawn_local(async move {
                     match Request::get(&format!(
                         "{}/api/{}/search-rooms?search={}",
@@ -198,9 +202,10 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
         let refresh = refresh_from_server.clone();
         let selected_service = selected_service.clone();
         let selected_noti_type = selected_noti_type.clone();
+        let is_all_mode = is_all_mode.clone();
         let contacts_local = contacts_local.clone();
         let error_message = error_message.clone();
- 
+        let current_tab = current_tab.clone();
         Callback::from(move |_| {
             let identifier = (*new_contact).trim().to_string();
             if identifier.is_empty() { return; }
@@ -217,7 +222,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                 error_message.set(Some("Please enter a valid email address".to_string()));
                 return;
             }
-     
+    
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
                 .flatten()
@@ -227,7 +232,15 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                 let new_contact = new_contact.clone();
                 let refresh = refresh.clone();
                 let service_type = service_type.clone();
-                let noti_type = (*selected_noti_type).clone();
+                let noti_mode = if *is_all_mode { "all".to_string() } else { "focus".to_string() };
+                let noti_type = if *is_all_mode {
+                    Some((*selected_noti_type).clone())
+                } else {
+                    Some("sms".to_string())
+                };
+                let current_tab = current_tab.clone();
+                let error_message = error_message.clone();
+                let is_all_mode = is_all_mode.clone();
                 spawn_local(async move {
                     let _ = Request::post(&format!(
                         "{}/api/filters/monitored-contact/{}",
@@ -238,21 +251,23 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     .json(&MonitoredContactRequest {
                         sender: identifier,
                         service_type: service_type.clone(),
-                        noti_type: Some(noti_type),
+                        noti_type,
+                        noti_mode: noti_mode,
                     })
                     .unwrap()
                     .send()
                     .await;
                     new_contact.set(String::new());
+                    is_all_mode.set(false);
                     error_message.set(None);
                     refresh.emit(());
+                    current_tab.set(service_type);
                 });
             }
         })
     };
     let delete_monitored_contact = {
         let refresh = refresh_from_server.clone();
- 
         Callback::from(move |(identifier, service_type): (String, String)| {
             if let Some(token) = window()
                 .and_then(|w| w.local_storage().ok())
@@ -261,7 +276,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                 .flatten()
             {
                 let refresh = refresh.clone();
-         
+        
                 spawn_local(async move {
                     let _ = Request::delete(&format!(
                         "{}/api/filters/monitored-contact/{}/{}",
@@ -272,7 +287,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     .header("Authorization", &format!("Bearer {}", token))
                     .send()
                     .await;
-             
+            
                     refresh.emit(());
                 });
             }
@@ -352,6 +367,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                         display: flex;
                         gap: 0.5rem;
                         width: 100%;
+                        flex-wrap: wrap;
                     }
                     @media (max-width: 480px) {
                         .input-group {
@@ -396,6 +412,19 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                         background: #1a1a1a;
                         color: #fff;
                         padding: 0.5rem;
+                    }
+                    .checkbox-label {
+                        display: flex;
+                        align-items: center;
+                        gap: 0.5rem;
+                        color: #fff;
+                        font-size: 0.9rem;
+                        cursor: pointer;
+                    }
+                    .checkbox-label input[type="checkbox"] {
+                        width: 16px;
+                        height: 16px;
+                        cursor: pointer;
                     }
                     .waiting-check-fields input[type="text"] {
                         padding: 0.75rem;
@@ -480,7 +509,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                         border: 1px solid rgba(0, 136, 204, 0.2);
                     }
                     .service-type-badge.signal {
-                        color: #3A76F0;<grok-card data-id="24576a" data-type="citation_card"></grok-card>
+                        color: #3A76F0;
                         border: 1px solid rgba(58, 118, 240, 0.2);
                     }
                     .noti-type-badge {
@@ -496,6 +525,16 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     .noti-type-badge.call {
                         color: #FF6347;
                         border: 1px solid rgba(255, 99, 71, 0.2);
+                    }
+                    .mode-badge {
+                        padding: 0.25rem 0.75rem;
+                        border-radius: 8px;
+                        font-size: 0.8rem;
+                        background: rgba(0, 0, 0, 0.2);
+                    }
+                    .mode-badge.all {
+                        color: #34D399;
+                        border: 1px solid rgba(52, 211, 153, 0.2);
                     }
                     .filter-list li:hover {
                         border-color: rgba(245, 158, 11, 0.2);
@@ -630,12 +669,32 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                         font-size: 0.8rem;
                         margin-top: 1rem;
                     }
+                    .tabs {
+                        display: flex;
+                        gap: 0.5rem;
+                        margin-bottom: 1rem;
+                    }
+                    .tab-button {
+                        padding: 0.5rem 1rem;
+                        border-radius: 8px;
+                        background: rgba(0,0,0,0.2);
+                        border: 1px solid rgba(245,158,11,0.1);
+                        color: #fff;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                    }
+                    .tab-button.active {
+                        border: none;
+                    }
+                    .tab-button:hover {
+                        opacity: 0.9;
+                    }
                 "#}
             </style>
             <div class="filter-header">
                 <div class="filter-title">
                     <i class="fas fa-user-check" style="color: #4ECDC4;"></i>
-                    <h3>{"Monitored Contacts"}</h3>
+                    <h3>{"Special Contacts"}</h3>
                     <button
                         class="info-button"
                         onclick={Callback::from({
@@ -647,8 +706,9 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     </button>
                 </div>
                 <div class="flow-description">
-                    {"Get always notified about messages from your monitored contacts"}
+                    {"Define important contacts and lightfriend will keep an extra eye out for them."}
                 </div>
+                    /*
                 <div class="notification-cost">
                     {if *estimated_monthly_price == 0.0 {
                         "Not enough data to estimate cost yet".to_string()
@@ -664,14 +724,20 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                         )
                     }}
                 </div>
+                    */
                 <div class="info-section" style={if *show_info { "display: block" } else { "display: none" }}>
                     <h4>{"How It Works"}</h4>
                     <div class="info-subsection">
                         <ul>
-                            <li>{"Lightfriend will notify you about all messages from your monitored contacts"}</li>
+                            <li>{"Special contacts will be prioritized in digest messages and can be set to have special behaviour with critical notitications"}</li>
+                            <li>{"To get notified about every new message from certain contact, check the checkbox and choose notification method"}</li>
                             <li>{"For WhatsApp, Telegram, Signal, enter the contact's name or phone number"}</li>
                             <li>{"For Email, enter the contact's email address"}</li>
                         </ul>
+                    </div>
+                    <h4>{"Notification Modes"}</h4>
+                    <div class="info-subsection">
+                        <p>{"By default, contacts are in \"focus\" mode, which prioritizes them in the family group for digest messages and critical notifications. Check the \"Notify about all messages\" box when adding a contact to receive every message from them."}</p>
                     </div>
                 </div>
             </div>
@@ -814,6 +880,28 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                         {
                             if !(*selected_service).is_empty() {
                                 html! {
+                                    <label class="checkbox-label">
+                                        <input
+                                            type="checkbox"
+                                            checked={*is_all_mode}
+                                            onchange={Callback::from({
+                                                let is_all_mode = is_all_mode.clone();
+                                                move |e: Event| {
+                                                    let input: HtmlInputElement = e.target_unchecked_into();
+                                                    is_all_mode.set(input.checked());
+                                                }
+                                            })}
+                                        />
+                                        {"Notify about all messages from this sender"}
+                                    </label>
+                                }
+                            } else {
+                                html! {}
+                            }
+                        }
+                        {
+                            if !(*selected_service).is_empty() && *is_all_mode {
+                                html! {
                                     <select
                                         class="noti-select"
                                         value={(*selected_noti_type).clone()}
@@ -843,9 +931,34 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                     }
                 </div>
             </div>
+            <div class="tabs">
+            {
+                vec!["whatsapp", "telegram", "signal", "imap"].iter().map(|&tab| {
+                    let display = match tab {
+                        "whatsapp" => "WhatsApp",
+                        "telegram" => "Telegram",
+                        "signal" => "Signal",
+                        "imap" => "Email",
+                        _ => ""
+                    };
+                    html! {
+                        <button
+                            class={classes!("tab-button", if *current_tab == tab { "active" } else { "" })}
+                            onclick={Callback::from({
+                                let current_tab = current_tab.clone();
+                                let tab = tab.to_string();
+                                move |_| current_tab.set(tab.clone())
+                            })}
+                        >
+                            {display}
+                        </button>
+                    }
+                }).collect::<Html>()
+            }
+            </div>
             <ul class="filter-list">
             {
-                (*contacts_local).iter().map(|contact| {
+                (*contacts_local).iter().filter(|contact| contact.service_type == *current_tab).map(|contact| {
                     let identifier = contact.sender.clone();
                     let service_type_class = match contact.service_type.as_str() {
                         "imap" => "email",
@@ -873,6 +986,7 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                         "call" => "call",
                         _ => "sms",
                     };
+                    let noti_mode_str = contact.noti_mode.as_ref().cloned().unwrap_or("focus".to_string());
                     html! {
                         <li>
                             <span>{identifier.clone()}</span>
@@ -882,7 +996,20 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                             }
                             {service_type_display}
                             </span>
-                            <span class={classes!("noti-type-badge", noti_type_class)}>{noti_type_display.to_uppercase()}</span>
+                            {
+                                if noti_mode_str == "all" {
+                                    html! { <span class={classes!("noti-type-badge", noti_type_class)}>{noti_type_display.to_uppercase()}</span> }
+                                } else {
+                                    html! {}
+                                }
+                            }
+                            {
+                                if noti_mode_str == "all" {
+                                    html! { <span class={classes!("mode-badge", "all")}>{"ALL"}</span> }
+                                } else {
+                                    html! {}
+                                }
+                            }
                             <button class="delete-btn"
                                 onclick={Callback::from({
                                     let identifier = identifier.clone();

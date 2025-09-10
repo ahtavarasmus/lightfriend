@@ -30,6 +30,7 @@ pub struct PrioritySenderRequest {
     sender: String,
     service_type: String, // imap, whatsapp, etc.
     noti_type: Option<String>,
+    noti_mode: String, // "all", "focus"
 }
 
 #[derive(Deserialize)]
@@ -59,6 +60,7 @@ pub struct PrioritySenderResponse {
     sender: String,
     service_type: String,
     noti_type: Option<String>,
+    noti_mode: String,
 }
 
 #[derive(Serialize)]
@@ -174,6 +176,7 @@ pub async fn create_priority_sender(
         sender: request.sender.clone(),
         service_type: request.service_type,
         noti_type: request.noti_type,
+        noti_mode: request.noti_mode,
     };
 
     match state.user_repository.create_priority_sender(&new_sender) {
@@ -254,6 +257,7 @@ pub async fn get_priority_senders(
         sender: sender.sender,
         service_type: sender.service_type,
         noti_type: sender.noti_type,
+        noti_mode: sender.noti_mode,
     }).collect();
     let full_response = json!({
         "contacts": response,

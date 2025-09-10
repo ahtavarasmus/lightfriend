@@ -264,7 +264,7 @@ pub fn proactive_agent_section() -> Html {
             </style>
             <div class="filter-header">
                 <div class="filter-title proactive">
-                    <h3>{"Monitoring Status"}</h3>
+                    <h3>{"Notifications Status"}</h3>
                     <button
                         class="info-button"
                         onclick={Callback::from({
@@ -276,16 +276,16 @@ pub fn proactive_agent_section() -> Html {
                     </button>
                 </div>
                 <div class="flow-description">
-                    {"Easily toggle monitoring on and off."}
+                    {"Easily toggle all notifications on and off."}
                 </div>
                 <div class="info-section" style={if *show_info { "display: block" } else { "display: none" }}>
                     <h4>{"How It Works"}</h4>
                     <div class="info-subsection">
                         <ul>
                             <li>{"When disabled, you won't receive any notifications."}</li>
-                            <li>{"When enabled, monitoring follows the rules set below."}</li>
-                            <li>{"You can toggle this setting on the fly by calling or texting lightfriend to turn monitoring off/on."}</li>
-                            <li>{"This is useful when you want monitoring in specific situations. For example, you can enable monitoring when going for a run, and disable it when you're return home."}</li>
+                            <li>{"When enabled, notifications follow the rules set below."}</li>
+                            <li>{"You can toggle this setting on the fly by calling or texting lightfriend to turn notifications off/on."}</li>
+                            <li>{"This is useful when you only want notifications in specific situations. For example, you can enable notifications when going for a run, and disable it when you're return home."}</li>
                         </ul>
                     </div>
                 </div>
@@ -303,7 +303,6 @@ pub fn proactive_agent_section() -> Html {
                         />
                         <div class="radio-label">
                             {"Disabled"}
-                            <div class="radio-description">{"Do not monitor anything"}</div>
                         </div>
                     </label>
                     <label class="radio-option" onclick={
@@ -317,7 +316,6 @@ pub fn proactive_agent_section() -> Html {
                         />
                         <div class="radio-label">
                             {"Enabled"}
-                            <div class="radio-description">{"Monitoring everything"}</div>
                         </div>
                     </label>
                 </div>

@@ -691,7 +691,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
             }
             {
                 if props.is_trial {
-                    html! { <div class="trial-tag">{"7-Day Free Trial"}</div> }
+                    html! { <div class="trial-tag">{"Explore 7 Days for Free"}</div> }
                 } else {
                     html! {}
                 }
@@ -708,7 +708,7 @@ pub fn pricing_card(props: &PricingCardProps) -> Html {
                     { if props.subscription_type == "hosted" {
                         html! {
                             <p class="billing-note">
-                                {if props.is_trial {"7-day free trial, then "} else {""} }{format!("billed monthly at {}{:.2}", props.currency, props.price)}
+                                {if props.is_trial {"First 7 days for free, then "} else {""} }{format!("billed monthly at {}{:.2}", props.currency, props.price)}
                             </p>
                         }
                     } else if props.subscription_type == "guaranteed" {
@@ -1512,11 +1512,11 @@ pub fn unified_pricing(props: &PricingProps) -> Html {
                                 <>
                                 <details>
                                     <summary>{"How does billing work?"}</summary>
-                                    <p>{"Plans bill monthly. Hosted Plan includes everything from phone number to 400 in the US and Canada. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
+                                    <p>{"Plans bill monthly. Hosted Plan includes everything from phone number to 400 messages per month in the US and Canada. No hidden fees, but no refunds — I'm a bootstrapped solo dev."}</p>
                                 </details>
                                 <details>
                                     <summary>{"What counts as a Message?"}</summary>
-                                    <p>{"Voice calls (1 min = 1 Message), text queries (1 query = 1 Message), daily digests (1 digest = 1 Message), priority sender notifications (1 notification = 1/2 Message). Critical monitoring and custom checks are included."}</p>
+                                    <p>{"Voice calls (1 min = 1 Message), text queries (1 query = 1 Message), daily digests (1 digest = 1 Message), priority sender notifications (1 notification = 1/2 Message)."}</p>
                                 </details>
                                 </>
                             }

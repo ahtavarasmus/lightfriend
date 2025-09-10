@@ -8,7 +8,7 @@ pub fn get_update_monitoring_status_tool() -> openai_api_rs::v1::chat_completion
         "enabled".to_string(),
         Box::new(types::JSONSchemaDefine {
             schema_type: Some(types::JSONSchemaType::Boolean),
-            description: Some("Set to true to turn the monitoring on, false to turn it off.".to_string()),
+            description: Some("Set to true to turn the notifications on, false to turn it off.".to_string()),
             ..Default::default()
         }),
     );
@@ -16,9 +16,9 @@ pub fn get_update_monitoring_status_tool() -> openai_api_rs::v1::chat_completion
     chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
-            name: String::from("update_monitoring_status"),
+            name: String::from("update_notifications_status"),
             description: Some(String::from(
-                "Turns the proactive monitoring system on or off globally for the user's messages and notifications. Use this tool when the user explicitly requests to enable or disable all monitoring and notifications entirely, such as 'start monitoring again' or 'turn off monitoring'. Do not use this for setting up monitors for specific content; instead, use the create_waiting_check tool for targeted monitoring of particular events or content in incoming messages or emails.",
+                "Turns the notifications system on or off globally for the user's incoming messages. Use this tool when the user explicitly requests to enable or disable all monitoring or notifications entirely, such as 'turn on notifications' or 'turn off notifications'. Do not use this for setting up notifications/monitoring for specific content; instead, use the create_waiting_check tool for targeted notifications of particular events or content in incoming messages or emails.",
             )),
             parameters: types::FunctionParameters {
                 schema_type: types::JSONSchemaType::Object,

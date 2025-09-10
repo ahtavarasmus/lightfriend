@@ -583,7 +583,7 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                                     />
                                     <div class="radio-label">
                                         {"Notify Now"}
-                                        <div class="radio-description">{"Alert for calls immediately"}</div>
+                                        <div class="radio-description">{"Alert for calls always immediately"}</div>
                                     </div>
                                 </label>
                                 <label class="radio-option" onclick={
@@ -624,7 +624,7 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
             </div>
             <div class="critical-option">
                 <div style="display: flex; align-items: center; gap: 0.5rem;">
-                    <span class="critical-label">{"Action on Critical Message (this feature is coming soon, you will be notified by email when ready! also you can tell me your thoughts about it rasmus@ahtava.com)"}</span>
+                    <span class="critical-label">{"Action on Critical Message"}</span>
                     <button class="info-button" onclick={toggle_action_info.clone()}>
                         {"ⓘ"}
                     </button>
@@ -635,9 +635,11 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                             {"Critical: Can't wait 2hrs (e.g., emergencies, lunch invites)."}
                             <ul>
                                 <li>{"Notify All: Alert for any critical message, regardless of sender."}</li>
-                                <li>{"Contacts Only: Alert only if sender is in your contacts. Does not apply to email which will always follow the notify all setting."}</li>
+                                <li>{"Special Contacts Only: Alert only if sender is in your special contacts (specified 2 sections up). Does not apply to email which will always follow the notify all setting."}</li>
                                 <li>{"Ask Sender: Lightfriend asks sender the following: \"Hi, I'm Lightfriend, your friend's AI assistant. This message looks time-sensitive—since they're not currently on their computer, would you like me to send them a notification about it? Reply \"yes\" or \"no.\"\". Does not apply to email which will always follow the notify all setting."}</li>
-                                <li>{"Always Notify Contacts: For senders who are in your contacts, notify without follow-up question (only when 'Ask Sender' is selected)."}</li>
+                                <ul>
+                                    <li>{"Always Notify Special Contacts: For senders who are in your special contacts, notify without follow-up question (only when 'Ask Sender' is selected)."}</li>
+                                </ul>
                             </ul>
                         </div>
                     }
@@ -668,7 +670,7 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                             checked={*mode == "family"}
                         />
                         <div class="radio-label">
-                            {"Family Only"}
+                            {"Special Contacts Only"}
                         </div>
                     </label>
                     <label class="radio-option" onclick={
@@ -701,7 +703,7 @@ pub fn critical_section(props: &CriticalSectionProps) -> Html {
                                 }
                             })}
                         />
-                        <span class="radio-label">{"Always Notify Family (No Follow-up)"}</span>
+                        <span class="radio-label">{"Always Notify Special Contacts (No Follow-up)"}</span>
                     </label>
                 </div>
             </div>

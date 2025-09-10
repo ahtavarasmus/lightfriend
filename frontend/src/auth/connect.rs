@@ -406,7 +406,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                         }
                     >
                         <i class="fa-solid fa-robot"></i>
-                        {"Monitoring"}
+                        {"Notifications"}
                         <div class="group-summary">
                             <span class="monitoring-cost">
                                 {
@@ -466,7 +466,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                                     }
                                                 }
                                             </div>
-                                            <h4 class="flow-title">{"Proactive Monitoring Flow"}</h4>
+                                            <h4 class="flow-title">{"Notification Flow"}</h4>
                                                 // Monitored Contacts Section
                                                 <div class={classes!("service-item", "flow-step")}>
                                                     {

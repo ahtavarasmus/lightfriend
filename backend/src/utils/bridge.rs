@@ -1204,14 +1204,11 @@ pub async fn handle_bridge_message(
     if let Ok((is_critical, message_opt, first_message_opt)) = crate::proactive::utils::check_message_importance(&state, user_id, &format!("{} from {}: {}", service_cap, chat_name, content), service_cap.as_str(), chat_name.as_str(), content.as_str()).await {
         println!("is critical: {}", is_critical);
         if is_critical {
-            let is_family = false;
-            /* TODO have to add field to priority senders which is either "focus" or "all" depending on if we want them in family or in family + send all their messages
-            let is_family = priority_senders.iter().any(|ps| {
+            let is_family = priority_senders.iter().filter(|ps| ps.noti_mode == "focus").any(|ps| {
                 let clean_priority_sender = remove_bridge_suffix(&ps.sender);
                 chat_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) ||
                 sender_name.to_lowercase().contains(&clean_priority_sender.to_lowercase())
             });
-            */
             println!("is_family: {}", is_family);
             let action = user_settings.action_on_critical_message.as_ref().map(|s| s.as_str()).unwrap_or("notify");
             let prompt = "Hi, I'm Lightfriend, your friend's AI assistant. This message looks time-sensitive—since they're not currently on their computer, would you like me to send them a notification about it? Reply \"yes\" or \"no.\"".to_string();
