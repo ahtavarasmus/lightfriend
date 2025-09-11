@@ -223,7 +223,7 @@ pub async fn broadcast_email(
     let mut error_details = Vec::new();
     for user in users {
         // TODO remove
-        if user.id < 25 {
+        if user.id < 61 {
             continue;
         }
         // Get user settings
