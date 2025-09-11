@@ -1,5 +1,6 @@
 use crate::models::user_models::WaitingCheck;
 use crate::AppState;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use openai_api_rs::v1::{
     chat_completion,
@@ -633,6 +634,30 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 return Ok(());
             }
 
+            // Fetch priority senders for each platform and build a lookup map
+            let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
+            for platform in ["email", "whatsapp", "telegram", "signal"] {
+                let priors = state.user_repository.get_priority_senders(user_id, platform).unwrap_or(Vec::new());
+                let set: HashSet<String> = priors.into_iter().map(|p| p.sender).collect();
+                if !set.is_empty() {
+                    tracing::debug!("Loaded {} priority senders for {}", set.len(), platform);
+                }
+                priority_map.insert(platform.to_string(), set);
+            }
+
+            messages.sort_by(|a, b| {
+                let plat_cmp = a.platform.cmp(&b.platform);
+                if plat_cmp == std::cmp::Ordering::Equal {
+                    let a_pri = priority_map.get(&a.platform).map_or(false, |set| set.contains(&a.sender));
+                    let b_pri = priority_map.get(&b.platform).map_or(false, |set| set.contains(&b.sender));
+                    b_pri.cmp(&a_pri).then_with(|| b.timestamp_rfc.cmp(&a.timestamp_rfc))
+                } else {
+                    plat_cmp
+                }
+            });
+
+
+
             // Prepare digest data
             let digest_data = DigestData {
                 messages,
@@ -641,7 +666,7 @@ pub async fn check_morning_digest(state: &Arc<AppState>, user_id: i32) -> Result
             };
 
             // Generate the digest
-            let digest_message = match generate_digest(&state, digest_data).await {
+            let digest_message = match generate_digest(&state, digest_data, priority_map).await {
                 Ok(digest) => format!("Good morning! {}",digest),
                 Err(_) => format!(
                     "Good morning! Here's your morning digest covering the last {} hours. Next digest in {} hours.",
@@ -902,6 +927,29 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
                 return Ok(());
             }
 
+            // Fetch priority senders for each platform and build a lookup map
+            let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
+            for platform in ["email", "whatsapp", "telegram", "signal"] {
+                let priors = state.user_repository.get_priority_senders(user_id, platform).unwrap_or(Vec::new());
+                let set: HashSet<String> = priors.into_iter().map(|p| p.sender).collect();
+                if !set.is_empty() {
+                    tracing::debug!("Loaded {} priority senders for {}", set.len(), platform);
+                }
+                priority_map.insert(platform.to_string(), set);
+            }
+
+            messages.sort_by(|a, b| {
+                let plat_cmp = a.platform.cmp(&b.platform);
+                if plat_cmp == std::cmp::Ordering::Equal {
+                    let a_pri = priority_map.get(&a.platform).map_or(false, |set| set.contains(&a.sender));
+                    let b_pri = priority_map.get(&b.platform).map_or(false, |set| set.contains(&b.sender));
+                    b_pri.cmp(&a_pri).then_with(|| b.timestamp_rfc.cmp(&a.timestamp_rfc))
+                } else {
+                    plat_cmp
+                }
+            });
+
+
             // Prepare digest data
             let digest_data = DigestData {
                 messages,
@@ -910,7 +958,7 @@ pub async fn check_day_digest(state: &Arc<AppState>, user_id: i32) -> Result<(),
             };
 
             // Generate the digest
-            let digest_message = match generate_digest(&state, digest_data).await {
+            let digest_message = match generate_digest(&state, digest_data, priority_map).await {
                 Ok(digest) => format!("Hello! {}",digest),
                 Err(_) => format!(
                     "Hello! Here's your daily digest covering the last {} hours. Next digest in {} hours.",
@@ -1183,6 +1231,29 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
                 return Ok(());
             }
 
+                        // Fetch priority senders for each platform and build a lookup map
+            let mut priority_map: HashMap<String, HashSet<String>> = HashMap::new();
+            for platform in ["email", "whatsapp", "telegram", "signal"] {
+                let priors = state.user_repository.get_priority_senders(user_id, platform).unwrap_or(Vec::new());
+                let set: HashSet<String> = priors.into_iter().map(|p| p.sender).collect();
+                if !set.is_empty() {
+                    tracing::debug!("Loaded {} priority senders for {}", set.len(), platform);
+                }
+                priority_map.insert(platform.to_string(), set);
+            }
+
+            messages.sort_by(|a, b| {
+                let plat_cmp = a.platform.cmp(&b.platform);
+                if plat_cmp == std::cmp::Ordering::Equal {
+                    let a_pri = priority_map.get(&a.platform).map_or(false, |set| set.contains(&a.sender));
+                    let b_pri = priority_map.get(&b.platform).map_or(false, |set| set.contains(&b.sender));
+                    b_pri.cmp(&a_pri).then_with(|| b.timestamp_rfc.cmp(&a.timestamp_rfc))
+                } else {
+                    plat_cmp
+                }
+            });
+
+
             // Prepare digest data
             let digest_data = DigestData {
                 messages,
@@ -1191,7 +1262,7 @@ pub async fn check_evening_digest(state: &Arc<AppState>, user_id: i32) -> Result
             };
 
             // Generate the digest
-            let digest_message = match generate_digest(&state, digest_data).await {
+            let digest_message = match generate_digest(&state, digest_data, priority_map).await {
                 Ok(digest) => format!("Good evening! {}",digest),
                 Err(_) => format!(
                     "Hello! Here's your evening digest covering the last {} hours. Next digest in {} hours.",
@@ -1222,6 +1293,7 @@ Rules
 • Do NOT use emojis or emoticons.
 • Plain text only.
 • Start each platform group on a new line, followed by ': ' and the teasers/summaries.
+• Messages marked with [PRIORITY] are from user-defined priority senders. Always put them first in their platform group, highlight them with more detailed teasers (e.g., key excerpts, actions, or urgency hints), and treat them as critical/actionable to minimize user follow-ups.
 • Put critical or prioritized items first within each group.
 • Include timestamps in parentheses (e.g., '(yesterday 8pm)') for relevance.
 • For calendar, include events in the next 24 hours with start time and brief hint.
@@ -1232,7 +1304,8 @@ Return JSON with a single field:
 
 pub async fn generate_digest(
     state: &Arc<AppState>,
-    data: DigestData
+    data: DigestData,
+    priority_map: HashMap<String, HashSet<String>>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let client = create_openai_client(&state)?;
 
@@ -1240,12 +1313,18 @@ pub async fn generate_digest(
     let messages_str = data.messages
         .iter()
         .map(|msg| {
+            let priority_tag = if priority_map.get(&msg.platform).map_or(false, |set| set.contains(&msg.sender)) {
+                " [PRIORITY]".to_string()
+            } else {
+                String::new()
+            };
             format!(
-                "- [{}] {} on {}: {}",
+                "- [{}] {} on {}: {}{}",
                 msg.platform.to_uppercase(),
                 msg.sender,
                 msg.timestamp_rfc,
-                msg.content
+                msg.content,
+                priority_tag,
             )
         })
         .collect::<Vec<String>>()

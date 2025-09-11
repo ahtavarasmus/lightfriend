@@ -670,6 +670,42 @@ pub fn connect(props: &ConnectProps) -> Html {
                                     </div>
                                 </div>
                             </div>
+
+                            <div class="service-item">
+                                <div class="service-header">
+                                    <div class="service-name">
+                                        {"⏰ Notifications Status"}
+                                    </div>
+                                    <button class="info-button" onclick={Callback::from(|_| {
+                                        if let Some(element) = web_sys::window()
+                                            .and_then(|w| w.document())
+                                            .and_then(|d| d.get_element_by_id("waiting-checks-info"))
+                                        {
+                                            let display = element.get_attribute("style")
+                                                .unwrap_or_else(|| "display: none".to_string());
+                                     
+                                            if display.contains("none") {
+                                                let _ = element.set_attribute("style", "display: block");
+                                            } else {
+                                                let _ = element.set_attribute("style", "display: none");
+                                            }
+                                        }
+                                    })}>
+                                        {"ⓘ"}
+                                    </button>
+                                </div>
+                                <p class="service-description">
+                                    {"Easily toggle all notifications on and off without having to use this dashboard. Works with both voice calls and SMS."}
+                                </p>
+                                <div id="waiting-checks-info" class="info-section" style="display: none">
+                                    <h4>{"How It Works"}</h4>
+                                    <div class="info-subsection">
+                                        <ul>
+                                            <li>{"Tell lightfriend to turn on or off all notifications."}</li>
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
                             // Waiting Checks
                             <div class="service-item">
                                 <div class="service-header">

@@ -249,15 +249,12 @@ pub fn signal_connect(props: &SignalProps) -> Html {
                         <li>{"Fetch Signal Messages: Get recent Signal messages from a specific time period"}</li>
                         <li>{"Fetch Chat Messages: Get messages from a specific Signal chat or contact"}</li>
                         <li>{"Search Contacts: Search for Signal contacts or chat rooms by name"}</li>
-                        <li>{"Send Message: Send a Signal message to a specific recipient. Message will only be sent 60 seconds later so if you or assistant made a mistake just type 'cancel' with sms or say 'cancel the message' with voice calls to discard the sent event."}</li>
+                        <li>{"Send Message: Send a Signal message to a specific recipient. Message will only be sent 60 seconds later so if you or assistant made a mistake just type 'C' with sms or say 'cancel the message' with voice calls to discard the sent event."}</li>
                     </ul>
                 </div>
                 <div class="info-subsection security-notice">
                     <h5>{"Security & Privacy"}</h5>
-                    <p>{"Your security is our priority. Here's how we protect your messages:"}</p>
-                    <ul>
-                        <li>{"Your Signal messages are end-to-end encrypted between Signal and our Matrix server. We use the same trusted Matrix server and Signal bridge technology as Beeper, with robust encryption and strict access controls to protect your data at every step."}</li>
-                    </ul>
+                    <p>{"Your security is our priority. We use the same trusted Matrix server and Signal bridge technology as Beeper Cloud, with robust encryption and strict access controls to protect your data at every step. When you disconnect your WhatsApp account, all your WhatsApp data will be automatically deleted from our servers."}</p>
                     <p class="security-recommendation">{"Note: While we maintain high security standards, SMS and voice calls use standard cellular networks. For maximum privacy, use Signal directly for sensitive communications."}</p>
                 </div>
             </div>

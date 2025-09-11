@@ -735,10 +735,6 @@ pub fn monitored_contacts_section(props: &MonitoredContactsProps) -> Html {
                             <li>{"For Email, enter the contact's email address"}</li>
                         </ul>
                     </div>
-                    <h4>{"Notification Modes"}</h4>
-                    <div class="info-subsection">
-                        <p>{"By default, contacts are in \"focus\" mode, which prioritizes them in the family group for digest messages and critical notifications. Check the \"Notify about all messages\" box when adding a contact to receive every message from them."}</p>
-                    </div>
                 </div>
             </div>
             {

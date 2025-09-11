@@ -273,16 +273,12 @@ pub fn whatsapp_connect(props: &WhatsappProps) -> Html {
                         <li>{"Fetch WhatsApp Messages: Get recent WhatsApp messages from a specific time period"}</li>
                         <li>{"Fetch Chat Messages: Get messages from a specific WhatsApp chat or contact"}</li>
                         <li>{"Search Contacts: Search for WhatsApp contacts or chat rooms by name"}</li>
-                        <li>{"Send Message: Give platform, message content and recipient name and lightfriend will send the message. Message will only be sent 60 seconds later so if you or assistant made a mistake just type 'cancel' with sms or say 'cancel the message' with voice calls to discard the sent event."}</li>
+                        <li>{"Send Message: Give platform, message content and recipient name and lightfriend will send the message. Message will only be sent 60 seconds later so if you or assistant made a mistake just type 'C' with sms or say 'cancel the message' with voice calls to discard the sent event."}</li>
                     </ul>
                 </div>
                 <div class="info-subsection security-notice">
                     <h5>{"Security & Privacy"}</h5>
-                    <p>{"Your security is our priority. Here's how we protect your messages:"}</p>
-                    <ul>
-                        <li>{"Your WhatsApp messages are end-to-end encrypted between WhatsApp and our Matrix server, keeping them safe from prying eyes. To deliver them via SMS, our server decrypts the messages, ensuring they’re readable when you request them. We use the same trusted Matrix server and WhatsApp bridge technology as Beeper, with robust encryption and strict access controls to protect your data at every step."}</li>
-                        <li>{"When you disconnect your WhatsApp account, all your WhatsApp data will be automatically deleted from our servers."}</li>
-                    </ul>
+                    <p>{"Your security is our priority. We use the same trusted Matrix server and WhatsApp bridge technology as Beeper Cloud, with robust encryption and strict access controls to protect your data at every step. When you disconnect your WhatsApp account, all your WhatsApp data will be automatically deleted from our servers."}</p>
                     <p class="security-recommendation">{"Note: While we maintain high security standards, SMS and voice calls use standard cellular networks. For maximum privacy, use WhatsApp directly for sensitive communications."}</p>
                 </div>
             </div>
