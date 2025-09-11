@@ -222,10 +222,7 @@ pub async fn broadcast_email(
     let mut failed_count = 0;
     let mut error_details = Vec::new();
     for user in users {
-        // TODO remove
-        if user.id < 145 {
-            continue;
-        }
+        // TODO fix this is taking too long and then crashes before all are finished or just use some email provider
         // Get user settings
         let user_settings = match state.user_core.get_user_settings(user.id) {
             Ok(settings) => settings,

@@ -166,7 +166,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                                     let mut emails_content = String::from("New emails:\n");
                                     for email in &sorted_emails {
                                         // Check if sender matches priority senders and send the noti anyways about it
-                                        if let Some(matched_sender) = priority_senders.iter().find(|priority_sender| {
+                                        if let Some(matched_sender) = priority_senders.iter().filter(|p_send| p_send.noti_mode == "all").find(|priority_sender| {
                                             let priority_lower = priority_sender.sender.to_lowercase();
                                             // Check 'from' (display name)
                                             let from_matches = email.from.as_deref().unwrap_or("Unknown").to_lowercase().contains(&priority_lower);

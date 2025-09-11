@@ -1097,42 +1097,44 @@ pub async fn handle_bridge_message(
     let service_cap = capitalize(&service);
     // FAST CHECKS SECOND - Check priority senders if active
     for priority_sender in &priority_senders {
-        let clean_priority_sender = remove_bridge_suffix(priority_sender.sender.as_str());
-        if chat_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) ||
-           sender_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) {
-        
-            // Determine suffix based on noti_type
-            let suffix = match priority_sender.noti_type.as_ref().map(|s| s.as_str()) {
-                Some("call") => "_call",
-                _ => "_sms",
-            };
-            let notification_type = format!("{}_priority{}", service, suffix);
-        
-            // Check if user has enough credits for notification
-            match crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await {
-                Ok(()) => {
-                    // User has enough credits, proceed with notification
-                    let state_clone = state.clone();
-                    let content_clone = content.clone();
-                    let message = trim_for_sms(&service, &priority_sender.sender, &content_clone);
-                    let first_message = format!("Hello, you have an important {} message from {}.", service_cap, priority_sender.sender);
-                
-                    // Spawn a new task for sending notification
-                    tokio::spawn(async move {
-                        // Send the notification
-                        crate::proactive::utils::send_notification(
-                            &state_clone,
-                            user_id,
-                            &message,
-                            notification_type,
-                            Some(first_message),
-                        ).await;
+        if priority_sender.noti_mode == "all" {
+            let clean_priority_sender = remove_bridge_suffix(priority_sender.sender.as_str());
+            if chat_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) ||
+               sender_name.to_lowercase().contains(&clean_priority_sender.to_lowercase()) {
+            
+                // Determine suffix based on noti_type
+                let suffix = match priority_sender.noti_type.as_ref().map(|s| s.as_str()) {
+                    Some("call") => "_call",
+                    _ => "_sms",
+                };
+                let notification_type = format!("{}_priority{}", service, suffix);
+            
+                // Check if user has enough credits for notification
+                match crate::utils::usage::check_user_credits(&state, &user, "noti_msg", None).await {
+                    Ok(()) => {
+                        // User has enough credits, proceed with notification
+                        let state_clone = state.clone();
+                        let content_clone = content.clone();
+                        let message = trim_for_sms(&service, &priority_sender.sender, &content_clone);
+                        let first_message = format!("Hello, you have an important {} message from {}.", service_cap, priority_sender.sender);
                     
-                    });
-                    return;
-                }
-                Err(e) => {
-                    tracing::warn!("User {} does not have enough credits for priority sender notification: {}, continuing though", user_id, e);
+                        // Spawn a new task for sending notification
+                        tokio::spawn(async move {
+                            // Send the notification
+                            crate::proactive::utils::send_notification(
+                                &state_clone,
+                                user_id,
+                                &message,
+                                notification_type,
+                                Some(first_message),
+                            ).await;
+                        
+                        });
+                        return;
+                    }
+                    Err(e) => {
+                        tracing::warn!("User {} does not have enough credits for priority sender notification: {}, continuing though", user_id, e);
+                    }
                 }
             }
         }

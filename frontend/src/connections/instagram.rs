@@ -6,31 +6,26 @@ use wasm_bindgen::JsCast;
 use crate::config;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::js_sys;
-
 #[derive(Deserialize, Clone, Debug)]
 struct InstagramStatus {
     connected: bool,
     status: String,
     created_at: i32,
 }
-
 #[derive(Serialize)]
 struct InstagramLoginRequest {
     curl_paste: String,
 }
-
 #[derive(Deserialize, Clone, Debug)]
 struct InstagramConnectionResponse {
     message: String,
 }
-
 #[derive(Properties, PartialEq)]
 pub struct InstagramProps {
     pub user_id: i32,
     pub sub_tier: Option<String>,
     pub discount: bool,
 }
-
 #[function_component(InstagramConnect)]
 pub fn instagram_connect(props: &InstagramProps) -> Html {
     let connection_status = use_state(|| None::<InstagramStatus>);
@@ -40,7 +35,6 @@ pub fn instagram_connect(props: &InstagramProps) -> Html {
     let is_disconnecting = use_state(|| false);
     let show_auth_form = use_state(|| false);
     let curl_paste = use_state(|| String::new());
-
     let fetch_status = {
         let connection_status = connection_status.clone();
         let error = error.clone();
@@ -60,25 +54,45 @@ pub fn instagram_connect(props: &InstagramProps) -> Html {
                         .await
                     {
                         Ok(response) => {
-                            match response.json::<InstagramStatus>().await {
-                                Ok(status) => {
-                                    connection_status.set(Some(status));
-                                    error.set(None);
+                            let status_code = response.status();
+                            let response_text = response.text().await.unwrap_or_else(|_| "".to_string());
+                            if status_code == 200 {
+                                match serde_json::from_str::<InstagramStatus>(&response_text) {
+                                    Ok(status) => {
+                                        connection_status.set(Some(status));
+                                        error.set(None);
+                                    }
+                                    Err(parse_err) => {
+                                        error.set(Some(format!("Failed to parse Instagram status: {} (text: {})", parse_err, response_text)));
+                                    }
                                 }
-                                Err(_) => {
-                                    error.set(Some("Failed to parse Instagram status".to_string()));
+                            } else {
+                                if !response_text.is_empty() {
+                                    match serde_json::from_str::<serde_json::Value>(&response_text) {
+                                        Ok(data) => {
+                                            if let Some(err_msg) = data.get("error").and_then(|v| v.as_str()) {
+                                                error.set(Some(err_msg.to_string()));
+                                            } else {
+                                                error.set(Some(format!("Server error {}: {}", status_code, response_text)));
+                                            }
+                                        }
+                                        Err(_) => {
+                                            error.set(Some(format!("Server error {}: {}", status_code, response_text)));
+                                        }
+                                    }
+                                } else {
+                                    error.set(Some(format!("Server error {}: no response body", status_code)));
                                 }
                             }
                         }
-                        Err(_) => {
-                            error.set(Some("Failed to fetch Instagram status".to_string()));
+                        Err(send_err) => {
+                            error.set(Some(format!("Failed to fetch Instagram status: {}", send_err)));
                         }
                     }
                 });
             }
         })
     };
-
     {
         let fetch_status = fetch_status.clone();
         use_effect_with_deps(move |_| {
@@ -86,14 +100,12 @@ pub fn instagram_connect(props: &InstagramProps) -> Html {
             || ()
         }, ());
     }
-
     let start_auth = {
         let show_auth_form = show_auth_form.clone();
         Callback::from(move |_| {
             show_auth_form.set(true);
         })
     };
-
     let submit_curl = {
         let is_connecting = is_connecting.clone();
         let error = error.clone();
@@ -125,72 +137,103 @@ pub fn instagram_connect(props: &InstagramProps) -> Html {
                         .await
                     {
                         Ok(response) => {
-                            match response.json::<InstagramConnectionResponse>().await {
-                                Ok(_) => {
-                                    error.set(None);
-                                    show_auth_form.set(false);
-                                    let poll_interval = 5000;
-                                    let poll_duration = 300000;
-                                    let start_time = js_sys::Date::now();
-                                    fn create_poll_fn(
-                                        start_time: f64,
-                                        poll_duration: i32,
-                                        poll_interval: i32,
-                                        is_connecting: UseStateHandle<bool>,
-                                        error: UseStateHandle<Option<String>>,
-                                        fetch_status: Callback<()>,
-                                    ) -> Box<dyn Fn()> {
-                                        Box::new(move || {
-                                            if js_sys::Date::now() - start_time > poll_duration as f64 {
-                                                is_connecting.set(false);
-                                                error.set(Some("Connection attempt timed out".to_string()));
-                                                return;
+                            let status_code = response.status();
+                            let response_text = response.text().await.unwrap_or_else(|_| "".to_string());
+                            web_sys::console::log_1(&format!("Instagram connect response status: {}, body: {}", status_code, response_text).into());
+                            if status_code == 200 {
+                                match serde_json::from_str::<serde_json::Value>(&response_text) {
+                                    Ok(data) => {
+                                        if data.get("message").is_some() {
+                                            error.set(None);
+                                            show_auth_form.set(false);
+                                            let poll_interval = 5000;
+                                            let poll_duration = 300000;
+                                            let start_time = js_sys::Date::now();
+                                            fn create_poll_fn(
+                                                start_time: f64,
+                                                poll_duration: i32,
+                                                poll_interval: i32,
+                                                is_connecting: UseStateHandle<bool>,
+                                                error: UseStateHandle<Option<String>>,
+                                                fetch_status: Callback<()>,
+                                            ) -> Box<dyn Fn()> {
+                                                Box::new(move || {
+                                                    if js_sys::Date::now() - start_time > poll_duration as f64 {
+                                                        is_connecting.set(false);
+                                                        error.set(Some("Connection attempt timed out".to_string()));
+                                                        return;
+                                                    }
+                                                    fetch_status.emit(());
+                                                    let is_connecting = is_connecting.clone();
+                                                    let error = error.clone();
+                                                    let fetch_status = fetch_status.clone();
+                                                    let poll_fn = create_poll_fn(
+                                                        start_time,
+                                                        poll_duration,
+                                                        poll_interval,
+                                                        is_connecting,
+                                                        error,
+                                                        fetch_status,
+                                                    );
+                                                    let handle = gloo_timers::callback::Timeout::new(
+                                                        poll_interval as u32,
+                                                        move || poll_fn(),
+                                                    );
+                                                    handle.forget();
+                                                })
                                             }
-                                            fetch_status.emit(());
-                                            let is_connecting = is_connecting.clone();
-                                            let error = error.clone();
-                                            let fetch_status = fetch_status.clone();
                                             let poll_fn = create_poll_fn(
                                                 start_time,
                                                 poll_duration,
                                                 poll_interval,
-                                                is_connecting,
-                                                error,
-                                                fetch_status,
+                                                is_connecting.clone(),
+                                                error.clone(),
+                                                fetch_status.clone(),
                                             );
-                                            let handle = gloo_timers::callback::Timeout::new(
-                                                poll_interval as u32,
-                                                move || poll_fn(),
-                                            );
-                                            handle.forget();
-                                        })
+                                            poll_fn();
+                                        } else {
+                                            is_connecting.set(false);
+                                            error.set(Some(format!("Unexpected successful response: {}", response_text)));
+                                        }
                                     }
-                                    let poll_fn = create_poll_fn(
-                                        start_time,
-                                        poll_duration,
-                                        poll_interval,
-                                        is_connecting.clone(),
-                                        error.clone(),
-                                        fetch_status.clone(),
-                                    );
-                                    poll_fn();
+                                    Err(parse_err) => {
+                                        is_connecting.set(false);
+                                        error.set(Some(format!("Failed to parse success response: {} (text: {})", parse_err, response_text)));
+                                    }
                                 }
-                                Err(_) => {
+                            } else {
+                                if !response_text.is_empty() {
+                                    match serde_json::from_str::<serde_json::Value>(&response_text) {
+                                        Ok(data) => {
+                                            if let Some(err_msg) = data.get("error").and_then(|v| v.as_str()) {
+                                                is_connecting.set(false);
+                                                error.set(Some(err_msg.to_string()));
+                                            } else {
+                                                is_connecting.set(false);
+                                                error.set(Some(format!("Server error {}: {}", status_code, response_text)));
+                                            }
+                                        }
+                                        Err(_) => {
+                                            is_connecting.set(false);
+                                            error.set(Some(format!("Server error {}: {}", status_code, response_text)));
+                                        }
+                                    }
+                                } else {
                                     is_connecting.set(false);
-                                    error.set(Some("Failed to parse connection response".to_string()));
+                                    error.set(Some(format!("Server error {}: no response body", status_code)));
                                 }
                             }
                         }
-                        Err(_) => {
+                        Err(send_err) => {
+                            web_sys::console::error_1(&format!("Failed to send Instagram connect request: {}", send_err).into());
                             is_connecting.set(false);
-                            error.set(Some("Failed to start Instagram connection".to_string()));
+                            error.set(Some(format!("Failed to start Instagram connection: {}", send_err)));
                         }
                     }
                 });
             }
         })
     };
-
     let disconnect = {
         let connection_status = connection_status.clone();
         let error = error.clone();
@@ -214,16 +257,21 @@ pub fn instagram_connect(props: &InstagramProps) -> Html {
                         .send()
                         .await
                     {
-                        Ok(_) => {
-                            connection_status.set(Some(InstagramStatus {
-                                connected: false,
-                                status: "not_connected".to_string(),
-                                created_at: (js_sys::Date::now() as i32),
-                            }));
-                            error.set(None);
+                        Ok(response) => {
+                            if response.ok() {
+                                connection_status.set(Some(InstagramStatus {
+                                    connected: false,
+                                    status: "not_connected".to_string(),
+                                    created_at: (js_sys::Date::now() as i32),
+                                }));
+                                error.set(None);
+                            } else {
+                                let text = response.text().await.unwrap_or_default();
+                                error.set(Some(format!("Failed to disconnect Instagram: status {}, {}", response.status(), text)));
+                            }
                         }
-                        Err(_) => {
-                            error.set(Some("Failed to disconnect Instagram".to_string()));
+                        Err(send_err) => {
+                            error.set(Some(format!("Failed to send disconnect request: {}", send_err)));
                         }
                     }
                     is_disconnecting.set(false);
@@ -234,7 +282,6 @@ pub fn instagram_connect(props: &InstagramProps) -> Html {
             }
         })
     };
-
     html! {
         <div class="instagram-connect">
             <div class="service-header">
@@ -364,12 +411,17 @@ pub fn instagram_connect(props: &InstagramProps) -> Html {
                                                             .send()
                                                             .await
                                                         {
-                                                            Ok(_) => {
-                                                                web_sys::console::log_1(&"Instagram resync initiated".into());
-                                                                fetch_status.emit(());
+                                                            Ok(response) => {
+                                                                if response.ok() {
+                                                                    web_sys::console::log_1(&"Instagram resync initiated".into());
+                                                                    fetch_status.emit(());
+                                                                } else {
+                                                                    let text = response.text().await.unwrap_or_default();
+                                                                    web_sys::console::error_1(&format!("Failed to resync Instagram: status {}, {}", response.status(), text).into());
+                                                                }
                                                             }
                                                             Err(e) => {
-                                                                web_sys::console::error_1(&format!("Failed to resync Instagram: {}", e).into());
+                                                                web_sys::console::error_1(&format!("Failed to send resync request: {}", e).into());
                                                             }
                                                         }
                                                     });
@@ -926,4 +978,3 @@ pub fn instagram_connect(props: &InstagramProps) -> Html {
         </div>
     }
 }
-
