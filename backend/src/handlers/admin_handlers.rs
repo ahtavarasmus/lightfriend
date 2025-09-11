@@ -163,15 +163,28 @@ fn wrap_text(text: &str, max_width: usize) -> String {
         }
         let mut current_line = String::new();
         for word in line.split_whitespace() {
-            if !current_line.is_empty() && current_line.len() + word.len() + 1 > max_width {
-                result.push_str(&current_line);
-                result.push('\n');
-                current_line = word.to_string();
-            } else {
-                if !current_line.is_empty() {
-                    current_line.push(' ');
+            let mut remaining_word = word.to_string();
+            loop {
+                let add_space = !current_line.is_empty();
+                let space_len = if add_space { 1 } else { 0 };
+                if current_line.len() + remaining_word.len() + space_len <= max_width {
+                    if add_space {
+                        current_line.push(' ');
+                    }
+                    current_line.push_str(&remaining_word);
+                    break;
+                } else {
+                    if current_line.is_empty() {
+                        // Break the long word
+                        let chunk_len = max_width;
+                        let (chunk, rest) = remaining_word.split_at(chunk_len);
+                        current_line.push_str(chunk);
+                        remaining_word = rest.to_string();
+                    }
+                    result.push_str(&current_line);
+                    result.push('\n');
+                    current_line = String::new();
                 }
-                current_line.push_str(word);
             }
         }
         if !current_line.is_empty() {
@@ -179,7 +192,7 @@ fn wrap_text(text: &str, max_width: usize) -> String {
         }
         result.push('\n');
     }
-    // Remove any trailing newline if the original didn't end with one (optional, but keeps it clean)
+    // Remove any trailing newline if the original didn't end with one
     if !text.ends_with('\n') && result.ends_with('\n') {
         result.pop();
     }
@@ -197,7 +210,6 @@ pub async fn broadcast_email(
             Json(json!({"error": "Subject and message cannot be empty"}))
         ));
     }
-
     let users = state.user_core.get_all_users().map_err(|e| {
         tracing::error!("Database error when fetching users: {}", e);
         (
@@ -205,14 +217,15 @@ pub async fn broadcast_email(
             Json(json!({"error": format!("Database error: {}", e)}))
         )
     })?;
-
     let auth_user = crate::handlers::auth_middleware::AuthUser { user_id: 1, is_admin: false}; // Hardcode user_id to 1
     let mut success_count = 0;
     let mut failed_count = 0;
     let mut error_details = Vec::new();
-
     for user in users {
-
+        // TODO remove
+        if user.id < 25 {
+            continue;
+        }
         // Get user settings
         let user_settings = match state.user_core.get_user_settings(user.id) {
             Ok(settings) => settings,
@@ -227,32 +240,29 @@ pub async fn broadcast_email(
             tracing::info!("skipping user since they don't have notify on");
             continue;
         }
-
         // Skip users with invalid or empty email addresses
         if user.email.is_empty() || !user.email.contains('@') || !user.email.contains('.') {
             tracing::warn!("Skipping invalid email address: {}", user.email);
             continue;
         }
-
         // Prepare the unsubscribe link
         let encoded_email = urlencoding::encode(&user.email);
         let server_url = std::env::var("SERVER_URL").expect("SERVER_URL not set");
         let unsubscribe_link = format!("{}/api/unsubscribe?email={}", server_url, encoded_email);
-
-        // Prepare plain text body with unsubscribe
+        // Prepare plain text body with unsubscribe (link inline now)
         let plain_body = format!(
-            "{}\n\nTo unsubscribe from these feature updates/fixes, click here:\n{}",
+            "{}\n\nTo unsubscribe from these feature updates/fixes, click here: {}",
             request.message, unsubscribe_link
         );
         let wrapped_body = wrap_text(&plain_body, 72);
-
+        // Convert to CRLF line endings for email compliance
+        let crlf_body = wrapped_body.replace("\n", "\r\n");
         // Prepare the email request for the send_email handler
         let email_request = crate::handlers::imap_handlers::SendEmailRequest {
             to: user.email.clone(),
             subject: request.subject.clone(),
-            body: wrapped_body,
+            body: crlf_body,
         };
-
         // Call the existing send_email handler
         match crate::handlers::imap_handlers::send_email(
             State(state.clone()),
@@ -270,11 +280,9 @@ pub async fn broadcast_email(
                 error_details.push(error_msg);
             }
         }
-
         // Add a small delay to avoid hitting rate limits
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
-
     if success_count == 0 && failed_count > 0 {
         // If all attempts failed, return an error
         return Err((
@@ -289,7 +297,6 @@ pub async fn broadcast_email(
             }))
         ));
     }
-
     Ok(Json(json!({
         "message": "Email broadcast completed",
         "stats": {
