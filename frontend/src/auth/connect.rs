@@ -540,7 +540,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                             {"Tools"}
                             <div class="group-summary">
                                 <span class="service-count">
-                                {"7 tools ready!"}
+                                {"8 tools ready!"}
                                 </span>
                                 <i class={if group_states.get("tools").map(|s| s.expanded).unwrap_or(false) {
                                     "fas fa-chevron-up"
@@ -674,7 +674,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                             <div class="service-item">
                                 <div class="service-header">
                                     <div class="service-name">
-                                        {"⏰ Notifications Status"}
+                                        {"🔔 Notifications Status"}
                                     </div>
                                     <button class="info-button" onclick={Callback::from(|_| {
                                         if let Some(element) = web_sys::window()
