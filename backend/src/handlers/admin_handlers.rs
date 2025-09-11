@@ -154,6 +154,38 @@ pub async fn unsubscribe(
     }
 }
 
+fn wrap_text(text: &str, max_width: usize) -> String {
+    let mut result = String::new();
+    for line in text.lines() {
+        if line.is_empty() {
+            result.push('\n');
+            continue;
+        }
+        let mut current_line = String::new();
+        for word in line.split_whitespace() {
+            if !current_line.is_empty() && current_line.len() + word.len() + 1 > max_width {
+                result.push_str(&current_line);
+                result.push('\n');
+                current_line = word.to_string();
+            } else {
+                if !current_line.is_empty() {
+                    current_line.push(' ');
+                }
+                current_line.push_str(word);
+            }
+        }
+        if !current_line.is_empty() {
+            result.push_str(&current_line);
+        }
+        result.push('\n');
+    }
+    // Remove any trailing newline if the original didn't end with one (optional, but keeps it clean)
+    if !text.ends_with('\n') && result.ends_with('\n') {
+        result.pop();
+    }
+    result
+}
+
 pub async fn broadcast_email(
     State(state): State<Arc<AppState>>,
     Json(request): Json<EmailBroadcastRequest>,
@@ -212,12 +244,13 @@ pub async fn broadcast_email(
             "{}\n\nTo unsubscribe from these feature updates/fixes, click here:\n{}",
             request.message, unsubscribe_link
         );
+        let wrapped_body = wrap_text(&plain_body, 72);
 
         // Prepare the email request for the send_email handler
         let email_request = crate::handlers::imap_handlers::SendEmailRequest {
             to: user.email.clone(),
             subject: request.subject.clone(),
-            body: plain_body,
+            body: wrapped_body,
         };
 
         // Call the existing send_email handler

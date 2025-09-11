@@ -896,6 +896,14 @@ pub async fn send_email(
         .credentials(creds)
         .build();
     // Build the email message
+    use lettre::message::{header::{ContentType, ContentTransferEncoding}, SinglePart};
+    let part = SinglePart::builder()
+        .header(ContentType::parse("text/plain; charset=us-ascii").map_err(|e| (
+            StatusCode::BAD_REQUEST,
+            AxumJson(json!({ "error": format!("Invalid content type: {}", e) })),
+        ))?)
+        .header(ContentTransferEncoding::SevenBit)
+        .body(request.body.clone());
     let email_message = match Message::builder()
         .from(email.parse().map_err(|e| (
             StatusCode::BAD_REQUEST,
@@ -906,7 +914,7 @@ pub async fn send_email(
             AxumJson(json!({ "error": format!("Invalid recipient email format: {}", e) })),
         ))?)
         .subject(request.subject.clone())
-        .body(request.body.clone())
+        .singlepart(part)
     {
         Ok(message) => message,
         Err(e) => return Err((
