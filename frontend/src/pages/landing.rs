@@ -374,6 +374,11 @@ pub fn landing() -> Html {
                         </blockquote>
                         <p class="testimonial-author">{"- Max"}</p>
                     </div>
+                    <div class="testimonial">
+                        <blockquote>
+                            {"As a dumbphone user, I couldn't live without lightfriend. It's useful, smart and most importantly, reliable. A true must have for living a distraction free life."}
+                        </blockquote>
+                    </div>
                 </div>
             </section>
             <div class="filter-concept">
