@@ -127,7 +127,7 @@ pub fn landing() -> Html {
                 <div class="hero-overlay" style={format!("opacity: {};", *dim_opacity)}></div>
                 <div class="hero-content">
                     <div class="hero-header">
-                        <h1 class="hero-title">{"Your Time is Priceless"}</h1>
+                        <h1 class="hero-title">{"Break Free of Smartphones"}</h1>
                         <p class="hero-subtitle">
                             {"Switch to a dumbphone without feeling isolated, even if your life depends on "}
                             <span class="highlight-icon"><i class="fab fa-whatsapp"></i></span>
@@ -163,6 +163,17 @@ pub fn landing() -> Html {
                     </div>
                     <div class="difference-image">
                         <img src="/assets/delete-blocker.png" alt="Man thinking about checking IG with delete blocker prompt" loading="lazy" />
+                    </div>
+                </div>
+            </div>
+            <div class="difference-section">
+                <div class="difference-content">
+                    <div class="difference-text">
+                        <h2>{"Every castle has a wall"}</h2>
+                        <p>{"Companies that make their money selling ads are incentivized to manipulate your attention. You can keep constantly fighting them, or just let lightfriend be the virtual (and physical) wall where only the signal gets through."}</p>
+                    </div>
+                    <div class="difference-image">
+                        <img src="/assets/human_looking_at_field.webp" alt="Human looking at field" loading="lazy" />
                     </div>
                 </div>
             </div>

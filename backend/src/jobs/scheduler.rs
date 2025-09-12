@@ -572,6 +572,7 @@ pub async fn start_scheduler(state: Arc<AppState>) {
                     return;
                 }
             };
+            tracing::info!("users: {}", users.len());
 
             let now = chrono::Utc::now();
             let window_end = now + chrono::Duration::minutes(30);

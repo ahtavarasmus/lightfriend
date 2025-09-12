@@ -785,6 +785,8 @@ pub async fn fetch_calendar_events(
         start_time: &str,
         end_time: &str
     ) -> Result<Vec<CalendarEvent>, CalendarError> {
+
+        println!("fetching calendar list for user: {}", user_id);
         async fn attempt_fetch(
             client: &reqwest::Client,
 

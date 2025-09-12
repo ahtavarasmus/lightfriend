@@ -122,12 +122,14 @@ pub async fn create_unified_subscription_checkout(
     let base_price_id = match body.subscription_type {
         SubscriptionType::Hosted => {
             if country == "US" || country == "CA" {
-                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_US")
+                std::env::var("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_US")
             } else if country == "FI" {
                 std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_FI")
             } else if country == "UK" {
                 std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_UK")
             } else if country == "AU" {
+                std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_NL")
+            } else if country == "NL" {
                 std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_AU")
             } else {
                 std::env::var("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_OTHER")
@@ -584,7 +586,7 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
         };
     }
     // Tier 1 Plans (Hard Mode and Basic Daily)
-    for country in ["US", "FI", "UK", "AU", "OTHER"] {
+    for country in ["US", "FI", "NL", "UK", "AU", "OTHER"] {
         // Check Hard Mode price IDs (older subscriptions)
         check_price_id!(
             country,
@@ -605,7 +607,7 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
             "tier 1"
         );
     }
-    for country in ["US", "FI", "UK", "AU", "OTHER"] {
+    for country in ["US", "FI", "NL", "UK", "AU", "OTHER"] {
         // Check World price IDs (older subscriptions)
         check_price_id!(
             country,
@@ -631,15 +633,26 @@ fn extract_subscription_info(price_id: &str) -> SubscriptionInfo {
             format!("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_{}", country),
             "tier 2"
         );
+        // Check new hosted plan price IDs
+        check_price_id!(
+            country,
+            format!("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_{}", country),
+            "tier 2"
+        );
     }
     info
 }
 fn is_sentinel_price_id(price_id: &str) -> bool {
-    const COUNTRIES: [&str; 5] = ["US", "FI", "UK", "AU", "OTHER"];
+    const COUNTRIES: [&str; 6] = ["US", "FI", "UK", "NL", "AU", "OTHER"];
     COUNTRIES.iter().any(|cty| {
         let var_name = format!("STRIPE_SUBSCRIPTION_SENTINEL_PRICE_ID_{}", cty);
+        let var_name_two = format!("STRIPE_SUBSCRIPTION_HOSTED_PLAN_PRICE_ID_{}", cty);
         // If the env-var is missing, simply skip that entry.
-        std::env::var(var_name).map_or(false, |v| v == price_id)
+        if std::env::var(var_name).map_or(false, |v| v == price_id) || std::env::var(var_name_two).map_or(false, |v| v == price_id) {
+            true
+        } else {
+            false
+        }
     })
 }
 
