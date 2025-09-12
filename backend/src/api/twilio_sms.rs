@@ -86,7 +86,7 @@ pub struct TextBeeWebhookPayload {
 }
 
 pub fn get_model() -> String {
-    "google/gemini-2.0-flash-001".to_string()
+    "openai/gpt-4o-2024-11-20".to_string()
 }
 
 pub async fn handle_textbee_sms(
