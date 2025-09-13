@@ -9,6 +9,7 @@ diesel::table! {
         room_id -> Nullable<Text>,
         data -> Nullable<Text>,
         created_at -> Nullable<Integer>,
+        cooldown_seconds -> Integer,
     }
 }
 

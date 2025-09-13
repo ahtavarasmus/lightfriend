@@ -344,6 +344,7 @@ pub async fn start_whatsapp_connection(
         room_id: Some(room_id.to_string()),
         data: None,
         created_at: Some(current_time),
+        cooldown_seconds: 30,
     };
 
     // Store bridge information
@@ -476,6 +477,7 @@ async fn monitor_whatsapp_connection(
                                     room_id: Some(room_id.to_string()),
                                     data: None,
                                     created_at: Some(current_time),
+                                    cooldown_seconds: 30,
                                 };
 
                                 state.user_repository.delete_bridge(user_id, "whatsapp")?;

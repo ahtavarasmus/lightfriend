@@ -952,8 +952,8 @@ pub fn credit_pricing(props: &FeatureListProps) -> Html {
 #[function_component(UnifiedPricing)]
 pub fn unified_pricing(props: &PricingProps) -> Html {
     let hosted_prices: HashMap<String, f64> = HashMap::from([
-        ("US".to_string(), 19.00),
-        ("CA".to_string(), 19.00),
+        ("US".to_string(), 29.00),
+        ("CA".to_string(), 29.00),
         ("FI".to_string(), 19.00),
         ("NL".to_string(), 19.00),
         ("UK".to_string(), 19.00),

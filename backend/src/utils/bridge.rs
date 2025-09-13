@@ -808,6 +808,10 @@ pub async fn handle_bridge_message(
         );
         return;
     }
+
+    
+
+
     // Find the user ID for this Matrix client
     let matrix_user_id = client.user_id().unwrap().to_owned(); // Clone to OwnedUserId
     let client_user_id = matrix_user_id.to_string();
@@ -929,6 +933,7 @@ pub async fn handle_bridge_message(
         // Return early since this is not a portal message
         return;
     }
+    
     // Proceed with existing portal message handling if not a management room
     // Get room name
     let room_name = match room.display_name().await {
@@ -946,6 +951,42 @@ pub async fn handle_bridge_message(
             return;
         }
     };
+    use matrix_sdk::ruma::{events::receipt::{ReceiptType, ReceiptThread}, api::client::room::get_room_event};
+    use tokio::time::{sleep, Duration};
+    let bridge = match state.user_repository.get_bridge(user_id, service.as_str()) {
+        Ok(Some(b)) => b,
+        Ok(None) => {
+            tracing::error!("No bridge found for service {}", service);
+            return;
+        }
+        Err(e) => {
+            tracing::error!("Error getting bridge for service {}: {}", service, e);
+            return;
+        }
+    };
+
+    tracing::info!("waiting for {} seconds before processing", bridge.cooldown_seconds);
+    sleep(Duration::from_secs(bridge.cooldown_seconds as u64)).await;
+
+    // Check if user has read this or a later message (via bridged receipt)
+    let own_user_id = client.user_id().unwrap();
+    if let Ok(Some((receipt_event_id, receipt))) = room.load_user_receipt(ReceiptType::Read, ReceiptThread::Unthreaded, own_user_id).await {
+        // Fetch the receipted event to get its timestamp (approximate order)
+        let request = get_room_event::v3::Request::new(room.room_id().to_owned(), receipt_event_id.clone());
+        if let Ok(response) = client.send(request).await {
+            if let Ok(any_event) = response.event.deserialize_as::<AnySyncTimelineEvent>() {
+                if any_event.origin_server_ts().0 >= event.origin_server_ts.0 {
+                    tracing::info!("Skipping processing because user has read this or a later message");
+                    state.user_repository.update_bridge_cooldown(user_id, room_id_str, service, 300).unwrap();
+                    tracing::info!("Successfully set the bridge cooldown to 5 mins");
+                    return;
+                }
+            }
+        }
+    }
+
+    state.user_repository.update_bridge_cooldown(user_id, room_id_str, service.clone(), 30).unwrap();
+    tracing::info!("Successfully set the bridge cooldown to 30s");
     let sender_prefix = get_sender_prefix(&service);
     if user_id == 1 {
         println!("sender_prefix: {}", sender_prefix);

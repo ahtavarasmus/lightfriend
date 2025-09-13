@@ -263,7 +263,7 @@ pub async fn check_message_importance(
     raw_content: &str,
 ) -> Result<(bool, Option<String>, Option<String>), Box<dyn std::error::Error>> {
     // Special case for WhatsApp incoming calls
-    if raw_content.contains("Incoming call") {
+    if raw_content.contains("Incoming call") || raw_content.contains("Missed call") {
         let call_notify = state.user_core.get_call_notify(user_id).unwrap_or(true);
         if call_notify {
             // Trim for SMS

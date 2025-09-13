@@ -1067,6 +1067,22 @@ impl UserRepository {
         Ok(())
     }
 
+
+    pub fn update_bridge_cooldown(&self, user_id: i32, room_id: String, service_type: String, new_cooldown_seconds: i32) -> Result<(), DieselError> {
+        use crate::schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+        diesel::update(bridges::table)
+            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::room_id.eq(room_id))
+            .filter(bridges::bridge_type.eq(service_type))
+            .set(
+                bridges::cooldown_seconds.eq(new_cooldown_seconds)
+            )
+            .execute(&mut conn)?;
+        Ok(())
+    }
+
+
     pub fn create_bridge(&self, new_bridge: NewBridge) -> Result<(), DieselError> {
         use crate::schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
@@ -1097,6 +1113,19 @@ impl UserRepository {
 
         let bridge = bridges::table
             .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::bridge_type.eq(service))
+            .first::<Bridge>(&mut conn)
+            .optional()?;
+
+        Ok(bridge)
+    }
+    pub fn get_bridge_by_room_id(&self, user_id: i32, room_id: String, service: &str) -> Result<Option<Bridge>, DieselError> {
+        use crate::schema::bridges;
+        let mut conn = self.pool.get().expect("Failed to get DB connection");
+
+        let bridge = bridges::table
+            .filter(bridges::user_id.eq(user_id))
+            .filter(bridges::room_id.eq(Some(room_id)))
             .filter(bridges::bridge_type.eq(service))
             .first::<Bridge>(&mut conn)
             .optional()?;
