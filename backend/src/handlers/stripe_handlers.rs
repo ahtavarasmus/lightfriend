@@ -42,6 +42,7 @@ pub struct SubscriptionCheckoutBody {
     pub subscription_type: SubscriptionType,
     pub addons: Option<Vec<String>>,
 }
+
 pub async fn create_unified_subscription_checkout(
     State(state): State<Arc<AppState>>,
     auth_user: AuthUser,
@@ -185,6 +186,18 @@ pub async fn create_unified_subscription_checkout(
             name: Some(stripe::CreateCheckoutSessionCustomerUpdateName::Auto),
             shipping: Some(stripe::CreateCheckoutSessionCustomerUpdateShipping::Auto),
         }),
+        custom_fields: Some(vec![
+            stripe::CreateCheckoutSessionCustomFields {
+                key: "referral_source".to_string(),
+                label: stripe::CreateCheckoutSessionCustomFieldsLabel {
+                    custom: "Where did you hear about Lightfriend?".to_string(),
+                    type_: stripe::CreateCheckoutSessionCustomFieldsLabelType::Custom,
+                },
+                type_: stripe::CreateCheckoutSessionCustomFieldsType::Text,
+                optional: Some(false),
+                ..Default::default()
+            },
+        ]),
         ..Default::default()
     };
     // Handle metadata if needed (removed cold_turkey)
@@ -195,12 +208,12 @@ pub async fn create_unified_subscription_checkout(
     let success_url1 = format!("{}/billing?subscription=changed", domain_url);
     if let Some(current_subscription) = existing_subscription.data.first() {
         println!("Found existing subscription: {}", current_subscription.id);
-   
+  
         // Create metadata to track the subscription change
         metadata.insert("replacing_subscription".to_string(), current_subscription.id.to_string());
         metadata.insert("plan_change".to_string(), "true".to_string());
         metadata.insert("user_id".to_string(), user_id.to_string());
-   
+  
         sub_data.metadata = Some(metadata.clone());
         // Update success URL to indicate plan change
         create_params.success_url = Some(&success_url1);
@@ -242,7 +255,6 @@ pub async fn create_unified_subscription_checkout(
         "message": "Redirecting to Stripe Checkout for subscription"
     })))
 }
-
 
 pub async fn create_customer_portal_session(
     State(state): State<Arc<AppState>>,
