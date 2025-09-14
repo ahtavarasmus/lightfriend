@@ -313,7 +313,6 @@ pub async fn start_telegram_connection(
         room_id: Some(room_id.to_string()),
         data: None,
         created_at: Some(current_time),
-        cooldown_seconds: 30,
     };
 
     // Store bridge information
@@ -443,7 +442,6 @@ async fn monitor_telegram_connection(
                                     room_id: Some(room_id.to_string()),
                                     data: None,
                                     created_at: Some(current_time),
-                                    cooldown_seconds: 30,
                                 };
                                 state.user_repository.delete_bridge(user_id, "telegram")?;
                                 state.user_repository.create_bridge(new_bridge)?;

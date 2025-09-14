@@ -965,28 +965,57 @@ pub async fn handle_bridge_message(
         }
     };
 
-    tracing::info!("waiting for {} seconds before processing", bridge.cooldown_seconds);
-    sleep(Duration::from_secs(bridge.cooldown_seconds as u64)).await;
+    tracing::info!("Computing wait time based on last seen");
+
+    // Get current time in seconds (Unix timestamp)
+    let now_secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i32;
+
+    const SHORT_WAIT: u64 = 30;
+    const LONG_WAIT: u64 = 300;
+    const ACTIVITY_THRESHOLD: i32 = 300;  // 5 minutes
+
+    let wait_time = match bridge.last_seen_online {
+        Some(last_seen) => {
+            let age = now_secs - last_seen;
+            if age > ACTIVITY_THRESHOLD {
+                SHORT_WAIT
+            } else {
+                LONG_WAIT
+            }
+        }
+        None => SHORT_WAIT,
+    };
+    tracing::info!("Waiting for {} seconds before processing (user activity inferred as {})", 
+        wait_time, 
+        if wait_time == SHORT_WAIT { "inactive" } else { "active" }
+    );
+    
+    sleep(Duration::from_secs(wait_time)).await;
 
     // Check if user has read this or a later message (via bridged receipt)
     let own_user_id = client.user_id().unwrap();
-    if let Ok(Some((receipt_event_id, receipt))) = room.load_user_receipt(ReceiptType::Read, ReceiptThread::Unthreaded, own_user_id).await {
+    if let Ok(Some((receipt_event_id, _))) = room.load_user_receipt(ReceiptType::Read, ReceiptThread::Unthreaded, own_user_id).await {
         // Fetch the receipted event to get its timestamp (approximate order)
         let request = get_room_event::v3::Request::new(room.room_id().to_owned(), receipt_event_id.clone());
         if let Ok(response) = client.send(request).await {
             if let Ok(any_event) = response.event.deserialize_as::<AnySyncTimelineEvent>() {
                 if any_event.origin_server_ts().0 >= event.origin_server_ts.0 {
                     tracing::info!("Skipping processing because user has read this or a later message");
-                    state.user_repository.update_bridge_cooldown(user_id, room_id_str, service, 300).unwrap();
-                    tracing::info!("Successfully set the bridge cooldown to 5 mins");
+                    state.user_repository.update_bridge_last_seen_online(
+                        user_id, 
+                        room_id_str.as_str(), 
+                        service.as_str(), 
+                        i32::try_from(any_event.origin_server_ts().as_secs()).unwrap()).unwrap();
                     return;
                 }
             }
         }
     }
 
-    state.user_repository.update_bridge_cooldown(user_id, room_id_str, service.clone(), 30).unwrap();
-    tracing::info!("Successfully set the bridge cooldown to 30s");
+    tracing::info!("No recent read detected; proceeding with message processing");
     let sender_prefix = get_sender_prefix(&service);
     if user_id == 1 {
         println!("sender_prefix: {}", sender_prefix);

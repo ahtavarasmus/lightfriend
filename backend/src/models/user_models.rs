@@ -219,7 +219,7 @@ pub struct Bridge {
     pub room_id: Option<String>,
     pub data: Option<String>,
     pub created_at: Option<i32>,
-    pub cooldown_seconds: i32, // how many seconds to wait untili we process the incoming message(if user offline on og app: 30s, if user online on og app: 5min)
+    pub last_seen_online: Option<i32>,
 }
 
 
@@ -232,7 +232,6 @@ pub struct NewBridge {
     pub room_id: Option<String>,
     pub data: Option<String>,
     pub created_at: Option<i32>,
-    pub cooldown_seconds: i32,
 }
 
 #[derive(Queryable, Selectable, Insertable)]

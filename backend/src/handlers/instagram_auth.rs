@@ -236,7 +236,6 @@ pub async fn start_instagram_connection(
         room_id: Some(room_id.to_string()),
         data: None,
         created_at: Some(current_time),
-        cooldown_seconds: 30,
     };
     tracing::debug!("Storing new bridge record for Instagram");
     // Store bridge information
@@ -360,7 +359,6 @@ async fn monitor_instagram_connection(
                                     room_id: Some(room_id.to_string()),
                                     data: None,
                                     created_at: Some(current_time),
-                                    cooldown_seconds: 30,
                                 };
                                 tracing::debug!("Deleting existing bridge record for Instagram");
                                 state.user_repository.delete_bridge(user_id, "instagram")?;
