@@ -809,9 +809,6 @@ pub async fn handle_bridge_message(
         return;
     }
 
-    
-
-
     // Find the user ID for this Matrix client
     let matrix_user_id = client.user_id().unwrap().to_owned(); // Clone to OwnedUserId
     let client_user_id = matrix_user_id.to_string();

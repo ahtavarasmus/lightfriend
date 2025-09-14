@@ -30,7 +30,7 @@ pub struct BroadcastMessageRequest {
     pub message: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct EmailBroadcastRequest {
     pub subject: String,
     pub message: String,
@@ -210,6 +210,8 @@ pub async fn broadcast_email(
             Json(json!({"error": "Subject and message cannot be empty"}))
         ));
     }
+
+    // Fetch users outside the spawn to avoid DB issues, then move into task
     let users = state.user_core.get_all_users().map_err(|e| {
         tracing::error!("Database error when fetching users: {}", e);
         (
@@ -217,90 +219,96 @@ pub async fn broadcast_email(
             Json(json!({"error": format!("Database error: {}", e)}))
         )
     })?;
-    let auth_user = crate::handlers::auth_middleware::AuthUser { user_id: 1, is_admin: false}; // Hardcode user_id to 1
-    let mut success_count = 0;
-    let mut failed_count = 0;
-    let mut error_details = Vec::new();
-    for user in users {
-        // TODO fix this is taking too long and then crashes before all are finished or just use some email provider
-        // Get user settings
-        let user_settings = match state.user_core.get_user_settings(user.id) {
-            Ok(settings) => settings,
-            Err(e) => {
-                tracing::error!("Failed to get settings for user {}: {}", user.id, e);
-                failed_count += 1;
-                error_details.push(format!("Failed to get settings for {}: {}", user.email, e));
+
+    // Clone what we need for the task
+    let state_clone = state.clone();
+    let request_clone = request.clone();
+
+    // Spawn the background task
+    tokio::spawn(async move {
+        let auth_user = crate::handlers::auth_middleware::AuthUser { user_id: 1, is_admin: false }; // Hardcode user_id to 1
+
+        let mut success_count = 0;
+        let mut failed_count = 0;
+        let mut error_details = Vec::new();
+
+        for user in users {
+            let user_settings = match state_clone.user_core.get_user_settings(user.id) {
+                Ok(settings) => settings,
+                Err(e) => {
+                    tracing::error!("Failed to get settings for user {}: {}", user.id, e);
+                    failed_count += 1;
+                    error_details.push(format!("Failed to get settings for {}: {}", user.email, e));
+                    continue;
+                }
+            };
+
+            if !user_settings.notify {
+                tracing::info!("skipping user since they don't have notify on");
                 continue;
             }
-        };
-        if !user_settings.notify {
-            tracing::info!("skipping user since they don't have notify on");
-            continue;
-        }
-        // Skip users with invalid or empty email addresses
-        if user.email.is_empty() || !user.email.contains('@') || !user.email.contains('.') {
-            tracing::warn!("Skipping invalid email address: {}", user.email);
-            continue;
-        }
-        // Prepare the unsubscribe link
-        let encoded_email = urlencoding::encode(&user.email);
-        let server_url = std::env::var("SERVER_URL").expect("SERVER_URL not set");
-        let unsubscribe_link = format!("{}/api/unsubscribe?email={}", server_url, encoded_email);
-        // Prepare plain text body with unsubscribe (link inline now)
-        let plain_body = format!(
-            "{}\n\nTo unsubscribe from these feature updates/fixes, click here: {}",
-            request.message, unsubscribe_link
-        );
-        let wrapped_body = wrap_text(&plain_body, 72);
-        // Convert to CRLF line endings for email compliance
-        let crlf_body = wrapped_body.replace("\n", "\r\n");
-        // Prepare the email request for the send_email handler
-        let email_request = crate::handlers::imap_handlers::SendEmailRequest {
-            to: user.email.clone(),
-            subject: request.subject.clone(),
-            body: crlf_body,
-        };
-        // Call the existing send_email handler
-        match crate::handlers::imap_handlers::send_email(
-            State(state.clone()),
-            auth_user.clone(),
-            Json(email_request)
-        ).await {
-            Ok(_) => {
-                success_count += 1;
-                tracing::info!("Successfully sent email to {}", user.email);
+
+            // Skip users with invalid or empty email addresses
+            if user.email.is_empty() || !user.email.contains('@') || !user.email.contains('.') {
+                tracing::warn!("Skipping invalid email address: {}", user.email);
+                continue;
             }
-            Err((status, err)) => {
-                failed_count += 1;
-                let error_msg = format!("Failed to send to {}: {:?}", user.email, err);
-                tracing::error!("{}", error_msg);
-                error_details.push(error_msg);
-            }
-        }
-        // Add a small delay to avoid hitting rate limits
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    }
-    if success_count == 0 && failed_count > 0 {
-        // If all attempts failed, return an error
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({
-                "error": "Failed to send any emails",
-                "details": error_details,
-                "stats": {
-                    "success": success_count,
-                    "failed": failed_count
+
+            // Prepare the unsubscribe link
+            let encoded_email = urlencoding::encode(&user.email);
+            let server_url = std::env::var("SERVER_URL").expect("SERVER_URL not set");
+            let unsubscribe_link = format!("{}/api/unsubscribe?email={}", server_url, encoded_email);
+
+            // Prepare plain text body with unsubscribe (link inline now)
+            let plain_body = format!(
+                "{}\n\nTo unsubscribe from these feature updates/fixes, click here: {}",
+                request_clone.message, unsubscribe_link
+            );
+            let wrapped_body = wrap_text(&plain_body, 72);
+            // Convert to CRLF line endings for email compliance
+            let crlf_body = wrapped_body.replace("\n", "\r\n");
+
+            // Prepare the email request for the send_email handler
+            let email_request = crate::handlers::imap_handlers::SendEmailRequest {
+                to: user.email.clone(),
+                subject: request_clone.subject.clone(),
+                body: crlf_body,
+            };
+
+            // Call the existing send_email handler
+            match crate::handlers::imap_handlers::send_email(
+                State(state_clone.clone()),
+                auth_user.clone(),
+                Json(email_request)
+            ).await {
+                Ok(_) => {
+                    success_count += 1;
+                    tracing::info!("Successfully sent email to {}", user.email);
                 }
-            }))
-        ));
-    }
+                Err((status, err)) => {
+                    failed_count += 1;
+                    let error_msg = format!("Failed to send to {}: {:?}", user.email, err);
+                    tracing::error!("{}", error_msg);
+                    error_details.push(error_msg);
+                }
+            }
+
+            // Add a small delay to avoid hitting rate limits
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+
+        // Log final stats since we can't return them
+        tracing::info!(
+            "Email broadcast completed: success={}, failed={}, errors={:?}",
+            success_count,
+            failed_count,
+            error_details
+        );
+    });
+
+    // Respond immediately
     Ok(Json(json!({
-        "message": "Email broadcast completed",
-        "stats": {
-            "success": success_count,
-            "failed": failed_count
-        },
-        "error_details": error_details
+        "message": "Email broadcast queued and will process in the background"
     })))
 }
 
