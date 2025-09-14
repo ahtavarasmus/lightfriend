@@ -504,7 +504,7 @@ pub fn connect(props: &ConnectProps) -> Html {
                                                     }
                                                 </div>
                                                 <p class="flow-description">{"If a match is found in any of the above steps, a notification message will be sent to you. Otherwise, no message will be sent."}</p>
-                                                <p class="flow-description">{"Note: The message won't be processed if it has already been marked as read in the original chat app. Incoming message will have normally 30 second delay until lightfriend starts processing it, but if you are currently actively chatting on the original app, there will be a 5 minute delay until a incoming message will be processed. Don't worry though, this will default always to 30 seconds if you don't read the message within the set delay. This is just to prevent lightfriend from notifying you of messages you would/have seen anyways."}</p>
+                                                <p class="flow-description">{"Only unread messages will go through this flow. Lightfriend waits variable amount of time before starting to process a incoming message. This is to prevent processing messages that you had already seen. When you are offline, the message will be processed within 30 seconds and when actively chatting on the original app, the wait will be 5 minutes."}</p>
 
                                                 <br/>
                                         </>
