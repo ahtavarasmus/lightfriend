@@ -1068,18 +1068,15 @@ impl UserRepository {
     }
 
 
-    pub fn update_bridge_last_seen_online(&self, user_id: i32, room_id: &str, service_type: &str, last_seen_online: i32) -> Result<(), DieselError> {
+    pub fn update_bridge_last_seen_online(&self, user_id: i32, service_type: &str, last_seen_online: i32) -> Result<usize, DieselError> {
         use crate::schema::bridges;
         let mut conn = self.pool.get().expect("Failed to get DB connection");
-        diesel::update(bridges::table)
+        let rows = diesel::update(bridges::table)
             .filter(bridges::user_id.eq(user_id))
-            .filter(bridges::room_id.eq(room_id))
             .filter(bridges::bridge_type.eq(service_type))
-            .set(
-                bridges::last_seen_online.eq(Some(last_seen_online))
-            )
+            .set(bridges::last_seen_online.eq(Some(last_seen_online)))
             .execute(&mut conn)?;
-        Ok(())
+        Ok(rows)
     }
 
 
@@ -1117,6 +1114,7 @@ impl UserRepository {
             .first::<Bridge>(&mut conn)
             .optional()?;
 
+        println!("bridge: {:#?}", bridge);
         Ok(bridge)
     }
     pub fn get_bridge_by_room_id(&self, user_id: i32, room_id: String, service: &str) -> Result<Option<Bridge>, DieselError> {

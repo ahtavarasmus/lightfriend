@@ -977,6 +977,7 @@ pub async fn handle_bridge_message(
     const LONG_WAIT: u64 = 300;
     const ACTIVITY_THRESHOLD: i32 = 300;  // 5 minutes
 
+    println!("last_seen_online: {:#?}", bridge.last_seen_online);
     let wait_time = match bridge.last_seen_online {
         Some(last_seen) => {
             let age = now_secs - last_seen;
@@ -1004,11 +1005,17 @@ pub async fn handle_bridge_message(
             if let Ok(any_event) = response.event.deserialize_as::<AnySyncTimelineEvent>() {
                 if any_event.origin_server_ts().0 >= event.origin_server_ts.0 {
                     tracing::info!("Skipping processing because user has read this or a later message");
-                    state.user_repository.update_bridge_last_seen_online(
-                        user_id, 
-                        room_id_str.as_str(), 
-                        service.as_str(), 
-                        i32::try_from(any_event.origin_server_ts().as_secs()).unwrap()).unwrap();
+                    let last_seen_online = i32::try_from(any_event.origin_server_ts().as_secs()).unwrap();
+                    let rows = state.user_repository.update_bridge_last_seen_online(
+                        user_id,
+                        service.as_str(),
+                        last_seen_online,
+                    ).unwrap();
+                    tracing::info!("Updated {:#?} rows for last_seen_online (user_id: {}, service: {}, value: {})", rows, user_id, service, last_seen_online);
+                    if rows == 0 {
+                        tracing::warn!("No bridge row matched for update - possible race or mismatch");
+                    }
+                    tracing::info!("set the last_seen_online to: {}", last_seen_online);
                     return;
                 }
             }
