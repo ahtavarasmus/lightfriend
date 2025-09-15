@@ -156,7 +156,7 @@ pub fn landing() -> Html {
                 <div class="difference-content">
                     <div class="difference-text">
                         <h2>{"It's got your back."}</h2>
-                        <p>{"No need to reach out, unless you don't want to. Lightfriend will keep you updated proactively, so you can focus on your life!"}</p>
+                        <p>{"No need to reach out, unless you want to. Lightfriend will let you know when it's important!"}</p>
                     </div>
                     <div class="difference-image">
                         <img src="/assets/critical-noti-example.png" alt="Lightfriend proactive notification" loading="lazy" />
