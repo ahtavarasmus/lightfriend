@@ -147,9 +147,22 @@ pub fn landing() -> Html {
                     </div>
                 </div>
             </header>
+
             <section class="story-section">
                 <img src="/assets/rasmus-story.png" alt="Rasmus story" loading="lazy" />
             </section>
+
+            <div class="difference-section">
+                <div class="difference-content">
+                    <div class="difference-text">
+                        <h2>{"It's got your back."}</h2>
+                        <p>{"No need to reach out, unless you don't want to. Lightfriend will keep you updated proactively, so you can focus on your life!"}</p>
+                    </div>
+                    <div class="difference-image">
+                        <img src="/assets/critical-noti-example.png" alt="Lightfriend proactive notification" loading="lazy" />
+                    </div>
+                </div>
+            </div>
             <div class="filter-concept">
                 <div class="filter-content">
                     <AnimationComponent />
