@@ -129,15 +129,7 @@ pub fn landing() -> Html {
                     <div class="hero-header">
                         <h1 class="hero-title">{"Break Free of Smartphones"}</h1>
                         <p class="hero-subtitle">
-                            {"Switch to a dumbphone without feeling isolated, even if your life depends on "}
-                            <span class="highlight-icon"><i class="fab fa-whatsapp"></i></span>
-                            <span class="highlight-icon"><i class="fab fa-telegram"></i></span>
-                            <span class="highlight-icon"><i class="fab fa-signal-messenger"></i></span>
-                            <span class="highlight-icon"><i class="fas fa-envelope"></i></span>
-                            <span class="highlight-icon"><i class="fas fa-calendar"></i></span>
-                            <span class="highlight-icon"><i class="fa-solid fa-route"></i></span>
-                            <span class="highlight-icon"><i class="fas fa-globe"></i></span>
-                            {"."}
+                            {"An Assistant so useful you can live with a flip phone"}
                         </p>
                     </div>
                     <div class="hero-cta-group">
