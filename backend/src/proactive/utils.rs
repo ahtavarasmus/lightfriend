@@ -1301,14 +1301,12 @@ Rules
 Return JSON with a single field:
 • `digest` – the plain-text SMS message, with newlines separating groups.
 "#;
-
 pub async fn generate_digest(
     state: &Arc<AppState>,
     data: DigestData,
     priority_map: HashMap<String, HashSet<String>>,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let client = create_openai_client(&state)?;
-
     // Format messages for the prompt
     let messages_str = data.messages
         .iter()
@@ -1329,7 +1327,6 @@ pub async fn generate_digest(
         })
         .collect::<Vec<String>>()
         .join("\n");
-
     // Format calendar events for the prompt
     let events_str = data.calendar_events
         .iter()
@@ -1343,7 +1340,18 @@ pub async fn generate_digest(
         })
         .collect::<Vec<String>>()
         .join("\n");
-
+    // Conditionally include calendar section only if there are events
+    let user_content = if data.calendar_events.is_empty() {
+        format!(
+            "Create a digest covering the last {} hours.\n\nMessages:\n{}",
+            data.time_period_hours, messages_str
+        )
+    } else {
+        format!(
+            "Create a digest covering the last {} hours.\n\nMessages:\n{}\n\nUpcoming calendar events:\n{}",
+            data.time_period_hours, messages_str, events_str
+        )
+    };
     let messages = vec![
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::system,
@@ -1354,16 +1362,12 @@ pub async fn generate_digest(
         },
         chat_completion::ChatCompletionMessage {
             role: chat_completion::MessageRole::user,
-            content: chat_completion::Content::Text(format!(
-                "Create a digest covering the last {} hours.\n\nMessages:\n{}\n\nUpcoming calendar events:\n{}",
-                data.time_period_hours, messages_str, events_str
-            )),
+            content: chat_completion::Content::Text(user_content),
             name: None,
             tool_calls: None,
             tool_call_id: None,
         },
     ];
-
     let mut properties = std::collections::HashMap::new();
     properties.insert(
         "digest".to_string(),
@@ -1373,7 +1377,6 @@ pub async fn generate_digest(
             ..Default::default()
         }),
     );
-
     let tools = vec![chat_completion::Tool {
         r#type: chat_completion::ToolType::Function,
         function: types::Function {
@@ -1390,7 +1393,6 @@ pub async fn generate_digest(
             },
         },
     }];
-
     let request = chat_completion::ChatCompletionRequest::new(
         GPT4_O.to_string(),
         messages,
@@ -1398,7 +1400,6 @@ pub async fn generate_digest(
     .tools(tools)
     .tool_choice(chat_completion::ToolChoiceType::Required)
     .max_tokens(200);
-
     match client.chat_completion(request).await {
         Ok(result) => {
             if let Some(tool_calls) = result.choices[0].message.tool_calls.as_ref() {
@@ -1408,7 +1409,6 @@ pub async fn generate_digest(
                         struct DigestResponse {
                             digest: String,
                         }
-
                         match serde_json::from_str::<DigestResponse>(args) {
                             Ok(response) => {
                                 tracing::debug!(
