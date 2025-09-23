@@ -518,6 +518,10 @@ pub async fn fetch_bridge_messages(
         let sender_prefix = sender_prefix.clone();
         let user_timezone = user_timezone.clone();
         let room_name = remove_bridge_suffix(&bridge_room.display_name);
+        if room.user_defined_notification_mode().await == Some(RoomNotificationMode::Mute) {
+            tracing::info!("Skipping message from a muted room");
+            continue;
+        }
         futures.push(async move {
             let mut options = matrix_sdk::room::MessagesOptions::backward();
             options.limit = matrix_sdk::ruma::UInt::new(50).unwrap(); // Fetch enough to cover filters
